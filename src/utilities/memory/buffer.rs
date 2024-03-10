@@ -1,24 +1,34 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut};
-use std::{mem, ptr};
+use std::{marker::PhantomData, mem, ptr};
 
 use crate::utilities::memory::unmanaged_mempool::IUnmanagedMemoryPool;
 
 /// Represents a span of unmanaged memory.
 pub struct Buffer<T> {
-    memory: *mut T,
+    memory: ptr::NonNull<T>,
     length: usize,
     id: i32,
+    /// PhantomData is used to indicate that the Buffer<T> struct is logically owning data of type T.
+    _marker: PhantomData<T>,
 }
 
 impl<T: std::cmp::PartialEq> Buffer<T> {
     /// Creates a new buffer.
     pub fn new(memory: *mut T, length: usize, id: i32) -> Self {
-        Buffer { memory, length, id }
+        Buffer {
+            memory,
+            length,
+            id,
+            _marker: PhantomData,
+        }
     }
 
-    /// Allocates a new buffer from a pool (error handling omitted for brevity).
-    pub fn from_pool(length: usize, pool: &mut impl IUnmanagedMemoryPool) -> Self {
-        pool.take(length).unwrap() // Assuming take always succeeds for this example
+    /// Allocates a new buffer from a pool.
+    pub fn from_pool(
+        length: usize,
+        pool: &mut impl IUnmanagedMemoryPool,
+    ) -> Result<Self, &'static str> {
+        pool.take(length)
     }
 
     /// Returns the length of the buffer in typed elements.
@@ -28,7 +38,7 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
 
     /// Gets whether the buffer references non-null memory.
     pub fn is_allocated(&self) -> bool {
-        !self.memory.is_null()
+        !self.memory.as_ptr().is_null()
     }
 
     /// Returns a buffer to a pool.
@@ -38,20 +48,25 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
 
     /// Zeroes out the buffer's memory.
     pub fn clear(&mut self, start: usize, count: usize) {
-        assert!(start + count <= self.length, "Clear region out of bounds.");
+        debug_assert!(start + count <= self.length, "Clear region out of bounds.");
         unsafe {
-            ptr::write_bytes(self.memory.add(start), 0, count * mem::size_of::<T>());
+            ptr::write_bytes(
+                self.memory.as_ptr().add(start),
+                0,
+                count * mem::size_of::<T>(),
+            );
         }
     }
 
     /// Creates a view of a subset of the buffer's memory.
     pub fn slice(&self, start: usize, count: usize) -> Self {
-        assert!(start + count <= self.length, "Slice region out of bounds.");
-        let new_memory = unsafe { self.memory.add(start) };
+        debug_assert!(start + count <= self.length, "Slice region out of bounds.");
+        let new_memory = unsafe { self.memory.as_ptr().add(start) };
         Buffer {
             memory: new_memory,
             length: count,
             id: self.id,
+            _marker: PhantomData,
         }
     }
 
@@ -63,19 +78,19 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
         target_start: usize,
         count: usize,
     ) {
-        assert!(
+        debug_assert!(
             source_start + count <= self.length,
             "Source region out of bounds"
         );
-        assert!(
+        debug_assert!(
             target_start + count <= target.length,
             "Target region out of bounds"
         );
 
         unsafe {
             ptr::copy_nonoverlapping(
-                self.memory.add(source_start),
-                target.memory.add(target_start),
+                self.memory.as_ptr().add(source_start),
+                target.memory.as_ptr().add(target_start),
                 count * mem::size_of::<T>(),
             );
         }
@@ -89,11 +104,11 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
         target_start: usize,
         count: usize,
     ) {
-        assert!(
+        debug_assert!(
             source_start + count <= source.len(),
             "Source region out of bounds"
         );
-        assert!(
+        debug_assert!(
             target_start + count <= self.length,
             "Target region out of bounds"
         );
@@ -101,7 +116,7 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
         unsafe {
             ptr::copy_nonoverlapping(
                 source.as_ptr().add(source_start),
-                self.memory.add(target_start),
+                self.memory.as_ptr().add(target_start),
                 count * mem::size_of::<T>(),
             );
         }
@@ -109,7 +124,7 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
 
     /// Gets the index of an element, if it exists, using the type's default equality comparison.
     pub fn index_of(&self, element: &T, start: usize, count: usize) -> Option<usize> {
-        assert!(start + count <= self.length, "Index region out of bounds");
+        debug_assert!(start + count <= self.length, "Index region out of bounds");
 
         for i in start..(start + count) {
             if self[i] == *element {
@@ -129,6 +144,7 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
             memory: self.memory as *mut TCast,
             length: count,
             id: self.id,
+            _marker: PhantomData,
         }
     }
 }
@@ -138,15 +154,15 @@ impl<T> Index<usize> for Buffer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        assert!(index < self.length);
-        unsafe { &*self.memory.add(index) }
+        debug_assert!(index < self.length);
+        unsafe { &*self.memory.as_ptr().add(index) }
     }
 }
 
 impl<T> IndexMut<usize> for Buffer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        assert!(index < self.length);
-        unsafe { &mut *self.memory.add(index) }
+        debug_assert!(index < self.length);
+        unsafe { &mut *self.memory.as_ptr().add(index) }
     }
 }
 
