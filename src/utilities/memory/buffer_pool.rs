@@ -1,4 +1,5 @@
 use crate::utilities::memory::managed_id_pool::ManagedIdPool;
+use crate::utilities::memory::span_helper::MAXIMUM_SPAN_SIZE_POWER;
 use std::alloc::{self, Layout};
 use std::ptr::NonNull;
 
@@ -69,5 +70,95 @@ impl PowerPool {
             }
         }
         self.slots.clear();
+    }
+
+    ///// Allocates a new block if necessary and returns the memory pointer for a given slot
+    // unsafe fn get_or_allocate_block(&mut self, slot: usize) -> NonNull<u8> {
+    //     let block_index = slot >> self.suballocations_per_block_shift;
+    //     while self.blocks.len() <= block_index {
+    //         self.allocate_block();
+    //     }
+    //     self.blocks[block_index]
+    // }
+
+    // /// Takes a slot from the pool and returns a pointer to the suballocated memory
+    // pub unsafe fn take(&mut self) -> *mut u8 {
+    //     let slot = self.slots.take() as usize;
+    //     let block_ptr = self.get_or_allocate_block(slot);
+    //     let index_in_block = slot & self.suballocations_per_block_mask;
+    //     block_ptr.as_ptr().add(index_in_block * self.suballocation_size)
+    // }
+
+    // /// Returns a slot to the pool, freeing its associated memory if necessary
+    // pub fn return_slot(&mut self, slot: usize) {
+    //     self.slots.return_id(slot);
+    // }
+
+    // /// Clears the pool, deallocating all allocated blocks
+    // pub unsafe fn clear(&mut self) {
+    //     for block in &self.blocks {
+    //         let layout = Layout::from_size_align(self.block_size, self.block_alignment).unwrap();
+    //         alloc::dealloc(block.as_ptr(), layout);
+    //     }
+    //     self.blocks.clear();
+    //     self.slots.clear();
+    // }
+}
+
+struct BufferPool {
+    pools: Vec<PowerPool>,
+}
+
+impl BufferPool {
+    pub fn new(
+        minimum_block_allocation_size: usize,
+        expected_pooled_resource_count: usize,
+    ) -> Self {
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            minimum_block_allocation_size.is_power_of_two(),
+            "Block allocation size must be a power of 2."
+        );
+        let pools = (0..=MAXIMUM_SPAN_SIZE_POWER)
+            .map(|power| {
+                PowerPool::new(
+                    power,
+                    minimum_block_allocation_size,
+                    expected_pooled_resource_count,
+                )
+            })
+            .collect();
+        Self { pools }
+    }
+
+    /// Ensures the specified power pool has the capacity to handle a given number of bytes
+    pub fn ensure_capacity_for_power(&mut self, byte_count: usize, power: usize) {
+        let needed_capacity = (byte_count + self.pools[power].suballocation_size - 1) / self.pools[power].suballocation_size;
+        self.pools[power].slots.ensure_capacity(needed_capacity);
+    }
+
+    // Takes a buffer of at least the specified size
+    pub unsafe fn take_at_least<T>(&mut self, count: usize) -> *mut T where T: Sized {
+        let type_size = std::mem::size_of::<T>();
+        let total_size = count * type_size;
+        let power = total_size.next_power_of_two().trailing_zeros() as usize;
+        self.ensure_capacity_for_power(total_size, power);
+        self.pools[power].take() as *mut T
+    }
+
+    /// Returns a buffer to the appropriate pool
+    pub fn return_buffer<T>(&mut self, buffer: *mut T, count: usize) where T: Sized {
+        let type_size = std::mem::size_of::<T>();
+        let total_size = count * type_size;
+        let power = total_size.next_power_of_two().trailing_zeros() as usize;
+        let slot = buffer as usize >> self.pools[power].suballocations_per_block_shift;
+        self.pools[power].return_slot(slot);
+    }
+
+    /// Clears all pools, deallocating all memory
+    pub unsafe fn clear(&mut self) {
+        for pool in &mut self.pools {
+            pool.clear();
+        }
     }
 }
