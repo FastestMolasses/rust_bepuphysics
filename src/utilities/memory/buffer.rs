@@ -32,6 +32,7 @@ impl<T: std::cmp::PartialEq> Buffer<T> {
     }
 
     /// Returns the length of the buffer in typed elements.
+    #[inline]
     pub fn len(&self) -> usize {
         self.length
     }
