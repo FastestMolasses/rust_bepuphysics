@@ -1,3 +1,4 @@
+pub mod allocator;
 pub mod buffer;
 pub mod buffer_pool;
 pub mod managed_id_pool;
