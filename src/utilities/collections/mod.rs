@@ -9,3 +9,4 @@ mod predicate;
 mod primitive_comparer;
 mod quick_dictionary;
 mod reference_comparer;
+mod vectorized_sorts;
