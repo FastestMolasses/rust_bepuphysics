@@ -6,5 +6,6 @@ mod insertion_sort;
 mod lsb_radix_sort;
 mod msb_radix_sort;
 mod predicate;
-mod quick_dictionary;
 mod primitive_comparer;
+mod quick_dictionary;
+mod reference_comparer;
