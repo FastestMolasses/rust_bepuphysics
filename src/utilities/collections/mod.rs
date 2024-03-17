@@ -3,5 +3,7 @@ mod comparer_ref;
 mod equaility_comparer_ref;
 mod index_set;
 mod insertion_sort;
+mod lsb_radix_sort;
+mod msb_radix_sort;
 mod predicate;
 mod quick_dictionary;

@@ -8,7 +8,7 @@ use crate::utilities::memory::unmanaged_mempool::IUnmanagedMemoryPool;
 
 /// Represents a span of unmanaged memory.
 pub struct Buffer<T> {
-    memory: NonNull<T>,
+    pub memory: NonNull<T>,
     length: usize,
     pub id: i32,
     /// PhantomData is used to indicate that the Buffer<T> struct is logically owning data of type T.
