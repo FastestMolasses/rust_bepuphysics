@@ -7,3 +7,4 @@ mod lsb_radix_sort;
 mod msb_radix_sort;
 mod predicate;
 mod quick_dictionary;
+mod primitive_comparer;
