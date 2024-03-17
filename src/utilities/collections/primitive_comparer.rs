@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
-
-// TODO: LOOK INTO `std::mem::transmute;` FOR THIS FILE
+use std::marker::PhantomData;
+use std::mem::transmute;
 
 // the original code leverages the Unsafe.As method to reinterpret the references of
 // generic types (T) as specific primitive types without actual copying or boxing,
@@ -10,19 +10,44 @@ use std::hash::{Hash, Hasher};
 // locality and avoiding heap allocations are paramount.
 
 /// Provides optimized equality testing, comparison, and hashing for primitive types.
-pub struct PrimitiveComparer;
+pub struct PrimitiveComparer<T> {
+    _marker: PhantomData<T>,
+}
 
-impl PrimitiveComparer {
-    pub unsafe fn compare<T: Primitive>(a: &T, b: &T) -> Ordering {
-        T::cmp(a, b)
+impl<T> PrimitiveComparer<T> {
+    pub fn new() -> Self {
+        PrimitiveComparer {
+            _marker: PhantomData,
+        }
     }
 
-    pub unsafe fn equals<T: Primitive>(a: &T, b: &T) -> bool {
-        T::eq(a, b)
+    /// SAFETY: This function assumes that T is a primitive type that can be safely reinterpreted to U.
+    pub unsafe fn compare<U>(&self, a: &T, b: &T) -> Ordering
+    where
+        U: Ord,
+    {
+        let a_transmuted: &U = transmute(a);
+        let b_transmuted: &U = transmute(b);
+        a_transmuted.cmp(b_transmuted)
     }
 
-    pub unsafe fn hash<T: Primitive, H: Hasher>(item: &T, state: &mut H) {
-        T::hash(item, state);
+    /// SAFETY: This function assumes that T is a primitive type that can be safely reinterpreted to U.
+    pub unsafe fn equals<U>(&self, a: &T, b: &T) -> bool
+    where
+        U: PartialEq,
+    {
+        let a_transmuted: &U = transmute(a);
+        let b_transmuted: &U = transmute(b);
+        a_transmuted == b_transmuted
+    }
+
+    /// SAFETY: This function assumes that T is a primitive type that can be safely reinterpreted to U.
+    pub unsafe fn hash<U, H: Hasher>(&self, item: &T, state: &mut H)
+    where
+        U: Hash,
+    {
+        let item_transmuted: &U = transmute(item);
+        item_transmuted.hash(state);
     }
 }
 
@@ -69,3 +94,66 @@ impl_primitive!(isize, isize);
 impl_primitive!(f32, u32);
 impl_primitive!(f64, u64);
 impl_primitive!(char, char);
+
+// TODO: TESTS
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+
+    #[test]
+    fn test_compare_integers() {
+        let comparer: PrimitiveComparer<i32> = PrimitiveComparer::new();
+        unsafe {
+            assert_eq!(comparer.compare::<i32>(&5, &10), Ordering::Less);
+            assert_eq!(comparer.compare::<i32>(&10, &5), Ordering::Greater);
+            assert_eq!(comparer.compare::<i32>(&10, &10), Ordering::Equal);
+        }
+    }
+
+    #[test]
+    fn test_equals_floats() {
+        let comparer: PrimitiveComparer<f32> = PrimitiveComparer::new();
+        unsafe {
+            assert!(comparer.equals::<f32>(&1.0, &1.0));
+            assert!(!comparer.equals::<f32>(&1.0, &1.1));
+        }
+    }
+
+    #[test]
+    fn test_hash_bool() {
+        let comparer: PrimitiveComparer<bool> = PrimitiveComparer::new();
+        let mut hasher_true = DefaultHasher::new();
+        let mut hasher_false = DefaultHasher::new();
+
+        unsafe {
+            comparer.hash::<bool, _>(&true, &mut hasher_true);
+            comparer.hash::<bool, _>(&false, &mut hasher_false);
+        }
+
+        let hash_true = hasher_true.finish();
+        let hash_false = hasher_false.finish();
+
+        assert_ne!(hash_true, hash_false);
+    }
+
+    #[test]
+    fn test_compare_chars() {
+        let comparer: PrimitiveComparer<char> = PrimitiveComparer::new();
+        unsafe {
+            assert_eq!(comparer.compare::<char>(&'a', &'b'), Ordering::Less);
+            assert_eq!(comparer.compare::<char>(&'c', &'b'), Ordering::Greater);
+            assert_eq!(comparer.compare::<char>(&'a', &'a'), Ordering::Equal);
+        }
+    }
+
+    #[test]
+    fn test_equals_bytes() {
+        let comparer: PrimitiveComparer<u8> = PrimitiveComparer::new();
+        unsafe {
+            assert!(comparer.equals::<u8>(&0x0F, &0x0F));
+            assert!(!comparer.equals::<u8>(&0x0F, &0xF0));
+        }
+    }
+}
