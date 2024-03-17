@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
+// TODO: LOOK INTO `std::mem::transmute;` FOR THIS FILE
+
 // the original code leverages the Unsafe.As method to reinterpret the references of
 // generic types (T) as specific primitive types without actual copying or boxing,
 // allowing for efficient comparisons and hashing directly on the stack. This approach
