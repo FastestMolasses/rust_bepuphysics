@@ -1,36 +1,52 @@
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 use crate::utilities::collections::predicate::Predicate;
-use std::hash::Hash;
-use std::sync::Arc;
+use crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer;
 
-/// A structure that holds a value of type `T` and compares other values of type `T` against it for equality.
-pub struct WrapperPredicate<T> {
+/// Provides a default implementation for a reference equality comparer that can be used with any `T` that implements `Hash` and `Eq`.
+pub struct DefaultRefEqualityComparer;
+
+impl<T: Hash + Eq> RefEqualityComparer<T> for DefaultRefEqualityComparer {
+    fn hash(&self, item: &T) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        item.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn equals(&self, a: &T, b: &T) -> bool {
+        a == b
+    }
+}
+
+/// IPredicate wrapper around an EqualityComparer and an object to compare against.
+pub struct WrapperPredicate<T, C>
+where
+    C: RefEqualityComparer<T>,
+{
     item: T,
-    comparer: Arc<dyn Fn(&T, &T) -> bool + Send + Sync>,
+    comparer: C,
 }
 
-impl<T: 'static + Eq + Hash + Send + Sync> WrapperPredicate<T> {
-    /// Creates a new `WrapperPredicate` with the default equality comparer.
+impl<T, C> WrapperPredicate<T, C>
+where
+    T: Hash + Eq,
+    C: RefEqualityComparer<T>,
+{
+    /// Creates a default comparer for the given type.
     pub fn new(item: T) -> Self {
-        Self {
+        WrapperPredicate {
             item,
-            comparer: Arc::new(|a: &T, b: &T| a == b),
+            comparer: DefaultRefEqualityComparer,
         }
     }
 }
 
-impl<T: 'static + Eq + Hash + Send + Sync> Predicate<T> for WrapperPredicate<T> {
+impl<T, C> Predicate<T> for WrapperPredicate<T, C>
+where
+    T: Hash + Eq,
+    C: RefEqualityComparer<T>,
+{
     fn matches(&self, other_item: &T) -> bool {
-        (self.comparer)(&self.item, other_item)
-    }
-}
-
-// Optional: Implementing Clone for `WrapperPredicate` to ensure it can be easily duplicated.
-// This is particularly useful if the predicate needs to be shared across threads.
-impl<T: Clone> Clone for WrapperPredicate<T> {
-    fn clone(&self) -> Self {
-        Self {
-            item: self.item.clone(),
-            comparer: Arc::clone(&self.comparer),
-        }
+        self.comparer.equals(&self.item, other_item)
     }
 }
