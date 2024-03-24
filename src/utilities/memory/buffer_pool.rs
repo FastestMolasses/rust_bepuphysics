@@ -1,6 +1,5 @@
 use crate::utilities::memory::buffer::Buffer;
 use std::alloc::{self, Layout};
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ptr::NonNull;
 
@@ -259,24 +258,51 @@ impl BufferPool {
 
     /// Ensures the specified power pool has the capacity to handle a given number of bytes
     pub fn ensure_capacity_for_power(&mut self, byte_count: usize, power: usize) {
-        let needed_capacity = (byte_count + self.pools[power].suballocation_size - 1)
-            / self.pools[power].suballocation_size;
-        self.pools[power].slots.ensure_capacity(needed_capacity);
+        self.pools[power].ensure_capacity(byte_count);
     }
 
-    // Takes a buffer of at least the specified size
-    pub unsafe fn take_at_least<T>(&mut self, count: usize) -> *mut T
+    pub fn get_capacity_for_power(&self, power: usize) -> usize {
+        self.pools[power].block_count * self.pools[power].block_size
+    }
+
+    pub fn get_total_allocated_byte_count(&self) -> u64 {
+        self.pools.iter()
+            .map(|pool| pool.block_count as u64 * pool.block_size as u64)
+            .sum()
+    }
+
+    #[inline]
+    pub fn take_at_least<T>(&mut self, count: usize) -> Buffer<T> 
     where
-        T: Sized,
+        T: Copy,
     {
-        let type_size = std::mem::size_of::<T>();
-        let total_size = count * type_size;
+        let count = count.max(1); // Avoid zero-length spans
+        let total_size = count * std::mem::size_of::<T>();
         let power = total_size.next_power_of_two().trailing_zeros() as usize;
-        self.ensure_capacity_for_power(total_size, power);
-        self.pools[power].take() as *mut T
+        let mut raw_buffer = self.take_for_power(power);
+        unsafe {
+            raw_buffer.reinterpret_as::<T>()
+        }
+    }
+
+    #[inline]
+    pub fn take<T>(&mut self, count: usize) -> Buffer<T> 
+    where
+        T: Copy,
+    {
+        let mut buffer = self.take_at_least(count);
+        buffer.length = count;
+        buffer
+    }
+
+    #[inline]
+    pub fn take_for_power(&mut self, power: usize) -> Buffer<u8> {
+        assert!(power <= MAXIMUM_SPAN_SIZE_POWER);
+        self.pools[power].take()
     }
 
     /// Returns a buffer to the appropriate pool
+    #[inline]
     pub fn return_buffer<T>(&mut self, buffer: *mut T, count: usize)
     where
         T: Sized,
