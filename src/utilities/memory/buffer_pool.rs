@@ -262,6 +262,10 @@ impl BufferPool {
         Self { pools }
     }
 
+    pub fn new_with_minimum_block_size(minimum_block_size: usize) -> Self {
+        Self::new(minimum_block_size, 16)
+    }
+
     /// Ensures the specified power pool has the capacity to handle a given number of bytes
     pub fn ensure_capacity_for_power(&mut self, byte_count: usize, power: usize) {
         self.pools[power].ensure_capacity(byte_count);
@@ -426,6 +430,12 @@ impl BufferPool {
             "This function assumes that counts aren't going to overflow a signed 32 bit integer."
         );
         rounded_up / std::mem::size_of::<T>()
+    }
+}
+
+impl Default for BufferPool {
+    fn default() -> Self {
+        Self::new(131072, 16)
     }
 }
 
