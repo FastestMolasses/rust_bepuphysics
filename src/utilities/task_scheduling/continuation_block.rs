@@ -8,7 +8,7 @@ use std::ptr::null_mut;
 pub struct ContinuationBlock {
     previous: *mut ContinuationBlock,
     count: i32,
-    continuations: Buffer<TaskContinuation>,
+    pub continuations: Buffer<TaskContinuation>,
 }
 
 impl ContinuationBlock {
@@ -51,6 +51,6 @@ impl Drop for ContinuationBlock {
         // Logic to properly release resources, if needed, goes here.
         // Since `ContinuationBlock::dispose` must be called explicitly and may involve unsafe code,
         // careful consideration is required to decide whether any logic should be placed here.
-        // This might remain empty to enforce explicit management through `dispose`.
+        // TODO: This might remain empty to enforce explicit management through `dispose`.
     }
 }

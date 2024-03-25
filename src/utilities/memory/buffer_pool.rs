@@ -7,6 +7,8 @@ use crate::utilities::memory::{
     managed_id_pool::ManagedIdPool, span_helper::MAXIMUM_SPAN_SIZE_POWER,
 };
 
+use super::unmanaged_mempool::IUnmanagedMemoryPool;
+
 struct PowerPool {
     blocks: Vec<NonNull<u8>>,
     slots: ManagedIdPool,
@@ -275,35 +277,6 @@ impl BufferPool {
         self.pools[power].block_count * self.pools[power].block_size
     }
 
-    pub fn get_total_allocated_byte_count(&self) -> u64 {
-        self.pools
-            .iter()
-            .map(|pool| pool.block_count as u64 * pool.block_size as u64)
-            .sum()
-    }
-
-    #[inline]
-    pub fn take_at_least<T>(&mut self, count: usize) -> Buffer<T>
-    where
-        T: Copy,
-    {
-        let count = count.max(1); // Avoid zero-length spans
-        let total_size = count * std::mem::size_of::<T>();
-        let power = total_size.next_power_of_two().trailing_zeros() as usize;
-        let mut raw_buffer = self.take_for_power(power);
-        unsafe { raw_buffer.reinterpret_as::<T>() }
-    }
-
-    #[inline]
-    pub fn take<T>(&mut self, count: usize) -> Buffer<T>
-    where
-        T: Copy,
-    {
-        let mut buffer = self.take_at_least(count);
-        buffer.length = count;
-        buffer
-    }
-
     #[inline]
     pub fn take_for_power(&mut self, power: usize) -> Buffer<u8> {
         assert!(power <= MAXIMUM_SPAN_SIZE_POWER);
@@ -325,16 +298,43 @@ impl BufferPool {
         self.pools[power_index].return_slot(slot_index);
     }
 
-    // pub fn return_buffer<T>(&mut self, buffer: *mut T, count: usize)
-    // where
-    //     T: Sized,
-    // {
-    //     let type_size = std::mem::size_of::<T>();
-    //     let total_size = count * type_size;
-    //     let power = total_size.next_power_of_two().trailing_zeros() as usize;
-    //     let slot = buffer as usize >> self.pools[power].suballocations_per_block_shift;
-    //     self.pools[power].return_buffer(slot);
-    // }
+    #[cfg(debug_assertions)]
+    pub fn assert_empty(&self) {
+        for (i, pool) in self.pools.iter().enumerate() {
+            if !pool.outstanding_ids.is_empty() {
+                eprintln!("Power pool {} contains allocations.", i);
+                #[cfg(feature = "leak_debug")]
+                for (allocator, ids) in &pool.outstanding_allocators {
+                    eprintln!("{} ALLOCATION COUNT: {}", allocator, ids.len());
+                }
+                debug_assert!(pool.outstanding_ids.is_empty(), "Pool is not empty");
+            }
+        }
+    }
+}
+
+impl IUnmanagedMemoryPool for BufferPool {
+    #[inline]
+    pub fn take_at_least<T>(&mut self, count: usize) -> Buffer<T>
+    where
+        T: Copy,
+    {
+        let count = count.max(1); // Avoid zero-length spans
+        let total_size = count * std::mem::size_of::<T>();
+        let power = total_size.next_power_of_two().trailing_zeros() as usize;
+        let mut raw_buffer = self.take_for_power(power);
+        unsafe { raw_buffer.reinterpret_as::<T>() }
+    }
+
+    #[inline]
+    pub fn take<T>(&mut self, count: usize) -> Buffer<T>
+    where
+        T: Copy,
+    {
+        let mut buffer = self.take_at_least(count);
+        buffer.length = count;
+        buffer
+    }
 
     /// Returns a buffer to the appropriate pool
     #[inline]
@@ -389,6 +389,20 @@ impl BufferPool {
         }
     }
 
+    pub fn get_capacity_for_count<T>(count: usize) -> usize
+    where
+        T: Sized, // Only requirement is that T's size must be known
+    {
+        let count = count.max(1); // Ensure at least 1
+        let size_in_bytes = count * std::mem::size_of::<T>();
+        let rounded_up = size_in_bytes.next_power_of_two();
+        debug_assert!(
+            rounded_up as u64 * std::mem::size_of::<T>() as u64 <= i32::MAX as u64,
+            "This function assumes that counts aren't going to overflow a signed 32 bit integer."
+        );
+        rounded_up / std::mem::size_of::<T>()
+    }
+
     pub fn resize<T>(&mut self, buffer: &mut Buffer<T>, target_size: usize, copy_count: usize)
     where
         T: Unpin + Clone, // Assuming T needs to be Unpin for certain operations and Clone for copying.
@@ -404,32 +418,11 @@ impl BufferPool {
         }
     }
 
-    #[cfg(debug_assertions)]
-    pub fn assert_empty(&self) {
-        for (i, pool) in self.pools.iter().enumerate() {
-            if !pool.outstanding_ids.is_empty() {
-                eprintln!("Power pool {} contains allocations.", i);
-                #[cfg(feature = "leak_debug")]
-                for (allocator, ids) in &pool.outstanding_allocators {
-                    eprintln!("{} ALLOCATION COUNT: {}", allocator, ids.len());
-                }
-                debug_assert!(pool.outstanding_ids.is_empty(), "Pool is not empty");
-            }
-        }
-    }
-
-    pub fn get_capacity_for_count<T>(count: usize) -> usize
-    where
-        T: Sized, // Only requirement is that T's size must be known
-    {
-        let count = count.max(1); // Ensure at least 1
-        let size_in_bytes = count * std::mem::size_of::<T>();
-        let rounded_up = size_in_bytes.next_power_of_two();
-        debug_assert!(
-            rounded_up as u64 * std::mem::size_of::<T>() as u64 <= i32::MAX as u64,
-            "This function assumes that counts aren't going to overflow a signed 32 bit integer."
-        );
-        rounded_up / std::mem::size_of::<T>()
+    pub fn get_total_allocated_byte_count(&self) -> u64 {
+        self.pools
+            .iter()
+            .map(|pool| pool.block_count as u64 * pool.block_size as u64)
+            .sum()
     }
 }
 
