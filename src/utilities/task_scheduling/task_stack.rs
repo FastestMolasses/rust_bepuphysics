@@ -98,6 +98,10 @@ impl TaskStack {
             unsafe {
                 sum += std::cmp::max(0, (*job).counter() as isize) as usize;
                 job = (*job).previous();
+
+                // TODO: WHICH ONE IS BETTER?
+                // sum += unsafe { (*job).counter.load(Ordering::SeqCst) }.max(0);
+                // job = unsafe { (*job).previous };
             }
         }
         sum
@@ -367,6 +371,16 @@ impl TaskStack {
     ) {
         unsafe { (*(context as *mut TaskStack)).request_stop() };
     }
+
+    /// Convenience function for requesting a stop. Requires the context to be a pointer to the expected `TaskStack`.
+    // pub unsafe extern "C" fn request_stop_task_function(
+    //     _id: i64,
+    //     untyped_context: *mut std::ffi::c_void,
+    //     _worker_index: usize,
+    //     _dispatcher: &dyn IThreadDispatcher,
+    // ) {
+    //     (*(untyped_context as *mut TaskStack)).request_stop();
+    // }
 
     /// Convenience function for getting a task representing a stop request.
     pub fn get_request_stop_task(stack: *mut TaskStack) -> Task {
