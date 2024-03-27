@@ -1,7 +1,9 @@
+use std::arch::aarch64::{float32x4_t, uint32x4_t};
+use std::arch::aarch64::{vcgtq_f32, vcleq_f32, vdupq_n_f32, vminvq_u32};
 use std::arch::x86_64::{__m128, _mm_cmp_ps, _mm_cmp_ps_mask, _mm_movemask_ps};
 use std::arch::x86_64::{__m256, _mm256_cmp_ps, _mm256_cmp_ps_mask, _mm256_movemask_ps};
 use std::mem;
-use std::simd::{u32x4, u32x8, SimdPartialOrd};
+use std::simd::{f32x4, f32x8, u32x4, u32x8, Mask, SimdPartialOrd};
 
 /// Some helpers for indexing into vector bundles.
 pub struct BundleIndexing;
@@ -65,6 +67,14 @@ impl BundleIndexing {
                 let mask = _mm_movemask_ps(cmp);
                 mem::transmute::<i32, __m128>(mask as i32)
             }
+        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
+            unsafe {
+                let cmp = vcleq_f32(
+                    vdupq_n_f32(count_in_bundle as f32),
+                    float32x4_t(3.0, 2.0, 1.0, 0.0),
+                );
+                mem::transmute::<uint32x4_t, u32x4>(vminvq_u32(cmp))
+            }
         } else {
             let mut mask = [0; f32x8::LANES];
             for i in 0..f32x8::LANES {
@@ -96,6 +106,14 @@ impl BundleIndexing {
                 let mask = _mm_movemask_ps(cmp);
                 mem::transmute::<i32, __m128>(mask as i32)
             }
+        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
+            unsafe {
+                let cmp = vcgtq_f32(
+                    vdupq_n_f32(count_in_bundle as f32),
+                    float32x4_t(3.0, 2.0, 1.0, 0.0),
+                );
+                mem::transmute::<uint32x4_t, u32x4>(vminvq_u32(cmp))
+            }
         } else {
             let mut mask = [0; f32x8::LANES];
             for i in 0..f32x8::LANES {
@@ -117,6 +135,9 @@ impl BundleIndexing {
                 let scalar_mask = _mm_movemask_ps(mem::transmute::<__m128, __m128>(v));
                 scalar_mask.trailing_zeros() as i32
             }
+        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
+            let mask: Mask<i32, 4> = v.lanes_le(f32x4::splat(0.0)).into();
+            mask.trailing_zeros() as i32
         } else {
             for i in 0..f32x8::LANES {
                 if v[i] == !0 {
@@ -141,6 +162,9 @@ impl BundleIndexing {
                 let scalar_mask = _mm_movemask_ps(mem::transmute::<__m128, __m128>(v));
                 32 - scalar_mask.leading_zeros() as usize
             }
+        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
+            let mask: Mask<i32, 4> = v.lanes_le(f32x4::splat(0.0)).into();
+            32 - mask.bitmask().leading_zeros() as usize
         } else {
             for i in (0..f32x8::LANES).rev() {
                 if v[i] == !0 {
