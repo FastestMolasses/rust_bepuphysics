@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 packed_simd = { version = "*" }
+glam = { version = "*" }
 crossbeam-utils = { version = "0.8" }
