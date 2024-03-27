@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
-use std::mem;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
@@ -71,6 +70,7 @@ impl AsMut<Int3> for Int3 {
 mod neon {
     use super::Int3;
     use core::arch::aarch64::*;
+    use std::mem;
 
     #[inline]
     pub fn eq(a: Int3, b: Int3) -> bool {
@@ -90,10 +90,10 @@ mod neon {
 
     #[inline]
     pub fn hash(item: &Int3) -> u64 {
-        let vitem = unsafe { vld1q_s32(mem::transmute(item)) };
-        let vp = vdupq_n_u64(961748927899809343715225741);
-        let vhash = unsafe {
-            vmlal_high_u32(
+        unsafe {
+            let vitem = vld1q_s32(mem::transmute(item));
+            let vp = vdupq_n_u64(961748927899809343715225741);
+            let vhash = vmlal_high_u32(
                 vmlal_u32(
                     vmovq_n_u64(0),
                     vget_low_u32(vreinterpretq_u32_s32(vitem)),
@@ -101,10 +101,10 @@ mod neon {
                 ),
                 vget_high_u32(vreinterpretq_u32_s32(vitem)),
                 vget_high_u32(vreinterpretq_u32_u64(vp)),
-            )
-        };
-        let result = vgetq_lane_u64(vhash, 0) ^ (vgetq_lane_u64(vhash, 1) >> 32);
-        result as u64
+            );
+            let result = vgetq_lane_u64(vhash, 0) ^ (vgetq_lane_u64(vhash, 1) >> 32);
+            result as u64
+        }
     }
 }
 
@@ -166,5 +166,126 @@ impl core::fmt::Debug for Int3 {
 impl core::fmt::Display for Int3 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "{{{}, {}, {}}}", self.x, self.y, self.z)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_int3_creation() {
+        let int3 = Int3::new(1, 2, 3);
+        assert_eq!(int3.x, 1);
+        assert_eq!(int3.y, 2);
+        assert_eq!(int3.z, 3);
+    }
+
+    #[test]
+    fn test_int3_equality() {
+        let a = Int3::new(1, 2, 3);
+        let b = Int3::new(1, 2, 3);
+        let c = Int3::new(4, 5, 6);
+
+        assert!(a.eq(b));
+        assert!(!a.eq(c));
+        assert!(a.ne(c));
+        assert!(!a.ne(b));
+    }
+
+    #[test]
+    fn test_int3_comparison() {
+        let a = Int3::new(1, 2, 3);
+        let b = Int3::new(1, 2, 3);
+        let c = Int3::new(1, 2, 4);
+        let d = Int3::new(1, 3, 3);
+        let e = Int3::new(2, 2, 3);
+
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+        assert_eq!(a.cmp(&c), Ordering::Less);
+        assert_eq!(c.cmp(&a), Ordering::Greater);
+        assert_eq!(a.cmp(&d), Ordering::Less);
+        assert_eq!(a.cmp(&e), Ordering::Less);
+    }
+
+    #[test]
+    fn test_int3_hashing() {
+        let a = Int3::new(1, 2, 3);
+        let b = Int3::new(1, 2, 3);
+        let c = Int3::new(4, 5, 6);
+
+        assert_eq!(a.hash(), b.hash());
+        assert_ne!(a.hash(), c.hash());
+    }
+
+    #[test]
+    fn test_int3_as_ref() {
+        let a = Int3::new(1, 2, 3);
+        let r = a.as_ref();
+        assert_eq!(r.x, 1);
+        assert_eq!(r.y, 2);
+        assert_eq!(r.z, 3);
+    }
+
+    #[test]
+    fn test_int3_as_mut() {
+        let mut a = Int3::new(1, 2, 3);
+        {
+            let m = a.as_mut();
+            m.x = 4;
+            m.y = 5;
+            m.z = 6;
+        }
+        assert_eq!(a.x, 4);
+        assert_eq!(a.y, 5);
+        assert_eq!(a.z, 6);
+    }
+
+    #[test]
+    fn test_int3_debug_format() {
+        let a = Int3::new(1, 2, 3);
+        assert_eq!(format!("{:?}", a), "Int3 { x: 1, y: 2, z: 3 }");
+    }
+
+    #[test]
+    fn test_int3_display_format() {
+        let a = Int3::new(1, 2, 3);
+        assert_eq!(format!("{}", a), "{1, 2, 3}");
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[cfg(target_feature = "neon")]
+    mod neon_tests {
+        use super::*;
+
+        #[test]
+        fn test_int3_neon_eq() {
+            let a = Int3::new(1, 2, 3);
+            let b = Int3::new(1, 2, 3);
+            let c = Int3::new(4, 5, 6);
+
+            assert!(neon::eq(a, b));
+            assert!(!neon::eq(a, c));
+        }
+
+        #[test]
+        fn test_int3_neon_ne() {
+            let a = Int3::new(1, 2, 3);
+            let b = Int3::new(1, 2, 3);
+            let c = Int3::new(4, 5, 6);
+
+            assert!(!neon::ne(a, b));
+            assert!(neon::ne(a, c));
+        }
+
+        #[test]
+        fn test_int3_neon_hash() {
+            let a = Int3::new(1, 2, 3);
+            let b = Int3::new(1, 2, 3);
+            let c = Int3::new(4, 5, 6);
+
+            assert_eq!(neon::hash(&a), neon::hash(&b));
+            assert_ne!(neon::hash(&a), neon::hash(&c));
+        }
     }
 }
