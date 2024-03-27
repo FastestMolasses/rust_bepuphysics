@@ -430,7 +430,7 @@ impl TaskStack {
     pub fn for_loop<TJobFilter, F>(
         &self,
         function: F,
-        context: *mut std::ffi::c_void,
+        context: *mut c_void,
         inclusive_start_index: isize,
         iteration_count: isize,
         worker_index: usize,
@@ -439,7 +439,7 @@ impl TaskStack {
         tag: u64,
     ) where
         TJobFilter: JobFilter,
-        F: Fn(isize, *mut std::ffi::c_void, isize, Arc<dyn IThreadDispatcher>)
+        F: Fn(isize, *mut c_void, isize, Arc<dyn IThreadDispatcher>)
             + Send
             + Sync
             + 'static,

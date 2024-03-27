@@ -1,6 +1,8 @@
 mod physics;
 mod utilities;
 
+pub use utilities::*;
+
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }
