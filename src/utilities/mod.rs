@@ -25,6 +25,7 @@ mod task_scheduling;
 mod thread_dispatcher;
 mod vector2_wide;
 mod vector3_wide;
+mod vector4_wide;
 
 // Private:
 mod vector3;
