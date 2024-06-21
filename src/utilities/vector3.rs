@@ -1,7 +1,7 @@
 use packed_simd::f32x4;
 
 #[derive(Copy, Clone, Debug)]
-pub struct Vector3(f32x4);
+pub struct Vector3(pub(crate) f32x4);
 
 impl Vector3 {
     /// Constructs a new `Vector3`.
