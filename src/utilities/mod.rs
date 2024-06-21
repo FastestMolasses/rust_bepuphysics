@@ -14,12 +14,17 @@ mod gather_scatter;
 mod int2;
 mod int3;
 mod int4;
+mod math_helper;
 mod matrix;
+mod matrix2x2_wide;
+mod matrix2x3_wide;
 mod matrix3x3;
 mod memory;
+mod quaternion_ex;
 mod task_scheduling;
 mod thread_dispatcher;
-mod quaternion_ex;
+mod vector2_wide;
+mod vector3_wide;
 
 // Private:
 mod vector3;

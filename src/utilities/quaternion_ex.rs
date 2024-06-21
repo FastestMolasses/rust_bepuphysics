@@ -258,6 +258,7 @@ pub fn get_axis_angle_from_quaternion(q: Quaternion) -> (Vector3, f32) {
     let length_squared = axis.length_squared();
     if length_squared > 1e-14 {
         axis /= length_squared.sqrt();
+        // TODO: USE MATH_HELPER HERE
         let angle = 2.0 * qw.clamp(-1.0, 1.0).acos();
         (axis, angle)
     } else {

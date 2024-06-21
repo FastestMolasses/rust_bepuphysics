@@ -1,12 +1,7 @@
 use core::mem::size_of;
 use core::ptr::{read_unaligned, write_unaligned};
 use packed_simd::*;
-
-pub struct BundleIndexing;
-
-impl BundleIndexing {
-    pub const VECTOR_MASK: usize = 3; // Assuming Vector4 is used
-}
+use crate::utilities::bundle_indexing::BundleIndexing;
 
 pub struct GatherScatter;
 
@@ -25,7 +20,7 @@ impl GatherScatter {
         target_bundle: &mut T,
         target_inner_index: usize,
     ) {
-        let size_in_ints = (size_of::<T>() >> 2) & !BundleIndexing::VECTOR_MASK;
+        let size_in_ints = (size_of::<T>() >> 2) & !BundleIndexing::vector_mask();
 
         let source_base = (source_bundle as *const T as *const i32).add(source_inner_index);
         let target_base = (target_bundle as *mut T as *mut i32).add(target_inner_index);

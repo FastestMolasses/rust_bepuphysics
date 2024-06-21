@@ -1,10 +1,10 @@
 use std::arch::x86_64::*;
 use std::mem::MaybeUninit;
 use std::ops::{Add, Mul, Sub};
-use crate::Vector3;
-use crate::Vector4;
-use crate::Matrix3x3;
-use crate::Quaternion;
+use crate::utilities::vector3::Vector3;
+use crate::utilities::vector4::Vector4;
+use crate::utilities::matrix3x3::Matrix3x3;
+// use crate::utilities::::Quaternion;
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, align(16))]
