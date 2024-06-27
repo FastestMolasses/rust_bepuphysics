@@ -22,6 +22,7 @@ mod matrix3x3;
 mod matrix3x3_wide;
 mod memory;
 mod quaternion_ex;
+mod quaternion_wide;
 mod task_scheduling;
 mod thread_dispatcher;
 mod vector2_wide;
