@@ -19,6 +19,7 @@ mod matrix;
 mod matrix2x2_wide;
 mod matrix2x3_wide;
 mod matrix3x3;
+mod matrix3x3_wide;
 mod memory;
 mod quaternion_ex;
 mod task_scheduling;
