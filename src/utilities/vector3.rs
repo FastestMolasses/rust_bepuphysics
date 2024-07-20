@@ -41,6 +41,11 @@ impl Vector3 {
     pub fn scale(self, scale: f32) -> Self {
         Self(self.0 * scale)
     }
+
+    #[inline(always)]
+    pub fn splat(value: f32) -> Self {
+        Self(f32x4::splat(value))
+    }
 }
 
 impl std::ops::Mul<f32> for Vector3 {
