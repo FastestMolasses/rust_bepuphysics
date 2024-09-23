@@ -1,5 +1,4 @@
 use crate::utilities::vector2_wide::Vector2Wide;
-use packed_simd::*;
 
 #[derive(Clone, Copy)]
 pub struct Matrix2x2Wide {

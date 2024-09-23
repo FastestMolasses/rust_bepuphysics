@@ -26,6 +26,9 @@ mod quaternion_wide;
 mod symetric2x2_wide;
 mod symmetric3x3;
 mod symmetric3x3_wide;
+mod symmetric4x4_wide;
+mod symmetric5x5_wide;
+mod symmetric6x6_wide;
 mod task_scheduling;
 mod thread_dispatcher;
 mod vector2_wide;
@@ -33,5 +36,7 @@ mod vector3_wide;
 mod vector4_wide;
 
 // Private:
-mod vector3;
+mod arch;
+mod vector;
+// mod vector3;
 mod vector4;

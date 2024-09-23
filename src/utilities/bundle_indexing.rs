@@ -3,7 +3,7 @@ use std::arch::aarch64::{vcgtq_f32, vcleq_f32, vdupq_n_f32, vminvq_u32};
 use std::arch::x86_64::{__m128, _mm_cmp_ps, _mm_cmp_ps_mask, _mm_movemask_ps};
 use std::arch::x86_64::{__m256, _mm256_cmp_ps, _mm256_cmp_ps_mask, _mm256_movemask_ps};
 use std::mem;
-use std::simd::{f32x4, f32x8, u32x4, u32x8, Mask, SimdPartialOrd};
+use std::simd::{f32x4, f32x8, u32x4, u32x8, Mask};
 
 /// Some helpers for indexing into vector bundles.
 pub struct BundleIndexing;

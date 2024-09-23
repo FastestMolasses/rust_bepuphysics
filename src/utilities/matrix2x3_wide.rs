@@ -4,7 +4,6 @@ use crate::utilities::{
     matrix2x2_wide::Matrix2x2Wide,
     matrix3x3_wide::Matrix3x3Wide,
 };
-use packed_simd::*;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Matrix2x3Wide {

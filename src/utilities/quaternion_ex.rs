@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 use std::mem::transmute;
 use std::simd::f32x4;
-use packed_simd::f32x8;
+use portable_simd::f32x8;
 
 use crate::utilities::{vector3::Vector3, matrix3x3::Matrix3x3, matrix::Matrix};
 

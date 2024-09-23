@@ -1,4 +1,4 @@
-use packed_simd::*;
+use portable_simd::*;
 use std::ops::{Add, Mul};
 
 use crate::utilities::matrix2x3_wide::Matrix2x3Wide;

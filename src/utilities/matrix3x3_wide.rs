@@ -1,7 +1,7 @@
-use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use packed_simd::f32x4 as Vector;
+use glam::Mat3;
 use std::ops::{Mul, Sub};
 
 #[repr(C)]
@@ -14,12 +14,12 @@ pub struct Matrix3x3Wide {
 
 impl Matrix3x3Wide {
     #[inline(always)]
-    pub fn broadcast(source: &Matrix3x3) -> Self {
+    pub fn broadcast(source: &Mat3) -> Self {
         Self {
             x: Vector3Wide::new(
-                Vector::splat(source.x.x),
-                Vector::splat(source.x.y),
-                Vector::splat(source.x.z),
+                Vector::splat(source.x_axis.x),
+                Vector::splat(source.x_axis.y),
+                Vector::splat(source.x_axis.z),
             ),
             y: Vector3Wide::new(
                 Vector::splat(source.y.x),
@@ -167,14 +167,19 @@ impl Matrix3x3Wide {
             z: Vector3Wide::new(-v.y, v.x, Vector::splat(0.0)),
         }
     }
+    // TODO: THESE FUNCTIONS ARE CREATING NEW VALUES INSTEAD OF MODIFYING THE SPECIFIED VALUES.
 
     #[inline(always)]
-    pub fn negate(&self) -> Self {
-        Self {
-            x: Vector3Wide::new(-self.x.x, -self.x.y, -self.x.z),
-            y: Vector3Wide::new(-self.y.x, -self.y.y, -self.y.z),
-            z: Vector3Wide::new(-self.z.x, -self.z.y, -self.z.z),
-        }
+    pub fn negate(&self, result: &mut Self) {
+        result.x.x = -self.x.x;
+        result.x.y = -self.x.y;
+        result.x.z = -self.x.z;
+        result.y.x = -self.y.x;
+        result.y.y = -self.y.y;
+        result.y.z = -self.y.z;
+        result.z.x = -self.z.x;
+        result.z.y = -self.z.y;
+        result.z.z = -self.z.z;
     }
 
     #[inline(always)]
@@ -210,21 +215,21 @@ impl Matrix3x3Wide {
     }
 
     #[inline(always)]
-    pub fn read_first(&self) -> Matrix3x3 {
-        Matrix3x3 {
-            x: self.x.read_first(),
-            y: self.y.read_first(),
-            z: self.z.read_first(),
+    pub fn read_first(&self) -> Mat3 {
+        Mat3 {
+            x_axis: self.x.read_first(),
+            y_axis: self.y.read_first(),
+            z_axis: self.z.read_first(),
         }
     }
 
     #[inline(always)]
-    pub fn read_slot(&self, slot_index: usize) -> Matrix3x3 {
+    pub fn read_slot(&self, slot_index: usize) -> Mat3 {
         unsafe {
-            Matrix3x3 {
-                x: self.x.read_slot(slot_index),
-                y: self.y.read_slot(slot_index),
-                z: self.z.read_slot(slot_index),
+            Mat3 {
+                x_axis: self.x.read_slot(slot_index),
+                y_axis: self.y.read_slot(slot_index),
+                z_axis: self.z.read_slot(slot_index),
             }
         }
     }

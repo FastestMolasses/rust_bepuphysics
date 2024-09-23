@@ -1,4 +1,4 @@
-use packed_simd::*;
+use portable_simd::*;
 use std::ops::{Add, Mul, Neg, Sub};
 
 use crate::utilities::math_helper::MathHelper;

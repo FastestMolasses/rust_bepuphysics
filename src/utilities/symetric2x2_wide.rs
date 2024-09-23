@@ -1,7 +1,7 @@
 use crate::utilities::matrix2x3::Matrix2x3Wide;
 use crate::utilities::vector2::Vector2Wide;
 use core::ops::*;
-use packed_simd::*;
+use portable_simd::*;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

@@ -1,13 +1,13 @@
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector2::Vector2;
-use packed_simd::*;
+use crate::utilities::vector::Vector;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Vector2Wide {
     /// First component of the vector.
-    pub x: f32x4,
+    pub x: Vector,
     /// Second component of the vector.
-    pub y: f32x4,
+    pub y: Vector,
 }
 
 impl Vector2Wide {
@@ -24,12 +24,12 @@ impl Vector2Wide {
     }
 
     #[inline(always)]
-    pub fn dot(a: &Self, b: &Self, result: &mut f32x4) {
+    pub fn dot(a: &Self, b: &Self, result: &mut Vector) {
         *result = a.x * b.x + a.y * b.y;
     }
 
     #[inline(always)]
-    pub fn scale(vector: &Self, scalar: f32x4, result: &mut Self) {
+    pub fn scale(vector: &Self, scalar: Vector, result: &mut Self) {
         result.x = vector.x * scalar;
         result.y = vector.y * scalar;
     }

@@ -1,4 +1,6 @@
-use packed_simd::f32x4;
+use portable_simd::f32x4;
+
+// TODO: THIS SHOULD MOST LIKELY BE REPLACED WITH GLAM::VEC3
 
 #[derive(Copy, Clone, Debug)]
 pub struct Vector3(pub(crate) f32x4);

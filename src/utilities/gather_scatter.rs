@@ -1,6 +1,6 @@
 use core::mem::size_of;
 use core::ptr::{read_unaligned, write_unaligned};
-use packed_simd::*;
+use portable_simd::*;
 use crate::utilities::bundle_indexing::BundleIndexing;
 
 pub struct GatherScatter;

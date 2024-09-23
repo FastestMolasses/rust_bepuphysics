@@ -1,4 +1,4 @@
-use packed_simd::f32x4;
+use portable_simd::f32x4;
 use std::ops::{Add, Sub, Mul, Div, Neg};
 
 #[derive(Copy, Clone, Debug)]

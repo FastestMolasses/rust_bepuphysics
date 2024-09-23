@@ -1,23 +1,22 @@
-use crate::utilities::vector3::Vector3;
-use std::arch::x86_64::*;
+use glam::Vec3;
 use std::mem::MaybeUninit;
 use std::ops::{Add, Mul, Sub};
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, align(16))]
 pub struct Matrix3x3 {
-    pub x: Vector3,
-    pub y: Vector3,
-    pub z: Vector3,
+    pub x: Vec3,
+    pub y: Vec3,
+    pub z: Vec3,
 }
 
 impl Matrix3x3 {
     #[inline(always)]
     pub fn identity() -> Self {
         Self {
-            x: Vector3::new(1.0, 0.0, 0.0),
-            y: Vector3::new(0.0, 1.0, 0.0),
-            z: Vector3::new(0.0, 0.0, 1.0),
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+            z: Vec3::new(0.0, 0.0, 1.0),
         }
     }
 
@@ -130,13 +129,13 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    pub fn transform(&self, v: Vector3) -> Vector3 {
+    pub fn transform(&self, v: Vec3) -> Vec3 {
         self.x * v.0.extract(0) + self.y * v.0.extract(1) + self.z * v.0.extract(2)
     }
 
     #[inline(always)]
-    pub fn transform_transpose(&self, v: Vector3) -> Vector3 {
-        Vector3::new(v.dot(self.x), v.dot(self.y), v.dot(self.z))
+    pub fn transform_transpose(&self, v: Vec3) -> Vec3 {
+        Vec3::new(v.dot(self.x), v.dot(self.y), v.dot(self.z))
     }
 
     #[inline(always)]
@@ -229,23 +228,23 @@ impl Matrix3x3 {
         let zw = qz2 * q.w;
 
         Self {
-            x: Vector3::new(1.0 - yy - zz, xy + zw, xz - yw),
-            y: Vector3::new(xy - zw, 1.0 - xx - zz, yz + xw),
-            z: Vector3::new(xz + yw, yz - xw, 1.0 - xx - yy),
+            x: Vec3::new(1.0 - yy - zz, xy + zw, xz - yw),
+            y: Vec3::new(xy - zw, 1.0 - xx - zz, yz + xw),
+            z: Vec3::new(xz + yw, yz - xw, 1.0 - xx - yy),
         }
     }
 
     #[inline(always)]
-    pub fn create_scale(scale: Vector3) -> Self {
+    pub fn create_scale(scale: Vec3) -> Self {
         Self {
-            x: Vector3::new(scale.0.extract(0), 0.0, 0.0),
-            y: Vector3::new(0.0, scale.0.extract(1), 0.0),
-            z: Vector3::new(0.0, 0.0, scale.0.extract(2)),
+            x: Vec3::new(scale.0.extract(0), 0.0, 0.0),
+            y: Vec3::new(0.0, scale.0.extract(1), 0.0),
+            z: Vec3::new(0.0, 0.0, scale.0.extract(2)),
         }
     }
 
     #[inline(always)]
-    pub fn create_from_axis_angle(axis: Vector3, angle: f32) -> Self {
+    pub fn create_from_axis_angle(axis: Vec3, angle: f32) -> Self {
         let xx = axis.0.extract(0) * axis.0.extract(0);
         let yy = axis.0.extract(1) * axis.0.extract(1);
         let zz = axis.0.extract(2) * axis.0.extract(2);
@@ -257,17 +256,17 @@ impl Matrix3x3 {
         let one_minus_cos_angle = 1.0 - angle.cos();
 
         Self {
-            x: Vector3::new(
+            x: Vec3::new(
                 1.0 + one_minus_cos_angle * (xx - 1.0),
                 axis.0.extract(2) * sin_angle + one_minus_cos_angle * xy,
                 -axis.0.extract(1) * sin_angle + one_minus_cos_angle * xz,
             ),
-            y: Vector3::new(
+            y: Vec3::new(
                 -axis.0.extract(2) * sin_angle + one_minus_cos_angle * xy,
                 1.0 + one_minus_cos_angle * (yy - 1.0),
                 axis.0.extract(0) * sin_angle + one_minus_cos_angle * yz,
             ),
-            z: Vector3::new(
+            z: Vec3::new(
                 axis.0.extract(1) * sin_angle + one_minus_cos_angle * xz,
                 -axis.0.extract(0) * sin_angle + one_minus_cos_angle * yz,
                 1.0 + one_minus_cos_angle * (zz - 1.0),
@@ -276,11 +275,11 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    pub fn create_cross_product(v: Vector3) -> Self {
+    pub fn create_cross_product(v: Vec3) -> Self {
         Self {
-            x: Vector3::new(0.0, -v.0.extract(2), v.0.extract(1)),
-            y: Vector3::new(v.0.extract(2), 0.0, -v.0.extract(0)),
-            z: Vector3::new(-v.0.extract(1), v.0.extract(0), 0.0),
+            x: Vec3::new(0.0, -v.0.extract(2), v.0.extract(1)),
+            y: Vec3::new(v.0.extract(2), 0.0, -v.0.extract(0)),
+            z: Vec3::new(-v.0.extract(1), v.0.extract(0), 0.0),
         }
     }
 }

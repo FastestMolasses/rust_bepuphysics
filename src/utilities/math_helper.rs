@@ -1,6 +1,4 @@
-use packed_simd::*;
 use std::arch::aarch64::*;
-use std::arch::x86_64::*;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
 use crate::Quaternion;

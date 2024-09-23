@@ -1,4 +1,3 @@
-use packed_simd::*;
 use std::hash::{Hash, Hasher};
 use std::mem;
 
