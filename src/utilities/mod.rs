@@ -4,7 +4,6 @@ pub use self::affine_transform::*;
 mod collections;
 pub use self::collections::*;
 
-mod affine_transform;
 mod bounding_box;
 mod bounding_sphere;
 mod bundle_indexing;
@@ -38,5 +37,3 @@ mod vector4_wide;
 // Private:
 mod arch;
 mod vector;
-// mod vector3;
-mod vector4;

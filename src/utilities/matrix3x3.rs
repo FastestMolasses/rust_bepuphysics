@@ -2,17 +2,22 @@ use glam::Vec3;
 use std::mem::MaybeUninit;
 use std::ops::{Add, Mul, Sub};
 
+/// 3 row, 3 column matrix.
 #[derive(Copy, Clone, Debug)]
 #[repr(C, align(16))]
 pub struct Matrix3x3 {
+    /// First row of the matrix.
     pub x: Vec3,
+    /// Second row of the matrix.
     pub y: Vec3,
+    /// Third row of the matrix.
     pub z: Vec3,
 }
 
 impl Matrix3x3 {
+    /// Gets the 3x3 identity matrix.
     #[inline(always)]
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         Self {
             x: Vec3::new(1.0, 0.0, 0.0),
             y: Vec3::new(0.0, 1.0, 0.0),
@@ -20,31 +25,28 @@ impl Matrix3x3 {
         }
     }
 
+    /// Adds the components of two matrices together.
     #[inline(always)]
-    pub fn add(a: &Self, b: &Self) -> Self {
-        Self {
-            x: a.x + b.x,
-            y: a.y + b.y,
-            z: a.z + b.z,
-        }
+    pub fn add(a: &Self, b: &Self, result: &mut Self) -> Self {
+        result.x = a.x + b.x;
+        result.y = a.y + b.y;
+        result.z = a.z + b.z;
     }
 
+    /// Scales the components of a matrix by a scalar.
     #[inline(always)]
-    pub fn scale(&self, scale: f32) -> Self {
-        Self {
-            x: self.x * scale,
-            y: self.y * scale,
-            z: self.z * scale,
-        }
+    pub fn scale(matrix: &Self, scale: f32, result: &mut Self) -> Self {
+        result.x = matrix.x * scale;
+        result.y = matrix.y * scale;
+        result.z = matrix.z * scale;
     }
 
+    /// Subtracts the components of one matrix from another.
     #[inline(always)]
-    pub fn subtract(a: &Self, b: &Self) -> Self {
-        Self {
-            x: a.x - b.x,
-            y: a.y - b.y,
-            z: a.z - b.z,
-        }
+    pub fn subtract(a: &Self, b: &Self, result: &mut Self) -> Self {
+        result.x = a.x - b.x;
+        result.y = a.y - b.y;
+        result.z = a.z - b.z;
     }
 
     #[inline(always)]
