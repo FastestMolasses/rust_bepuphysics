@@ -1,7 +1,7 @@
+use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use glam::Mat3;
 use std::ops::{Mul, Sub};
 
 #[repr(C)]
@@ -14,185 +14,206 @@ pub struct Matrix3x3Wide {
 
 impl Matrix3x3Wide {
     #[inline(always)]
-    pub fn broadcast(source: &Mat3) -> Self {
+    pub fn broadcast(source: &Matrix3x3, broadcasted: &mut Self) {
+        broadcasted.x = Vector3Wide {
+            x: Vector::splat(source.x_axis.x),
+            y: Vector::splat(source.x_axis.y),
+            z: Vector::splat(source.x_axis.z),
+        };
+        broadcasted.y = Vector3Wide {
+            x: Vector::splat(source.y.x),
+            y: Vector::splat(source.y.y),
+            z: Vector::splat(source.y.z),
+        };
+        broadcasted.z = Vector3Wide {
+            x: Vector::splat(source.z.x),
+            y: Vector::splat(source.z.y),
+            z: Vector::splat(source.z.z),
+        };
+    }
+
+    #[inline(always)]
+    pub const fn create_identity() -> Self {
+        // TODO:
         Self {
-            x: Vector3Wide::new(
-                Vector::splat(source.x_axis.x),
-                Vector::splat(source.x_axis.y),
-                Vector::splat(source.x_axis.z),
-            ),
-            y: Vector3Wide::new(
-                Vector::splat(source.y.x),
-                Vector::splat(source.y.y),
-                Vector::splat(source.y.z),
-            ),
-            z: Vector3Wide::new(
-                Vector::splat(source.z.x),
-                Vector::splat(source.z.y),
-                Vector::splat(source.z.z),
-            ),
+            x: Vector3Wide {
+                x: Vector::splat(1.0),
+                y: Vector::splat(0.0),
+                z: Vector::splat(0.0),
+            },
+            y: Vector3Wide {
+                x: Vector::splat(0.0),
+                y: Vector::splat(1.0),
+                z: Vector::splat(0.0),
+            },
+            z: Vector3Wide {
+                x: Vector::splat(0.0),
+                y: Vector::splat(0.0),
+                z: Vector::splat(1.0),
+            },
         }
     }
 
     #[inline(always)]
-    pub fn identity() -> Self {
-        Self {
-            x: Vector3Wide::new(Vector::splat(1.0), Vector::splat(0.0), Vector::splat(0.0)),
-            y: Vector3Wide::new(Vector::splat(0.0), Vector::splat(1.0), Vector::splat(0.0)),
-            z: Vector3Wide::new(Vector::splat(0.0), Vector::splat(0.0), Vector::splat(1.0)),
-        }
+    pub fn multiply_without_overlap(a: &Self, b: &Self, result: &mut Self) {
+        result.x.x = a.x.x * b.x.x + a.x.y * b.y.x + a.x.z * b.z.x;
+        result.x.y = a.x.x * b.x.y + a.x.y * b.y.y + a.x.z * b.z.y;
+        result.x.z = a.x.x * b.x.z + a.x.y * b.y.z + a.x.z * b.z.z;
+
+        result.y.x = a.y.x * b.x.x + a.y.y * b.y.x + a.y.z * b.z.x;
+        result.y.y = a.y.x * b.x.y + a.y.y * b.y.y + a.y.z * b.z.y;
+        result.y.z = a.y.x * b.x.z + a.y.y * b.y.z + a.y.z * b.z.z;
+
+        result.z.x = a.z.x * b.x.x + a.z.y * b.y.x + a.z.z * b.z.x;
+        result.z.y = a.z.x * b.x.y + a.z.y * b.y.y + a.z.z * b.z.y;
+        result.z.z = a.z.x * b.x.z + a.z.y * b.y.z + a.z.z * b.z.z;
+    }
+
+    /// Multiplies a matrix by another matrix, where the first matrix is sampled as if it were transposed: result = transpose(a) * b.
+    #[inline(always)]
+    pub fn multiply_transposed_without_overlap(a: &Self, b: &Self, result: &mut Self) {
+        result.x.x = a.x.x * b.x.x + a.y.x * b.y.x + a.z.x * b.z.x;
+        result.x.y = a.x.x * b.x.y + a.y.x * b.y.y + a.z.x * b.z.y;
+        result.x.z = a.x.x * b.x.z + a.y.x * b.y.z + a.z.x * b.z.z;
+
+        result.y.x = a.x.y * b.x.x + a.y.y * b.y.x + a.z.y * b.z.x;
+        result.y.y = a.x.y * b.x.y + a.y.y * b.y.y + a.z.y * b.z.y;
+        result.y.z = a.x.y * b.x.z + a.y.y * b.y.z + a.z.y * b.z.z;
+
+        result.z.x = a.x.z * b.x.x + a.y.z * b.y.x + a.z.z * b.z.x;
+        result.z.y = a.x.z * b.x.y + a.y.z * b.y.y + a.z.z * b.z.y;
+        result.z.z = a.x.z * b.x.z + a.y.z * b.y.z + a.z.z * b.z.z;
+    }
+
+    /// Multiplies a matrix by another matrix, where the second matrix is sampled as if it were transposed: result = a * transpose(b).
+    #[inline(always)]
+    pub fn multiply_by_transpose_without_overlap(a: &Self, b: &Self, result: &mut Self) {
+        result.x = a.x * b.x + a.x.y * b.x.y + a.x.z * b.x.z;
+        result.x.y = a.x * b.y.x + a.x.y * b.y.y + a.x.z * b.y.z;
+        result.x.z = a.x * b.z.x + a.x.y * b.z.y + a.x.z * b.z.z;
+
+        result.y.x = a.y.x * b.x + a.y.y * b.x.y + a.y.z * b.x.z;
+        result.y.y = a.y.x * b.y.x + a.y.y * b.y.y + a.y.z * b.y.z;
+        result.y.z = a.y.x * b.z.x + a.y.y * b.z.y + a.y.z * b.z.z;
+
+        result.z.x = a.z.x * b.x + a.z.y * b.x.y + a.z.z * b.x.z;
+        result.z.y = a.z.x * b.y.x + a.z.y * b.y.y + a.z.z * b.y.z;
+        result.z.z = a.z.x * b.z.x + a.z.y * b.z.y + a.z.z * b.z.z;
     }
 
     #[inline(always)]
-    pub fn multiply_without_overlap(&self, other: &Self) -> Self {
-        Self {
-            x: Vector3Wide::new(
-                self.x.x * other.x.x + self.x.y * other.y.x + self.x.z * other.z.x,
-                self.x.x * other.x.y + self.x.y * other.y.y + self.x.z * other.z.y,
-                self.x.x * other.x.z + self.x.y * other.y.z + self.x.z * other.z.z,
-            ),
-            y: Vector3Wide::new(
-                self.y.x * other.x.x + self.y.y * other.y.x + self.y.z * other.z.x,
-                self.y.x * other.x.y + self.y.y * other.y.y + self.y.z * other.z.y,
-                self.y.x * other.x.z + self.y.y * other.y.z + self.y.z * other.z.z,
-            ),
-            z: Vector3Wide::new(
-                self.z.x * other.x.x + self.z.y * other.y.x + self.z.z * other.z.x,
-                self.z.x * other.x.y + self.z.y * other.y.y + self.z.z * other.z.y,
-                self.z.x * other.x.z + self.z.y * other.y.z + self.z.z * other.z.z,
-            ),
-        }
+    pub fn transform_without_overlap(v: &Vector3Wide, m: &Self, result: &mut Vector3Wide) {
+        result.x = v.x * m.x.x + v.y * m.y.x + v.z * m.z.x;
+        result.y = v.x * m.x.y + v.y * m.y.y + v.z * m.z.y;
+        result.z = v.x * m.x.z + v.y * m.y.z + v.z * m.z.z;
     }
 
     #[inline(always)]
-    pub fn multiply_transposed_without_overlap(&self, other: &Self) -> Self {
-        Self {
-            x: Vector3Wide::new(
-                self.x.x * other.x.x + self.y.x * other.y.x + self.z.x * other.z.x,
-                self.x.x * other.x.y + self.y.x * other.y.y + self.z.x * other.z.y,
-                self.x.x * other.x.z + self.y.x * other.y.z + self.z.x * other.z.z,
-            ),
-            y: Vector3Wide::new(
-                self.x.y * other.x.x + self.y.y * other.y.x + self.z.y * other.z.x,
-                self.x.y * other.x.y + self.y.y * other.y.y + self.z.y * other.z.y,
-                self.x.y * other.x.z + self.y.y * other.y.z + self.z.y * other.z.z,
-            ),
-            z: Vector3Wide::new(
-                self.x.z * other.x.x + self.y.z * other.y.x + self.z.z * other.z.x,
-                self.x.z * other.x.y + self.y.z * other.y.y + self.z.z * other.z.y,
-                self.x.z * other.x.z + self.y.z * other.y.z + self.z.z * other.z.z,
-            ),
-        }
+    pub fn transform_by_transposed_without_overlap(
+        v: &Vector3Wide,
+        m: &Self,
+        result: &mut Vector3Wide,
+    ) {
+        result.x = v.x * m.x.x + v.y * m.x.y + v.z * m.x.z;
+        result.y = v.x * m.y.x + v.y * m.y.y + v.z * m.y.z;
+        result.z = v.x * m.z.x + v.y * m.z.y + v.z * m.z.z;
     }
 
     #[inline(always)]
-    pub fn multiply_by_transpose_without_overlap(&self, other: &Self) -> Self {
-        Self {
-            x: Vector3Wide::new(
-                self.x.x * other.x.x + self.x.y * other.x.y + self.x.z * other.x.z,
-                self.x.x * other.y.x + self.x.y * other.y.y + self.x.z * other.y.z,
-                self.x.x * other.z.x + self.x.y * other.z.y + self.x.z * other.z.z,
-            ),
-            y: Vector3Wide::new(
-                self.y.x * other.x.x + self.y.y * other.x.y + self.y.z * other.x.z,
-                self.y.x * other.y.x + self.y.y * other.y.y + self.y.z * other.y.z,
-                self.y.x * other.z.x + self.y.y * other.z.y + self.y.z * other.z.z,
-            ),
-            z: Vector3Wide::new(
-                self.z.x * other.x.x + self.z.y * other.x.y + self.z.z * other.x.z,
-                self.z.x * other.y.x + self.z.y * other.y.y + self.z.z * other.y.z,
-                self.z.x * other.z.x + self.z.y * other.z.y + self.z.z * other.z.z,
-            ),
-        }
+    pub fn invert(m: &Self, inverse: &mut Self) {
+        let m11 = m.y.y * m.z.z - m.z.y * m.y.z;
+        let m21 = m.y.z * m.z.x - m.z.z * m.y.x;
+        let m31 = m.y.x * m.z.y - m.z.x * m.y.y;
+        // TODO: CHECK THIS WITH Vector<float>.ONE
+        let determinant_inverse = Vector::<f32>::ONE / (m11 * m.x.x + m21 * m.x.y + m31 * m.x.z);
+
+        let m12 = m.z.y * m.x.z - m.x.y * m.z.z;
+        let m22 = m.z.z * m.x.x - m.x.z * m.z.x;
+        let m32 = m.z.x * m.x.y - m.x.x * m.z.y;
+
+        let m13 = m.x.y * m.y.z - m.y.y * m.x.z;
+        let m23 = m.x.z * m.y.x - m.y.z * m.x.x;
+        let m33 = m.x.x * m.y.y - m.y.x * m.x.y;
+
+        inverse.x.x = m11 * determinant_inverse;
+        inverse.y.x = m21 * determinant_inverse;
+        inverse.z.x = m31 * determinant_inverse;
+        inverse.x.y = m12 * determinant_inverse;
+        inverse.y.y = m22 * determinant_inverse;
+        inverse.z.y = m32 * determinant_inverse;
+        inverse.x.z = m13 * determinant_inverse;
+        inverse.y.z = m23 * determinant_inverse;
+        inverse.z.z = m33 * determinant_inverse;
     }
 
     #[inline(always)]
-    pub fn transform_without_overlap(&self, v: &Vector3Wide) -> Vector3Wide {
-        Vector3Wide::new(
-            v.x * self.x.x + v.y * self.y.x + v.z * self.z.x,
-            v.x * self.x.y + v.y * self.y.y + v.z * self.z.y,
-            v.x * self.x.z + v.y * self.y.z + v.z * self.z.z,
-        )
+    pub fn create_cross_product(v: &Vector3Wide, skew: &mut Self) -> Self {
+        skew.x = Vector3Wide {
+            x: Vector::<f32>::ZERO,
+            y: -v.z,
+            z: v.y,
+        };
+        skew.y = Vector3Wide {
+            x: v.z,
+            y: Vector::<f32>::ZERO,
+            z: -v.x,
+        };
+        skew.z = Vector3Wide {
+            x: -v.y,
+            y: v.x,
+            z: Vector::<f32>::ZERO,
+        };
     }
 
     #[inline(always)]
-    pub fn transform_by_transposed_without_overlap(&self, v: &Vector3Wide) -> Vector3Wide {
-        Vector3Wide::new(
-            v.x * self.x.x + v.y * self.x.y + v.z * self.x.z,
-            v.x * self.y.x + v.y * self.y.y + v.z * self.y.z,
-            v.x * self.z.x + v.y * self.z.y + v.z * self.z.z,
-        )
+    pub fn create_cross_product_value(v: &Vector3Wide) {
+        let skew;
+        Self::create_cross_product(v, skew);
+        return skew;
+    }
+
+    /// Negates the components of a matrix.
+    #[inline(always)]
+    pub fn negate(m: &Self, result: &mut Self) {
+        result.x = Vector3Wide {
+            x: -m.x.x,
+            y: -m.x.y,
+            z: -m.x.z,
+        };
+        result.y = Vector3Wide {
+            x: -m.y.x,
+            y: -m.y.y,
+            z: -m.y.z,
+        };
+        result.z = Vector3Wide {
+            x: -m.z.x,
+            y: -m.z.y,
+            z: -m.z.z,
+        };
+    }
+
+    /// Multiplies every component in the matrix by the given scalar value.
+    #[inline(always)]
+    pub fn scale(m: &Self, scale: &Vector, result: &mut Self) {
+        result.x = Vector3Wide {
+            x: m.x.x * scale,
+            y: m.x.y * scale,
+            z: m.x.z * scale,
+        };
+        result.y = Vector3Wide {
+            x: m.y.x * scale,
+            y: m.y.y * scale,
+            z: m.y.z * scale,
+        };
+        result.z = Vector3Wide {
+            x: m.z.x * scale,
+            y: m.z.y * scale,
+            z: m.z.z * scale,
+        };
     }
 
     #[inline(always)]
-    pub fn invert(&self) -> Self {
-        let m11 = self.y.y * self.z.z - self.z.y * self.y.z;
-        let m21 = self.y.z * self.z.x - self.z.z * self.y.x;
-        let m31 = self.y.x * self.z.y - self.z.x * self.y.y;
-        let determinant_inverse =
-            Vector::splat(1.0) / (m11 * self.x.x + m21 * self.x.y + m31 * self.x.z);
-
-        let m12 = self.z.y * self.x.z - self.x.y * self.z.z;
-        let m22 = self.z.z * self.x.x - self.x.z * self.z.x;
-        let m32 = self.z.x * self.x.y - self.x.x * self.z.y;
-
-        let m13 = self.x.y * self.y.z - self.y.y * self.x.z;
-        let m23 = self.x.z * self.y.x - self.y.z * self.x.x;
-        let m33 = self.x.x * self.y.y - self.y.x * self.x.y;
-
-        Self {
-            x: Vector3Wide::new(
-                m11 * determinant_inverse,
-                m12 * determinant_inverse,
-                m13 * determinant_inverse,
-            ),
-            y: Vector3Wide::new(
-                m21 * determinant_inverse,
-                m22 * determinant_inverse,
-                m23 * determinant_inverse,
-            ),
-            z: Vector3Wide::new(
-                m31 * determinant_inverse,
-                m32 * determinant_inverse,
-                m33 * determinant_inverse,
-            ),
-        }
-    }
-
-    #[inline(always)]
-    pub fn create_cross_product(v: &Vector3Wide) -> Self {
-        Self {
-            x: Vector3Wide::new(Vector::splat(0.0), -v.z, v.y),
-            y: Vector3Wide::new(v.z, Vector::splat(0.0), -v.x),
-            z: Vector3Wide::new(-v.y, v.x, Vector::splat(0.0)),
-        }
-    }
-    // TODO: THESE FUNCTIONS ARE CREATING NEW VALUES INSTEAD OF MODIFYING THE SPECIFIED VALUES.
-
-    #[inline(always)]
-    pub fn negate(&self, result: &mut Self) {
-        result.x.x = -self.x.x;
-        result.x.y = -self.x.y;
-        result.x.z = -self.x.z;
-        result.y.x = -self.y.x;
-        result.y.y = -self.y.y;
-        result.y.z = -self.y.z;
-        result.z.x = -self.z.x;
-        result.z.y = -self.z.y;
-        result.z.z = -self.z.z;
-    }
-
-    #[inline(always)]
-    pub fn scale(&self, scale: Vector) -> Self {
-        Self {
-            x: Vector3Wide::new(self.x.x * scale, self.x.y * scale, self.x.z * scale),
-            y: Vector3Wide::new(self.y.x * scale, self.y.y * scale, self.y.z * scale),
-            z: Vector3Wide::new(self.z.x * scale, self.z.y * scale, self.z.z * scale),
-        }
-    }
-
-    #[inline(always)]
-    pub fn from_quaternion(quaternion: &QuaternionWide) -> Self {
+    pub fn from_quaternion(quaternion: &QuaternionWide, result: &mut Self) {
         let qx2 = quaternion.x + quaternion.x;
         let qy2 = quaternion.y + quaternion.y;
         let qz2 = quaternion.z + quaternion.z;
@@ -207,31 +228,47 @@ impl Matrix3x3Wide {
         let xw = qx2 * quaternion.w;
         let yz = qy2 * quaternion.z;
 
-        Self {
-            x: Vector3Wide::new(Vector::splat(1.0) - yy - zz, xy + zw, xz - yw),
-            y: Vector3Wide::new(xy - zw, Vector::splat(1.0) - xx - zz, yz + xw),
-            z: Vector3Wide::new(xz + yw, yz - xw, Vector::splat(1.0) - xx - yy),
-        }
+        result.x = Vector3Wide {
+            x: Vector::splat(1.0) - yy - zz,
+            y: xy + zw,
+            z: xz - yw,
+        };
+        result.y = Vector3Wide {
+            x: xy - zw,
+            y: Vector::splat(1.0) - xx - zz,
+            z: yz + xw,
+        };
+        result.z = Vector3Wide {
+            x: xz + yw,
+            y: yz - xw,
+            z: Vector::splat(1.0) - xx - yy,
+        };
     }
 
     #[inline(always)]
-    pub fn read_first(&self) -> Mat3 {
-        Mat3 {
-            x_axis: self.x.read_first(),
-            y_axis: self.y.read_first(),
-            z_axis: self.z.read_first(),
-        }
+    pub fn subtract(a: &Self, b: &Self, result: &mut Self) {
+        result.x.x = a.x.x - b.x.x;
+        result.x.y = a.x.y - b.x.y;
+        result.x.z = a.x.z - b.x.z;
+        result.y.x = a.y.x - b.y.x;
+        result.y.y = a.y.y - b.y.y;
+        result.y.z = a.y.z - b.y.z;
+        result.z.x = a.z.x - b.z.x;
+        result.z.y = a.z.y - b.z.y;
+        result.z.z = a.z.z - b.z.z;
+    }
+
+    /// Pulls one lane out of the wide representation.
+    #[inline(always)]
+    pub fn read_first(source: &Self, target: &mut Matrix3x3) {
+        Vector3Wide::read_first(&source.x, &mut target.x);
+        Vector3Wide::read_first(&source.y, &mut target.y);
+        Vector3Wide::read_first(&source.z, &mut target.z);
     }
 
     #[inline(always)]
-    pub fn read_slot(&self, slot_index: usize) -> Mat3 {
-        unsafe {
-            Mat3 {
-                x_axis: self.x.read_slot(slot_index),
-                y_axis: self.y.read_slot(slot_index),
-                z_axis: self.z.read_slot(slot_index),
-            }
-        }
+    pub fn read_slot(&self, slot_index: usize) -> Matrix3x3 {
+        // TODO:
     }
 }
 

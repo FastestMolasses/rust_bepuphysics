@@ -16,7 +16,7 @@ pub struct QuickList<T> {
 
 impl<T> QuickList<T> {
     pub fn new(initial_span: Buffer<T>) -> Self {
-        BufferPool
+        // BufferPool
         Self {
             span: initial_span,
             count: 0,

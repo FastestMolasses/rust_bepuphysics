@@ -102,6 +102,8 @@ impl<
     > Vector<T>
 {
     pub const LANES: usize = <<T as SimdOps>::VectorType as std::simd::Simd>::LEN;
+    pub const ZERO: Self = Vector(SimdOps::splat(T::zero()));
+    pub const ONE: Self = Vector(SimdOps::splat(T::one()));
 
     pub fn splat(value: T) -> Self {
         Vector(T::splat(value))
@@ -150,8 +152,6 @@ impl<
 
 // Implement additional methods for floating-point types
 impl<T: SimdOps + Float> Vector<T> {
-    pub const ONE: Vector<T> = Vector(SimdOps::splat(T::one()));
-
     #[inline(always)]
     pub fn sqrt(&self) -> Self {
         Vector(self.0.map(|x| x.sqrt()))
@@ -187,8 +187,6 @@ impl<T: SimdOps + Float> Vector<T> {
 
 // Implement additional methods for integer types
 impl<T: SimdOps + PrimInt> Vector<T> {
-    pub const ONE: Vector<T> = Vector(SimdOps::splat(T::one()));
-
     #[inline(always)]
     pub fn abs(&self) -> Self {
         Vector(self.0.map(|x| x.abs()))

@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![feature(effects)]
 
 mod physics;
 mod utilities;

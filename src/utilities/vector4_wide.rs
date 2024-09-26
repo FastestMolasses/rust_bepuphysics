@@ -3,23 +3,21 @@ use core::arch::aarch64::*;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
 use core::mem::transmute;
-use portable_simd::f32x8 as Vector;
-use portable_simd::i32x8 as VectorI;
-
-use crate::utilities::vector4::Vector4;
+use crate::utilities::vector::Vector;
+use glam::Vec4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Vector4Wide {
-    pub x: Vector,
-    pub y: Vector,
-    pub z: Vector,
-    pub w: Vector,
+    pub x: Vector<f32>,
+    pub y: Vector<f32>,
+    pub z: Vector<f32>,
+    pub w: Vector<f32>,
 }
 
 impl Vector4Wide {
     #[inline(always)]
-    pub fn broadcast(source: &Vector4) -> Self {
+    pub fn broadcast(source: &Vec4) -> Self {
         Self {
             x: Vector::splat(source.x),
             y: Vector::splat(source.y),
@@ -66,20 +64,20 @@ impl Vector4Wide {
     #[inline(always)]
     pub fn min(a: &Self, b: &Self) -> Self {
         Self {
-            x: a.x.min(b.x),
-            y: a.y.min(b.y),
-            z: a.z.min(b.z),
-            w: a.w.min(b.w),
+            x: a.x.min(&b.x),
+            y: a.y.min(&b.y),
+            z: a.z.min(&b.z),
+            w: a.w.min(&b.w),
         }
     }
 
     #[inline(always)]
     pub fn max(a: &Self, b: &Self) -> Self {
         Self {
-            x: a.x.max(b.x),
-            y: a.y.max(b.y),
-            z: a.z.max(b.z),
-            w: a.w.max(b.w),
+            x: a.x.max(&b.x),
+            y: a.y.max(&b.y),
+            z: a.z.max(&b.z),
+            w: a.w.max(&b.w),
         }
     }
 
@@ -170,8 +168,8 @@ impl Vector4Wide {
     }
 
     #[inline(always)]
-    pub fn read_slot(&self, slot_index: usize) -> Vector4 {
-        Vector4::new(
+    pub fn read_slot(&self, slot_index: usize) -> Vec4 {
+        Vec4::new(
             self.x[slot_index],
             self.y[slot_index],
             self.z[slot_index],
@@ -180,7 +178,7 @@ impl Vector4Wide {
     }
 
     #[inline(always)]
-    pub fn write_first(source: &Vector4, target_slot: &mut Self) {
+    pub fn write_first(source: &Vec4, target_slot: &mut Self) {
         target_slot.x[0] = source.x;
         target_slot.y[0] = source.y;
         target_slot.z[0] = source.z;
@@ -197,7 +195,7 @@ impl std::ops::Add for Vector4Wide {
     }
 }
 
-impl std::ops::Add<Vector> for Vector4Wide {
+impl std::ops::Add<Vector<f32>> for Vector4Wide {
     type Output = Self;
 
     #[inline(always)]
@@ -215,7 +213,7 @@ impl std::ops::Sub for Vector4Wide {
     }
 }
 
-impl std::ops::Mul<Vector> for Vector4Wide {
+impl std::ops::Mul<Vector<f32>> for Vector4Wide {
     type Output = Self;
 
     #[inline(always)]

@@ -224,6 +224,7 @@ impl Vector3Wide {
 
     #[inline(always)]
     pub fn conditionally_negate(&self, should_negate: VectorI) -> Self {
+        // TODO:
         unsafe {
             #[cfg(target_arch = "x86_64")]
             {
@@ -404,6 +405,7 @@ impl Vector3Wide {
 
     #[inline(always)]
     pub fn conditional_select(condition: VectorI, left: &Self, right: &Self) -> Self {
+        // TODO:
         unsafe {
             #[cfg(target_arch = "x86_64")]
             {

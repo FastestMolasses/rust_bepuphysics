@@ -1,13 +1,12 @@
 use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::vector2::Vector2;
 use crate::utilities::vector::Vector;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Vector2Wide {
     /// First component of the vector.
-    pub x: Vector,
+    pub x: Vector<f32>,
     /// Second component of the vector.
-    pub y: Vector,
+    pub y: Vector<f32>,
 }
 
 impl Vector2Wide {
