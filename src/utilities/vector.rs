@@ -34,6 +34,7 @@ impl SimdOps for f32 {
         VectorWidth::splat(value)
     }
     fn add(a: Self::VectorType, b: Self::VectorType) -> Self::VectorType {
+        // TODO: VECTORIZE THESE OPERATIONS
         a + b
     }
     fn sub(a: Self::VectorType, b: Self::VectorType) -> Self::VectorType {
@@ -64,6 +65,7 @@ impl SimdOps for i32 {
         Self::VectorType::splat(value)
     }
     fn add(a: Self::VectorType, b: Self::VectorType) -> Self::VectorType {
+        // TODO: VECTORIZE THESE OPERATIONS
         a + b
     }
     fn sub(a: Self::VectorType, b: Self::VectorType) -> Self::VectorType {

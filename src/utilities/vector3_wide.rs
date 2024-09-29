@@ -6,7 +6,7 @@ use core::arch::x86_64::*;
 use crate::utilities::vector::Vector;
 use core::mem::transmute;
 use glam::Vec3;
-use std::{default, ops::{Add, Div, Mul, Neg, Sub}};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 // TODO: REPLACE CUSTOM VECTOR TYPE
 // use portable_simd::i32x8 as VectorI;
 
@@ -524,6 +524,7 @@ impl Vector3Wide {
     /// Gathers values from a vector and places them into the first indices of the target vector.
     #[inline(always)]
     pub fn read_first(source: &Self, target: &mut Vec3) {
+        // TODO:
         target.x = source.x[0];
         target.y = source.y[0];
         target.z = source.z[0];
