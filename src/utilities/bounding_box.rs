@@ -227,7 +227,7 @@ impl BoundingBox {
             let current_max = Simd::<f32, 4>::from_array(*(result_ptr.add(4) as *const [f32; 4]));
             let min = std::simd::num::SimdFloat::simd_min(a_min, b_min);
             let max = std::simd::num::SimdFloat::simd_max(a_max, b_max);
-            let mask = Mask::<i32, 4>::from_array([true, true, true, false]);
+            let mask = std::simd::Mask::<i32, 4>::from_array([true, true, true, false]);
 
             // Use load_select to blend the results while preserving the W component
             let min_ptr = core::ptr::addr_of!(min) as *const f32;

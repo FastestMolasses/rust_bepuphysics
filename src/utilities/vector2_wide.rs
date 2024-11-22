@@ -1,7 +1,7 @@
-use glam::Vec2;
-
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
+use glam::Vec2;
+use std::simd::Mask;
 
 /// Two dimensional vector with SIMD lanes.
 #[derive(Clone, Copy, Debug)]
@@ -32,7 +32,7 @@ impl Vector2Wide {
     }
 
     #[inline(always)]
-    pub fn scale(vector: &Self, scalar: Vector<f32>, result: &mut Self) {
+    pub fn scale(vector: &Self, scalar: &Vector<f32>, result: &mut Self) {
         result.x = vector.x * scalar;
         result.y = vector.y * scalar;
     }
@@ -44,24 +44,29 @@ impl Vector2Wide {
     }
 
     #[inline(always)]
-    pub fn conditionally_negate(should_negate: i32x4, v: &mut Self) {
-        // TODO:
-        v.x = should_negate.select(-v.x, v.x);
-        v.y = should_negate.select(-v.y, v.y);
+    pub fn conditionally_negate(should_negate: &Vector<i32>, v: &mut Self) {
+        let mask = Mask::from_int(*should_negate);
+        v.x = mask.select(-v.x, v.x);
+        v.y = mask.select(-v.y, v.y);
     }
 
     #[inline(always)]
-    pub fn conditionally_negate_to(should_negate: i32x4, v: &Self, negated: &mut Self) {
-        // TODO:
-        negated.x = should_negate.select(-v.x, v.x);
-        negated.y = should_negate.select(-v.y, v.y);
+    pub fn conditionally_negate_to(should_negate: &Vector<i32>, v: &Self, negated: &mut Self) {
+        let mask = Mask::from_int(*should_negate);
+        negated.x = mask.select(-v.x, v.x);
+        negated.y = mask.select(-v.y, v.y);
     }
 
     #[inline(always)]
-    pub fn conditional_select(condition: i32x4, left: &Self, right: &Self, result: &mut Self) {
-        // TODO:
-        result.x = condition.select(left.x, right.x);
-        result.y = condition.select(left.y, right.y);
+    pub fn conditional_select(
+        condition: &Vector<i32>,
+        left: &Self,
+        right: &Self,
+        result: &mut Self,
+    ) {
+        let mask = Mask::from_int(*condition);
+        result.x = mask.select(left.x, right.x);
+        result.y = mask.select(left.y, right.y);
     }
 
     #[inline(always)]
@@ -71,7 +76,7 @@ impl Vector2Wide {
 
     #[inline(always)]
     pub fn length(v: &Self, length: &mut Vector<f32>) {
-        *length = (v.x * v.x + v.y * v.y).sqrt();
+        *length = std::simd::StdFloat::sqrt(v.x * v.x + v.y * v.y);
     }
 
     #[inline(always)]
@@ -88,13 +93,13 @@ impl Vector2Wide {
     /// Pulls one lane out of the wide representation.
     #[inline(always)]
     pub fn read_first(source: &Self, target: &mut Vec2) {
-        // TODO:
+        target.x = source.x[0];
+        target.y = source.y[0];
     }
 
     /// Pulls one lane out of the wide representation.
     #[inline(always)]
     pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Vec2) {
-        // TODO:
         let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
         Self::read_first(offset, narrow);
     }
@@ -102,23 +107,21 @@ impl Vector2Wide {
     /// Gathers values from a vector and places them into the first indices of the target vector.
     #[inline(always)]
     pub fn write_first(source: &Vec2, target_slot: &mut Self) {
-        // TODO:
         unsafe {
-            GatherScatter::get_first(&mut target_slot.x).write(source.x);
-            GatherScatter::get_first(&mut target_slot.y).write(source.y);
+            *GatherScatter::get_first_mut(&mut target_slot.x) = source.x;
+            *GatherScatter::get_first_mut(&mut target_slot.y) = source.y;
         }
     }
 
     /// Writes a value into a slot of the target bundle.
     #[inline(always)]
     pub fn write_slot(source: &Vec2, slot_index: usize, target: &mut Self) {
-        // TODO:
-        let mut offset = unsafe { GatherScatter::get_offset_instance(target, slot_index) };
+        let mut offset = unsafe { GatherScatter::get_offset_instance_mut(target, slot_index) };
         Self::write_first(source, &mut offset);
     }
 }
 
-impl std::ops::Add for Vector2Wide {
+impl std::ops::Add<Vector2Wide> for Vector2Wide {
     type Output = Self;
 
     #[inline(always)]
@@ -130,11 +133,11 @@ impl std::ops::Add for Vector2Wide {
     }
 }
 
-impl std::ops::Add<f32x4> for Vector2Wide {
+impl std::ops::Add<Vector<f32>> for Vector2Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn add(self, scalar: f32x4) -> Self {
+    fn add(self, scalar: Vector<f32>) -> Self {
         Self {
             x: self.x + scalar,
             y: self.y + scalar,
@@ -142,11 +145,23 @@ impl std::ops::Add<f32x4> for Vector2Wide {
     }
 }
 
-impl std::ops::Mul<f32x4> for Vector2Wide {
+impl std::ops::Add<Vector2Wide> for Vector<f32> {
+    type Output = Vector2Wide;
+
+    #[inline(always)]
+    fn add(self, vector: Vector2Wide) -> Vector2Wide {
+        Vector2Wide {
+            x: vector.x + self,
+            y: vector.y + self,
+        }
+    }
+}
+
+impl std::ops::Mul<Vector<f32>> for Vector2Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn mul(self, scalar: f32x4) -> Self {
+    fn mul(self, scalar: Vector<f32>) -> Self {
         Self {
             x: self.x * scalar,
             y: self.y * scalar,
@@ -154,7 +169,7 @@ impl std::ops::Mul<f32x4> for Vector2Wide {
     }
 }
 
-impl std::ops::Mul<Vector2Wide> for f32x4 {
+impl std::ops::Mul<Vector2Wide> for Vector<f32> {
     type Output = Vector2Wide;
 
     #[inline(always)]

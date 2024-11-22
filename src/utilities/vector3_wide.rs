@@ -1,14 +1,10 @@
-#[cfg(target_arch = "aarch64")]
-use core::arch::aarch64::*;
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
-
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
-use core::mem::transmute;
 use glam::Vec3;
-use std::ops::{Add, Div, Mul, Neg, Sub};
-// TODO: REPLACE CUSTOM VECTOR TYPE
-// use portable_simd::i32x8 as VectorI;
+use std::{
+    ops::{Add, Div, Mul, Neg, Sub},
+    simd::{num::SimdFloat, Mask},
+};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -25,7 +21,18 @@ pub struct Vector3Wide {
 impl From<Vector<f32>> for Vector3Wide {
     #[inline(always)]
     fn from(s: Vector<f32>) -> Self {
-        Self::new(s)
+        Self { x: s, y: s, z: s }
+    }
+}
+
+impl From<&Vector<f32>> for Vector3Wide {
+    #[inline(always)]
+    fn from(s: &Vector<f32>) -> Self {
+        Self {
+            x: *s,
+            y: *s,
+            z: *s,
+        }
     }
 }
 
@@ -34,16 +41,6 @@ impl Vector3Wide {
     #[inline(always)]
     pub fn new(s: Vector<f32>) -> Self {
         Self { x: s, y: s, z: s }
-    }
-
-    /// Creates a vector by populating each component with the given scalar.
-    #[inline(always)]
-    pub fn from_ref(s: &Vector<f32>) -> Self {
-        Self {
-            x: *s,
-            y: *s,
-            z: *s,
-        }
     }
 
     /// Performs a componentwise add between two vectors.
@@ -101,26 +98,26 @@ impl Vector3Wide {
     /// Computes the per-component minimum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn min_scalar(s: &Vector<f32>, v: &Self, result: &mut Self) {
-        result.x = s.min(&v.x);
-        result.y = s.min(&v.y);
-        result.z = s.min(&v.z);
+        result.x = s.simd_min(v.x);
+        result.y = s.simd_min(v.y);
+        result.z = s.simd_min(v.z);
     }
 
     /// Computes the per-component minimum of two vectors.
     #[inline(always)]
     pub fn min(a: &Self, b: &Self, result: &mut Self) {
-        result.x = a.x.min(&b.x);
-        result.y = a.y.min(&b.y);
-        result.z = a.z.min(&b.z);
+        result.x = a.x.simd_min(b.x);
+        result.y = a.y.simd_min(b.y);
+        result.z = a.z.simd_min(b.z);
     }
 
     /// Computes the per-component minimum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn min_scalar_new(s: &Vector<f32>, v: &Self) -> Self {
         Self {
-            x: s.min(&v.x),
-            y: s.min(&v.y),
-            z: s.min(&v.z),
+            x: s.simd_min(v.x),
+            y: s.simd_min(v.y),
+            z: s.simd_min(v.z),
         }
     }
 
@@ -128,35 +125,35 @@ impl Vector3Wide {
     #[inline(always)]
     pub fn min_new(a: &Self, b: &Self) -> Self {
         Self {
-            x: a.x.min(&b.x),
-            y: a.y.min(&b.y),
-            z: a.z.min(&b.z),
+            x: a.x.simd_min(b.x),
+            y: a.y.simd_min(b.y),
+            z: a.z.simd_min(b.z),
         }
     }
 
     /// Computes the per-component maximum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn max_scalar(s: &Vector<f32>, v: &Self, result: &mut Self) {
-        result.x = s.max(&v.x);
-        result.y = s.max(&v.y);
-        result.z = s.max(&v.z);
+        result.x = s.simd_max(v.x);
+        result.y = s.simd_max(v.y);
+        result.z = s.simd_max(v.z);
     }
 
     /// Computes the per-component maximum of two vectors.
     #[inline(always)]
     pub fn max(a: &Self, b: &Self, result: &mut Self) {
-        result.x = a.x.max(&b.x);
-        result.y = a.y.max(&b.y);
-        result.z = a.z.max(&b.z);
+        result.x = a.x.simd_max(b.x);
+        result.y = a.y.simd_max(b.y);
+        result.z = a.z.simd_max(b.z);
     }
 
     /// Computes the per-component maximum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn max_scalar_new(s: &Vector<f32>, v: &Self) -> Self {
         Self {
-            x: s.max(&v.x),
-            y: s.max(&v.y),
-            z: s.max(&v.z),
+            x: s.simd_max(v.x),
+            y: s.simd_max(v.y),
+            z: s.simd_max(v.z),
         }
     }
 
@@ -164,38 +161,39 @@ impl Vector3Wide {
     #[inline(always)]
     pub fn max_new(a: &Self, b: &Self) -> Self {
         Self {
-            x: a.x.max(&b.x),
-            y: a.y.max(&b.y),
-            z: a.z.max(&b.z),
+            x: a.x.simd_max(b.x),
+            y: a.y.simd_max(b.y),
+            z: a.z.simd_max(b.z),
         }
     }
 
     /// Scales a vector by a scalar.
     #[inline(always)]
-    pub fn scale(vector: &Self, scalar: &Vector<f32>, result: &mut Self) {
+    pub fn scale(vector: &Self, scalar: &Vector<f32>) -> Self {
+        Self {
+            x: vector.x * *scalar,
+            y: vector.y * *scalar,
+            z: vector.z * *scalar,
+        }
+    }
+
+    /// Scales a vector by a scalar into another vector.
+    #[inline(always)]
+    pub fn scale_to(vector: &Self, scalar: &Vector<f32>, result: &mut Self) {
         result.x = vector.x * *scalar;
         result.y = vector.y * *scalar;
         result.z = vector.z * *scalar;
     }
 
-    /// Computes the absolute value of a vector.
+    /// Computes the absolute value of a vector and stores it in another vector.
     #[inline(always)]
-    pub fn abs(vector: &Self, result: &mut Self) {
+    pub fn abs_to(vector: &Self, result: &mut Self) {
         result.x = vector.x.abs();
         result.y = vector.y.abs();
         result.z = vector.z.abs();
     }
 
     /// Computes the absolute value of a vector.
-    #[inline(always)]
-    pub fn abs_new(vector: &Self) -> Self {
-        Self {
-            x: vector.x.abs(),
-            y: vector.y.abs(),
-            z: vector.z.abs(),
-        }
-    }
-
     #[inline(always)]
     pub fn abs(&self) -> Self {
         Self {
@@ -205,78 +203,48 @@ impl Vector3Wide {
         }
     }
 
-    /// Negates a vector in place and returns a reference to it.
+    /// Negates a vector.
     #[inline(always)]
-    pub fn negate(&self) -> &Self {
+    pub fn negate(v: &Self, result: &mut Self) {
+        result.x = -v.x;
+        result.y = -v.y;
+        result.z = -v.z;
+    }
+
+    /// Negates a vector in place and returns a reference to it.
+    pub fn negate_self(&mut self) -> &Self {
         self.x = -self.x;
         self.y = -self.y;
         self.z = -self.z;
         self
     }
 
-    /// Negates a vector into another vector.
+    /// Conditionally negates lanes of the vector.
     #[inline(always)]
-    pub fn negate_static(&self, result: &mut self) -> Self {
-        result.x = -self.x;
-        result.y = -self.y;
-        result.z = -self.z;
+    pub fn conditionally_negate(should_negate: &Vector<i32>, v: &mut Self) {
+        let mask = Mask::from_int(*should_negate);
+        v.x = mask.select(-v.x, v.x);
+        v.y = mask.select(-v.y, v.y);
+        v.z = mask.select(-v.z, v.z);
     }
 
+    /// Conditionally negates lanes of the vector and stores the result in another vector.
     #[inline(always)]
-    pub fn conditionally_negate(&self, should_negate: VectorI) -> Self {
-        // TODO:
-        unsafe {
-            #[cfg(target_arch = "x86_64")]
-            {
-                Self {
-                    x: transmute(_mm256_xor_ps(
-                        transmute(self.x),
-                        _mm256_and_ps(transmute(should_negate), transmute(Vector::splat(-0.0))),
-                    )),
-                    y: transmute(_mm256_xor_ps(
-                        transmute(self.y),
-                        _mm256_and_ps(transmute(should_negate), transmute(Vector::splat(-0.0))),
-                    )),
-                    z: transmute(_mm256_xor_ps(
-                        transmute(self.z),
-                        _mm256_and_ps(transmute(should_negate), transmute(Vector::splat(-0.0))),
-                    )),
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                Self {
-                    x: transmute(vreinterpretq_f32_u32(veorq_u32(
-                        vreinterpretq_u32_f32(transmute(self.x)),
-                        vandq_u32(
-                            transmute(should_negate),
-                            vreinterpretq_u32_f32(vdupq_n_f32(-0.0)),
-                        ),
-                    ))),
-                    y: transmute(vreinterpretq_f32_u32(veorq_u32(
-                        vreinterpretq_u32_f32(transmute(self.y)),
-                        vandq_u32(
-                            transmute(should_negate),
-                            vreinterpretq_u32_f32(vdupq_n_f32(-0.0)),
-                        ),
-                    ))),
-                    z: transmute(vreinterpretq_f32_u32(veorq_u32(
-                        vreinterpretq_u32_f32(transmute(self.z)),
-                        vandq_u32(
-                            transmute(should_negate),
-                            vreinterpretq_u32_f32(vdupq_n_f32(-0.0)),
-                        ),
-                    ))),
-                }
-            }
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            {
-                Self {
-                    x: self.x.select(should_negate.cast(), -self.x, self.x),
-                    y: self.y.select(should_negate.cast(), -self.y, self.y),
-                    z: self.z.select(should_negate.cast(), -self.z, self.z),
-                }
-            }
+    pub fn conditionally_negate_to(should_negate: &Vector<i32>, v: &Self, negated: &mut Self) {
+        let mask = Mask::from_int(*should_negate);
+        negated.x = mask.select(-v.x, v.x);
+        negated.y = mask.select(-v.y, v.y);
+        negated.z = mask.select(-v.z, v.z);
+    }
+
+    /// Conditionally negates lanes of the vector and stores the result in another vector.
+    #[inline(always)]
+    pub fn conditionally_negate_to_new(should_negate: &Vector<i32>, v: &Self) -> Self {
+        let mask = Mask::from_int(*should_negate);
+        Self {
+            x: mask.select(-v.x, v.x),
+            y: mask.select(-v.y, v.y),
+            z: mask.select(-v.z, v.z),
         }
     }
 
@@ -301,7 +269,7 @@ impl Vector3Wide {
 
     /// Computes the cross product between two vectors.
     #[inline(always)]
-    pub fn cross_by_value(a: Self, b: Self) -> Self {
+    pub fn cross_new(a: &Self, b: &Self) -> Self {
         Self {
             x: a.y * b.z - a.z * b.y,
             y: a.z * b.x - a.x * b.z,
@@ -309,153 +277,117 @@ impl Vector3Wide {
         }
     }
 
-    /// Computes the squared length of a vector into another.
+    /// Computes the squared length of this vector.
     #[inline(always)]
-    pub fn length_squared(v: &Self, length_squared: &mut Vector<f32>) {
-        *length_squared = v.x * v.x + v.y * v.y + v.z * v.z;
+    pub fn length_squared(&self) -> Vector<f32> {
+        self.x * self.x + self.y * self.y + self.z * self.z
     }
 
-    /// Computes the length of a vector into another.
+    /// Computes the squared length of a vector into another.
     #[inline(always)]
-    pub fn length(v: &Self, length: &mut Vector<f32>) {
-        *length = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
+    pub fn length_squared_to(v: &Self, length_squared: &mut Vector<f32>) {
+        *length_squared = v.x * v.x + v.y * v.y + v.z * v.z;
     }
 
     /// Computes the squared length of another vector.
     #[inline(always)]
-    pub fn length_squared_by_value(v: Self) -> Vector<f32> {
+    pub fn length_squared_of(v: &Self) -> Vector<f32> {
         v.x * v.x + v.y * v.y + v.z * v.z
-    }
-
-    /// Computes the length of another vector.
-    #[inline(always)]
-    pub fn length_by_value(v: Self) -> Vector<f32> {
-        (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
-    }
-
-    /// Computes the squared length of this vector.
-    #[inline(always)]
-    pub fn length_squared_self(&self) -> Vector<f32> {
-        self.x * self.x + self.y * self.y + self.z * self.z
     }
 
     /// Computes the length of this vector.
     #[inline(always)]
-    pub fn length_self(&self) -> Vector<f32> {
-        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+    pub fn length(&self) -> Vector<f32> {
+        std::simd::StdFloat::sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+    }
+
+    /// Computes the length of a vector into another.
+    #[inline(always)]
+    pub fn length_to(v: &Self, length: &mut Vector<f32>) {
+        *length = std::simd::StdFloat::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    }
+
+    /// Computes the length of another vector.
+    #[inline(always)]
+    pub fn length_of(v: &Self) -> Vector<f32> {
+        std::simd::StdFloat::sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
     }
 
     /// Computes the distance between two vectors.
     #[inline(always)]
-    pub fn distance(a: &Self, b: &Self, distance: &mut Vector<f32>) {
+    pub fn distance(a: &Self, b: &Self) -> Vector<f32> {
         let x = b.x - a.x;
         let y = b.y - a.y;
         let z = b.z - a.z;
-        *distance = (x * x + y * y + z * z).sqrt();
-    }
-
-    /// Computes the squared distance between two vectors into another.
-    #[inline(always)]
-    pub fn distance_squared(a: &Self, b: &Self, distance_squared: &mut Vector<f32>) {
-        let x = b.x - a.x;
-        let y = b.y - a.y;
-        let z = b.z - a.z;
-        *distance_squared = x * x + y * y + z * z;
+        std::simd::StdFloat::sqrt(x * x + y * y + z * z)
     }
 
     /// Computes the distance between two vectors.
     #[inline(always)]
-    pub fn distance_by_value(a: Self, b: Self) -> Vector<f32> {
+    pub fn distance_to(a: &Self, b: &Self, distance: &mut Vector<f32>) {
         let x = b.x - a.x;
         let y = b.y - a.y;
         let z = b.z - a.z;
-        (x * x + y * y + z * z).sqrt()
+        *distance = std::simd::StdFloat::sqrt(x * x + y * y + z * z);
     }
 
     /// Computes the squared distance between two vectors.
     #[inline(always)]
-    pub fn distance_squared_by_value(a: Self, b: Self) -> Vector<f32> {
+    pub fn distance_squared(a: &Self, b: &Self) -> Vector<f32> {
         let x = b.x - a.x;
         let y = b.y - a.y;
         let z = b.z - a.z;
         x * x + y * y + z * z
     }
 
-    /// Computes a unit length vector pointing in the same direction as the input.
+    /// Computes the squared distance between two vectors into another.
     #[inline(always)]
-    pub fn normalize(v: &Self, result: &mut Self) {
-        let mut length = Vector::splat(0.0);
-        Self::length(v, &mut length);
-        let scale = Vector::splat(1.0) / length;
-        Self::scale(v, &scale, result);
+    pub fn distance_squared_to(a: &Self, b: &Self, distance_squared: &mut Vector<f32>) {
+        let x = b.x - a.x;
+        let y = b.y - a.y;
+        let z = b.z - a.z;
+        *distance_squared = x * x + y * y + z * z;
     }
 
     /// Computes a unit length vector pointing in the same direction as the input.
     #[inline(always)]
-    pub fn normalize_by_value(v: Self) -> Self {
-        let mut length = Vector::splat(0.0);
-        Self::length(&v, &mut length);
+    pub fn normalize(v: &Self) -> Self {
+        let length = Self::length_of(&v);
         let scale = Vector::splat(1.0) / length;
+        Self::scale(v, &scale)
+    }
+
+    /// Computes a unit length vector pointing in the same direction as the input.
+    #[inline(always)]
+    pub fn normalize_to(v: &Self, result: &mut Self) {
+        let length = Self::length_of(&v);
+        let scale = Vector::splat(1.0) / length;
+        Self::scale_to(v, &scale, result);
+    }
+
+    /// Selects the left or right input for each lane depending on a mask.
+    #[inline(always)]
+    pub fn conditional_select(condition: &Vector<i32>, left: &Self, right: &Self) -> Self {
+        let mask = Mask::from_int(*condition);
         Self {
-            x: v.x * scale,
-            y: v.y * scale,
-            z: v.z * scale,
+            x: mask.select(left.x, right.x),
+            y: mask.select(left.y, right.y),
+            z: mask.select(left.z, right.z),
         }
     }
 
+    /// Selects the left or right input for each lane depending on a mask.
     #[inline(always)]
-    pub fn conditional_select(condition: VectorI, left: &Self, right: &Self) -> Self {
-        // TODO:
-        unsafe {
-            #[cfg(target_arch = "x86_64")]
-            {
-                Self {
-                    x: transmute(_mm256_blendv_ps(
-                        transmute(right.x),
-                        transmute(left.x),
-                        transmute(condition),
-                    )),
-                    y: transmute(_mm256_blendv_ps(
-                        transmute(right.y),
-                        transmute(left.y),
-                        transmute(condition),
-                    )),
-                    z: transmute(_mm256_blendv_ps(
-                        transmute(right.z),
-                        transmute(left.z),
-                        transmute(condition),
-                    )),
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                Self {
-                    x: transmute(vbslq_f32(
-                        transmute(condition),
-                        transmute(left.x),
-                        transmute(right.x),
-                    )),
-                    y: transmute(vbslq_f32(
-                        transmute(condition),
-                        transmute(left.y),
-                        transmute(right.y),
-                    )),
-                    z: transmute(vbslq_f32(
-                        transmute(condition),
-                        transmute(left.z),
-                        transmute(right.z),
-                    )),
-                }
-            }
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            {
-                Self {
-                    x: Vector::select(condition, left.x, right.x),
-                    y: Vector::select(condition, left.y, right.y),
-                    z: Vector::select(condition, left.z, right.z),
-                }
-            }
-        }
+    pub fn conditional_select_to(
+        condition: &Vector<i32>,
+        left: &Self,
+        right: &Self,
+        result: &mut Self,
+    ) {
+        let mask = Mask::from_int(*condition);
+        result.x = mask.select(left.x, right.x);
+        result.y = mask.select(left.y, right.y);
+        result.z = mask.select(left.z, right.z);
     }
 
     /// Multiplies the components of one vector with another.
@@ -466,29 +398,41 @@ impl Vector3Wide {
         result.z = a.z * b.z;
     }
 
+    /// Pulls one lane out of the wide representation.
     #[inline(always)]
-    pub fn read_slot(&self, slot_index: usize) -> Vec3 {
-        Vec3::new(self.x[slot_index], self.y[slot_index], self.z[slot_index])
+    pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Vec3) {
+        let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
+        Self::read_first(offset, narrow);
     }
 
+    /// Pulls the first lane out of the wide representation.
     #[inline(always)]
-    pub fn write_slot(&mut self, source: Vec3, slot_index: usize) {
-        self.x[slot_index] = source.x;
-        self.y[slot_index] = source.y;
-        self.z[slot_index] = source.z;
+    pub fn read_first(source: &Self, target: &mut Vec3) {
+        target.x = source.x[0];
+        target.y = source.y[0];
+        target.z = source.z[0];
+    }
+
+    /// Writes a value into a slot of the target bundle.
+    #[inline(always)]
+    pub fn write_slot(source: Vec3, slot_index: usize, target: &mut Self) {
+        Self::write_first(source, unsafe {
+            GatherScatter::get_offset_instance_mut(target, slot_index)
+        });
+    }
+
+    /// Gathers values from a vector and places them into the first indices of the target vector.
+    pub fn write_first(source: Vec3, target_slot: &mut Self) {
+        unsafe {
+            *GatherScatter::get_first_mut(&mut target_slot.x) = source.x;
+            *GatherScatter::get_first_mut(&mut target_slot.y) = source.y;
+            *GatherScatter::get_first_mut(&mut target_slot.z) = source.z;
+        }
     }
 
     /// Expands each scalar value to every slot of the bundle.
     #[inline(always)]
-    pub fn broadcast(source: Vector3, broadcasted: &mut Self) {
-        broadcasted.x = Vector::splat(source.x);
-        broadcasted.y = Vector::splat(source.y);
-        broadcasted.z = Vector::splat(source.z);
-    }
-
-    /// Expands each scalar value to every slot of the bundle.
-    #[inline(always)]
-    pub fn broadcast_by_value(source: Vector3) -> Self {
+    pub fn broadcast(source: Vector3) -> Self {
         Self {
             x: Vector::splat(source.x),
             y: Vector::splat(source.y),
@@ -498,15 +442,15 @@ impl Vector3Wide {
 
     /// Takes a slot from the source vector and broadcasts it into all slots of the target vector.
     #[inline(always)]
-    pub fn rebroadcast(source: &Self, slot_index: usize, broadcasted: &mut Self) {
-        broadcasted.x = Vector::splat(source.x[slot_index]);
-        broadcasted.y = Vector::splat(source.y[slot_index]);
-        broadcasted.z = Vector::splat(source.z[slot_index]);
+    pub fn broadcast_to(source: Vector3, broadcasted: &mut Self) {
+        broadcasted.x = Vector::splat(source.x);
+        broadcasted.y = Vector::splat(source.y);
+        broadcasted.z = Vector::splat(source.z);
     }
 
     /// Takes a slot from the source vector and broadcasts it into all slots of the target vector.
     #[inline(always)]
-    pub fn rebroadcast_by_value(source: Self, slot_index: usize) -> Self {
+    pub fn rebroadcast(source: &Self, slot_index: usize) -> Self {
         Self {
             x: Vector::splat(source.x[slot_index]),
             y: Vector::splat(source.y[slot_index]),
@@ -514,30 +458,12 @@ impl Vector3Wide {
         }
     }
 
-    // TODO: most of these gatherscattery functions are fallbacks in AOS->SOA conversions and should often be replaced by explicit vectorized transposes.
-    /// Pulls one lane out of the wide representation.
+    /// Takes a slot from the source vector and broadcasts it into all slots of the target vector.
     #[inline(always)]
-    pub fn read_slot(wide: &Self, slot_index: usize, narrow: Vec3) -> Vec3 {
-        // TODO:
-    }
-
-    /// Gathers values from a vector and places them into the first indices of the target vector.
-    #[inline(always)]
-    pub fn read_first(source: &Self, target: &mut Vec3) {
-        // TODO:
-        target.x = source.x[0];
-        target.y = source.y[0];
-        target.z = source.z[0];
-    }
-
-    /// Gathers values from a vector and places them into the first indices of the target vector.
-    pub fn write_first(source: Vec3, target: &mut Self) {
-        // TODO:
-    }
-
-    /// Writes a value into a slot of the target bundle.
-    pub fn write_slot(source: Vec3, slot_index: usize, target: &mut Self) {
-        // TODO:
+    pub fn rebroadcast_to(source: &Self, slot_index: usize, broadcasted: &mut Self) {
+        broadcasted.x = Vector::splat(source.x[slot_index]);
+        broadcasted.y = Vector::splat(source.y[slot_index]);
+        broadcasted.z = Vector::splat(source.z[slot_index]);
     }
 
     /// Takes a slot from the source vector and places it into a slot of the target.
@@ -548,7 +474,13 @@ impl Vector3Wide {
         target: &mut Self,
         target_slot_index: usize,
     ) {
-        // TODO:
+        unsafe {
+            let source_slot = GatherScatter::get_offset_instance(source, source_slot_index);
+            let target_slot = GatherScatter::get_offset_instance_mut(target, target_slot_index);
+            *GatherScatter::get_first_mut(&mut target_slot.x) = source_slot.x[0];
+            *GatherScatter::get_first_mut(&mut target_slot.y) = source_slot.y[0];
+            *GatherScatter::get_first_mut(&mut target_slot.z) = source_slot.z[0];
+        }
     }
 }
 
@@ -645,6 +577,19 @@ impl Mul<Vector<f32>> for Vector3Wide {
 }
 
 impl Mul<Vector3Wide> for Vector<f32> {
+    type Output = Vector3Wide;
+
+    #[inline(always)]
+    fn mul(self, vector: Vector3Wide) -> Self::Output {
+        Vector3Wide {
+            x: vector.x * self,
+            y: vector.y * self,
+            z: vector.z * self,
+        }
+    }
+}
+
+impl Mul<&Vector3Wide> for Vector<f32> {
     type Output = Vector3Wide;
 
     #[inline(always)]

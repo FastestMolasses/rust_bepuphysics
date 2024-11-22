@@ -37,6 +37,7 @@ impl GatherScatter {
 
         ptr::copy_nonoverlapping(source_base, target_base, Vector::<i32>::LEN);
 
+        // TODO: CHECK IF THIS MANUAL UNROLL IS NEEDED, OR IF THE COMPILER CAN DO IT
         let mut offset = Vector::<i32>::LEN;
         // 8-wide unroll for maximum throughput
         while offset + Vector::<i32>::LEN * 8 <= size_in_ints {
@@ -97,13 +98,24 @@ impl GatherScatter {
 
     /// Gets a reference to a shifted bundle container.
     #[inline(always)]
-    pub unsafe fn get_offset_instance<T>(bundle_container: &T, inner_index: usize) -> &T
+    pub unsafe fn get_offset_instance<T>(bundle_container: &T, slot_index: usize) -> &T
     where
         T: Copy,
     {
         let ptr = bundle_container as *const T as *const f32;
-        let shifted_ptr = ptr.add(inner_index);
+        let shifted_ptr = ptr.add(slot_index);
         &*(shifted_ptr as *const T)
+    }
+
+    /// Gets a mutable reference to a shifted bundle container.
+    #[inline(always)]
+    pub unsafe fn get_offset_instance_mut<T>(bundle_container: &mut T, slot_index: usize) -> &mut T 
+    where
+        T: Copy,
+    {
+        let ptr = bundle_container as *mut T as *mut f32;
+        let shifted_ptr = ptr.add(slot_index);
+        &mut *(shifted_ptr as *mut T)
     }
 
     /// Gets a reference to the first element in the vector reference.
@@ -115,5 +127,16 @@ impl GatherScatter {
     {
         let ptr = vector as *const Vector<T> as *const T;
         &*ptr
+    }
+
+    /// Gets a mutable reference to the first element in the vector reference.
+    #[inline(always)]
+    pub unsafe fn get_first_mut<T>(vector: &mut Vector<T>) -> &mut T 
+    where
+        T: Copy + std::simd::SimdElement,
+        std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,
+    {
+        let ptr = vector as *mut Vector<T> as *mut T;
+        &mut *ptr
     }
 }
