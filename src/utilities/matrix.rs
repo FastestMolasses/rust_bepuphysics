@@ -308,10 +308,10 @@ impl Matrix {
         let h = 1.0 / (vertical_fov * 0.5).tan();
         let w = 1.0 / (horizontal_fov * 0.5).tan();
         let m33: f32 = far_clip / (near_clip - far_clip);
-        perspective.x = Vec4::new(w, 0, 0, 0);
-        perspective.y = Vec4::new(0, h, 0, 0);
-        perspective.z = Vec4::new(0, 0, m33, -1);
-        perspective.w = Vec4::new(0, 0, near_clip * m33, 0);
+        perspective.x = Vec4::new(w, 0.0, 0.0, 0.0);
+        perspective.y = Vec4::new(0.0, h, 0.0, 0.0);
+        perspective.z = Vec4::new(0.0, 0.0, m33, -1.0);
+        perspective.w = Vec4::new(0.0, 0.0, near_clip * m33, 0.0);
     }
 
     /// Creates a right-handed perspective matrix.

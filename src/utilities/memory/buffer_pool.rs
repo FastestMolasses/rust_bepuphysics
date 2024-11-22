@@ -127,11 +127,13 @@ impl PowerPool {
             }
         }
         let ptr = unsafe { self.get_start_pointer_for_slot(slot) };
-        Buffer::new(
-            ptr,
-            self.suballocation_size,
-            (self.power << Self::ID_POWER_SHIFT) | slot,
-        )
+        unsafe {
+            Buffer::new(
+                ptr,
+                self.suballocation_size,
+                (self.power << Self::ID_POWER_SHIFT) | slot,
+            )
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -315,7 +317,7 @@ impl BufferPool {
 
 impl IUnmanagedMemoryPool for BufferPool {
     #[inline]
-    pub fn take_at_least<T>(&mut self, count: usize) -> Buffer<T>
+    fn take_at_least<T>(&mut self, count: usize) -> Buffer<T>
     where
         T: Copy,
     {
@@ -327,7 +329,7 @@ impl IUnmanagedMemoryPool for BufferPool {
     }
 
     #[inline]
-    pub fn take<T>(&mut self, count: usize) -> Buffer<T>
+    fn take<T>(&mut self, count: usize) -> Buffer<T>
     where
         T: Copy,
     {
@@ -338,7 +340,7 @@ impl IUnmanagedMemoryPool for BufferPool {
 
     /// Returns a buffer to the appropriate pool
     #[inline]
-    pub fn return_buffer<T>(&mut self, buffer: &mut Buffer<T>)
+    fn return_buffer<T>(&mut self, buffer: &mut Buffer<T>)
     where
         T: std::marker::Unpin, // Assuming Unpin is the closest trait to unmanaged in this context
     {
@@ -352,7 +354,7 @@ impl IUnmanagedMemoryPool for BufferPool {
         *buffer = Buffer::default();
     }
 
-    pub fn resize_to_at_least<T>(
+    fn resize_to_at_least<T>(
         &mut self,
         buffer: &mut Buffer<T>,
         target_size: usize,
@@ -389,7 +391,7 @@ impl IUnmanagedMemoryPool for BufferPool {
         }
     }
 
-    pub fn get_capacity_for_count<T>(count: usize) -> usize
+    fn get_capacity_for_count<T>(count: usize) -> usize
     where
         T: Sized, // Only requirement is that T's size must be known
     {
@@ -403,7 +405,7 @@ impl IUnmanagedMemoryPool for BufferPool {
         rounded_up / std::mem::size_of::<T>()
     }
 
-    pub fn resize<T>(&mut self, buffer: &mut Buffer<T>, target_size: usize, copy_count: usize)
+    fn resize<T>(&mut self, buffer: &mut Buffer<T>, target_size: usize, copy_count: usize)
     where
         T: Unpin + Clone, // Assuming T needs to be Unpin for certain operations and Clone for copying.
     {
@@ -412,13 +414,13 @@ impl IUnmanagedMemoryPool for BufferPool {
     }
 
     /// Clears all pools, deallocating all memory
-    pub unsafe fn clear(&mut self) {
+    unsafe fn clear(&mut self) {
         for pool in &mut self.pools {
             pool.clear();
         }
     }
 
-    pub fn get_total_allocated_byte_count(&self) -> u64 {
+    fn get_total_allocated_byte_count(&self) -> u64 {
         self.pools
             .iter()
             .map(|pool| pool.block_count as u64 * pool.block_size as u64)

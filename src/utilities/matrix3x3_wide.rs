@@ -124,8 +124,7 @@ impl Matrix3x3Wide {
         let m11 = m.y.y * m.z.z - m.z.y * m.y.z;
         let m21 = m.y.z * m.z.x - m.z.z * m.y.x;
         let m31 = m.y.x * m.z.y - m.z.x * m.y.y;
-        // TODO: CHECK THIS WITH Vector<float>.ONE
-        let determinant_inverse = Vector::<f32>::ONE / (m11 * m.x.x + m21 * m.x.y + m31 * m.x.z);
+        let determinant_inverse = Vector::<f32>::splat(1.0) / (m11 * m.x.x + m21 * m.x.y + m31 * m.x.z);
 
         let m12 = m.z.y * m.x.z - m.x.y * m.z.z;
         let m22 = m.z.z * m.x.x - m.x.z * m.z.x;
@@ -149,19 +148,19 @@ impl Matrix3x3Wide {
     #[inline(always)]
     pub fn create_cross_product(v: &Vector3Wide, skew: &mut Self) -> Self {
         skew.x = Vector3Wide {
-            x: Vector::<f32>::ZERO,
+            x: Vector::<f32>::splat(0.0),
             y: -v.z,
             z: v.y,
         };
         skew.y = Vector3Wide {
             x: v.z,
-            y: Vector::<f32>::ZERO,
+            y: Vector::<f32>::splat(0.0),
             z: -v.x,
         };
         skew.z = Vector3Wide {
             x: -v.y,
             y: v.x,
-            z: Vector::<f32>::ZERO,
+            z: Vector::<f32>::splat(0.0),
         };
     }
 

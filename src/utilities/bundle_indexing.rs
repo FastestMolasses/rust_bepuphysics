@@ -1,28 +1,22 @@
-use std::arch::aarch64::{float32x4_t, uint32x4_t};
-use std::arch::aarch64::{vcgtq_f32, vcleq_f32, vdupq_n_f32, vminvq_u32};
-use std::arch::x86_64::{__m128, _mm_cmp_ps, _mm_cmp_ps_mask, _mm_movemask_ps};
-use std::arch::x86_64::{__m256, _mm256_cmp_ps, _mm256_cmp_ps_mask, _mm256_movemask_ps};
-use std::mem;
-use std::simd::{f32x4, f32x8, u32x4, u32x8, Mask};
+use crate::utilities::vector::Vector;
+use std::simd::{cmp::SimdPartialOrd, Simd};
+
+pub const VECTOR_MASK: usize = Vector::<f32>::LEN - 1;
 
 /// Some helpers for indexing into vector bundles.
 pub struct BundleIndexing;
 
 impl BundleIndexing {
-    /// Gets the mask value such that x & VECTOR_MASK computes x % f32x8::LANES.
-    ///
-    /// The compiler recognizes that this value is constant!
+    /// Gets the mask value such that x & VECTOR_MASK computes x % Vector<f32>::LEN.
     #[inline(always)]
     pub const fn vector_mask() -> usize {
-        f32x8::LANES - 1
+        VECTOR_MASK
     }
 
-    /// Gets the shift value such that x >> VECTOR_SHIFT divides x by f32x8::LANES.
-    ///
-    /// The compiler recognizes that this value is constant!
+    /// Gets the shift value such that x >> VECTOR_SHIFT divides x by Vector<f32>::LEN.
     #[inline(always)]
     pub const fn vector_shift() -> usize {
-        match f32x8::LANES {
+        match Vector::<f32>::LEN {
             4 => 2,
             8 => 3,
             16 => 4,
@@ -46,132 +40,114 @@ impl BundleIndexing {
     }
 
     #[inline(always)]
-    pub fn create_trailing_mask_for_count_in_bundle(count_in_bundle: usize) -> u32x8 {
-        if is_x86_feature_detected!("avx") && f32x8::LANES == 8 {
-            unsafe {
-                let cmp = _mm256_cmp_ps(
-                    _mm256_set1_ps(count_in_bundle as f32),
-                    _mm256_set_ps(7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0),
-                    _CMP_LE_OQ,
-                );
-                let mask = _mm256_movemask_ps(cmp);
-                mem::transmute::<i32, __m256>(mask as i32)
+    pub fn create_trailing_mask_for_count_in_bundle(count_in_bundle: usize) -> Vector<i32> {
+        let count = Vector::splat(count_in_bundle as f32);
+        let indices = Vector::from_slice(
+            &(0..Vector::<f32>::LEN)
+                .map(|x| x as f32)
+                .collect::<Vec<_>>(),
+        );
+        let mask = count.simd_le(indices);
+        // Convert bool mask to -1/0 integers
+        Simd::from_array(unsafe {
+            std::array::from_fn(|i| if mask.test_unchecked(i) { -1 } else { 0 })
+        })
+    }
+
+    #[inline(always)]
+    pub fn create_mask_for_count_in_bundle(count_in_bundle: usize) -> Vector<i32> {
+        let count = Vector::splat(count_in_bundle as f32);
+        let indices = Vector::from_slice(
+            &(0..Vector::<f32>::LEN)
+                .map(|x| x as f32)
+                .collect::<Vec<_>>(),
+        );
+        let mask = count.simd_gt(indices);
+        // Convert bool mask to -1/0 integers
+        Simd::from_array(unsafe {
+            std::array::from_fn(|i| if mask.test_unchecked(i) { -1 } else { 0 })
+        })
+    }
+
+    #[inline(always)]
+    pub fn get_first_set_lane_index(v: Vector<i32>) -> i32 {
+        // There's no guarantee that std::simd::Simd will use the move mask instruction,
+        // so we use x86 intrinsics directly here.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            if is_x86_feature_detected!("avx2") && Vector::<i32>::LEN == 8 {
+                let float_vec = std::mem::transmute::<_, __m256>(v);
+                let scalar_mask = _mm256_movemask_ps(float_vec);
+                scalar_mask.trailing_zeros() as i32
+            } else if is_x86_feature_detected!("sse4.1") && Vector::<i32>::LEN == 4 {
+                let float_vec = std::mem::transmute::<_, __m128>(v);
+                let scalar_mask = _mm_movemask_ps(float_vec);
+                scalar_mask.trailing_zeros() as i32
+            } else {
+                Self::fallback_get_first_set_lane_index(v)
             }
-        } else if is_x86_feature_detected!("sse") && f32x4::LANES == 4 {
-            unsafe {
-                let cmp = _mm_cmp_ps(
-                    _mm_set1_ps(count_in_bundle as f32),
-                    _mm_set_ps(3.0, 2.0, 1.0, 0.0),
-                    _CMP_LE_OQ,
-                );
-                let mask = _mm_movemask_ps(cmp);
-                mem::transmute::<i32, __m128>(mask as i32)
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let mask = std::simd::cmp::SimdPartialEq::simd_eq(v, Vector::splat(-1));
+            let bits = mask.to_bitmask();
+            if bits == 0 {
+                -1
+            } else {
+                bits.trailing_zeros() as i32
             }
-        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
-            unsafe {
-                let cmp = vcleq_f32(
-                    vdupq_n_f32(count_in_bundle as f32),
-                    float32x4_t(3.0, 2.0, 1.0, 0.0),
-                );
-                mem::transmute::<uint32x4_t, u32x4>(vminvq_u32(cmp))
-            }
-        } else {
-            let mut mask = [0; f32x8::LANES];
-            for i in 0..f32x8::LANES {
-                mask[i] = if count_in_bundle <= i { !0 } else { 0 };
-            }
-            u32x8::from_array(mask)
         }
     }
 
     #[inline(always)]
-    pub fn create_mask_for_count_in_bundle(count_in_bundle: usize) -> u32x8 {
-        if is_x86_feature_detected!("avx") && f32x8::LANES == 8 {
-            unsafe {
-                let cmp = _mm256_cmp_ps(
-                    _mm256_set1_ps(count_in_bundle as f32),
-                    _mm256_set_ps(7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0),
-                    _CMP_GT_OQ,
-                );
-                let mask = _mm256_movemask_ps(cmp);
-                mem::transmute::<i32, __m256>(mask as i32)
+    fn fallback_get_first_set_lane_index(v: Vector<i32>) -> i32 {
+        for i in 0..Vector::<i32>::LEN {
+            if v[i] == -1 {
+                return i as i32;
             }
-        } else if is_x86_feature_detected!("sse") && f32x4::LANES == 4 {
-            unsafe {
-                let cmp = _mm_cmp_ps(
-                    _mm_set1_ps(count_in_bundle as f32),
-                    _mm_set_ps(3.0, 2.0, 1.0, 0.0),
-                    _CMP_GT_OQ,
-                );
-                let mask = _mm_movemask_ps(cmp);
-                mem::transmute::<i32, __m128>(mask as i32)
-            }
-        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
-            unsafe {
-                let cmp = vcgtq_f32(
-                    vdupq_n_f32(count_in_bundle as f32),
-                    float32x4_t(3.0, 2.0, 1.0, 0.0),
-                );
-                mem::transmute::<uint32x4_t, u32x4>(vminvq_u32(cmp))
-            }
-        } else {
-            let mut mask = [0; f32x8::LANES];
-            for i in 0..f32x8::LANES {
-                mask[i] = if count_in_bundle > i { !0 } else { 0 };
-            }
-            u32x8::from_array(mask)
         }
-    }
-
-    #[inline(always)]
-    pub fn get_first_set_lane_index(v: u32x8) -> i32 {
-        if is_x86_feature_detected!("avx") && f32x8::LANES == 8 {
-            unsafe {
-                let scalar_mask = _mm256_movemask_ps(mem::transmute::<__m256, __m256>(v));
-                scalar_mask.trailing_zeros() as i32
-            }
-        } else if is_x86_feature_detected!("sse") && f32x4::LANES == 4 {
-            unsafe {
-                let scalar_mask = _mm_movemask_ps(mem::transmute::<__m128, __m128>(v));
-                scalar_mask.trailing_zeros() as i32
-            }
-        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
-            let mask: Mask<i32, 4> = v.lanes_le(f32x4::splat(0.0)).into();
-            mask.trailing_zeros() as i32
-        } else {
-            for i in 0..f32x8::LANES {
-                if v[i] == !0 {
-                    return i as i32;
-                }
-            }
-            -1
-        }
+        -1
     }
 
     /// Gets the number of lanes that occur at or before the last set lane.
     /// In other words, if the lanes in the vector are (-1, 0, -1, 0), then this will return 3.
     #[inline(always)]
-    pub fn get_last_set_lane_count(v: u32x8) -> usize {
-        if is_x86_feature_detected!("avx") && f32x8::LANES == 8 {
-            unsafe {
-                let scalar_mask = _mm256_movemask_ps(mem::transmute::<__m256, __m256>(v));
+    pub fn get_last_set_lane_count(v: Vector<i32>) -> usize {
+        // There's no guarantee that std::simd::Simd will use the move mask instruction,
+        // so we use x86 intrinsics directly here.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            if is_x86_feature_detected!("avx2") && Vector::<i32>::LEN == 8 {
+                let float_vec = std::mem::transmute::<_, __m256>(v);
+                let scalar_mask = _mm256_movemask_ps(float_vec);
                 32 - scalar_mask.leading_zeros() as usize
-            }
-        } else if is_x86_feature_detected!("sse") && f32x4::LANES == 4 {
-            unsafe {
-                let scalar_mask = _mm_movemask_ps(mem::transmute::<__m128, __m128>(v));
+            } else if is_x86_feature_detected!("sse4.1") && Vector::<i32>::LEN == 4 {
+                let float_vec = std::mem::transmute::<_, __m128>(v);
+                let scalar_mask = _mm_movemask_ps(float_vec);
                 32 - scalar_mask.leading_zeros() as usize
+            } else {
+                Self::fallback_get_last_set_lane_count(v)
             }
-        } else if is_aarch64_feature_detected!("neon") && f32x4::LANES == 4 {
-            let mask: Mask<i32, 4> = v.lanes_le(f32x4::splat(0.0)).into();
-            32 - mask.bitmask().leading_zeros() as usize
-        } else {
-            for i in (0..f32x8::LANES).rev() {
-                if v[i] == !0 {
-                    return i + 1;
-                }
-            }
-            0
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let mask = std::simd::cmp::SimdPartialEq::simd_eq(v, Vector::splat(-1));
+            let bits = mask.to_bitmask();
+            if bits == 0 {
+                0
+            } else {
+                (u32::BITS - bits.leading_zeros()) as usize
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn fallback_get_last_set_lane_count(v: Vector<i32>) -> usize {
+        for i in (0..Vector::<i32>::LEN).rev() {
+            if v[i] == -1 {
+                return i + 1;
+            }
+        }
+        0
     }
 }

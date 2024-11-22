@@ -622,7 +622,7 @@ impl Div<Vector<f32>> for Vector3Wide {
 
     #[inline(always)]
     fn div(self, scalar: Vector) -> Self::Output {
-        let inverse = Vector::ONE / scalar;
+        let inverse = Vector::<f32>::splat(1.0) / scalar;
         Self {
             x: self.x * inverse,
             y: self.y * inverse,

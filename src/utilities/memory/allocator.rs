@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ptr::NonNull};
 
 use crate::utilities::memory::{
-    buffer::Buffer, buffer_pool::IUnmanagedMemoryPool, managed_id_pool::ManagedIdPool,
+    buffer::Buffer, unmanaged_mempool::IUnmanagedMemoryPool, managed_id_pool::ManagedIdPool,
 };
 
 /// Represents a chunk of abstract memory supporting allocations and deallocations.

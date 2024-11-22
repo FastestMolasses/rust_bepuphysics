@@ -1,8 +1,4 @@
-use std::arch::aarch64::*;
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
-
-use crate::Quaternion;
-use crate::Vector3;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 #[inline(always)]
 pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
@@ -262,8 +258,8 @@ pub fn fast_reciprocal(v: f32x4) -> f32x4 {
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        let v_neon = vld1q_f32(v.as_ptr());
-        let result_neon = vrecpeq_f32(v_neon);
+        let v_neon = std::arch::aarch64::vld1q_f32(v.as_ptr());
+        let result_neon = std::arch::aarch64::vrecpeq_f32(v_neon);
         // Optional: Perform a Newton-Raphson iteration for higher precision
         // let step = vmulq_f32(result_neon, vrecpsq_f32(v_neon, result_neon));
         // result_neon = vmulq_f32(step, vrecpsq_f32(v_neon, step));
@@ -294,8 +290,8 @@ pub fn fast_reciprocal_square_root(v: f32x4) -> f32x4 {
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        let v_neon = vld1q_f32(v.as_ptr());
-        let result_neon = vrsqrteq_f32(v_neon);
+        let v_neon = std::arch::aarch64::vld1q_f32(v.as_ptr());
+        let result_neon = std::arch::aarch64::vrsqrteq_f32(v_neon);
         // Optional: Perform a Newton-Raphson iteration for higher precision
         // let step = vmulq_f32(vrsqrtsq_f32(vmulq_f32(v_neon, result_neon), result_neon), result_neon);
         // result_neon = vmulq_f32(vrsqrtsq_f32(vmulq_f32(v_neon, step), step), step);

@@ -3,7 +3,7 @@ use glam::{Quat, Vec3};
 use std::ops::{Add, Mul, Sub};
 
 /// 3 row, 3 column matrix.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(C, align(16))]
 pub struct Matrix3x3 {
     /// First row of the matrix.

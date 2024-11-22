@@ -1,4 +1,5 @@
-use super::bounding_sphere::BoundingSphere;
+use crate::utilities::bounding_sphere::BoundingSphere;
+use glam::Vec4Swizzles;
 use glam::{Vec3, Vec4};
 use std::mem::MaybeUninit;
 
@@ -396,7 +397,7 @@ impl BoundingBox {
 
     /// Creates a bounding box from a bounding sphere.
     #[inline(always)]
-    pub fn from_sphere(bounding_sphere: &BoundingSphere, bounding_box: &mut Self) -> Self {
+    pub fn create_from_sphere(bounding_sphere: &BoundingSphere, bounding_box: &mut Self) {
         let radius = Vec3::splat(sphere.radius);
         bounding_box.min = sphere.center - radius;
         bounding_box.max = sphere.center + radius;

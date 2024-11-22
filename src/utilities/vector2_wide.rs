@@ -95,7 +95,7 @@ impl Vector2Wide {
     #[inline(always)]
     pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Vec2) {
         // TODO:
-        let offset = GatherScatter::get_offset_instance(wide, slot_index);
+        let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
         Self::read_first(offset, narrow);
     }
 
@@ -103,15 +103,17 @@ impl Vector2Wide {
     #[inline(always)]
     pub fn write_first(source: &Vec2, target_slot: &mut Self) {
         // TODO:
-        GatherScatter::get_first(&mut target_slot.x).write(source.x);
-        GatherScatter::get_first(&mut target_slot.y).write(source.y);
+        unsafe {
+            GatherScatter::get_first(&mut target_slot.x).write(source.x);
+            GatherScatter::get_first(&mut target_slot.y).write(source.y);
+        }
     }
 
     /// Writes a value into a slot of the target bundle.
     #[inline(always)]
     pub fn write_slot(source: &Vec2, slot_index: usize, target: &mut Self) {
         // TODO:
-        let mut offset = GatherScatter::get_offset_instance(target, slot_index);
+        let mut offset = unsafe { GatherScatter::get_offset_instance(target, slot_index) };
         Self::write_first(source, &mut offset);
     }
 }

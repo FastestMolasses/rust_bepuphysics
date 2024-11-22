@@ -32,5 +32,4 @@ mod vector3_wide;
 mod vector4_wide;
 
 // Private:
-mod arch;
 mod vector;
