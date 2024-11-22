@@ -24,7 +24,7 @@ pub struct Vector3Wide {
 
 impl From<Vector<f32>> for Vector3Wide {
     #[inline(always)]
-    fn from(s: Vector) -> Self {
+    fn from(s: Vector<f32>) -> Self {
         Self::new(s)
     }
 }
@@ -56,7 +56,7 @@ impl Vector3Wide {
 
     /// Finds the result of adding a scalar to every component of a vector.
     #[inline(always)]
-    pub fn add_scalar(v: &Self, s: &Vector, result: &mut Self) {
+    pub fn add_scalar(v: &Self, s: &Vector<f32>, result: &mut Self) {
         result.x = v.x + s;
         result.y = v.y + s;
         result.z = v.z + s;
@@ -72,7 +72,7 @@ impl Vector3Wide {
 
     /// Finds the result of subtracting a scalar from every component of a vector.
     #[inline(always)]
-    pub fn subtract_scalar(v: &Self, s: &Vector, result: &mut Self) {
+    pub fn subtract_scalar(v: &Self, s: &Vector<f32>, result: &mut Self) {
         result.x = v.x - s;
         result.y = v.y - s;
         result.z = v.z - s;
@@ -80,7 +80,7 @@ impl Vector3Wide {
 
     /// Finds the result of subtracting the components of a vector from a scalar.
     #[inline(always)]
-    pub fn subtract_from_scalar(s: &Vector, v: &Self, result: &mut Self) {
+    pub fn subtract_from_scalar(s: &Vector<f32>, v: &Self, result: &mut Self) {
         result.x = s - v.x;
         result.y = s - v.y;
         result.z = s - v.z;
@@ -569,7 +569,7 @@ impl Add<Vector<f32>> for Vector3Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn add(self, s: Vector) -> Self {
+    fn add(self, s: Vector<f32>) -> Self {
         Self {
             x: self.x + s,
             y: self.y + s,
@@ -595,7 +595,7 @@ impl Sub<Vector<f32>> for Vector3Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn sub(self, s: Vector) -> Self {
+    fn sub(self, s: Vector<f32>) -> Self {
         Self {
             x: self.x - s,
             y: self.y - s,
@@ -621,7 +621,7 @@ impl Div<Vector<f32>> for Vector3Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn div(self, scalar: Vector) -> Self::Output {
+    fn div(self, scalar: Vector<f32>) -> Self::Output {
         let inverse = Vector::<f32>::splat(1.0) / scalar;
         Self {
             x: self.x * inverse,
@@ -635,7 +635,7 @@ impl Mul<Vector<f32>> for Vector3Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn mul(self, scalar: Vector) -> Self::Output {
+    fn mul(self, scalar: Vector<f32>) -> Self::Output {
         Self {
             x: self.x * scalar,
             y: self.y * scalar,
@@ -700,6 +700,6 @@ impl Neg for Vector3Wide {
 
 impl std::fmt::Display for Vector3Wide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}, {}, {}>", self.x, self.y, self.z)
+        write!(f, "<{:?}, {:?}, {:?}>", self.x, self.y, self.z)
     }
 }
