@@ -5,7 +5,7 @@ use crate::utilities::{
     matrix3x3_wide::Matrix3x3Wide,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Matrix2x3Wide {
     /// First row of the matrix.
     pub x: Vector3Wide,

@@ -1,8 +1,5 @@
-#[cfg(target_arch = "aarch64")]
-use core::arch::aarch64::*;
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
-use core::mem::transmute;
+use std::simd::{num::SimdFloat, Mask, StdFloat};
+
 use crate::utilities::vector::Vector;
 use glam::Vec4;
 
@@ -17,15 +14,14 @@ pub struct Vector4Wide {
 
 impl Vector4Wide {
     #[inline(always)]
-    pub fn broadcast(source: &Vec4) -> Self {
-        Self {
-            x: Vector::splat(source.x),
-            y: Vector::splat(source.y),
-            z: Vector::splat(source.z),
-            w: Vector::splat(source.w),
-        }
+    pub fn broadcast(source: &Vec4, broadcasted: &mut Self) {
+        broadcasted.x = Vector::splat(source.x);
+        broadcasted.y = Vector::splat(source.y);
+        broadcasted.z = Vector::splat(source.z);
+        broadcasted.w = Vector::splat(source.w);
     }
 
+    /// Performs a componentwise add between two vectors.
     #[inline(always)]
     pub fn add(a: &Self, b: &Self) -> Self {
         Self {
@@ -36,14 +32,33 @@ impl Vector4Wide {
         }
     }
 
+    /// Performs a componentwise add between two vectors and stores the result in the `result` parameter.
     #[inline(always)]
-    pub fn add_scalar(v: &Self, s: Vector) -> Self {
+    pub fn add_to(a: &Self, b: &Self, result: &mut Self) {
+        result.x = a.x + b.x;
+        result.y = a.y + b.y;
+        result.z = a.z + b.z;
+        result.w = a.w + b.w;
+    }
+
+    /// Performs a componentwise add between a vector and a scalar.
+    #[inline(always)]
+    pub fn add_scalar(v: &Self, s: Vector<f32>) -> Self {
         Self {
             x: v.x + s,
             y: v.y + s,
             z: v.z + s,
             w: v.w + s,
         }
+    }
+
+    /// Performs a componentwise add between a vector and a scalar and stores the result in the `result` parameter.
+    #[inline(always)]
+    pub fn add_scalar_to(v: &Self, s: Vector<f32>, result: &mut Self) {
+        result.x = v.x + s;
+        result.y = v.y + s;
+        result.z = v.z + s;
+        result.w = v.w + s;
     }
 
     #[inline(always)]
@@ -57,52 +72,54 @@ impl Vector4Wide {
     }
 
     #[inline(always)]
-    pub fn dot(a: &Self, b: &Self) -> Vector {
-        a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+    pub fn subtract_to(a: &Self, b: &Self, result: &mut Self) {
+        result.x = a.x - b.x;
+        result.y = a.y - b.y;
+        result.z = a.z - b.z;
+        result.w = a.w - b.w;
     }
 
     #[inline(always)]
-    pub fn min(a: &Self, b: &Self) -> Self {
-        Self {
-            x: a.x.min(&b.x),
-            y: a.y.min(&b.y),
-            z: a.z.min(&b.z),
-            w: a.w.min(&b.w),
-        }
+    pub fn dot(a: &Self, b: &Self, result: &mut Vector<f32>) {
+        *result = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    }
+
+    /// Computes the per-component minimum of two vectors.
+    #[inline(always)]
+    pub fn min(a: &Self, b: &Self, result: &mut Self) {
+        result.x = a.x.simd_min(b.x);
+        result.y = a.y.simd_min(b.y);
+        result.z = a.z.simd_min(b.z);
+        result.w = a.w.simd_min(b.w);
+    }
+
+    /// Computes the per-component maximum of two vectors.
+    #[inline(always)]
+    pub fn max(a: &Self, b: &Self, result: &mut Self) {
+        result.x = a.x.simd_max(b.x);
+        result.y = a.y.simd_max(b.y);
+        result.z = a.z.simd_max(b.z);
+        result.w = a.w.simd_max(b.w);
     }
 
     #[inline(always)]
-    pub fn max(a: &Self, b: &Self) -> Self {
-        Self {
-            x: a.x.max(&b.x),
-            y: a.y.max(&b.y),
-            z: a.z.max(&b.z),
-            w: a.w.max(&b.w),
-        }
+    pub fn scale(vector: &Self, scalar: Vector<f32>, result: &mut Self) {
+        result.x = vector.x * scalar;
+        result.y = vector.y * scalar;
+        result.z = vector.z * scalar;
+        result.w = vector.w * scalar;
     }
 
     #[inline(always)]
-    pub fn scale(vector: &Self, scalar: Vector) -> Self {
-        Self {
-            x: vector.x * scalar,
-            y: vector.y * scalar,
-            z: vector.z * scalar,
-            w: vector.w * scalar,
-        }
+    pub fn abs(vector: &Self, result: &mut Self) {
+        result.x = vector.x.abs();
+        result.y = vector.y.abs();
+        result.z = vector.z.abs();
+        result.w = vector.w.abs();
     }
 
     #[inline(always)]
-    pub fn abs(&self) -> Self {
-        Self {
-            x: self.x.abs(),
-            y: self.y.abs(),
-            z: self.z.abs(),
-            w: self.w.abs(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn negate(&self) -> Self {
+    pub fn negate(v: &Self) -> Self {
         Self {
             x: -self.x,
             y: -self.y,
@@ -112,81 +129,81 @@ impl Vector4Wide {
     }
 
     #[inline(always)]
-    pub fn length_squared(&self) -> Vector {
-        self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w
+    pub fn negate_to(v: &Self, result: &mut Self) {
+        result.x = -v.x;
+        result.y = -v.y;
+        result.z = -v.z;
+        result.w = -v.w;
     }
 
     #[inline(always)]
-    pub fn length(&self) -> Vector {
-        self.length_squared().sqrt()
+    pub fn length_squared(v: &Self, length_squared: &mut Vector<f32>) {
+        *length_squared = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
     }
 
     #[inline(always)]
-    pub fn distance(a: &Self, b: &Self) -> Vector {
+    pub fn length(v: &Self, length: &mut Vector<f32>) {
+        *length = Vector::<f32>::sqrt(
+            self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w,
+        );
+    }
+
+    #[inline(always)]
+    pub fn distance(a: &Self, b: &Self, distance: &mut Vector<f32>) {
         let offset = Self::subtract(b, a);
-        offset.length()
+        Self::length(&offset, distance);
     }
 
     #[inline(always)]
-    pub fn normalize(&self) -> Self {
-        let length = self.length();
-        let scale = Vector::splat(1.0) / length;
-        Self::scale(self, scale)
+    pub fn normalize(v: &Self, result: &mut Self) {
+        let mut length = Vector::splat(0.0);
+        Self::length(v, &mut length);
+        Self::scale(v, Vector::splat(1.0) / length, result);
     }
 
     #[inline(always)]
-    pub fn conditional_select(condition: VectorI, left: &Self, right: &Self) -> Self {
-        unsafe {
-            #[cfg(target_arch = "x86_64")]
-            {
-                Self {
-                    x: transmute(_mm256_blendv_ps(transmute(right.x), transmute(left.x), transmute(condition))),
-                    y: transmute(_mm256_blendv_ps(transmute(right.y), transmute(left.y), transmute(condition))),
-                    z: transmute(_mm256_blendv_ps(transmute(right.z), transmute(left.z), transmute(condition))),
-                    w: transmute(_mm256_blendv_ps(transmute(right.w), transmute(left.w), transmute(condition))),
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                Self {
-                    x: transmute(vbslq_f32(transmute(condition), transmute(left.x), transmute(right.x))),
-                    y: transmute(vbslq_f32(transmute(condition), transmute(left.y), transmute(right.y))),
-                    z: transmute(vbslq_f32(transmute(condition), transmute(left.z), transmute(right.z))),
-                    w: transmute(vbslq_f32(transmute(condition), transmute(left.w), transmute(right.w))),
-                }
-            }
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            {
-                Self {
-                    x: Vector::select(condition.cast(), left.x, right.x),
-                    y: Vector::select(condition.cast(), left.y, right.y),
-                    z: Vector::select(condition.cast(), left.z, right.z),
-                    w: Vector::select(condition.cast(), left.w, right.w),
-                }
-            }
-        }
+    pub fn conditional_select(
+        condition: &Vector<i32>,
+        left: &Self,
+        right: &Self,
+        result: &mut Self,
+    ) {
+        let mask = Mask::from_int(*condition);
+        result.x = mask.select(left.x, right.x);
+        result.y = mask.select(left.y, right.y);
+        result.z = mask.select(left.z, right.z);
+        result.w = mask.select(left.w, right.w);
     }
 
+    /// Pulls one lane out of the wide representation.
     #[inline(always)]
-    pub fn read_slot(&self, slot_index: usize) -> Vec4 {
-        Vec4::new(
-            self.x[slot_index],
-            self.y[slot_index],
-            self.z[slot_index],
-            self.w[slot_index],
-        )
+    pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Vec4) {
+        let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
+        Self::read_first(offset, narrow);
     }
 
+    /// Pulls the first lane out of the wide representation.
+    #[inline(always)]
+    pub fn read_first(source: &Self, target: &mut Vec4) {
+        target.x = source.x[0];
+        target.y = source.y[0];
+        target.z = source.z[0];
+        target.w = source.w[0];
+    }
+
+    /// Gathers values from a vector and places them into the first indices of the target vector.
     #[inline(always)]
     pub fn write_first(source: &Vec4, target_slot: &mut Self) {
-        target_slot.x[0] = source.x;
-        target_slot.y[0] = source.y;
-        target_slot.z[0] = source.z;
-        target_slot.w[0] = source.w;
+        unsafe {
+            *GatherScatter::get_first_mut(&mut target_slot.x) = source.x;
+            *GatherScatter::get_first_mut(&mut target_slot.y) = source.y;
+            *GatherScatter::get_first_mut(&mut target_slot.z) = source.z;
+            *GatherScatter::get_first_mut(&mut target_slot.w) = source.w;
+        }
     }
 }
 
-impl std::ops::Add for Vector4Wide {
+impl std::ops::Add<Vector4Wide> for Vector4Wide {
     type Output = Self;
 
     #[inline(always)]
@@ -199,8 +216,17 @@ impl std::ops::Add<Vector<f32>> for Vector4Wide {
     type Output = Self;
 
     #[inline(always)]
-    fn add(self, rhs: Vector) -> Self::Output {
+    fn add(self, rhs: Vector<f32>) -> Self::Output {
         Self::add_scalar(&self, rhs)
+    }
+}
+
+impl std::ops::Add<Vector4Wide> for Vector<f32> {
+    type Output = Vector4Wide;
+
+    #[inline(always)]
+    fn add(self, rhs: Vector4Wide) -> Self::Output {
+        Vector4Wide::add_scalar(&rhs, self)
     }
 }
 
@@ -213,26 +239,21 @@ impl std::ops::Sub for Vector4Wide {
     }
 }
 
-impl std::ops::Mul<Vector<f32>> for Vector4Wide {
-    type Output = Self;
-
-    #[inline(always)]
-    fn mul(self, rhs: Vector) -> Self::Output {
-        Self::scale(&self, rhs)
-    }
-}
-
 impl std::ops::Neg for Vector4Wide {
     type Output = Self;
 
     #[inline(always)]
     fn neg(self) -> Self::Output {
-        self.negate()
+        Vector4Wide::negate(&self)
     }
 }
 
 impl std::fmt::Display for Vector4Wide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}, {}, {}, {}>", self.x, self.y, self.z, self.w)
+        write!(
+            f,
+            "<{:?}, {:?}, {:?}, {:?}>",
+            self.x, self.y, self.z, self.w
+        )
     }
 }

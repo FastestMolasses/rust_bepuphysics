@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::ptr::null_mut;
 use std::sync::Arc;
 
 /// Function to be invoked on a worker thread in an `IThreadDispatcher`. Provides the unmanaged context of the dispatch.
