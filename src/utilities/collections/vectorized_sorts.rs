@@ -32,7 +32,7 @@ pub unsafe fn vector_counting_sort(
         );
         let index_offsets = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
         for i in (0..element_count).step_by(8) {
-            let values = _mm256_loadu_ps(padded_keys.as_ptr().add(i) as *const f32);
+            let values = _mm256_load_ps(padded_keys.as_ptr().add(i) as *const f32);
             let mut counts = _mm256_setzero_si256();
 
             let one_mask = _mm256_set1_epi32(1);
@@ -67,7 +67,7 @@ pub unsafe fn vector_counting_sort(
                 counts = _mm256_add_epi32(counts, _mm256_and_si256(slot_precedes_value, one_mask));
             }
 
-            _mm256_storeu_si256(
+            _mm256_store_si256(
                 padded_target_indices.as_mut_ptr().add(i) as *mut __m256i,
                 counts,
             );
@@ -81,7 +81,7 @@ pub unsafe fn vector_counting_sort(
         );
         let index_offsets = _mm_setr_epi32(0, 1, 2, 3);
         for i in (0..element_count).step_by(4) {
-            let values = _mm_loadu_ps(padded_keys.as_ptr().add(i) as *const f32);
+            let values = _mm_load_ps(padded_keys.as_ptr().add(i) as *const f32);
             let mut counts = _mm_setzero_si128();
 
             let one_mask = _mm_set1_epi32(1);
@@ -111,7 +111,7 @@ pub unsafe fn vector_counting_sort(
                 counts = _mm_add_epi32(counts, _mm_and_si128(slot_precedes_value, one_mask));
             }
 
-            _mm_storeu_si128(
+            _mm_store_si128(
                 padded_target_indices.as_mut_ptr().add(i) as *mut __m128i,
                 counts,
             );

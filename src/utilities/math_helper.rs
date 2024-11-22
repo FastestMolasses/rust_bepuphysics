@@ -244,12 +244,12 @@ pub fn fast_reciprocal(v: f32x4) -> f32x4 {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     unsafe {
         if is_x86_feature_detected!("avx") {
-            let v256 = _mm256_castps128_ps256(_mm_loadu_ps(v.as_ptr()));
+            let v256 = _mm256_castps128_ps256(_mm_load_ps(v.as_ptr()));
             let result256 = _mm256_rcp_ps(v256);
             let result128 = _mm256_castps256_ps128(result256);
             std::mem::transmute(result128)
         } else if is_x86_feature_detected!("sse") {
-            let v128 = _mm_loadu_ps(v.as_ptr());
+            let v128 = _mm_load_ps(v.as_ptr());
             let result128 = _mm_rcp_ps(v128);
             std::mem::transmute(result128)
         } else {
@@ -276,12 +276,12 @@ pub fn fast_reciprocal_square_root(v: f32x4) -> f32x4 {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     unsafe {
         if is_x86_feature_detected!("avx") {
-            let v256 = _mm256_castps128_ps256(_mm_loadu_ps(v.as_ptr()));
+            let v256 = _mm256_castps128_ps256(_mm_load_ps(v.as_ptr()));
             let result256 = _mm256_rsqrt_ps(v256);
             let result128 = _mm256_castps256_ps128(result256);
             std::mem::transmute(result128)
         } else if is_x86_feature_detected!("sse") {
-            let v128 = _mm_loadu_ps(v.as_ptr());
+            let v128 = _mm_load_ps(v.as_ptr());
             let result128 = _mm_rsqrt_ps(v128);
             std::mem::transmute(result128)
         } else {

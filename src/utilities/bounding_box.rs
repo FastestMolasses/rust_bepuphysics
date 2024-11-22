@@ -135,18 +135,18 @@ impl BoundingBox {
             let result_ptr = merged.as_mut_ptr() as *mut f32;
 
             // Load vectors
-            let a_min = _mm_loadu_ps(a_ptr);
-            let a_max = _mm_loadu_ps(a_ptr.add(4));
-            let b_min = _mm_loadu_ps(b_ptr);
-            let b_max = _mm_loadu_ps(b_ptr.add(4));
+            let a_min = _mm_load_ps(a_ptr);
+            let a_max = _mm_load_ps(a_ptr.add(4));
+            let b_min = _mm_load_ps(b_ptr);
+            let b_max = _mm_load_ps(b_ptr.add(4));
 
             // Compute min and max
             let min = _mm_min_ps(a_min, b_min);
             let max = _mm_max_ps(a_max, b_max);
 
             // Load current result values to preserve w component
-            let current_min = _mm_loadu_ps(result_ptr);
-            let current_max = _mm_loadu_ps(result_ptr.add(4));
+            let current_min = _mm_load_ps(result_ptr);
+            let current_max = _mm_load_ps(result_ptr.add(4));
 
             // Blend the results - preserve W component (mask: 0b1000 = 8)
             let result_min = if is_x86_feature_detected!("sse4.1") {
@@ -164,8 +164,8 @@ impl BoundingBox {
             };
 
             // Store results
-            _mm_storeu_ps(result_ptr, result_min);
-            _mm_storeu_ps(result_ptr.add(4), result_max);
+            _mm_store_ps(result_ptr, result_min);
+            _mm_store_ps(result_ptr.add(4), result_max);
         }
 
         #[cfg(target_arch = "aarch64")]
