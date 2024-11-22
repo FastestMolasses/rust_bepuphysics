@@ -122,7 +122,7 @@ impl Matrix3x3 {
         inverse.y = zx * inverse_determinant;
         inverse.z = xy * inverse_determinant;
         unsafe {
-            Matrix3x3::transpose(&inverse, inverse);
+            Matrix3x3::transpose(&inverse, inverse)
         }
     }
 
@@ -320,7 +320,7 @@ impl Matrix3x3 {
     /// Creates a matrix such that a x v = a * result. Returns
     /// the skew symmetric matrix representing the cross product.
     #[inline(always)]
-    pub fn create_cross_product(v: &Vec3, result: &mut Self) -> Self {
+    pub fn create_cross_product(v: &Vec3, result: &mut Self) {
         result.x.x = 0;
         result.x.y = -v.z;
         result.x.z = v.y;

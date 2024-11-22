@@ -1,5 +1,7 @@
+use glam::Vec3;
+
 use crate::utilities::matrix3x3::Matrix3x3;
-use crate::utilities::vector3::Vector3;
+use crate::utilities::vector::Vector;
 use core::ops::{Add, Mul, Sub};
 
 #[repr(C)]
@@ -82,28 +84,28 @@ impl Symmetric3x3 {
 
     #[inline(always)]
     pub fn multiply(a: &Matrix3x3, b: &Symmetric3x3) -> Matrix3x3 {
-        let bx = Vector3::new(b.xx, b.yx, b.zx);
-        let by = Vector3::new(b.yx, b.yy, b.zy);
-        let bz = Vector3::new(b.zx, b.zy, b.zz);
+        let bx = Vec3::new(b.xx, b.yx, b.zx);
+        let by = Vec3::new(b.yx, b.yy, b.zy);
+        let bz = Vec3::new(b.zx, b.zy, b.zz);
 
         let result_x = {
-            let x = Vector3::splat(a.x.0.extract(0));
-            let y = Vector3::splat(a.x.0.extract(1));
-            let z = Vector3::splat(a.x.0.extract(2));
+            let x = Vec3::splat(a.x[0]);
+            let y = Vec3::splat(a.x[1]);
+            let z = Vec3::splat(a.x[2]);
             x * bx + y * by + z * bz
         };
 
         let result_y = {
-            let x = Vector3::splat(a.y.0.extract(0));
-            let y = Vector3::splat(a.y.0.extract(1));
-            let z = Vector3::splat(a.y.0.extract(2));
+            let x = Vec3::splat(a.y[0]);
+            let y = Vec3::splat(a.y[1]);
+            let z = Vec3::splat(a.y[2]);
             x * bx + y * by + z * bz
         };
 
         let result_z = {
-            let x = Vector3::splat(a.z.0.extract(0));
-            let y = Vector3::splat(a.z.0.extract(1));
-            let z = Vector3::splat(a.z.0.extract(2));
+            let x = Vec3::splat(a.z[0]);
+            let y = Vec3::splat(a.z[1]);
+            let z = Vec3::splat(a.z[2]);
             x * bx + y * by + z * bz
         };
 
@@ -131,16 +133,16 @@ impl Symmetric3x3 {
     }
 
     #[inline(always)]
-    pub fn transform_without_overlap(v: &Vector3, m: &Symmetric3x3) -> Vector3 {
-        let v_x = v.0.extract(0);
-        let v_y = v.0.extract(1);
-        let v_z = v.0.extract(2);
+    pub fn transform_without_overlap(v: &Vec3, m: &Symmetric3x3) -> Vec3 {
+        let v_x = v[0];
+        let v_y = v[1];
+        let v_z = v[2];
 
         let x = v_x * m.xx + v_y * m.yx + v_z * m.zx;
         let y = v_x * m.yx + v_y * m.yy + v_z * m.zy;
         let z = v_x * m.zx + v_y * m.zy + v_z * m.zz;
 
-        Vector3(f32x4::new(x, y, z, 0.0))
+        Vec3(Vector::<f32>::from_array([x, y, z, 0.0]))
     }
 }
 
@@ -200,9 +202,9 @@ impl Add<Symmetric3x3> for Matrix3x3 {
     #[inline(always)]
     fn add(self, other: Symmetric3x3) -> Matrix3x3 {
         Matrix3x3 {
-            x: self.x + Vector3::new(other.xx, other.yx, other.zx),
-            y: self.y + Vector3::new(other.yx, other.yy, other.zy),
-            z: self.z + Vector3::new(other.zx, other.zy, other.zz),
+            x: self.x + Vec3::new(other.xx, other.yx, other.zx),
+            y: self.y + Vec3::new(other.yx, other.yy, other.zy),
+            z: self.z + Vec3::new(other.zx, other.zy, other.zz),
         }
     }
 }
@@ -213,9 +215,9 @@ impl Add<Matrix3x3> for Symmetric3x3 {
     #[inline(always)]
     fn add(self, other: Matrix3x3) -> Matrix3x3 {
         Matrix3x3 {
-            x: Vector3::new(self.xx, self.yx, self.zx) + other.x,
-            y: Vector3::new(self.yx, self.yy, self.zy) + other.y,
-            z: Vector3::new(self.zx, self.zy, self.zz) + other.z,
+            x: Vec3::new(self.xx, self.yx, self.zx) + other.x,
+            y: Vec3::new(self.yx, self.yy, self.zy) + other.y,
+            z: Vec3::new(self.zx, self.zy, self.zz) + other.z,
         }
     }
 }
@@ -226,9 +228,9 @@ impl Sub<Symmetric3x3> for Matrix3x3 {
     #[inline(always)]
     fn sub(self, other: Symmetric3x3) -> Matrix3x3 {
         Matrix3x3 {
-            x: self.x - Vector3::new(other.xx, other.yx, other.zx),
-            y: self.y - Vector3::new(other.yx, other.yy, other.zy),
-            z: self.z - Vector3::new(other.zx, other.zy, other.zz),
+            x: self.x - Vec3::new(other.xx, other.yx, other.zx),
+            y: self.y - Vec3::new(other.yx, other.yy, other.zy),
+            z: self.z - Vec3::new(other.zx, other.zy, other.zz),
         }
     }
 }
@@ -239,9 +241,9 @@ impl Sub<Matrix3x3> for Symmetric3x3 {
     #[inline(always)]
     fn sub(self, other: Matrix3x3) -> Matrix3x3 {
         Matrix3x3 {
-            x: Vector3::new(self.xx, self.yx, self.zx) - other.x,
-            y: Vector3::new(self.yx, self.yy, self.zy) - other.y,
-            z: Vector3::new(self.zx, self.zy, self.zz) - other.z,
+            x: Vec3::new(self.xx, self.yx, self.zx) - other.x,
+            y: Vec3::new(self.yx, self.yy, self.zy) - other.y,
+            z: Vec3::new(self.zx, self.zy, self.zz) - other.z,
         }
     }
 }
@@ -260,12 +262,12 @@ impl Mul<Matrix3x3> for Symmetric3x3 {
 
     #[inline(always)]
     fn mul(self, other: Matrix3x3) -> Matrix3x3 {
-        let axx = Vector3::splat(self.xx);
-        let ayx = Vector3::splat(self.yx);
-        let ayy = Vector3::splat(self.yy);
-        let azx = Vector3::splat(self.zx);
-        let azy = Vector3::splat(self.zy);
-        let azz = Vector3::splat(self.zz);
+        let axx = Vec3::splat(self.xx);
+        let ayx = Vec3::splat(self.yx);
+        let ayy = Vec3::splat(self.yy);
+        let azx = Vec3::splat(self.zx);
+        let azy = Vec3::splat(self.zy);
+        let azz = Vec3::splat(self.zz);
         Matrix3x3 {
             x: axx * other.x + ayx * other.y + azx * other.z,
             y: ayx * other.x + ayy * other.y + azy * other.z,

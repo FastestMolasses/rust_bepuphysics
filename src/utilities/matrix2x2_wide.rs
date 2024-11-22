@@ -26,14 +26,12 @@ impl Matrix2x2Wide {
 
     #[inline(always)]
     pub fn transform(v: &Vector2Wide, m: &Self, result: &mut Vector2Wide) {
-        let mut temp = Vector2Wide::default();
-        Self::transform_without_overlap(v, m, &mut temp);
-        *result = temp;
+        Self::transform_without_overlap(v, m, result);
     }
 
     /// Multiplies every component in the matrix by the given scalar value.
     #[inline(always)]
-    pub fn scale(m: &Self, scale: f32x4, result: &mut Self) {
+    pub fn scale(m: &Self, scale: Vector<f32>, result: &mut Self) {
         result.x.x = m.x.x * scale;
         result.x.y = m.x.y * scale;
         result.y.x = m.y.x * scale;
@@ -57,7 +55,7 @@ impl Matrix2x2Wide {
     /// Inverts the given matrix.
     #[inline(always)]
     pub fn invert_without_overlap(m: &Self, inverse: &mut Self) {
-        let determinant_inverse = f32x4::splat(1.0) / (m.x.x * m.y.y - m.x.y * m.y.x);
+        let determinant_inverse = Vector::<f32>::splat(1.0) / (m.x.x * m.y.y - m.x.y * m.y.x);
         inverse.x.x = m.y.y * determinant_inverse;
         inverse.x.y = -m.x.y * determinant_inverse;
 

@@ -68,7 +68,7 @@ impl Matrix2x3Wide {
 
     /// Multiplies every component in the matrix by the given scalar value.
     #[inline(always)]
-    pub fn scale(m: &Self, scale: f32x4, result: &mut Self) {
+    pub fn scale(m: &Self, scale: Vector<f32>, result: &mut Self) {
         result.x.x = m.x.x * scale;
         result.x.y = m.x.y * scale;
         result.x.z = m.x.z * scale;

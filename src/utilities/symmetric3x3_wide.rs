@@ -359,6 +359,7 @@ impl Mul<Symmetric3x3Wide> for Matrix2x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Symmetric3x3Wide) -> Self::Output {
+        // TODO: DO THIS WITHOUT TEMP INIT
         let mut result = Matrix2x3Wide::default();
         Symmetric3x3Wide::multiply_without_overlap(&self, &rhs, &mut result);
         result
@@ -370,7 +371,8 @@ impl Mul<Symmetric3x3Wide> for Matrix3x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Symmetric3x3Wide) -> Self::Output {
-        let mut result = Matrix3x3Wide::default();
+        // TODO: DO THIS WITHOUT TEMP INIT
+        let mut result = Matrix3x3Wide::create_identity();
         Symmetric3x3Wide::multiply_without_overlap_3x3(&self, &rhs, &mut result);
         result
     }
@@ -381,6 +383,7 @@ impl Mul<Matrix3x3Wide> for Symmetric3x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Matrix3x3Wide) -> Self::Output {
+        // TODO: DO THIS WITHOUT TEMP INIT
         let mut result = Matrix3x3Wide::default();
         Symmetric3x3Wide::multiply(&self, &rhs, &mut result);
         result

@@ -1,6 +1,6 @@
 use crate::utilities::matrix3x3::Matrix3x3;
 use glam::{Quat, Vec3, Vec4};
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Mul};
 
 /// Provides SIMD-aware 4x4 matrix math.
 /// All functions assume row vectors.
@@ -60,11 +60,11 @@ impl Matrix {
     }
 
     #[inline(always)]
-    pub unsafe fn transpose_m(m: *const M, transposed: *mut M) {
+    pub unsafe fn transpose_m_to(m: *const M, transposed: *mut M) {
         // From original code:
-        //A weird function! Why?
-        //1) Missing some helpful instructions for actual SIMD accelerated transposition.
-        //2) Difficult to get SIMD types to generate competitive codegen due to lots of componentwise access.
+        // A weird function! Why?
+        // 1) Missing some helpful instructions for actual SIMD accelerated transposition.
+        // 2) Difficult to get SIMD types to generate competitive codegen due to lots of componentwise access.
 
         let m = &*m;
         let transposed = &mut *transposed;
@@ -97,14 +97,30 @@ impl Matrix {
     }
 
     #[inline(always)]
-    pub unsafe fn transpose(m: *const Self, transposed: *mut Self) {
-        Self::transpose_m(m as *const M, transposed as *mut M);
+    pub unsafe fn transpose_m(m: *const Self, transposed: *mut Self) {
+        Self::transpose_m_to(m as *const M, transposed as *mut M);
     }
 
-    pub unsafe fn transpose_to_value(m: &Self) -> Self {
-        let transposed;
-        Self::transpose(m, &transposed);
-        return transposed;
+    pub unsafe fn transpose_to(m: &Self, transposed: &mut Self) {
+        // Not an ideal implementation. Shuffles would be handy.
+        let xy = m.x.y;
+        let xz = m.x.z;
+        let xw = m.x.w;
+        let yz = m.y.z;
+        let yw = m.y.w;
+        let zw = m.z.w;
+        transposed.x = Vec4::new(m.x.x, m.y.x, m.z.x, m.w.x);
+        transposed.y = Vec4::new(xy, m.y.y, m.z.y, m.w.y);
+        transposed.z = Vec4::new(xz, yz, m.z.z, m.w.z);
+        transposed.w = Vec4::new(xw, yw, zw, m.w.w);
+    }
+
+    #[inline(always)]
+    pub fn transpose(m: Self) -> Self {
+        // TODO: WAY TO DO IT WITHOUT INITIALIZATION?
+        let mut transposed = Self::identity();
+        unsafe { Self::transpose_to(&m, &mut transposed) };
+        transposed
     }
 
     /// Transforms a vector with a transposed matrix.
@@ -115,20 +131,20 @@ impl Matrix {
 
     /// Transforms a vector with a matrix.
     #[inline(always)]
-    pub fn transform(v: &Vec4, m: &Self, result: &Vec4) {
-        let x = Vec4::splat(v.x());
-        let y = Vec4::splat(v.y());
-        let z = Vec4::splat(v.z());
-        let w = Vec4::splat(v.w());
+    pub fn transform(v: &Vec4, m: &Self, result: &mut Vec4) {
+        let x = Vec4::splat(v.x);
+        let y = Vec4::splat(v.y);
+        let z = Vec4::splat(v.z);
+        let w = Vec4::splat(v.w);
         *result = m.x * x + m.y * y + m.z * z + m.w * w;
     }
 
     /// Transforms a vector with a matrix. Implicitly uses 1 as the fourth component of the input vector.
     #[inline(always)]
-    pub fn transform_vector3(v: &Vec3, m: &Self, result: &mut Self) {
-        let x = Vec4::splat(v.x());
-        let y = Vec4::splat(v.y());
-        let z = Vec4::splat(v.z());
+    pub fn transform_vec3(v: Vec3, m: &Self, result: &mut Vec4) {
+        let x = Vec4::splat(v.x);
+        let y = Vec4::splat(v.y);
+        let z = Vec4::splat(v.z);
         *result = m.x * x + m.y * y + m.z * z + m.w;
     }
 
@@ -144,7 +160,7 @@ impl Matrix {
             let y = Vec4::splat(a.x.y);
             let z = Vec4::splat(a.x.z);
             let w = Vec4::splat(a.x.w);
-            result.x = (x * b_x + y * b_y) + (z * b_z + w * b.W);
+            result.x = (x * b_x + y * b_y) + (z * b_z + w * b.w);
         }
 
         {
@@ -152,7 +168,7 @@ impl Matrix {
             let y = Vec4::splat(a.y.y);
             let z = Vec4::splat(a.y.z);
             let w = Vec4::splat(a.y.w);
-            result.y = (x * b_x + y * b_y) + (z * b_z + w * b.W);
+            result.y = (x * b_x + y * b_y) + (z * b_z + w * b.w);
         }
 
         {
@@ -160,7 +176,7 @@ impl Matrix {
             let y = Vec4::splat(a.z.y);
             let z = Vec4::splat(a.z.z);
             let w = Vec4::splat(a.z.w);
-            result.z = (x * b_x + y * b_y) + (z * b_z + w * b.W);
+            result.z = (x * b_x + y * b_y) + (z * b_z + w * b.w);
         }
 
         {
@@ -168,13 +184,13 @@ impl Matrix {
             let y = Vec4::splat(a.w.y);
             let z = Vec4::splat(a.w.z);
             let w = Vec4::splat(a.w.w);
-            result.w = (x * b_x + y * b_y) + (z * b_z + w * b.W);
+            result.w = (x * b_x + y * b_y) + (z * b_z + w * b.w);
         }
     }
 
     #[inline(always)]
     pub fn create_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) {
-        //TODO: Could be better simdified.
+        // TODO: Could be better simdified.
         let xx = axis.x * axis.x;
         let yy = axis.y * axis.y;
         let zz = axis.z * axis.z;
