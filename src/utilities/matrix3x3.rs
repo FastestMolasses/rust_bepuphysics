@@ -66,9 +66,9 @@ impl Matrix3x3 {
     #[inline(always)]
     unsafe fn transpose_m(m: *const M, transposed: *mut M) {
         // From original code:
-        //A weird function! Why?
-        //1) Missing some helpful instructions for actual SIMD accelerated transposition.
-        //2) Difficult to get SIMD types to generate competitive codegen due to lots of componentwise access.
+        // A weird function! Why?
+        // 1) Missing some helpful instructions for actual SIMD accelerated transposition.
+        // 2) Difficult to get SIMD types to generate competitive codegen due to lots of componentwise access.
 
         let m = &*m;
         let transposed = &mut *transposed;
@@ -238,7 +238,7 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    pub fn create_from_quaternion(q: &Quat, result: &mut Self) -> Self {
+    pub fn create_from_quaternion(q: &Quat, result: &mut Self) {
         let qx2 = q.x + q.x;
         let qy2 = q.y + q.y;
         let qz2 = q.z + q.z;
@@ -258,7 +258,7 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    pub fn create_value_from_quaternion(q: &Quat) -> Self{
+    pub fn create_value_from_quaternion(q: &Quat) -> Self {
         let result;
         Matrix3x3::create_from_quaternion(q, result);
         return result;
@@ -282,7 +282,7 @@ impl Matrix3x3 {
 
     /// Creates a matrix representing a rotation derived from an axis and angle.
     #[inline(always)]
-    pub fn create_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) -> Self {
+    pub fn create_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) {
         let xx = axis.x * axis.x;
         let yy = axis.y * axis.y;
         let zz = axis.z * axis.z;
@@ -321,15 +321,15 @@ impl Matrix3x3 {
     /// the skew symmetric matrix representing the cross product.
     #[inline(always)]
     pub fn create_cross_product(v: &Vec3, result: &mut Self) {
-        result.x.x = 0;
+        result.x.x = 0.0;
         result.x.y = -v.z;
         result.x.z = v.y;
         result.y.x = v.z;
-        result.y.y = 0;
+        result.y.y = 0.0;
         result.y.z = -v.x;
         result.z.x = -v.y;
         result.z.y = v.x;
-        result.z.z = 0;
+        result.z.z = 0.0;
     }
 }
 
