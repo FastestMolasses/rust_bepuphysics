@@ -1,6 +1,7 @@
 use crate::utilities::matrix::Matrix;
 use glam::{Quat, Vec3};
 use std::ops::Mul;
+// use std::mem::MaybeUninit;
 
 /// 3 row, 3 column matrix.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -210,6 +211,11 @@ impl Matrix3x3 {
 
     #[inline(always)]
     fn multiply_new(a: &Self, b: &Self) -> Self {
+        // TODO: CHECK THIS COMPILED SOLUTION INSTEAD OF RECREATING ALGORITHM.
+        // let mut result: MaybeUninit<Matrix3x3> = MaybeUninit::uninit();
+        // Self::multiply(a, b, unsafe { result.as_mut_ptr().as_mut().unwrap() });
+        // unsafe { result.assume_init() }
+
         Self {
             x: Vec3::splat(a.x.x) * b.x + Vec3::splat(a.x.y) * b.y + Vec3::splat(a.x.z) * b.z,
             y: Vec3::splat(a.y.x) * b.x + Vec3::splat(a.y.y) * b.y + Vec3::splat(a.y.z) * b.z,
