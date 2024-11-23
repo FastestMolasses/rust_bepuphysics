@@ -1,9 +1,6 @@
-use std::f32::consts::PI;
 use std::mem::transmute;
-use std::simd::f32x4;
-use portable_simd::f32x8;
-
-use crate::utilities::{vector3::Vector3, matrix3x3::Matrix3x3, matrix::Matrix};
+use glam::Vec3;
+use crate::utilities::{matrix3x3::Matrix3x3, matrix::Matrix};
 
 #[inline(always)]
 pub fn add(a: Quaternion, b: Quaternion) -> Quaternion {
@@ -65,7 +62,7 @@ pub fn create_from_rotation_matrix_3x3(r: &Matrix3x3) -> Quaternion {
 
 #[inline(always)]
 pub fn create_from_rotation_matrix_4x4(r: &Matrix) -> Quaternion {
-    let rotation3x3 = Matrix3x3::from_matrix(r);
+    let rotation3x3 = Matrix3x3::create_from_matrix(r);
     create_from_rotation_matrix(&rotation3x3)
 }
 
@@ -129,7 +126,7 @@ pub fn negate(q: Quaternion) -> Quaternion {
 }
 
 #[inline(always)]
-pub fn transform_without_overlap(v: Vector3, rotation: Quaternion) -> Vector3 {
+pub fn transform_without_overlap(v: Vec3, rotation: Quaternion) -> Vec3 {
     let x2 = rotation.0[0] + rotation.0[0];
     let y2 = rotation.0[1] + rotation.0[1];
     let z2 = rotation.0[2] + rotation.0[2];
@@ -143,7 +140,7 @@ pub fn transform_without_overlap(v: Vector3, rotation: Quaternion) -> Vector3 {
     let wy2 = rotation.0[3] * y2;
     let wz2 = rotation.0[3] * z2;
 
-    Vector3::new(
+    Vec3::new(
         v.x * (1.0 - yy2 - zz2) + v.y * (xy2 - wz2) + v.z * (xz2 + wy2),
         v.x * (xy2 + wz2) + v.y * (1.0 - xx2 - zz2) + v.z * (yz2 - wx2),
         v.x * (xz2 - wy2) + v.y * (yz2 + wx2) + v.z * (1.0 - xx2 - yy2)
@@ -151,12 +148,12 @@ pub fn transform_without_overlap(v: Vector3, rotation: Quaternion) -> Vector3 {
 }
 
 #[inline(always)]
-pub fn transform(v: Vector3, rotation: Quaternion) -> Vector3 {
+pub fn transform(v: Vec3, rotation: Quaternion) -> Vec3 {
     transform_without_overlap(v, rotation)
 }
 
 #[inline(always)]
-pub fn transform_unit_x(rotation: Quaternion) -> Vector3 {
+pub fn transform_unit_x(rotation: Quaternion) -> Vec3 {
     let y2 = rotation.0[1] + rotation.0[1];
     let z2 = rotation.0[2] + rotation.0[2];
     let xy2 = rotation.0[0] * y2;
@@ -165,11 +162,11 @@ pub fn transform_unit_x(rotation: Quaternion) -> Vector3 {
     let zz2 = rotation.0[2] * z2;
     let wy2 = rotation.0[3] * y2;
     let wz2 = rotation.0[3] * z2;
-    Vector3::new(1.0 - yy2 - zz2, xy2 + wz2, xz2 - wy2)
+    Vec3::new(1.0 - yy2 - zz2, xy2 + wz2, xz2 - wy2)
 }
 
 #[inline(always)]
-pub fn transform_unit_y(rotation: Quaternion) -> Vector3 {
+pub fn transform_unit_y(rotation: Quaternion) -> Vec3 {
     let x2 = rotation.0[0] + rotation.0[0];
     let y2 = rotation.0[1] + rotation.0[1];
     let z2 = rotation.0[2] + rotation.0[2];
@@ -179,11 +176,11 @@ pub fn transform_unit_y(rotation: Quaternion) -> Vector3 {
     let zz2 = rotation.0[2] * z2;
     let wx2 = rotation.0[3] * x2;
     let wz2 = rotation.0[3] * z2;
-    Vector3::new(xy2 - wz2, 1.0 - xx2 - zz2, yz2 + wx2)
+    Vec3::new(xy2 - wz2, 1.0 - xx2 - zz2, yz2 + wx2)
 }
 
 #[inline(always)]
-pub fn transform_unit_z(rotation: Quaternion) -> Vector3 {
+pub fn transform_unit_z(rotation: Quaternion) -> Vec3 {
     let x2 = rotation.0[0] + rotation.0[0];
     let y2 = rotation.0[1] + rotation.0[1];
     let z2 = rotation.0[2] + rotation.0[2];
@@ -193,11 +190,11 @@ pub fn transform_unit_z(rotation: Quaternion) -> Vector3 {
     let yz2 = rotation.0[1] * z2;
     let wx2 = rotation.0[3] * x2;
     let wy2 = rotation.0[3] * y2;
-    Vector3::new(xz2 + wy2, yz2 - wx2, 1.0 - xx2 - yy2)
+    Vec3::new(xz2 + wy2, yz2 - wx2, 1.0 - xx2 - yy2)
 }
 
 #[inline(always)]
-pub fn create_from_axis_angle(axis: Vector3, angle: f32) -> Quaternion {
+pub fn create_from_axis_angle(axis: Vec3, angle: f32) -> Quaternion {
     let half_angle = angle * 0.5;
     let s = half_angle.sin();
     Quaternion(f32x4::new(
@@ -246,8 +243,8 @@ pub fn get_angle_from_quaternion(q: Quaternion) -> f32 {
 }
 
 #[inline(always)]
-pub fn get_axis_angle_from_quaternion(q: Quaternion) -> (Vector3, f32) {
-    let mut axis = Vector3::new(q.0[0], q.0[1], q.0[2]);
+pub fn get_axis_angle_from_quaternion(q: Quaternion) -> (Vec3, f32) {
+    let mut axis = Vec3::new(q.0[0], q.0[1], q.0[2]);
     let mut qw = q.0[3];
 
     if qw < 0.0 {
@@ -262,12 +259,12 @@ pub fn get_axis_angle_from_quaternion(q: Quaternion) -> (Vector3, f32) {
         let angle = 2.0 * qw.clamp(-1.0, 1.0).acos();
         (axis, angle)
     } else {
-        (Vector3::unit_y(), 0.0)
+        (Vec3::unit_y(), 0.0)
     }
 }
 
 #[inline(always)]
-pub fn get_quaternion_between_normalized_vectors(v1: Vector3, v2: Vector3) -> Quaternion {
+pub fn get_quaternion_between_normalized_vectors(v1: Vec3, v2: Vec3) -> Quaternion {
     let dot = v1.dot(v2);
     if dot < -0.9999 {
         let abs_x = v1.x.abs();

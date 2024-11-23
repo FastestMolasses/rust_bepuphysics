@@ -33,7 +33,7 @@ impl AffineTransform {
     #[inline(always)]
     pub fn from_rotation_translation(orientation: Quat, translation: Vec3) -> Self {
         Self {
-            linear_transform: Matrix3x3::create_value_from_quaternion(&orientation),
+            linear_transform: Matrix3x3::create_new_from_quaternion(&orientation),
             translation,
         }
     }
@@ -45,8 +45,8 @@ impl AffineTransform {
         orientation: Quat,
         translation: Vec3,
     ) -> Self {
-        let linear_transform = Matrix3x3::create_scale_value(&scaling);
-        let rotation = Matrix3x3::create_value_from_quaternion(&orientation);
+        let linear_transform = Matrix3x3::create_new_scale(&scaling);
+        let rotation = Matrix3x3::create_new_from_quaternion(&orientation);
         Self {
             linear_transform: linear_transform * rotation,
             translation,

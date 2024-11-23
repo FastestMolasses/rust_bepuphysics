@@ -505,7 +505,7 @@ impl Matrix {
     /// Creates a rigid world matrix from a rotation quaternion and position.
     #[inline(always)]
     pub fn create_rigid_from_quat(rotation: &Quat, position: &Vec3, world: &mut Self) -> Matrix {
-        let rotation_matrix = Matrix3x3::create_value_from_quaternion(rotation);
+        let rotation_matrix = Matrix3x3::create_new_from_quaternion(rotation);
         world.x = Vec4::new(
             rotation_matrix.x.x,
             rotation_matrix.x.y,

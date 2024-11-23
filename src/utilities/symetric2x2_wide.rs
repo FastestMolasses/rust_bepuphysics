@@ -1,6 +1,7 @@
 use crate::utilities::matrix2x3_wide::Matrix2x3Wide;
 use crate::utilities::vector2_wide::Vector2Wide;
 
+/// Stores the lower left triangle (including diagonal) of a 2x2 matrix.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Symmetric2x2Wide {
@@ -27,17 +28,17 @@ impl Symmetric2x2Wide {
     }
 
     #[inline(always)]
-    pub fn add(a: &Self, other: &Self, result: &mut Self) {
-        result.xx = a.xx + other.xx;
-        result.yx = a.yx + other.yx;
-        result.yy = a.yy + other.yy;
+    pub fn add(a: &Self, b: &Self, result: &mut Self) {
+        result.xx = a.xx + b.xx;
+        result.yx = a.yx + b.yx;
+        result.yy = a.yy + b.yy;
     }
 
     #[inline(always)]
-    pub fn sub(a: &Self, other: &Self, result: &mut Self) {
-        result.xx = a.xx - other.xx;
-        result.yx = a.yx - other.yx;
-        result.yy = a.yy - other.yy;
+    pub fn sub(a: &Self, b: &Self, result: &mut Self) {
+        result.xx = a.xx - b.xx;
+        result.yx = a.yx - b.yx;
+        result.yy = a.yy - b.yy;
     }
 
     #[inline(always)]
@@ -54,18 +55,19 @@ impl Symmetric2x2Wide {
         result.y = v.x * m.yx + v.y * m.yy;
     }
 
+    /// Computes result = transpose(transpose(a) * b), assuming b is symmetric.
     #[inline(always)]
-    pub fn multiply_transposed(&self, a: &Matrix2x3Wide) -> Matrix2x3Wide {
+    pub fn multiply_transposed(a: &Self, a: &Matrix2x3Wide) -> Matrix2x3Wide {
         Matrix2x3Wide {
             x: Vector3Wide {
-                x: a.x.x * self.xx + a.y.x * self.yx,
-                y: a.x.y * self.xx + a.y.y * self.yx,
-                z: a.x.z * self.xx + a.y.z * self.yx,
+                x: a.x.x * b.xx + a.y.x * b.yx,
+                y: a.x.y * b.xx + a.y.y * b.yx,
+                z: a.x.z * b.xx + a.y.z * b.yx,
             },
             y: Vector3Wide {
-                x: a.x.x * self.yx + a.y.x * self.yy,
-                y: a.x.y * self.yx + a.y.y * self.yy,
-                z: a.x.z * self.yx + a.y.z * self.yy,
+                x: a.x.x * b.yx + a.y.x * b.yY,
+                y: a.x.y * b.yx + a.y.y * b.yY,
+                z: a.x.z * b.yx + a.y.z * b.yY,
             },
         }
     }

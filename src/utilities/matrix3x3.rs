@@ -1,6 +1,6 @@
 use crate::utilities::matrix::Matrix;
 use glam::{Quat, Vec3};
-use std::ops::{Add, Mul, Sub};
+use std::ops::Mul;
 
 /// 3 row, 3 column matrix.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -113,51 +113,56 @@ impl Matrix3x3 {
 
     /// Inverts the given matix.
     #[inline(always)]
-    pub fn invert(m: &Self, inverse: &mut Self) -> Self {
-        let yz = self.y.cross(self.z);
-        let zx = self.z.cross(self.x);
-        let xy = self.x.cross(self.y);
-        let inverse_determinant = 1.0 / self.x.dot(yz);
+    pub fn invert(m: &Self, inverse: &mut Self) {
+        // From original code:
+        // Current implementation of cross far from optimal without shuffles, and even then this has some room for improvement.
+        // Inverts should be really rare, so it's not too concerning. Use the scalar version when possible until ryujit improves (and we improve this implementation).
+        let yz = m.y.cross(m.z);
+        let zx = m.z.cross(m.x);
+        let xy = m.x.cross(m.y);
+        let inverse_determinant = 1.0 / m.x.dot(yz);
         inverse.x = yz * inverse_determinant;
         inverse.y = zx * inverse_determinant;
         inverse.z = xy * inverse_determinant;
         unsafe {
-            Matrix3x3::transpose(&inverse, inverse)
+            Matrix3x3::transpose(inverse, inverse);
         }
     }
 
-    /// Inverts the given matix.
+    /// Inverts the given matix using scalar operations.
     #[inline(always)]
-    pub unsafe fn invert(m: *const Self, inverse: *mut Self) {
-        // TODO: CHECK IF THIS IS ACTUALLY MODIFYING THE INVERSE VARIABLE
+    pub unsafe fn invert_scaler(m: *const Self, inverse: *mut Self) {
         let m_scalar = m as *const M;
         let inverse_scalar = inverse as *mut M;
 
-        let m11 = (*m_scalar).m22 * (*m_scalar).m33 - (*m_scalar).m32 * (*m_scalar).m23;
-        let m21 = (*m_scalar).m23 * (*m_scalar).m31 - (*m_scalar).m33 * (*m_scalar).m21;
-        let m31 = (*m_scalar).m21 * (*m_scalar).m32 - (*m_scalar).m31 * (*m_scalar).m22;
-        let determinant_inverse =
-            1.0 / (m11 * (*m_scalar).m11 + m21 * (*m_scalar).m12 + m31 * (*m_scalar).m13);
+        let m_ref = &*m_scalar;
 
-        let m12 = (*m_scalar).m32 * (*m_scalar).m13 - (*m_scalar).m12 * (*m_scalar).m33;
-        let m22 = (*m_scalar).m33 * (*m_scalar).m11 - (*m_scalar).m13 * (*m_scalar).m31;
-        let m32 = (*m_scalar).m31 * (*m_scalar).m12 - (*m_scalar).m11 * (*m_scalar).m32;
+        let m11 = m_ref.m22 * m_ref.m33 - m_ref.m32 * m_ref.m23;
+        let m21 = m_ref.m23 * m_ref.m31 - m_ref.m33 * m_ref.m21;
+        let m31 = m_ref.m21 * m_ref.m32 - m_ref.m31 * m_ref.m22;
+        let determinant_inverse = 1.0 / (m11 * m_ref.m11 + m21 * m_ref.m12 + m31 * m_ref.m13);
 
-        let m13 = (*m_scalar).m12 * (*m_scalar).m23 - (*m_scalar).m22 * (*m_scalar).m13;
-        let m23 = (*m_scalar).m13 * (*m_scalar).m21 - (*m_scalar).m23 * (*m_scalar).m11;
-        let m33 = (*m_scalar).m11 * (*m_scalar).m22 - (*m_scalar).m21 * (*m_scalar).m12;
+        let m12 = m_ref.m32 * m_ref.m13 - m_ref.m12 * m_ref.m33;
+        let m22 = m_ref.m33 * m_ref.m11 - m_ref.m13 * m_ref.m31;
+        let m32 = m_ref.m31 * m_ref.m12 - m_ref.m11 * m_ref.m32;
 
-        (*inverse_scalar).m11 = m11 * determinant_inverse;
-        (*inverse_scalar).m21 = m21 * determinant_inverse;
-        (*inverse_scalar).m31 = m31 * determinant_inverse;
+        let m13 = m_ref.m12 * m_ref.m23 - m_ref.m22 * m_ref.m13;
+        let m23 = m_ref.m13 * m_ref.m21 - m_ref.m23 * m_ref.m11;
+        let m33 = m_ref.m11 * m_ref.m22 - m_ref.m21 * m_ref.m12;
 
-        (*inverse_scalar).m12 = m12 * determinant_inverse;
-        (*inverse_scalar).m22 = m22 * determinant_inverse;
-        (*inverse_scalar).m32 = m32 * determinant_inverse;
+        let inverse_ref = &mut *inverse_scalar;
 
-        (*inverse_scalar).m13 = m13 * determinant_inverse;
-        (*inverse_scalar).m23 = m23 * determinant_inverse;
-        (*inverse_scalar).m33 = m33 * determinant_inverse;
+        inverse_ref.m11 = m11 * determinant_inverse;
+        inverse_ref.m21 = m21 * determinant_inverse;
+        inverse_ref.m31 = m31 * determinant_inverse;
+
+        inverse_ref.m12 = m12 * determinant_inverse;
+        inverse_ref.m22 = m22 * determinant_inverse;
+        inverse_ref.m32 = m32 * determinant_inverse;
+
+        inverse_ref.m13 = m13 * determinant_inverse;
+        inverse_ref.m23 = m23 * determinant_inverse;
+        inverse_ref.m33 = m33 * determinant_inverse;
     }
 
     /// Transforms the vector by the matrix.
@@ -200,6 +205,15 @@ impl Matrix3x3 {
             let y = Vec3::splat(a.z.y);
             let z = Vec3::splat(a.z.z);
             result.z = x * b_x + y * b_y + z * b.z;
+        }
+    }
+
+    #[inline(always)]
+    fn multiply_new(a: &Self, b: &Self) -> Self {
+        Self {
+            x: Vec3::splat(a.x.x) * b.x + Vec3::splat(a.x.y) * b.y + Vec3::splat(a.x.z) * b.z,
+            y: Vec3::splat(a.y.x) * b.x + Vec3::splat(a.y.y) * b.y + Vec3::splat(a.y.z) * b.z,
+            z: Vec3::splat(a.z.x) * b.x + Vec3::splat(a.z.y) * b.y + Vec3::splat(a.z.z) * b.z,
         }
     }
 
@@ -258,10 +272,25 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    pub fn create_value_from_quaternion(q: &Quat) -> Self {
-        let result;
-        Matrix3x3::create_from_quaternion(q, result);
-        return result;
+    pub fn create_new_from_quaternion(q: &Quat) -> Self {
+        let qx2 = q.x + q.x;
+        let qy2 = q.y + q.y;
+        let qz2 = q.z + q.z;
+        let xx = qx2 * q.x;
+        let yy = qy2 * q.y;
+        let zz = qz2 * q.z;
+        let xy = qx2 * q.y;
+        let xz = qx2 * q.z;
+        let xw = qx2 * q.w;
+        let yz = qy2 * q.z;
+        let yw = qy2 * q.w;
+        let zw = qz2 * q.w;
+
+        Self {
+            x: Vec3::new(1.0 - yy - zz, xy + zw, xz - yw),
+            y: Vec3::new(xy - zw, 1.0 - xx - zz, yz + xw),
+            z: Vec3::new(xz + yw, yz - xw, 1.0 - xx - yy),
+        }
     }
 
     /// Creates a 3x3 matrix representing the given scale along its local axes.
@@ -274,15 +303,18 @@ impl Matrix3x3 {
 
     /// Creates a 3x3 matrix representing the given scale along its local axes.
     #[inline(always)]
-    pub fn create_scale_value(scale: &Vec3) -> Self {
-        let result;
-        Matrix3x3::create_scale(scale, result);
-        return result;
+    pub fn create_new_scale(scale: &Vec3) -> Self {
+        Self {
+            x: Vec3::new(scale.x, 0.0, 0.0),
+            y: Vec3::new(0.0, scale.y, 0.0),
+            z: Vec3::new(0.0, 0.0, scale.z),
+        }
     }
 
     /// Creates a matrix representing a rotation derived from an axis and angle.
     #[inline(always)]
-    pub fn create_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) {
+    pub fn create_from_axis_angle_to(axis: &Vec3, angle: f32, result: &mut Self) {
+        // TODO: Could be better simdified.
         let xx = axis.x * axis.x;
         let yy = axis.y * axis.y;
         let zz = axis.z * axis.z;
@@ -311,9 +343,9 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    pub fn create_value_from_axis_angle(axis: &Vec3, angle: f32) -> Self {
-        let result;
-        Matrix3x3::create_from_axis_angle(axis, angle, result);
+    pub fn create_from_axis_angle(axis: &Vec3, angle: f32) -> Self {
+        let mut result = Matrix3x3::identity();
+        Matrix3x3::create_from_axis_angle_to(axis, angle, &mut result);
         return result;
     }
 
@@ -333,35 +365,11 @@ impl Matrix3x3 {
     }
 }
 
-impl Add for Matrix3x3 {
-    type Output = Self;
-
-    #[inline(always)]
-    fn add(self, other: Self) -> Self::Output {
-        let result;
-        Self::add(&self, &other, result);
-        return result;
-    }
-}
-
-impl Sub for Matrix3x3 {
-    type Output = Self;
-
-    #[inline(always)]
-    fn sub(self, other: Self) -> Self::Output {
-        let result;
-        Self::subtract(&self, &other, result);
-        return result;
-    }
-}
-
 impl Mul for Matrix3x3 {
     type Output = Self;
 
     #[inline(always)]
     fn mul(self, other: Self) -> Self::Output {
-        let result;
-        Self::multiply(&self, &other, result);
-        return result;
+        Self::multiply_new(&self, &other)
     }
 }
