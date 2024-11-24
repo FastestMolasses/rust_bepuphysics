@@ -1,4 +1,4 @@
-use crate::utilities::matrix::Matrix;
+use crate::{out, utilities::matrix::Matrix};
 use glam::{Quat, Vec3};
 use std::ops::Mul;
 // use std::mem::MaybeUninit;
@@ -209,20 +209,6 @@ impl Matrix3x3 {
         }
     }
 
-    #[inline(always)]
-    fn multiply_new(a: &Self, b: &Self) -> Self {
-        // TODO: CHECK THIS COMPILED SOLUTION INSTEAD OF RECREATING ALGORITHM.
-        // let mut result: MaybeUninit<Matrix3x3> = MaybeUninit::uninit();
-        // Self::multiply(a, b, unsafe { result.as_mut_ptr().as_mut().unwrap() });
-        // unsafe { result.assume_init() }
-
-        Self {
-            x: Vec3::splat(a.x.x) * b.x + Vec3::splat(a.x.y) * b.y + Vec3::splat(a.x.z) * b.z,
-            y: Vec3::splat(a.y.x) * b.x + Vec3::splat(a.y.y) * b.y + Vec3::splat(a.y.z) * b.z,
-            z: Vec3::splat(a.z.x) * b.x + Vec3::splat(a.z.y) * b.y + Vec3::splat(a.z.z) * b.z,
-        }
-    }
-
     /// Multiplies the two matrices, where a is treated as transposed: result = transpose(a) * b
     #[inline(always)]
     pub fn multiply_transposed(a: &Self, b: &Self, result: &mut Self) {
@@ -350,9 +336,7 @@ impl Matrix3x3 {
 
     #[inline(always)]
     pub fn create_from_axis_angle(axis: &Vec3, angle: f32) -> Self {
-        let mut result = Matrix3x3::identity();
-        Matrix3x3::create_from_axis_angle_to(axis, angle, &mut result);
-        return result;
+        out!(Matrix3x3::create_from_axis_angle_to(axis, angle))
     }
 
     /// Creates a matrix such that a x v = a * result. Returns
@@ -376,6 +360,6 @@ impl Mul for Matrix3x3 {
 
     #[inline(always)]
     fn mul(self, other: Self) -> Self::Output {
-        Self::multiply_new(&self, &other)
+        out!(Self::multiply(&self, &other))
     }
 }

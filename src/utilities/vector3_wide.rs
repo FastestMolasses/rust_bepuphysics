@@ -1,4 +1,4 @@
-use crate::utilities::gather_scatter::GatherScatter;
+use crate::{out_unsafe, utilities::gather_scatter::GatherScatter};
 use crate::utilities::vector::Vector;
 use glam::Vec3;
 use std::{
@@ -260,11 +260,7 @@ impl Vector3Wide {
     /// Computes the cross product between two vectors.
     #[inline(always)]
     pub fn cross(a: &Self, b: &Self, result: &mut Self) {
-        let mut temp = Vector3Wide::from(Vector::<f32>::splat(0.0));
-        unsafe {
-            Self::cross_without_overlap(a, b, &mut temp);
-        }
-        *result = temp;
+        *result = out_unsafe!(Self::cross_without_overlap(a, b));
     }
 
     /// Computes the cross product between two vectors.

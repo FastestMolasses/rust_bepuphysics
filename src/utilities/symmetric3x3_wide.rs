@@ -6,7 +6,6 @@ use crate::utilities::symmetric2x2_wide::Symmetric2x2Wide;
 use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::mem::MaybeUninit;
 use std::ops::{Add, Mul};
 
 #[repr(C)]
@@ -61,8 +60,7 @@ impl Symmetric3x3Wide {
 
     /// Subtracts one symmetric matrix's components from another.
     #[inline(always)]
-    pub fn subtract(a: &Self, b: &Self, result: &mut MaybeUninit<Self>) {
-        let result = unsafe { result.assume_init_mut() };
+    pub fn subtract(a: &Self, b: &Self, result: &mut Self) {
         result.xx = a.xx - b.xx;
         result.yx = a.yx - b.yx;
         result.yy = a.yy - b.yy;
@@ -331,9 +329,7 @@ impl Add<Symmetric3x3Wide> for Symmetric3x3Wide {
 
     #[inline(always)]
     fn add(self, rhs: Symmetric3x3Wide) -> Self::Output {
-        let mut result = MaybeUninit::uninit();
-        Symmetric3x3Wide::add(&self, &rhs, &mut result);
-        unsafe { result.assume_init() }
+        out!(Symmetric3x3Wide::add(&self, &rhs))
     }
 }
 
@@ -342,9 +338,7 @@ impl Add<&Symmetric3x3Wide> for &Symmetric3x3Wide {
 
     #[inline(always)]
     fn add(self, rhs: &Symmetric3x3Wide) -> Self::Output {
-        let mut result = MaybeUninit::uninit();
-        Symmetric3x3Wide::add(self, rhs, &mut result);
-        unsafe { result.assume_init() }
+        out!(Symmetric3x3Wide::add(self, rhs))
     }
 }
 
@@ -428,9 +422,7 @@ impl Mul<Symmetric3x3Wide> for Vector3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Symmetric3x3Wide) -> Self::Output {
-        let mut result = MaybeUninit::uninit();
-        Symmetric3x3Wide::transform_without_overlap(&self, &rhs, &mut result);
-        unsafe { result.assume_init() }
+        out!(Symmetric3x3Wide::transform_without_overlap(&self, &rhs))
     }
 }
 
@@ -439,11 +431,7 @@ impl Mul<Vector<f32>> for Symmetric3x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Vector<f32>) -> Self::Output {
-        let mut result = MaybeUninit::<Symmetric3x3Wide>::uninit();
-        Symmetric3x3Wide::scale(&self, rhs, unsafe { result.as_mut_ptr().as_mut().unwrap() });
-        unsafe { result.assume_init() }
-        // let result = out!(Symmetric3x3Wide::scale(&self, rhs));
-        // result
+        out!(Symmetric3x3Wide::scale(&self, rhs))
     }
 }
 
@@ -452,9 +440,7 @@ impl Mul<Symmetric3x3Wide> for Matrix2x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Symmetric3x3Wide) -> Self::Output {
-        let mut result = MaybeUninit::uninit();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(&self, &rhs, &mut result);
-        unsafe { result.assume_init() }
+        out!(Symmetric3x3Wide::multiply_without_overlap_2x3(&self, &rhs))
     }
 }
 
@@ -463,9 +449,7 @@ impl Mul<Symmetric3x3Wide> for Matrix3x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Symmetric3x3Wide) -> Self::Output {
-        let mut result = MaybeUninit::uninit();
-        Symmetric3x3Wide::multiply_without_overlap_3x3(&self, &rhs, &mut result);
-        unsafe { result.assume_init() }
+        out!(Symmetric3x3Wide::multiply_without_overlap_3x3(&self, &rhs))
     }
 }
 
@@ -474,8 +458,6 @@ impl Mul<Matrix3x3Wide> for Symmetric3x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Matrix3x3Wide) -> Self::Output {
-        let mut result = MaybeUninit::uninit();
-        Symmetric3x3Wide::multiply(&self, &rhs, &mut result);
-        unsafe { result.assume_init() }
+        out!(Symmetric3x3Wide::multiply(&self, &rhs))
     }
 }

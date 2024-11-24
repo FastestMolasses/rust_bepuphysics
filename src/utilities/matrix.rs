@@ -1,6 +1,6 @@
-use crate::utilities::matrix3x3::Matrix3x3;
+use crate::{out, out_unsafe, utilities::matrix3x3::Matrix3x3};
 use glam::{Quat, Vec3, Vec4};
-use std::ops::{Mul};
+use std::ops::Mul;
 
 /// Provides SIMD-aware 4x4 matrix math.
 /// All functions assume row vectors.
@@ -117,10 +117,7 @@ impl Matrix {
 
     #[inline(always)]
     pub fn transpose(m: Self) -> Self {
-        // TODO: WAY TO DO IT WITHOUT INITIALIZATION?
-        let mut transposed = Self::identity();
-        unsafe { Self::transpose_to(&m, &mut transposed) };
-        transposed
+        out_unsafe!(Self::transpose_to(&m))
     }
 
     /// Transforms a vector with a transposed matrix.
@@ -337,16 +334,13 @@ impl Matrix {
         horizontal_fov: f32,
         near_clip: f32,
         far_clip: f32,
-    ) {
-        let perspective;
-        Self::create_perspective_from_fovs(
+    ) -> Self {
+        out!(Self::create_perspective_from_fovs(
             vertical_fov,
             horizontal_fov,
             near_clip,
-            far_clip,
-            perspective,
-        );
-        return perspective;
+            far_clip
+        ))
     }
 
     /// Creates a right handed orthographic projection.
@@ -442,9 +436,7 @@ impl Matrix {
     /// Inverts the matrix.
     #[inline(always)]
     pub fn invert_to_value(m: &Self) -> Self {
-        let inverted;
-        Self::invert(m, inverted);
-        return inverted;
+        out!(Self::invert(m))
     }
 
     /// Creates a view matrix pointing in a direction with a given up vector.
@@ -469,9 +461,7 @@ impl Matrix {
     /// Creates a view matrix pointing in a direction with a given up vector.
     #[inline(always)]
     pub fn create_view_value(position: &Vec3, forward: &Vec3, up_vector: &Vec3) -> Self {
-        let view_matrix;
-        Self::create_view(position, forward, up_vector, view_matrix);
-        return view_matrix;
+        out!(Self::create_view(position, forward, up_vector))
     }
 
     /// Creates a view matrix pointing from a position to a target with the given up vector.
@@ -488,9 +478,7 @@ impl Matrix {
     /// Creates a view matrix pointing from a position to a target with the given up vector.
     #[inline(always)]
     pub fn create_look_at_value(position: &Vec3, target: &Vec3, up_vector: &Vec3) -> Self {
-        let view_matrix;
-        Self::create_look_at(position, target, up_vector, view_matrix);
-        return view_matrix;
+        out!(Self::create_look_at(position, target, up_vector))
     }
 
     /// Creates a rigid world matrix from a rotation matrix and position.
@@ -539,9 +527,7 @@ impl Matrix {
     /// Creates a 4x4 matrix from a 3x3 matrix. All extra columns and rows filled with 0 except the W.W, which is set to 1.
     #[inline(always)]
     pub fn create_value_from_3x3(matrix3x3: &Matrix3x3) -> Self {
-        let matrix4x4;
-        Self::create_from_3x3(matrix3x3, matrix4x4);
-        return matrix4x4;
+        out!(Self::create_from_3x3(matrix3x3))
     }
 }
 
@@ -550,8 +536,6 @@ impl Mul for Matrix {
 
     #[inline(always)]
     fn mul(self, other: Self) -> Self::Output {
-        let result;
-        Self::multiply(&self, &other, result);
-        return result;
+        out!(Self::multiply(&self, &other))
     }
 }
