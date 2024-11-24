@@ -1,4 +1,11 @@
-use std::f32::consts::{FRAC_PI_2, PI, FRAC_PI_4};
+use crate::utilities::vector::Vector;
+use std::f32::consts::{FRAC_PI_2, PI};
+use std::ops::BitAnd;
+use std::simd::cmp::SimdPartialOrd;
+use std::simd::num::SimdFloat;
+use std::simd::StdFloat;
+
+const TWO_PI: f32 = 2.0 * PI;
 
 /// Clamps a value between a minimum and maximum value.
 #[inline(always)]
@@ -51,14 +58,14 @@ pub fn cos(x: f32) -> f32 {
     // Rational approximation over [0, pi/2], use symmetry for the rest.
     let period_count = x * (0.5 / PI);
     let period_fraction = period_count - period_count.floor(); // This is a source of error as you get away from 0.
-    let period_x = period_fraction * 2.0 * PI;
+    let period_x = period_fraction * TWO_PI;
 
     // [0, pi/2] = f(x)
     // (pi/2, pi] = -f(Pi - x)
     // (pi, 3 * pi / 2] = -f(x - Pi)
     // (3*pi/2, 2*pi] = f(2 * Pi - x)
     let y = if period_x > 3.0 * FRAC_PI_2 {
-        2.0 * PI - period_x
+        TWO_PI - period_x
     } else if period_x > PI {
         period_x - PI
     } else if period_x > FRAC_PI_2 {
@@ -93,14 +100,22 @@ pub fn cos(x: f32) -> f32 {
     }
 }
 
+/// Computes an approximation of sine. Maximum error a little below 5e-7 for the interval -2 * Pi to 2 * Pi.
+/// Values further from the interval near zero have gracefully degrading error.
 #[inline(always)]
 pub fn sin(x: f32) -> f32 {
-    let period_count = x * (0.5 / PI as f64) as f32;
-    let period_fraction = period_count - period_count.floor();
-    let period_x = period_fraction * 2.0 * PI;
+    // Similar to cos, use a rational approximation for the region of sin from [0, pi/2]. Use symmetry to cover the rest.
+    // This has its own implementation rather than just calling into Cos because we want maximum fidelity near 0.
+    let period_count = x * (0.5 / PI);
+    let period_fraction = period_count - period_count.floor(); // This is a source of error as you get away from 0.
+    let period_x = period_fraction * TWO_PI;
 
+    // [0, pi/2] = f(x)
+    // (pi/2, pi] = f(pi - x)
+    // (pi, 3/2 * pi] = -f(x - pi)
+    // (3/2 * pi, 2*pi] = -f(2 * pi - x)
     let y = if period_x > 3.0 * FRAC_PI_2 {
-        2.0 * PI - period_x
+        TWO_PI - period_x
     } else if period_x > PI {
         period_x - PI
     } else if period_x > FRAC_PI_2 {
@@ -109,6 +124,9 @@ pub fn sin(x: f32) -> f32 {
         period_x
     };
 
+    // Using a fifth degree numerator and denominator.
+    // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
+    // TODO: FMA could help here, primarily in terms of precision.
     let numerator =
         ((((0.0040507708755727605 * y - 0.006685815219853882) * y - 0.13993701695343166) * y
             + 0.06174562337697123)
@@ -123,7 +141,6 @@ pub fn sin(x: f32) -> f32 {
             * y
             + 1.0;
     let result = numerator / denominator;
-
     if period_x > PI {
         -result
     } else {
@@ -131,10 +148,12 @@ pub fn sin(x: f32) -> f32 {
     }
 }
 
+/// Computes an approximation of arccos. Inputs outside of [-1, 1] are clamped. Maximum error less than 5.17e-07.
 #[inline(always)]
 pub fn acos(x: f32) -> f32 {
     let negative_input = x < 0.0;
     let x = 1.0f32.min(x.abs());
+    // Rational approximation (scaling sqrt(1-x)) over [0, 1], use symmetry for the rest. TODO: FMA would help with precision.
     let numerator = (1.0 - x).sqrt()
         * (62.95741097600742
             + x * (69.6550664543659 + x * (17.54512349463405 + x * 0.6022076120669532)));
@@ -147,106 +166,148 @@ pub fn acos(x: f32) -> f32 {
     }
 }
 
+/// Computes an approximation of cosine. Maximum error a little below 8e-7 for the interval -2 * Pi to 2 * Pi.
+/// Values further from the interval near zero have gracefully degrading error.
 #[inline(always)]
-pub fn cos_simd(x: f32x4) -> f32x4 {
-    let period_count = x * (0.5 / PI as f64) as f32;
-    let period_fraction = period_count - period_count.floor();
-    let two_pi = f32x4::splat(2.0 * PI);
+pub fn cos_simd(x: Vector<f32>) -> Vector<f32> {
+    // Rational approximation over [0, pi/2], use symmetry for the rest.
+    let period_count = x * Vector::splat(0.5 / PI);
+    let period_fraction = period_count - period_count.floor(); // This is a source of error as you get away from 0.
+    let two_pi = Vector::splat(TWO_PI);
     let period_x = period_fraction * two_pi;
 
-    let pi_over_2 = f32x4::splat(FRAC_PI_2);
-    let pi = f32x4::splat(PI);
-    let pi_3_over_2 = f32x4::splat(3.0 * FRAC_PI_2);
+    // [0, pi/2] = f(x)
+    // (pi/2, pi] = -f(Pi - x)
+    // (pi, 3 * pi / 2] = -f(x - Pi)
+    // (3*pi/2, 2*pi] = f(2 * Pi - x)
+    let pi_over_2 = Vector::splat(FRAC_PI_2);
+    let pi = Vector::splat(PI);
+    let pi_3_over_2 = Vector::splat(3.0 * FRAC_PI_2);
 
-    let y = (period_x.gt(pi_over_2) & (pi - period_x).lt(period_x))
-        | (period_x.gt(pi) & (period_x - pi).lt(period_x))
-        | (period_x.gt(pi_3_over_2) & (two_pi - period_x).lt(period_x));
+    let mut y: Vector<f32> = Vector::simd_gt(period_x, pi_over_2).select(pi - period_x, period_x);
+    y = Vector::simd_gt(period_x, pi).select(period_x - pi, y);
+    y = Vector::simd_gt(period_x, pi_3_over_2).select(Vector::splat(TWO_PI) - period_x, y);
 
-    let numerator =
-        ((((f32x4::splat(-0.003436308368583229) * y + f32x4::splat(0.021317031205957775)) * y
-            + f32x4::splat(0.06955843390178032))
-            * y
-            - f32x4::splat(0.4578088075324152))
-            * y
-            - f32x4::splat(0.15082367674208508))
-            * y
-            + f32x4::splat(1.0);
-    let denominator =
-        ((((f32x4::splat(-0.00007650398834677185) * y + f32x4::splat(0.0007451378206294365)) * y
-            - f32x4::splat(0.00585321045829395))
-            * y
-            + f32x4::splat(0.04219116713777847))
-            * y
-            - f32x4::splat(0.15082367538305258))
-            * y
-            + f32x4::splat(1.0);
+    // Using a fifth degree numerator and denominator.
+    // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
+    // TODO: FMA could help here, primarily in terms of precision.
+    // let y2 = y * y;
+    // let y3 = y2 * y;
+    // let y4 = y2 * y2;
+    // let y5 = y3 * y2;
+    // let numerator = Vector::splat(1.0_f32) - 0.15082367674208508 * y - 0.4578088075324152 * y2 + 0.06955843390178032 * y3 + 0.021317031205957775 * y4 - 0.003436308368583229 * y5;
+    // let denominator = Vector::splat(1.0_f32) - 0.15082367538305258 * y + 0.04219116713777847 * y2 - 0.00585321045829395 * y3 + 0.0007451378206294365 * y4 - 0.00007650398834677185 * y5;
+    let numerator = ((((Vector::splat(-0.003436308368583229_f32) * y
+        + Vector::splat(0.021317031205957775_f32))
+        * y
+        + Vector::splat(0.06955843390178032_f32))
+        * y
+        - Vector::splat(0.4578088075324152_f32))
+        * y
+        - Vector::splat(0.15082367674208508_f32))
+        * y
+        + Vector::splat(1.0_f32);
+    let denominator = ((((Vector::splat(-0.00007650398834677185_f32) * y
+        + Vector::splat(0.0007451378206294365_f32))
+        * y
+        - Vector::splat(0.00585321045829395_f32))
+        * y
+        + Vector::splat(0.04219116713777847_f32))
+        * y
+        - Vector::splat(0.15082367538305258_f32))
+        * y
+        + Vector::splat(1.0_f32);
     let result = numerator / denominator;
-
-    (period_x.gt(pi_over_2) & period_x.lt(pi_3_over_2)).select(-result, result)
+    Vector::simd_gt(period_x, pi_over_2)
+        .bitand(Vector::simd_lt(period_x, pi_3_over_2))
+        .select(-result, result)
 }
 
+/// Computes an approximation of sine. Maximum error a little below 5e-7 for the interval -2 * Pi to 2 * Pi.
+/// Values further from the interval near zero have gracefully degrading error.
 #[inline(always)]
-pub fn sin_simd(x: f32x4) -> f32x4 {
-    let period_count = x * (0.5 / PI as f64) as f32;
-    let period_fraction = period_count - period_count.floor();
-    let two_pi = f32x4::splat(2.0 * PI);
+pub fn sin_simd(x: Vector<f32>) -> Vector<f32> {
+    // Similar to cos, use a rational approximation for the region of sin from [0, pi/2]. Use symmetry to cover the rest.
+    // This has its own implementation rather than just calling into Cos because we want maximum fidelity near 0.
+    let period_count = x * Vector::splat(0.5 / PI);
+    let period_fraction = period_count - period_count.floor(); // This is a source of error as you get away from 0.
+    let two_pi = Vector::splat(TWO_PI);
     let period_x = period_fraction * two_pi;
 
-    let pi = f32x4::splat(PI);
-    let pi_over_2 = f32x4::splat(FRAC_PI_2);
-    let pi_3_over_2 = f32x4::splat(3.0 * FRAC_PI_2);
+    // [0, pi/2] = f(x)
+    // (pi/2, pi] = f(pi - x)
+    // (pi, 3/2 * pi] = -f(x - pi)
+    // (3/2 * pi, 2*pi] = -f(2 * pi - x)
+    let pi = Vector::splat(PI);
+    let pi_over_2 = Vector::splat(FRAC_PI_2);
 
-    let y = (period_x.gt(pi_over_2) & (pi - period_x).lt(period_x))
-        | (period_x.gt(pi) & (period_x - pi).lt(period_x))
-        | (period_x.gt(pi_3_over_2) & (two_pi - period_x).lt(period_x));
+    let mut y: Vector<f32> = Vector::simd_gt(period_x, pi_over_2).select(pi - period_x, period_x);
+    let in_second_half = Vector::simd_gt(period_x, pi);
+    y = in_second_half.select(period_x - pi, y);
+    y = Vector::simd_gt(period_x, Vector::splat(3.0 * FRAC_PI_2)).select(two_pi - period_x, y);
 
-    let in_second_half = period_x.gt(pi);
-
-    let numerator =
-        ((((f32x4::splat(0.0040507708755727605) * y - f32x4::splat(0.006685815219853882)) * y
-            - f32x4::splat(0.13993701695343166))
-            * y
-            + f32x4::splat(0.06174562337697123))
-            * y
-            + f32x4::splat(1.00000000151466040))
-            * y;
-    let denominator =
-        ((((f32x4::splat(0.00009018370615921334) * y + f32x4::splat(0.0001700784176413186)) * y
-            + f32x4::splat(0.003606014457152456))
-            * y
-            + f32x4::splat(0.02672943625500751))
-            * y
-            + f32x4::splat(0.061745651499203795))
-            * y
-            + f32x4::splat(1.0);
+    // Using a fifth degree numerator and denominator.
+    // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
+    // TODO: FMA could help here, primarily in terms of precision.
+    // let y2 = y * y;
+    // let y3 = y2 * y;
+    // let y4 = y2 * y2;
+    // let y5 = y3 * y2;
+    // let numerator = 1.0000000015146604_f32 * y + 0.06174562337697123_f32 * y2 - 0.13993701695343166_f32 * y3 - 0.006685815219853882_f32 * y4 + 0.0040507708755727605_f32 * y5;
+    // let denominator = Vector::splat(1.0_f32) + 0.061745651499203795_f32 * y + 0.02672943625500751_f32 * y2 + 0.003606014457152456_f32 * y3 + 0.0001700784176413186_f32 * y4 + 0.00009018370615921334_f32 * y5;
+    let numerator = ((((Vector::splat(0.0040507708755727605_f32) * y
+        - Vector::splat(0.006685815219853882_f32))
+        * y
+        - Vector::splat(0.13993701695343166_f32))
+        * y
+        + Vector::splat(0.06174562337697123_f32))
+        * y
+        + Vector::splat(1.00000000151466040_f32))
+        * y;
+    let denominator = ((((Vector::splat(0.00009018370615921334_f32) * y
+        + Vector::splat(0.0001700784176413186_f32))
+        * y
+        + Vector::splat(0.003606014457152456_f32))
+        * y
+        + Vector::splat(0.02672943625500751_f32))
+        * y
+        + Vector::splat(0.061745651499203795_f32))
+        * y
+        + Vector::splat(1.0_f32);
     let result = numerator / denominator;
-
     in_second_half.select(-result, result)
 }
 
+/// Computes an approximation of arccos. Inputs outside of [-1, 1] are clamped.
+/// Maximum error less than 5.17e-07.
 #[inline(always)]
-pub fn acos_simd(x: f32x4) -> f32x4 {
-    let negative_input = x.lt(f32x4::splat(0.0));
-    let x = f32x4::splat(1.0).min(x.abs());
-    let numerator = (f32x4::splat(1.0) - x).sqrt()
-        * (f32x4::splat(62.95741097600742)
-            + x * (f32x4::splat(69.6550664543659)
-                + x * (f32x4::splat(17.54512349463405) + x * f32x4::splat(0.6022076120669532))));
-    let denominator = f32x4::splat(40.07993264439811)
-        + x * (f32x4::splat(49.81949855726789) + x * (f32x4::splat(15.703851745284796) + x));
-    let result = numerator / denominator;
-    negative_input.select(f32x4::splat(PI) - result, result)
+pub fn acos_simd(x: Vector<f32>) -> Vector<f32> {
+    let negative_input = Vector::simd_lt(x, Vector::splat(0.0));
+    let x = SimdFloat::simd_min(Vector::splat(1.0), SimdFloat::abs(x));
+
+    // Rational approximation (scaling sqrt(1-x)) over [0, 1], use symmetry for the rest. TODO: FMA would help with precision.
+    let numerator = Vector::sqrt(Vector::splat(1.0_f32) - x)
+        * (Vector::splat(62.95741097600742_f32)
+            + x * (Vector::splat(69.6550664543659_f32)
+                + x * (Vector::splat(17.54512349463405_f32)
+                    + x * Vector::splat(0.6022076120669532_f32))));
+    let denominator = Vector::splat(40.07993264439811_f32)
+        + x * (Vector::splat(49.81949855726789_f32)
+            + x * (Vector::splat(15.703851745284796_f32) + x));
+
+    negativeInput.select(Vector::splat(PI) - result, result)
+}
+
+/// Gets the change in angle from a to b as a signed value from -pi to pi.
+#[inline(always)]
+pub fn get_signed_angle_difference(a: &Vector<f32>, b: &Vector<f32>, difference: &mut Vector<f32>) {
+    let half = Vector::splat(0.5_f32);
+    let x = (b - a) * Vector::splat(1.0 / TWO_PI) + half;
+    *difference = (x - x.floor() - half) * Vector::splat(TWO_PI);
 }
 
 #[inline(always)]
-pub fn get_signed_angle_difference(a: f32x4, b: f32x4) -> f32x4 {
-    let half = f32x4::splat(0.5);
-    let x = (b - a) * f32x4::splat(1.0 / (2.0 * PI)) + half;
-    (x - x.floor() - half) * f32x4::splat(2.0 * PI)
-}
-
-#[inline(always)]
-pub fn fast_reciprocal(v: f32x4) -> f32x4 {
+pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     unsafe {
         if is_x86_feature_detected!("avx") {

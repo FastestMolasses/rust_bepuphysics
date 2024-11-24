@@ -7,6 +7,8 @@ mod utilities;
 
 pub use utilities::*;
 
+// TODO: DOES is_x86_feature_detected GET COMPILED OUT?
+
 /// Provides a zero-cost abstraction for out parameters similar to C#'s `out` keyword.
 ///
 /// # Examples
