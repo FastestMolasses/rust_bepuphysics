@@ -1,5 +1,6 @@
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::{FRAC_PI_2, PI, FRAC_PI_4};
 
+/// Clamps a value between a minimum and maximum value.
 #[inline(always)]
 pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
     if value < min {
@@ -11,6 +12,7 @@ pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
     }
 }
 
+/// Returns the higher value of the two parameters.
 #[inline(always)]
 pub fn max<T: PartialOrd>(a: T, b: T) -> T {
     if a > b {
@@ -20,6 +22,7 @@ pub fn max<T: PartialOrd>(a: T, b: T) -> T {
     }
 }
 
+/// Returns the lower value of the two parameters.
 #[inline(always)]
 pub fn min<T: PartialOrd>(a: T, b: T) -> T {
     if a < b {
@@ -29,16 +32,7 @@ pub fn min<T: PartialOrd>(a: T, b: T) -> T {
     }
 }
 
-#[inline(always)]
-pub fn to_radians(degrees: f32) -> f32 {
-    degrees * (PI / 180.0)
-}
-
-#[inline(always)]
-pub fn to_degrees(radians: f32) -> f32 {
-    radians * (180.0 / PI)
-}
-
+/// Returns -1 if the value is negative and 1 otherwise.
 #[inline(always)]
 pub fn binary_sign(x: f32) -> f32 {
     if x < 0.0 {
@@ -48,6 +42,10 @@ pub fn binary_sign(x: f32) -> f32 {
     }
 }
 
+/// Computes an approximation of cosine. Maximum error a little below 8e-7 for the interval -2 * Pi to 2 * Pi. Values further from the interval near zero have gracefully degrading error.
+/// Note that these cos/sin implementations are not here for performance, but rather to:
+/// 1) Provide a SIMD accelerated version for wide processing, and
+/// 2) Provide a scalar implementation that is consistent with the SIMD version for systems which need to match its behavior.
 #[inline(always)]
 pub fn cos(x: f32) -> f32 {
     let period_count = x * (0.5 / PI as f64) as f32;

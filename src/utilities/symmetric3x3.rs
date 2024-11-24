@@ -1,23 +1,32 @@
+use crate::{out, utilities::matrix3x3::Matrix3x3};
+use core::ops::{Add, Mul, Sub};
 use glam::Vec3;
 
-use crate::utilities::matrix3x3::Matrix3x3;
-use crate::utilities::vector::Vector;
-use core::ops::{Add, Mul, Sub};
-
+/// Lower left triangle (including diagonal) of a symmetric 3x3 matrix.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Symmetric3x3 {
+    /// First row, first column of the matrix.
     pub xx: f32,
+    /// Second row, first column of the matrix.
     pub yx: f32,
+    /// Second row, second column of the matrix.
     pub yy: f32,
+    /// Third row, first column of the matrix.
     pub zx: f32,
+    /// Third row, second column of the matrix.
     pub zy: f32,
+    /// Third row, third column of the matrix.
     pub zz: f32,
 }
 
 impl Symmetric3x3 {
+    /// Computes rT * m * r for a symmetric matrix m and a rotation matrix r.
     #[inline(always)]
-    pub fn rotation_sandwich(r: &Matrix3x3, m: &Symmetric3x3) -> Self {
+    pub fn rotation_sandwich(r: &Matrix3x3, m: &Self, sandwich: &mut Self) {
+        // TODO: We just copied this from the wide implementation. There are a lot of ways to improve this, should it be necessary.
+        // (There's virtually no chance that optimizing this to a serious degree would be worth it- at the time of writing, it's only called by the pose integrator, which is
+        // horribly memory bound anyway.)
         let i11 = r.x.x * m.xx + r.y.x * m.yx + r.z.x * m.zx;
         let i12 = r.x.x * m.yx + r.y.x * m.yy + r.z.x * m.zy;
         let i13 = r.x.x * m.zx + r.y.x * m.zy + r.z.x * m.zz;
@@ -30,119 +39,109 @@ impl Symmetric3x3 {
         let i32 = r.x.z * m.yx + r.y.z * m.yy + r.z.z * m.zy;
         let i33 = r.x.z * m.zx + r.y.z * m.zy + r.z.z * m.zz;
 
-        Self {
-            xx: i11 * r.x.x + i12 * r.y.x + i13 * r.z.x,
-            yx: i21 * r.x.x + i22 * r.y.x + i23 * r.z.x,
-            yy: i21 * r.x.y + i22 * r.y.y + i23 * r.z.y,
-            zx: i31 * r.x.x + i32 * r.y.x + i33 * r.z.x,
-            zy: i31 * r.x.y + i32 * r.y.y + i33 * r.z.y,
-            zz: i31 * r.x.z + i32 * r.y.z + i33 * r.z.z,
-        }
+        sandwich.xx = i11 * r.x.x + i12 * r.y.x + i13 * r.z.x;
+        sandwich.yx = i21 * r.x.x + i22 * r.y.x + i23 * r.z.x;
+        sandwich.yy = i21 * r.x.y + i22 * r.y.y + i23 * r.z.y;
+        sandwich.zx = i31 * r.x.x + i32 * r.y.x + i33 * r.z.x;
+        sandwich.zy = i31 * r.x.y + i32 * r.y.y + i33 * r.z.y;
+        sandwich.zz = i31 * r.x.z + i32 * r.y.z + i33 * r.z.z;
+    }
+
+    /// Computes the determinant of a symmetric matrix.
+    #[inline(always)]
+    pub fn determinant(m: &Self) -> f32 {
+        let m11 = m.yy * m.zz - m.zy * m.zy;
+        let m21 = m.zy * m.zx - m.zz * m.yx;
+        let m31 = m.yx * m.zy - m.zx * m.yy;
+        m11 * m.xx + m21 * m.yx + m31 * m.zx
+    }
+
+    /// Inverts the given matix.
+    #[inline(always)]
+    pub fn invert(m: &Self, inverse: &mut Self) {
+        let m11 = m.yy * m.zz - m.zy * m.zy;
+        let m21 = m.zy * m.zx - m.zz * m.yx;
+        let m31 = m.yx * m.zy - m.zx * m.yy;
+        let determinant_inverse = 1.0 / (m11 * m.xx + m21 * m.yx + m31 * m.zx);
+
+        let m22 = m.zz * m.xx - m.zx * m.zx;
+        let m32 = m.zx * m.yx - m.xx * m.zy;
+
+        let m33 = m.xx * m.yy - m.yx * m.yx;
+
+        inverse.xx = m11 * determinant_inverse;
+        inverse.yx = m21 * determinant_inverse;
+        inverse.zx = m31 * determinant_inverse;
+        inverse.yy = m22 * determinant_inverse;
+        inverse.zy = m32 * determinant_inverse;
+        inverse.zz = m33 * determinant_inverse;
     }
 
     #[inline(always)]
-    pub fn determinant(&self) -> f32 {
-        let m11 = self.yy * self.zz - self.zy * self.zy;
-        let m21 = self.zy * self.zx - self.zz * self.yx;
-        let m31 = self.yx * self.zy - self.zx * self.yy;
-        m11 * self.xx + m21 * self.yx + m31 * self.zx
+    pub fn scale(m: &Self, scale: f32, scaled: &mut Self) {
+        scaled.xx = self.xx * scale;
+        scaled.yx = self.yx * scale;
+        scaled.yy = self.yy * scale;
+        scaled.zx = self.zx * scale;
+        scaled.zy = self.zy * scale;
+        scaled.zz = self.zz * scale;
     }
 
     #[inline(always)]
-    pub fn invert(&self) -> Self {
-        let m11 = self.yy * self.zz - self.zy * self.zy;
-        let m21 = self.zy * self.zx - self.zz * self.yx;
-        let m31 = self.yx * self.zy - self.zx * self.yy;
-        let determinant_inverse = 1.0 / (m11 * self.xx + m21 * self.yx + m31 * self.zx);
-
-        let m22 = self.zz * self.xx - self.zx * self.zx;
-        let m32 = self.zx * self.yx - self.xx * self.zy;
-
-        let m33 = self.xx * self.yy - self.yx * self.yx;
-
-        Self {
-            xx: m11 * determinant_inverse,
-            yx: m21 * determinant_inverse,
-            zx: m31 * determinant_inverse,
-            yy: m22 * determinant_inverse,
-            zy: m32 * determinant_inverse,
-            zz: m33 * determinant_inverse,
-        }
-    }
-
-    #[inline(always)]
-    pub fn scale(&self, scale: f32) -> Self {
-        Self {
-            xx: self.xx * scale,
-            yx: self.yx * scale,
-            yy: self.yy * scale,
-            zx: self.zx * scale,
-            zy: self.zy * scale,
-            zz: self.zz * scale,
-        }
-    }
-
-    #[inline(always)]
-    pub fn multiply(a: &Matrix3x3, b: &Symmetric3x3) -> Matrix3x3 {
-        let bx = Vec3::new(b.xx, b.yx, b.zx);
-        let by = Vec3::new(b.yx, b.yy, b.zy);
-        let bz = Vec3::new(b.zx, b.zy, b.zz);
-
-        let result_x = {
-            let x = Vec3::splat(a.x[0]);
-            let y = Vec3::splat(a.x[1]);
-            let z = Vec3::splat(a.x[2]);
-            x * bx + y * by + z * bz
-        };
-
-        let result_y = {
-            let x = Vec3::splat(a.y[0]);
-            let y = Vec3::splat(a.y[1]);
-            let z = Vec3::splat(a.y[2]);
-            x * bx + y * by + z * bz
-        };
-
-        let result_z = {
-            let x = Vec3::splat(a.z[0]);
-            let y = Vec3::splat(a.z[1]);
-            let z = Vec3::splat(a.z[2]);
-            x * bx + y * by + z * bz
-        };
-
-        Matrix3x3 {
-            x: result_x,
-            y: result_y,
-            z: result_z,
-        }
-    }
-
-    #[inline(always)]
-    pub fn multiply_without_overlap(a: &Symmetric3x3, b: &Symmetric3x3) -> Symmetric3x3 {
+    pub fn multiply_without_overlap(a: &Self, b: &Self, result: &mut Self) {
         let ayxbyx = a.yx * b.yx;
         let azxbzx = a.zx * b.zx;
         let azybzy = a.zy * b.zy;
 
-        Symmetric3x3 {
-            xx: a.xx * b.xx + ayxbyx + azxbzx,
-            yx: a.yx * b.xx + a.yy * b.yx + a.zy * b.zx,
-            yy: ayxbyx + a.yy * b.yy + azybzy,
-            zx: a.zx * b.xx + a.zy * b.yx + a.zz * b.zx,
-            zy: a.zx * b.yx + a.zy * b.yy + a.zz * b.zy,
-            zz: azxbzx + azybzy + a.zz * b.zz,
-        }
+        result.xx = a.xx * b.xx + ayxbyx + azxbzx;
+        result.yx = a.yx * b.xx + a.yy * b.yx + a.zy * b.zx;
+        result.yy = ayxbyx + a.yy * b.yy + azybzy;
+        result.zx = a.zx * b.xx + a.zy * b.yx + a.zz * b.zx;
+        result.zy = a.zx * b.yx + a.zy * b.yy + a.zz * b.zy;
+        result.zz = azxbzx + azybzy + a.zz * b.zz;
     }
 
+    /// Multiplies the two matrices.
     #[inline(always)]
-    pub fn transform_without_overlap(v: &Vec3, m: &Symmetric3x3) -> Vec3 {
-        let v_x = v[0];
-        let v_y = v[1];
-        let v_z = v[2];
+    pub fn multiply(a: &Matrix3x3, b: &Symmetric3x3, result: &mut Matrix3x3) {
+        let bx = Vec3::new(b.xx, b.yx, b.zx);
+        let by = Vec3::new(b.yx, b.yy, b.zy);
+        let bz = Vec3::new(b.zx, b.zy, b.zz);
+        result.x = {
+            let x = Vec3::splat(a.x.x);
+            let y = Vec3::splat(a.x.y);
+            let z = Vec3::splat(a.x.z);
+            x * bx + y * by + z * bz
+        };
+        result.y = {
+            let x = Vec3::splat(a.y.x);
+            let y = Vec3::splat(a.y.y);
+            let z = Vec3::splat(a.y.z);
+            x * bx + y * by + z * bz
+        };
+        result.z = {
+            let x = Vec3::splat(a.z.x);
+            let y = Vec3::splat(a.z.y);
+            let z = Vec3::splat(a.z.z);
+            x * bx + y * by + z * bz
+        };
+    }
 
-        let x = v_x * m.xx + v_y * m.yx + v_z * m.zx;
-        let y = v_x * m.yx + v_y * m.yy + v_z * m.zy;
-        let z = v_x * m.zx + v_y * m.zy + v_z * m.zz;
+    /// Transforms a vector by a symmetric matrix.
+    #[inline(always)]
+    pub fn transform_without_overlap(v: &Vec3, m: &Symmetric3x3, result: &mut Vec3) {
+        result.x = v.x * m.xx + v.y * m.yx + v.z * m.zx;
+        result.y = v.x * m.yx + v.y * m.yy + v.z * m.zy;
+        result.z = v.x * m.zx + v.y * m.zy + v.z * m.zz;
+    }
 
-        Vec3(Vector::<f32>::from_array([x, y, z, 0.0]))
+    /// Transforms a vector by a symmetric matrix.
+    pub fn transform(v: Vec3, m: &Self) -> Vec3 {
+        Vec3::new(
+            v.x * m.xx + v.y * m.yx + v.z * m.zx,
+            v.x * m.yx + v.y * m.yy + v.z * m.zy,
+            v.x * m.zx + v.y * m.zy + v.z * m.zz,
+        )
     }
 }
 
@@ -183,7 +182,7 @@ impl Mul<f32> for Symmetric3x3 {
 
     #[inline(always)]
     fn mul(self, scale: f32) -> Self {
-        self.scale(scale)
+        out!(Self::scale(&self, scale))
     }
 }
 
@@ -192,7 +191,7 @@ impl Mul for Symmetric3x3 {
 
     #[inline(always)]
     fn mul(self, other: Self) -> Self {
-        self.multiply_without_overlap(&other)
+        out!(Self::multiply_without_overlap(&self, &other))
     }
 }
 
@@ -253,7 +252,7 @@ impl Mul<Symmetric3x3> for Matrix3x3 {
 
     #[inline(always)]
     fn mul(self, other: Symmetric3x3) -> Matrix3x3 {
-        Symmetric3x3::multiply(&self, &other)
+        out!(Symmetric3x3::multiply(&self, &other))
     }
 }
 
