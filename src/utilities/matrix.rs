@@ -221,9 +221,7 @@ impl Matrix {
 
     #[inline(always)]
     pub fn create_value_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) -> Self {
-        let result;
-        Self::create_from_axis_angle(axis, angle, result);
-        return result;
+        out!(Self::create_from_axis_angle(axis, angle))
     }
 
     #[inline(always)]
@@ -248,9 +246,7 @@ impl Matrix {
     }
 
     pub fn create_value_from_quaternion(quaternion: &Quat) -> Self {
-        let result;
-        Self::create_from_quaternion(quaternion, result);
-        return result;
+        out!(Self::create_from_quaternion(quaternion))
     }
 
     /// Creates a right-handed perspective matrix.
@@ -400,8 +396,8 @@ impl Matrix {
         let m32 = m.z.y;
         let m33 = m.z.z;
 
-        let m41 = m.W.X;
-        let m42 = m.W.Y;
+        let m41 = m.w.x;
+        let m42 = m.w.y;
 
         inverted.x = inverse_determinant
             * Vec4::new(

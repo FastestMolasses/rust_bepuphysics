@@ -1,4 +1,5 @@
-use super::matrix3x3::Matrix3x3;
+use crate::out;
+use crate::utilities::matrix3x3::Matrix3x3;
 use glam::{Quat, Vec3};
 
 /// A transformation composed of a linear transformation and a translation.
@@ -88,7 +89,7 @@ impl AffineTransform {
     #[inline(always)]
     pub fn invert_rigid(transform: &Self, inverse: &mut Self) {
         unsafe {
-            Matrix3x3::transpose(transform.linear_transform, &mut inverse.linear_transform);
+            Matrix3x3::transpose(&transform.linear_transform as *const _, &mut inverse.linear_transform);
         }
         Matrix3x3::transform(
             &transform.translation,
@@ -101,8 +102,7 @@ impl AffineTransform {
     /// Multiplies a transform by another transform.
     #[inline(always)]
     pub fn multiply(a: &Self, b: &Self, transform: &mut Self) {
-        let translation;
-        Matrix3x3::transform(&a.translation, &b.linear_transform, translation);
+        let translation = out!(Matrix3x3::transform(&a.translation, &b.linear_transform));
         transform.translation = translation + b.translation;
         Matrix3x3::multiply(
             &a.linear_transform,

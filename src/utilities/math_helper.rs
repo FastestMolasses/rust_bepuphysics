@@ -48,10 +48,15 @@ pub fn binary_sign(x: f32) -> f32 {
 /// 2) Provide a scalar implementation that is consistent with the SIMD version for systems which need to match its behavior.
 #[inline(always)]
 pub fn cos(x: f32) -> f32 {
-    let period_count = x * (0.5 / PI as f64) as f32;
-    let period_fraction = period_count - period_count.floor();
+    // Rational approximation over [0, pi/2], use symmetry for the rest.
+    let period_count = x * (0.5 / PI);
+    let period_fraction = period_count - period_count.floor(); // This is a source of error as you get away from 0.
     let period_x = period_fraction * 2.0 * PI;
 
+    // [0, pi/2] = f(x)
+    // (pi/2, pi] = -f(Pi - x)
+    // (pi, 3 * pi / 2] = -f(x - Pi)
+    // (3*pi/2, 2*pi] = f(2 * Pi - x)
     let y = if period_x > 3.0 * FRAC_PI_2 {
         2.0 * PI - period_x
     } else if period_x > PI {
@@ -62,6 +67,9 @@ pub fn cos(x: f32) -> f32 {
         period_x
     };
 
+    // Using a fifth degree numerator and denominator.
+    // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
+    // TODO: FMA could help here, primarily in terms of precision.
     let numerator =
         ((((-0.003436308368583229 * y + 0.021317031205957775) * y + 0.06955843390178032) * y
             - 0.4578088075324152)
