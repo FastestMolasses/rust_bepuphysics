@@ -132,7 +132,7 @@ impl Matrix3x3 {
 
     /// Inverts the given matix using scalar operations.
     #[inline(always)]
-    pub unsafe fn invert_scaler(m: *const Self, inverse: *mut Self) {
+    pub unsafe fn invert_scalar(m: *const Self, inverse: *mut Self) {
         let m_scalar = m as *const M;
         let inverse_scalar = inverse as *mut M;
 

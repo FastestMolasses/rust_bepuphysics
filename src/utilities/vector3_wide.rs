@@ -593,25 +593,11 @@ impl Mul<&Vector3Wide> for Vector<f32> {
     type Output = Vector3Wide;
 
     #[inline(always)]
-    fn mul(self, vector: Vector3Wide) -> Self::Output {
+    fn mul(self, vector: &Vector3Wide) -> Self::Output {
         Vector3Wide {
             x: vector.x * self,
             y: vector.y * self,
             z: vector.z * self,
-        }
-    }
-}
-
-impl Mul for Vector3Wide {
-    type Output = Self;
-
-    /// Multiplies the components of one vector with another.
-    #[inline(always)]
-    fn mul(self, other: Self) -> Self::Output {
-        Self {
-            x: self.x * other.x,
-            y: self.y * other.y,
-            z: self.z * other.z,
         }
     }
 }
