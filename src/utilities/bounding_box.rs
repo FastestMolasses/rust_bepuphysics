@@ -309,13 +309,13 @@ impl BoundingBox {
         if points.is_empty() {
             panic!("Cannot construct a bounding box from an empty list.");
         }
-        let aabb = BoundingBox {
+        let mut aabb = BoundingBox {
             min: points[0],
             max: points[0],
         };
         for point in points.iter().skip(1) {
-            aabb.min = min.min(*point);
-            aabb.max = max.max(*point);
+            aabb.min = Vec3::min(*point, aabb.min);
+            aabb.max = Vec3::max(*point, aabb.max);
         }
         aabb
     }

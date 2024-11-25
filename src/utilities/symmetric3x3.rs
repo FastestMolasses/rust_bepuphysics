@@ -79,12 +79,12 @@ impl Symmetric3x3 {
 
     #[inline(always)]
     pub fn scale(m: &Self, scale: f32, scaled: &mut Self) {
-        scaled.xx = self.xx * scale;
-        scaled.yx = self.yx * scale;
-        scaled.yy = self.yy * scale;
-        scaled.zx = self.zx * scale;
-        scaled.zy = self.zy * scale;
-        scaled.zz = self.zz * scale;
+        scaled.xx = m.xx * scale;
+        scaled.yx = m.yx * scale;
+        scaled.yy = m.yy * scale;
+        scaled.zx = m.zx * scale;
+        scaled.zy = m.zy * scale;
+        scaled.zz = m.zz * scale;
     }
 
     #[inline(always)]

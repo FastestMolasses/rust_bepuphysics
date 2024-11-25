@@ -130,7 +130,6 @@ impl BundleIndexing {
                 Self::fallback_get_last_set_lane_count(v)
             }
         }
-        // TODO: ARM support
         #[cfg(not(target_arch = "x86_64"))]
         {
             let mask = std::simd::cmp::SimdPartialEq::simd_eq(v, Vector::splat(-1));
@@ -138,7 +137,7 @@ impl BundleIndexing {
             if bits == 0 {
                 0
             } else {
-                (u32::BITS - bits.leading_zeros()) as usize
+                (Vector::<i32>::LEN as u32 - bits.leading_zeros()) as usize
             }
         }
     }

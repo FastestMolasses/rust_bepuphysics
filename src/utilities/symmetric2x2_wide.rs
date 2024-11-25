@@ -59,28 +59,20 @@ impl Symmetric2x2Wide {
 
     /// Computes result = transpose(transpose(a) * b), assuming b is symmetric.
     #[inline(always)]
-    pub fn multiply_transposed(a: &Self, b: &Matrix2x3Wide) -> Matrix2x3Wide {
-        Matrix2x3Wide {
-            x: Vector3Wide {
-                x: a.x.x * b.xx + a.y.x * b.yx,
-                y: a.x.y * b.xx + a.y.y * b.yx,
-                z: a.x.z * b.xx + a.y.z * b.yx,
-            },
-            y: Vector3Wide {
-                x: a.x.x * b.yx + a.y.x * b.yY,
-                y: a.x.y * b.yx + a.y.y * b.yY,
-                z: a.x.z * b.yx + a.y.z * b.yY,
-            },
-        }
+    pub fn multiply_transposed(a: &Matrix2x3Wide, b: &Symmetric2x2Wide, result: &mut Matrix2x3Wide) {
+        result.x.x = a.x.x * b.xx + a.y.x * b.yx;
+        result.x.y = a.x.y * b.xx + a.y.y * b.yx;
+        result.x.z = a.x.z * b.xx + a.y.z * b.yx;
+        result.y.x = a.x.x * b.yx + a.y.x * b.yy;
+        result.y.y = a.x.y * b.yx + a.y.y * b.yy;
+        result.y.z = a.x.z * b.yx + a.y.z * b.yy;
     }
 
     /// Computes a * transpose(b), assuming a = b * M for some symmetric matrix M. This is conceptually the second half of Triangular3x3Wide.MatrixSandwich.
     #[inline(always)]
-    pub fn complete_matrix_sandwich(a: &Matrix2x3Wide, b: &Matrix2x3Wide) -> Self {
-        Self {
-            xx: a.x.x * b.x.x + a.x.y * b.x.y + a.x.z * b.x.z,
-            yx: a.y.x * b.x.x + a.y.y * b.x.y + a.y.z * b.x.z,
-            yy: a.y.x * b.y.x + a.y.y * b.y.y + a.y.z * b.y.z,
-        }
+    pub fn complete_matrix_sandwich(a: &Matrix2x3Wide, b: &Matrix2x3Wide, result: &mut Self) {
+        result.xx = a.x.x * b.x.x + a.x.y * b.x.y + a.x.z * b.x.z;
+        result.yx = a.y.x * b.x.x + a.y.y * b.x.y + a.y.z * b.x.z;
+        result.yy = a.y.x * b.y.x + a.y.y * b.y.y + a.y.z * b.y.z;
     }
 }

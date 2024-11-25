@@ -422,7 +422,7 @@ impl Vector3Wide {
 
     /// Expands each scalar value to every slot of the bundle.
     #[inline(always)]
-    pub fn broadcast(source: Vector3) -> Self {
+    pub fn broadcast(source: Vec3) -> Self {
         Self {
             x: Vector::splat(source.x),
             y: Vector::splat(source.y),
@@ -432,7 +432,7 @@ impl Vector3Wide {
 
     /// Takes a slot from the source vector and broadcasts it into all slots of the target vector.
     #[inline(always)]
-    pub fn broadcast_to(source: Vector3, broadcasted: &mut Self) {
+    pub fn broadcast_to(source: Vec3, broadcasted: &mut Self) {
         broadcasted.x = Vector::splat(source.x);
         broadcasted.y = Vector::splat(source.y);
         broadcasted.z = Vector::splat(source.z);
