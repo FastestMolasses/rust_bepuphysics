@@ -3,9 +3,7 @@
 #![feature(generic_const_exprs)]
 
 mod physics;
-mod utilities;
-
-pub use utilities::*;
+pub mod utilities;
 
 // TODO: REPLACE is_x86_feature_detected WITH CFG, MAYBE OnceLock AND DO FEATURE DETECTION IN BUILD SCRIPT
 // TODO: IMPLEMENT SVE INTRINSICS
