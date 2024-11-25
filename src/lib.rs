@@ -1,5 +1,5 @@
 #![feature(portable_simd)]
-#![feature(effects)]
+// #![feature(effects)]
 #![feature(generic_const_exprs)]
 
 mod physics;

@@ -19,7 +19,7 @@ pub struct Matrix {
 
 /// A representation of a 4x4 matrix that will be mapped linearly in memory.
 #[repr(C)]
-struct M {
+pub struct MatrixM {
     m11: f32,
     m12: f32,
     m13: f32,
@@ -50,7 +50,7 @@ impl Matrix {
     }
 
     #[inline(always)]
-    pub fn get_translation(&self) -> Vec3 {
+    pub fn translation(&self) -> Vec3 {
         Vec3::new(self.w.x, self.w.y, self.w.z)
     }
 
@@ -60,7 +60,7 @@ impl Matrix {
     }
 
     #[inline(always)]
-    pub unsafe fn transpose_m_to(m: *const M, transposed: *mut M) {
+    pub unsafe fn transpose_m_to(m: *const MatrixM, transposed: *mut MatrixM) {
         // From original code:
         // A weird function! Why?
         // 1) Missing some helpful instructions for actual SIMD accelerated transposition.
@@ -98,7 +98,7 @@ impl Matrix {
 
     #[inline(always)]
     pub unsafe fn transpose_m(m: *const Self, transposed: *mut Self) {
-        Self::transpose_m_to(m as *const M, transposed as *mut M);
+        Self::transpose_m_to(m as *const MatrixM, transposed as *mut MatrixM);
     }
 
     pub unsafe fn transpose_to(m: &Self, transposed: &mut Self) {
@@ -186,7 +186,8 @@ impl Matrix {
     }
 
     #[inline(always)]
-    pub fn create_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) {
+    pub fn create_from_axis_angle(axis: Vec3, angle: f32, result: &mut Self) {
+        // From original code:
         // TODO: Could be better simdified.
         let xx = axis.x * axis.x;
         let yy = axis.y * axis.y;
@@ -220,7 +221,7 @@ impl Matrix {
     }
 
     #[inline(always)]
-    pub fn create_value_from_axis_angle(axis: &Vec3, angle: f32, result: &mut Self) -> Self {
+    pub fn create_value_from_axis_angle(axis: Vec3, angle: f32) -> Self {
         out!(Self::create_from_axis_angle(axis, angle))
     }
 
@@ -249,7 +250,7 @@ impl Matrix {
         out!(Self::create_from_quaternion(quaternion))
     }
 
-    /// Creates a right-handed perspective matrix.
+    /// Creates a right-handed perspective matrix, into the provided matrix.
     #[inline(always)]
     pub fn create_perspective_fov(
         field_of_view: f32,
@@ -270,21 +271,18 @@ impl Matrix {
 
     /// Creates a right-handed perspective matrix.
     #[inline(always)]
-    pub fn create_value_perspective_fov(
+    pub fn create_new_perspective_fov(
         field_of_view: f32,
         aspect_ratio: f32,
         near_clip: f32,
         far_clip: f32,
-    ) {
-        let perspective;
-        Self::create_perspective_fov(
+    ) -> Matrix {
+        out!(Self::create_perspective_fov(
             field_of_view,
             aspect_ratio,
             near_clip,
-            far_clip,
-            perspective,
-        );
-        return perspective;
+            far_clip
+        ))
     }
 
     /// Creates a left-handed perspective matrix.
@@ -305,7 +303,7 @@ impl Matrix {
         perspective.w = Vec4::new(0.0, 0.0, -near_clip * m33, 0.0);
     }
 
-    /// Creates a right-handed perspective matrix.
+    /// Creates a right-handed perspective matrix, into the provided matrix.
     #[inline(always)]
     pub fn create_perspective_from_fovs(
         vertical_fov: f32,
@@ -325,7 +323,7 @@ impl Matrix {
 
     /// Creates a right-handed perspective matrix.
     #[inline(always)]
-    pub fn create_value_perspective_from_fovs(
+    pub fn create_new_perspective_from_fovs(
         vertical_fov: f32,
         horizontal_fov: f32,
         near_clip: f32,
@@ -364,7 +362,7 @@ impl Matrix {
         );
     }
 
-    /// Inverts the matrix.
+    /// Inverts the matrix, into the provided matrix.
     #[inline(always)]
     pub fn invert(m: &Self, inverted: &mut Self) {
         // From original code:
@@ -431,18 +429,18 @@ impl Matrix {
 
     /// Inverts the matrix.
     #[inline(always)]
-    pub fn invert_to_value(m: &Self) -> Self {
+    pub fn invert_new(m: &Self) -> Self {
         out!(Self::invert(m))
     }
 
-    /// Creates a view matrix pointing in a direction with a given up vector.
+    /// Creates a view matrix pointing in a direction with a given up vector, into the provided matrix.
     #[inline(always)]
     pub fn create_view(
-        position: &Vec3,
-        forward: &Vec3,
-        up_vector: &Vec3,
+        position: Vec3,
+        forward: Vec3,
+        up_vector: Vec3,
         view_matrix: &mut Self,
-    ) -> Matrix {
+    ) {
         let length = forward.length();
         let z = forward / -length;
         let x = up_vector.cross(z).normalize();
@@ -456,30 +454,31 @@ impl Matrix {
 
     /// Creates a view matrix pointing in a direction with a given up vector.
     #[inline(always)]
-    pub fn create_view_value(position: &Vec3, forward: &Vec3, up_vector: &Vec3) -> Self {
+    pub fn create_new_view(position: Vec3, forward: Vec3, up_vector: Vec3) -> Self {
         out!(Self::create_view(position, forward, up_vector))
     }
 
-    /// Creates a view matrix pointing from a position to a target with the given up vector.
+    /// Creates a view matrix pointing from a position to a target with the given up vector, into the provided matrix.
     #[inline(always)]
     pub fn create_look_at(
-        position: &Vec3,
-        target: &Vec3,
-        up_vector: &Vec3,
+        position: Vec3,
+        target: Vec3,
+        up_vector: Vec3,
         view_matrix: &mut Self,
     ) {
-        Self::create_view(position, target - position, up_vector, view_matrix);
+        let forward = target - position;
+        Self::create_view(position, forward, up_vector, view_matrix);
     }
 
     /// Creates a view matrix pointing from a position to a target with the given up vector.
     #[inline(always)]
-    pub fn create_look_at_value(position: &Vec3, target: &Vec3, up_vector: &Vec3) -> Self {
-        out!(Self::create_look_at(position, target, up_vector))
+    pub fn create_new_look_at(position: Vec3, target: Vec3, up_vector: Vec3) -> Self {
+        out!(Self::create_view(position, target - position, up_vector))
     }
 
     /// Creates a rigid world matrix from a rotation matrix and position.
     #[inline(always)]
-    pub fn create_rigid(rotation: &Matrix3x3, position: &Vec3, world: &mut Self) {
+    pub fn create_rigid_from_matrix(rotation: &Matrix3x3, position: &Vec3, world: &mut Self) {
         world.x = Vec4::new(rotation.x.x, rotation.x.y, rotation.x.z, 0.0);
         world.y = Vec4::new(rotation.y.x, rotation.y.y, rotation.y.z, 0.0);
         world.z = Vec4::new(rotation.z.x, rotation.z.y, rotation.z.z, 0.0);
@@ -488,8 +487,8 @@ impl Matrix {
 
     /// Creates a rigid world matrix from a rotation quaternion and position.
     #[inline(always)]
-    pub fn create_rigid_from_quat(rotation: &Quat, position: &Vec3, world: &mut Self) -> Matrix {
-        let rotation_matrix = Matrix3x3::create_new_from_quaternion(rotation);
+    pub fn create_rigid_from_quat(rotation: Quat, position: Vec3, world: &mut Self) {
+        let rotation_matrix = Matrix3x3::create_new_from_quaternion(&rotation);
         world.x = Vec4::new(
             rotation_matrix.x.x,
             rotation_matrix.x.y,
@@ -513,7 +512,7 @@ impl Matrix {
 
     /// Creates a 4x4 matrix from a 3x3 matrix. All extra columns and rows filled with 0 except the W.W, which is set to 1.
     #[inline(always)]
-    pub fn create_from_3x3(matrix3x3: &Matrix3x3, matrix4x4: &mut Self) -> Matrix {
+    pub fn create_from_3x3(matrix3x3: &Matrix3x3, matrix4x4: &mut Self) {
         matrix4x4.x = Vec4::new(matrix3x3.x.x, matrix3x3.x.y, matrix3x3.x.z, 0.0);
         matrix4x4.y = Vec4::new(matrix3x3.y.x, matrix3x3.y.y, matrix3x3.y.z, 0.0);
         matrix4x4.z = Vec4::new(matrix3x3.z.x, matrix3x3.z.y, matrix3x3.z.z, 0.0);
@@ -522,7 +521,7 @@ impl Matrix {
 
     /// Creates a 4x4 matrix from a 3x3 matrix. All extra columns and rows filled with 0 except the W.W, which is set to 1.
     #[inline(always)]
-    pub fn create_value_from_3x3(matrix3x3: &Matrix3x3) -> Self {
+    pub fn create_new_from_3x3(matrix3x3: &Matrix3x3) -> Self {
         out!(Self::create_from_3x3(matrix3x3))
     }
 }

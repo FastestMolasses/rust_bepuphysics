@@ -16,7 +16,7 @@ pub struct Matrix3x3 {
 
 /// A representation of a 3x3 matrix that will be mapped linearly in memory.
 #[repr(C)]
-struct M {
+struct Matrix3x3M {
     m11: f32,
     m12: f32,
     m13: f32,
@@ -64,7 +64,7 @@ impl Matrix3x3 {
     }
 
     #[inline(always)]
-    unsafe fn transpose_m(m: *const M, transposed: *mut M) {
+    unsafe fn transpose_m(m: *const Matrix3x3M, transposed: *mut Matrix3x3M) {
         // From original code:
         // A weird function! Why?
         // 1) Missing some helpful instructions for actual SIMD accelerated transposition.
@@ -91,7 +91,7 @@ impl Matrix3x3 {
 
     #[inline(always)]
     pub unsafe fn transpose(m: *const Self, transposed: *mut Self) {
-        Self::transpose_m(m as *const M, transposed as *mut M);
+        Self::transpose_m(m as *const Matrix3x3M, transposed as *mut Matrix3x3M);
     }
 
     /// Computes the transposed matrix of a matrix.
@@ -132,8 +132,8 @@ impl Matrix3x3 {
     /// Inverts the given matix using scalar operations.
     #[inline(always)]
     pub unsafe fn invert_scalar(m: *const Self, inverse: *mut Self) {
-        let m_scalar = m as *const M;
-        let inverse_scalar = inverse as *mut M;
+        let m_scalar = m as *const Matrix3x3M;
+        let inverse_scalar = inverse as *mut Matrix3x3M;
 
         let m_ref = &*m_scalar;
 

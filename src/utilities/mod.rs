@@ -5,6 +5,7 @@ pub use self::affine_transform::*;
 // pub use self::collections::*;
 // mod memory;
 // mod task_scheduling;
+// mod thread_dispatcher;
 
 mod bounding_box;
 mod bounding_sphere;
@@ -26,7 +27,6 @@ mod symmetric3x3_wide;
 mod symmetric4x4_wide;
 mod symmetric5x5_wide;
 mod symmetric6x6_wide;
-mod thread_dispatcher;
 mod vector2_wide;
 mod vector3_wide;
 mod vector4_wide;

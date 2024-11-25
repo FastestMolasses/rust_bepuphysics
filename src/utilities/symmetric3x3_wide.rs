@@ -33,12 +33,9 @@ impl Symmetric3x3Wide {
         let yx = m.zy * m.zx - m.zz * m.yx;
         let zx = m.yx * m.zy - m.zx * m.yy;
         let determinant_inverse = Vector::splat(1.0) / (xx * m.xx + yx * m.yx + zx * m.zx);
-
         let yy = m.zz * m.xx - m.zx * m.zx;
         let zy = m.zx * m.yx - m.xx * m.zy;
-
         let zz = m.xx * m.yy - m.yx * m.yx;
-
         inverse.xx = xx * determinant_inverse;
         inverse.yx = yx * determinant_inverse;
         inverse.zx = zx * determinant_inverse;

@@ -1,7 +1,6 @@
 use crate::utilities::matrix2x3_wide::Matrix2x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
-use crate::utilities::vector3_wide::Vector3Wide;
 
 /// Stores the lower left triangle (including diagonal) of a 2x2 matrix.
 #[repr(C)]
@@ -59,7 +58,11 @@ impl Symmetric2x2Wide {
 
     /// Computes result = transpose(transpose(a) * b), assuming b is symmetric.
     #[inline(always)]
-    pub fn multiply_transposed(a: &Matrix2x3Wide, b: &Symmetric2x2Wide, result: &mut Matrix2x3Wide) {
+    pub fn multiply_transposed(
+        a: &Matrix2x3Wide,
+        b: &Symmetric2x2Wide,
+        result: &mut Matrix2x3Wide,
+    ) {
         result.x.x = a.x.x * b.xx + a.y.x * b.yx;
         result.x.y = a.x.y * b.xx + a.y.y * b.yx;
         result.x.z = a.x.z * b.xx + a.y.z * b.yx;
