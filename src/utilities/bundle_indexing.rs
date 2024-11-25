@@ -87,6 +87,7 @@ impl BundleIndexing {
                 Self::fallback_get_first_set_lane_index(v)
             }
         }
+        // TODO: ARM support
         #[cfg(not(target_arch = "x86_64"))]
         {
             let mask = std::simd::cmp::SimdPartialEq::simd_eq(v, Vector::splat(-1));
@@ -129,6 +130,7 @@ impl BundleIndexing {
                 Self::fallback_get_last_set_lane_count(v)
             }
         }
+        // TODO: ARM support
         #[cfg(not(target_arch = "x86_64"))]
         {
             let mask = std::simd::cmp::SimdPartialEq::simd_eq(v, Vector::splat(-1));

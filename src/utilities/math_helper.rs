@@ -195,8 +195,8 @@ pub fn cos_simd(x: Vector<f32>) -> Vector<f32> {
     // let y3 = y2 * y;
     // let y4 = y2 * y2;
     // let y5 = y3 * y2;
-    // let numerator = Vector::splat(1.0_f32) - 0.15082367674208508 * y - 0.4578088075324152 * y2 + 0.06955843390178032 * y3 + 0.021317031205957775 * y4 - 0.003436308368583229 * y5;
-    // let denominator = Vector::splat(1.0_f32) - 0.15082367538305258 * y + 0.04219116713777847 * y2 - 0.00585321045829395 * y3 + 0.0007451378206294365 * y4 - 0.00007650398834677185 * y5;
+    // let numerator = Vector::<f32>::splat(1.0) - 0.15082367674208508 * y - 0.4578088075324152 * y2 + 0.06955843390178032 * y3 + 0.021317031205957775 * y4 - 0.003436308368583229 * y5;
+    // let denominator = Vector::<f32>::splat(1.0) - 0.15082367538305258 * y + 0.04219116713777847 * y2 - 0.00585321045829395 * y3 + 0.0007451378206294365 * y4 - 0.00007650398834677185 * y5;
     let numerator = ((((Vector::splat(-0.003436308368583229_f32) * y
         + Vector::splat(0.021317031205957775_f32))
         * y
@@ -206,7 +206,7 @@ pub fn cos_simd(x: Vector<f32>) -> Vector<f32> {
         * y
         - Vector::splat(0.15082367674208508_f32))
         * y
-        + Vector::splat(1.0_f32);
+        + Vector::<f32>::splat(1.0);
     let denominator = ((((Vector::splat(-0.00007650398834677185_f32) * y
         + Vector::splat(0.0007451378206294365_f32))
         * y
@@ -216,7 +216,7 @@ pub fn cos_simd(x: Vector<f32>) -> Vector<f32> {
         * y
         - Vector::splat(0.15082367538305258_f32))
         * y
-        + Vector::splat(1.0_f32);
+        + Vector::<f32>::splat(1.0);
     let result = numerator / denominator;
     Vector::simd_gt(period_x, pi_over_2)
         .bitand(Vector::simd_lt(period_x, pi_3_over_2))
@@ -254,7 +254,7 @@ pub fn sin_simd(x: Vector<f32>) -> Vector<f32> {
     // let y4 = y2 * y2;
     // let y5 = y3 * y2;
     // let numerator = 1.0000000015146604_f32 * y + 0.06174562337697123_f32 * y2 - 0.13993701695343166_f32 * y3 - 0.006685815219853882_f32 * y4 + 0.0040507708755727605_f32 * y5;
-    // let denominator = Vector::splat(1.0_f32) + 0.061745651499203795_f32 * y + 0.02672943625500751_f32 * y2 + 0.003606014457152456_f32 * y3 + 0.0001700784176413186_f32 * y4 + 0.00009018370615921334_f32 * y5;
+    // let denominator = Vector::<f32>::splat(1.0) + 0.061745651499203795_f32 * y + 0.02672943625500751_f32 * y2 + 0.003606014457152456_f32 * y3 + 0.0001700784176413186_f32 * y4 + 0.00009018370615921334_f32 * y5;
     let numerator = ((((Vector::splat(0.0040507708755727605_f32) * y
         - Vector::splat(0.006685815219853882_f32))
         * y
@@ -273,7 +273,7 @@ pub fn sin_simd(x: Vector<f32>) -> Vector<f32> {
         * y
         + Vector::splat(0.061745651499203795_f32))
         * y
-        + Vector::splat(1.0_f32);
+        + Vector::<f32>::splat(1.0);
     let result = numerator / denominator;
     in_second_half.select(-result, result)
 }
@@ -286,7 +286,7 @@ pub fn acos_simd(x: Vector<f32>) -> Vector<f32> {
     let x = SimdFloat::simd_min(Vector::splat(1.0), SimdFloat::abs(x));
 
     // Rational approximation (scaling sqrt(1-x)) over [0, 1], use symmetry for the rest. TODO: FMA would help with precision.
-    let numerator = Vector::sqrt(Vector::splat(1.0_f32) - x)
+    let numerator = Vector::sqrt(Vector::<f32>::splat(1.0) - x)
         * (Vector::splat(62.95741097600742_f32)
             + x * (Vector::splat(69.6550664543659_f32)
                 + x * (Vector::splat(17.54512349463405_f32)

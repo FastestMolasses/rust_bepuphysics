@@ -1,6 +1,6 @@
-use std::mem::transmute;
+use crate::utilities::{matrix::Matrix, matrix3x3::Matrix3x3};
 use glam::Vec3;
-use crate::utilities::{matrix3x3::Matrix3x3, matrix::Matrix};
+use std::mem::transmute;
 
 #[inline(always)]
 pub fn add(a: Quaternion, b: Quaternion) -> Quaternion {
@@ -20,7 +20,7 @@ pub fn concatenate_without_overlap(a: Quaternion, b: Quaternion) -> Quaternion {
         aw * bx + ax * bw + az * by - ay * bz,
         aw * by + ay * bw + ax * bz - az * bx,
         aw * bz + az * bw + ay * bx - ax * by,
-        aw * bw - ax * bx - ay * by - az * bz
+        aw * bw - ax * bx - ay * by - az * bz,
     ))
 }
 
@@ -143,7 +143,7 @@ pub fn transform_without_overlap(v: Vec3, rotation: Quaternion) -> Vec3 {
     Vec3::new(
         v.x * (1.0 - yy2 - zz2) + v.y * (xy2 - wz2) + v.z * (xz2 + wy2),
         v.x * (xy2 + wz2) + v.y * (1.0 - xx2 - zz2) + v.z * (yz2 - wx2),
-        v.x * (xz2 - wy2) + v.y * (yz2 + wx2) + v.z * (1.0 - xx2 - yy2)
+        v.x * (xz2 - wy2) + v.y * (yz2 + wx2) + v.z * (1.0 - xx2 - yy2),
     )
 }
 
@@ -201,7 +201,7 @@ pub fn create_from_axis_angle(axis: Vec3, angle: f32) -> Quaternion {
         axis.x * s,
         axis.y * s,
         axis.z * s,
-        half_angle.cos()
+        half_angle.cos(),
     ))
 }
 
@@ -228,7 +228,7 @@ pub fn create_from_yaw_pitch_roll(yaw: f32, pitch: f32, roll: f32) -> Quaternion
         cos_yaw_sin_pitch * cos_roll + sin_yaw_cos_pitch * sin_roll,
         sin_yaw_cos_pitch * cos_roll - cos_yaw_sin_pitch * sin_roll,
         cos_yaw_cos_pitch * sin_roll - sin_yaw_sin_pitch * cos_roll,
-        cos_yaw_cos_pitch * cos_roll + sin_yaw_sin_pitch * sin_roll
+        cos_yaw_cos_pitch * cos_roll + sin_yaw_sin_pitch * sin_roll,
     ))
 }
 
@@ -280,7 +280,8 @@ pub fn get_quaternion_between_normalized_vectors(v1: Vec3, v2: Vec3) -> Quaterni
     } else {
         let axis = v1.cross(v2);
         Quaternion(f32x4::new(axis.x, axis.y, axis.z, dot + 1.0))
-    }.normalized()
+    }
+    .normalized()
 }
 
 // TODO: IMPLEMENT REMAINING 2 GetRelativeRotationWithoutOverlap FUNCTIONS

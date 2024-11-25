@@ -299,14 +299,8 @@ impl Vector3Wide {
 
     /// Computes the length of a vector into another.
     #[inline(always)]
-    pub fn length_to(v: &Self, length: &mut Vector<f32>) {
+    pub fn length_into(v: &Self, length: &mut Vector<f32>) {
         *length = std::simd::StdFloat::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-    }
-
-    /// Computes the length of another vector.
-    #[inline(always)]
-    pub fn length_of(v: &Self) -> Vector<f32> {
-        std::simd::StdFloat::sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
     }
 
     /// Computes the distance between two vectors.
@@ -318,7 +312,7 @@ impl Vector3Wide {
         std::simd::StdFloat::sqrt(x * x + y * y + z * z)
     }
 
-    /// Computes the distance between two vectors.
+    /// Computes the distance between two vectors, into another vector.
     #[inline(always)]
     pub fn distance_to(a: &Self, b: &Self, distance: &mut Vector<f32>) {
         let x = b.x - a.x;
@@ -348,15 +342,15 @@ impl Vector3Wide {
     /// Computes a unit length vector pointing in the same direction as the input.
     #[inline(always)]
     pub fn normalize(v: &Self) -> Self {
-        let length = Self::length_of(&v);
+        let length = Self::length(&v);
         let scale = Vector::splat(1.0) / length;
         Self::scale(v, &scale)
     }
 
-    /// Computes a unit length vector pointing in the same direction as the input.
+    /// Computes a unit length vector pointing in the same direction as the input, into another vector.
     #[inline(always)]
     pub fn normalize_to(v: &Self, result: &mut Self) {
-        let length = Self::length_of(&v);
+        let length = Self::length(&v);
         let scale = Vector::splat(1.0) / length;
         Self::scale_to(v, &scale, result);
     }
@@ -372,7 +366,7 @@ impl Vector3Wide {
         }
     }
 
-    /// Selects the left or right input for each lane depending on a mask.
+    /// Selects the left or right input for each lane depending on a mask, into another vector.
     #[inline(always)]
     pub fn conditional_select_to(
         condition: &Vector<i32>,
