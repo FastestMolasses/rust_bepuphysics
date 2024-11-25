@@ -1,3 +1,4 @@
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;

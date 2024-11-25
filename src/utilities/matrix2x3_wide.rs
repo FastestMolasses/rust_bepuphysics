@@ -1,8 +1,6 @@
 use crate::utilities::{
-    vector2_wide::Vector2Wide,
-    vector3_wide::Vector3Wide,
-    matrix2x2_wide::Matrix2x2Wide,
-    matrix3x3_wide::Matrix3x3Wide,
+    matrix2x2_wide::Matrix2x2Wide, matrix3x3_wide::Matrix3x3Wide, vector::Vector,
+    vector2_wide::Vector2Wide, vector3_wide::Vector3Wide,
 };
 
 #[derive(Clone, Copy)]
@@ -55,7 +53,11 @@ impl Matrix2x3Wide {
     }
 
     #[inline(always)]
-    pub fn transform_by_transpose_without_overlap(v: &Vector3Wide, m: &Self, result: &mut Vector2Wide) {
+    pub fn transform_by_transpose_without_overlap(
+        v: &Vector3Wide,
+        m: &Self,
+        result: &mut Vector2Wide,
+    ) {
         result.x = v.x * m.x.x + v.y * m.x.y + v.z * m.x.z;
         result.y = v.x * m.y.x + v.y * m.y.y + v.z * m.y.z;
     }

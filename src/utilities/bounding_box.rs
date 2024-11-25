@@ -5,6 +5,8 @@ use std::mem::MaybeUninit;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::Simd;
 
+use super::containment_type::ContainmentType;
+
 /// Represents a bounding box as two `Vec4` values to avoid complexity associated with a `Vec3`'s empty SIMD lane.
 #[repr(C, align(32))]
 #[derive(Clone, Copy, Debug)]
@@ -321,9 +323,9 @@ impl BoundingBox {
     /// Creates a bounding box from a bounding sphere.
     #[inline(always)]
     pub fn create_from_sphere(bounding_sphere: &BoundingSphere, bounding_box: &mut Self) {
-        let radius = Vec3::splat(sphere.radius);
-        bounding_box.min = sphere.center - radius;
-        bounding_box.max = sphere.center + radius;
+        let radius = Vec3::splat(bounding_sphere.radius);
+        bounding_box.min = bounding_sphere.center - radius;
+        bounding_box.max = bounding_sphere.center + radius;
     }
 
     /// Creates a string representation of the bounding box.

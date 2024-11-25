@@ -1,9 +1,9 @@
 use crate::utilities::{matrix::Matrix, matrix3x3::Matrix3x3};
-use glam::Vec3;
+use glam::{Vec3, Quat};
 use std::mem::transmute;
 
 #[inline(always)]
-pub fn add(a: Quaternion, b: Quaternion) -> Quaternion {
+pub fn add(a: Quat, b: Quat) -> Quat {
     Quaternion(a.0 + b.0)
 }
 

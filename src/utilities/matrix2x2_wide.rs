@@ -1,3 +1,4 @@
+use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
 
 #[derive(Clone, Copy)]

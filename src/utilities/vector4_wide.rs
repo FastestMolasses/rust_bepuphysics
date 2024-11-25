@@ -1,7 +1,7 @@
-use std::simd::{num::SimdFloat, Mask, StdFloat};
-
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
 use glam::Vec4;
+use std::simd::{num::SimdFloat, Mask, StdFloat};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -121,10 +121,10 @@ impl Vector4Wide {
     #[inline(always)]
     pub fn negate(v: &Self) -> Self {
         Self {
-            x: -self.x,
-            y: -self.y,
-            z: -self.z,
-            w: -self.w,
+            x: -v.x,
+            y: -v.y,
+            z: -v.z,
+            w: -v.w,
         }
     }
 
@@ -138,14 +138,12 @@ impl Vector4Wide {
 
     #[inline(always)]
     pub fn length_squared(v: &Self, length_squared: &mut Vector<f32>) {
-        *length_squared = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
+        *length_squared = v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
     }
 
     #[inline(always)]
     pub fn length(v: &Self, length: &mut Vector<f32>) {
-        *length = Vector::<f32>::sqrt(
-            self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w,
-        );
+        *length = Vector::<f32>::sqrt(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w);
     }
 
     #[inline(always)]
