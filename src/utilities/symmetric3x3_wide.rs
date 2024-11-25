@@ -67,7 +67,7 @@ impl Symmetric3x3Wide {
     }
 
     #[inline(always)]
-    pub fn scale(m: &Self, scale: Vector<f32>, result: &mut Self) {
+    pub fn scale(m: &Self, scale: &Vector<f32>, result: &mut Self) {
         result.xx = m.xx * scale;
         result.yx = m.yx * scale;
         result.yy = m.yy * scale;
@@ -428,7 +428,7 @@ impl Mul<Vector<f32>> for Symmetric3x3Wide {
 
     #[inline(always)]
     fn mul(self, rhs: Vector<f32>) -> Self::Output {
-        out!(Symmetric3x3Wide::scale(&self, rhs))
+        out!(Symmetric3x3Wide::scale(&self, &rhs))
     }
 }
 

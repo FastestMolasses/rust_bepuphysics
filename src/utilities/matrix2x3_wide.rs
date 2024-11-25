@@ -3,7 +3,7 @@ use crate::utilities::{
     vector2_wide::Vector2Wide, vector3_wide::Vector3Wide,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Matrix2x3Wide {
     /// First row of the matrix.
     pub x: Vector3Wide,
@@ -70,7 +70,7 @@ impl Matrix2x3Wide {
 
     /// Multiplies every component in the matrix by the given scalar value.
     #[inline(always)]
-    pub fn scale(m: &Self, scale: Vector<f32>, result: &mut Self) {
+    pub fn scale(m: &Self, scale: &Vector<f32>, result: &mut Self) {
         result.x.x = m.x.x * scale;
         result.x.y = m.x.y * scale;
         result.x.z = m.x.z * scale;
