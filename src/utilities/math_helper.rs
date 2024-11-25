@@ -294,8 +294,8 @@ pub fn acos_simd(x: Vector<f32>) -> Vector<f32> {
     let denominator = Vector::splat(40.07993264439811_f32)
         + x * (Vector::splat(49.81949855726789_f32)
             + x * (Vector::splat(15.703851745284796_f32) + x));
-
-    negativeInput.select(Vector::splat(PI) - result, result)
+    let result = numerator / denominator;
+    negative_input.select(Vector::splat(PI) - result, result)
 }
 
 /// Gets the change in angle from a to b as a signed value from -pi to pi.
@@ -308,9 +308,13 @@ pub fn get_signed_angle_difference(a: &Vector<f32>, b: &Vector<f32>, difference:
 
 #[inline(always)]
 pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     unsafe {
-        if is_x86_feature_detected!("avx") {
+        if is_x86_feature_detected!("avx512f") {
+            let v512 = _mm512_load_ps(v.as_ptr());
+            let result512 = _mm512_rcp14_ps(v512);
+            std::mem::transmute(result512)
+        } else if is_x86_feature_detected!("avx") {
             let v256 = _mm256_castps128_ps256(_mm_load_ps(v.as_ptr()));
             let result256 = _mm256_rcp_ps(v256);
             let result128 = _mm256_castps256_ps128(result256);
@@ -320,29 +324,30 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
             let result128 = _mm_rcp_ps(v128);
             std::mem::transmute(result128)
         } else {
-            f32x4::splat(1.0) / v
+            Vector::<f32>::splat(1.0) / v
         }
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        let v_neon = std::arch::aarch64::vld1q_f32(v.as_ptr());
+        let v_neon = std::arch::aarch64::vld1q_f32(v.as_array().as_ptr());
         let result_neon = std::arch::aarch64::vrecpeq_f32(v_neon);
-        // Optional: Perform a Newton-Raphson iteration for higher precision
-        // let step = vmulq_f32(result_neon, vrecpsq_f32(v_neon, result_neon));
-        // result_neon = vmulq_f32(step, vrecpsq_f32(v_neon, step));
         std::mem::transmute(result_neon)
     }
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
-        f32x4::splat(1.0) / v
+        Vector::<f32>::splat(1.0) / v
     }
 }
 
 #[inline(always)]
-pub fn fast_reciprocal_square_root(v: f32x4) -> f32x4 {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
+    #[cfg(target_arch = "x86_64")]
     unsafe {
-        if is_x86_feature_detected!("avx") {
+        if is_x86_feature_detected!("avx512f") {
+            let v512 = _mm512_load_ps(v.as_ptr());
+            let result512 = _mm512_rsqrt14_ps(v512);
+            std::mem::transmute(result512)
+        } else if is_x86_feature_detected!("avx") {
             let v256 = _mm256_castps128_ps256(_mm_load_ps(v.as_ptr()));
             let result256 = _mm256_rsqrt_ps(v256);
             let result128 = _mm256_castps256_ps128(result256);
@@ -352,20 +357,17 @@ pub fn fast_reciprocal_square_root(v: f32x4) -> f32x4 {
             let result128 = _mm_rsqrt_ps(v128);
             std::mem::transmute(result128)
         } else {
-            f32x4::splat(1.0) / v.sqrt()
+            Vector::<f32>::splat(1.0) / v.sqrt()
         }
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        let v_neon = std::arch::aarch64::vld1q_f32(v.as_ptr());
+        let v_neon = std::arch::aarch64::vld1q_f32(v.as_array().as_ptr());
         let result_neon = std::arch::aarch64::vrsqrteq_f32(v_neon);
-        // Optional: Perform a Newton-Raphson iteration for higher precision
-        // let step = vmulq_f32(vrsqrtsq_f32(vmulq_f32(v_neon, result_neon), result_neon), result_neon);
-        // result_neon = vmulq_f32(vrsqrtsq_f32(vmulq_f32(v_neon, step), step), step);
         std::mem::transmute(result_neon)
     }
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
-        f32x4::splat(1.0) / v.sqrt()
+        Vector::<f32>::splat(1.0) / v.sqrt()
     }
 }

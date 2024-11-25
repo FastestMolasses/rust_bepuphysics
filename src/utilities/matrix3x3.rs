@@ -1,7 +1,6 @@
 use crate::{out, utilities::matrix::Matrix};
 use glam::{Quat, Vec3};
 use std::ops::Mul;
-// use std::mem::MaybeUninit;
 
 /// 3 row, 3 column matrix.
 #[derive(Copy, Clone, Debug, PartialEq)]

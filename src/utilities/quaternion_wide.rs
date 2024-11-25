@@ -5,7 +5,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use crate::{out, out_unsafe};
 use glam::Quat;
-use std::ops::BitAnd;
+use std::ops::{BitAnd, Mul, Neg};
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
 use std::simd::{Mask, StdFloat};
@@ -20,7 +20,7 @@ pub struct QuaternionWide {
 
 impl QuaternionWide {
     #[inline(always)]
-    pub fn broadcast(source: Quaternion, broadcasted: &mut Self) {
+    pub fn broadcast(source: Quat, broadcasted: &mut Self) {
         broadcasted.x = Vector::splat(source.x);
         broadcasted.y = Vector::splat(source.y);
         broadcasted.z = Vector::splat(source.z);
@@ -493,7 +493,7 @@ impl QuaternionWide {
     }
 
     #[inline(always)]
-    pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Quat) -> Quaternion {
+    pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Quat) {
         let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
         Self::read_first(offset, narrow);
     }
