@@ -5,6 +5,11 @@ use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
 use std::simd::StdFloat;
 
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+#[cfg(target_arch = "aarch64")]
+use std::arch::aarch64::*;
+
 const TWO_PI: f32 = 2.0 * PI;
 
 /// Clamps a value between a minimum and maximum value.
@@ -329,8 +334,8 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        let v_neon = std::arch::aarch64::vld1q_f32(v.as_array().as_ptr());
-        let result_neon = std::arch::aarch64::vrecpeq_f32(v_neon);
+        let v_neon = vld1q_f32(v.as_array().as_ptr());
+        let result_neon = vrecpeq_f32(v_neon);
         std::mem::transmute(result_neon)
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -362,8 +367,8 @@ pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        let v_neon = std::arch::aarch64::vld1q_f32(v.as_array().as_ptr());
-        let result_neon = std::arch::aarch64::vrsqrteq_f32(v_neon);
+        let v_neon = vld1q_f32(v.as_array().as_ptr());
+        let result_neon = vrsqrteq_f32(v_neon);
         std::mem::transmute(result_neon)
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
