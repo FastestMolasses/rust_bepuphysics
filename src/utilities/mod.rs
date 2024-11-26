@@ -3,7 +3,7 @@ pub use self::affine_transform::*;
 
 // mod collections;
 // pub use self::collections::*;
-// mod memory;
+mod memory;
 // mod task_scheduling;
 // mod thread_dispatcher;
 

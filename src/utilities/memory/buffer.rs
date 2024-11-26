@@ -1,199 +1,257 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use crate::utilities::memory::unmanaged_mempool::UnmanagedMemoryPool;
+use core::marker::PhantomData;
 use std::{
-    marker::PhantomData,
-    ptr::{copy_nonoverlapping, write_bytes, NonNull},
+    mem::size_of,
+    ops::{Index, IndexMut},
+    slice,
 };
 
-use crate::utilities::memory::unmanaged_mempool::IUnmanagedMemoryPool;
-
-/// Represents a span of unmanaged memory.
+#[repr(C)]
+#[derive(Debug)]
+/// Span over an unmanaged memory region.
 pub struct Buffer<T> {
-    pub memory: NonNull<T>,
-    length: usize,
+    /// Pointer to the beginning of the memory backing this buffer.
+    ptr: *mut T,
+    /// Length of the buffer in terms of elements
+    length: i32,
+    /// We're primarily interested in x64, so memory + length is 12 bytes. This struct would/should get padded to 16 bytes for alignment reasons anyway,
+    /// so making use of the last 4 bytes to speed up the case where the raw buffer is taken from a pool (which is basically always) is a good option.
     pub id: i32,
-    /// PhantomData is used to indicate that the Buffer<T> struct is logically owning data of type T.
-    _marker: PhantomData<T>,
+    _phantom: PhantomData<T>,
 }
 
-impl<T: std::cmp::PartialEq> Buffer<T> {
+unsafe impl<T: Send> Send for Buffer<T> {}
+unsafe impl<T: Sync> Sync for Buffer<T> {}
+
+impl<T> Buffer<T> {
     /// Creates a new buffer.
-    pub unsafe fn new(memory: *mut T, length: usize, id: i32) -> Self {
-        Buffer {
-            memory: NonNull::new(memory).expect("Null pointer passed to Buffer::new"),
+    /// # Safety
+    /// - `ptr` must be valid for reads and writes for `length` elements of T
+    /// - `ptr` must be properly aligned for T
+    /// - The memory referenced by `ptr` must not be accessed through any other pointer while this Buffer exists
+    #[inline(always)]
+    pub fn new(ptr: *mut T, length: i32, id: i32) -> Self {
+        debug_assert!(!ptr.is_null());
+        debug_assert!(length >= 0);
+        Self {
+            ptr,
             length,
             id,
-            _marker: PhantomData,
+            _phantom: PhantomData,
         }
     }
 
-    /// Allocates a new buffer from a pool.
-    pub fn from_pool(length: usize, pool: &mut impl IUnmanagedMemoryPool) -> Option<Self> {
-        pool.take(length)
+    /// Takes a buffer large enough to contain a number of elements of type T.
+    #[inline(always)]
+    pub fn new_from_pool<P: UnmanagedMemoryPool>(length: i32) -> Self {
+        let mut buffer = unsafe { Self::new(std::ptr::null_mut(), 0, -1) };
+        P::take(length, &mut buffer);
+        buffer
     }
 
-    /// Returns the length of the buffer in typed elements.
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.length
+    /// Returns a buffer to a pool. This should only be used if the specified
+    /// pool is the same as the one used to allocate the buffer.
+    #[inline(always)]
+    pub fn dispose<P: UnmanagedMemoryPool>(&mut self) {
+        P::return_to_pool(self);
     }
 
-    /// Gets whether the buffer references non-null memory.
-    #[inline]
-    pub fn is_allocated(&self) -> bool {
-        !self.memory.as_ptr().is_null()
+    /// Gets a reference to the element at the given index.
+    #[inline(always)]
+    pub fn get(&self, index: i32) -> &T {
+        debug_assert!(index >= 0 && index < self.length);
+        unsafe { &*self.ptr.add(index as usize) }
     }
 
-    /// Returns a buffer to a pool.
-    pub fn dispose(self, pool: &mut impl IUnmanagedMemoryPool) {
-        pool.return_buffer(self);
+    /// Gets a mutable reference to the element at the given index.
+    #[inline(always)]
+    pub fn get_mut(&mut self, index: i32) -> &mut T {
+        debug_assert!(index >= 0 && index < self.length);
+        unsafe { &mut *self.ptr.add(index as usize) }
     }
 
-    /// Zeroes out the buffer's memory.
-    #[inline]
-    pub fn clear(&mut self, start: usize, count: usize) {
-        #[cfg(debug_assertions)]
-        debug_assert!(start + count <= self.length, "Clear region out of bounds.");
-        unsafe {
-            write_bytes::<T>(self.memory.as_ptr().add(start), 0, count);
-        }
+    /// Gets a pointer to the element at the given index.
+    #[inline(always)]
+    pub fn get_ptr(&self, index: i32) -> *const T {
+        debug_assert!(index >= 0 && index < self.length);
+        unsafe { self.ptr.add(index as usize) }
+    }
+
+    /// Gets a mutable pointer to the element at the given index.
+    #[inline(always)]
+    pub fn get_mut_ptr(&mut self, index: i32) -> *mut T {
+        debug_assert!(index >= 0 && index < self.length);
+        unsafe { self.ptr.add(index as usize) }
     }
 
     /// Creates a view of a subset of the buffer's memory.
-    #[inline]
-    pub fn slice(&self, start: usize, count: usize) -> Self {
-        #[cfg(debug_assertions)]
-        debug_assert!(start + count <= self.length, "Slice region out of bounds.");
-        unsafe {
-            Buffer::new(
-                NonNull::new_unchecked(self.memory.as_ptr().add(start)),
-                count,
-                self.id,
-            )
-        }
+    #[inline(always)]
+    pub fn slice_offset(&self, start: i32, count: i32) -> Buffer<T> {
+        debug_assert!(start >= 0 && start + count <= self.length);
+        unsafe { Buffer::new(self.ptr.add(start as usize), count, self.id) }
+    }
+
+    /// Creates a view of a subset of the buffer's memory.
+    #[inline(always)]
+    pub fn slice_offset_into(&self, start: i32, count: i32, sliced: &mut Buffer<T>) {
+        debug_assert!(start >= 0 && start + count <= self.length);
+        *sliced = unsafe { Buffer::new(self.ptr.add(start as usize), count, self.id) };
     }
 
     /// Creates a view of a subset of the buffer's memory, starting from the first index.
-    #[inline]
-    pub fn slice_from_start(&self, count: usize) -> Self {
-        self.slice(0, count)
+    #[inline(always)]
+    pub fn slice_count(&self, count: i32) -> Buffer<T> {
+        debug_assert!(count >= 0 && count <= self.length);
+        unsafe { Buffer::new(self.ptr, count, self.id) }
+    }
+
+    /// Creates a view of a subset of the buffer's memory, starting from the first index.
+    #[inline(always)]
+    pub fn slice_count_into(&self, count: i32, sliced: &mut Buffer<T>) {
+        debug_assert!(count >= 0 && count <= self.length);
+        *sliced = unsafe { Buffer::new(self.ptr, count, self.id) };
+    }
+
+    /// Gets the length of the buffer in typed elements.
+    #[inline(always)]
+    pub fn len(&self) -> i32 {
+        self.length
+    }
+
+    /// Gets whether the buffer is empty.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    /// Gets whether the buffer references non-null memory.
+    #[inline(always)]
+    pub fn allocated(&self) -> bool {
+        !self.ptr.is_null()
+    }
+
+    /// Zeroes out the buffer's memory.
+    #[inline(always)]
+    pub fn clear(&mut self, start: i32, count: i32) {
+        debug_assert!(start >= 0 && start + count <= self.length);
+        unsafe {
+            std::ptr::write_bytes(self.ptr.add(start as usize), 0, count as usize);
+        }
     }
 
     /// Copies buffer data into another buffer.
-    pub unsafe fn copy_to(
+    #[inline(always)]
+    pub fn copy_to(
         &self,
-        source_start: usize,
+        source_start: i32,
         target: &mut Buffer<T>,
-        target_start: usize,
-        count: usize,
+        target_start: i32,
+        count: i32,
+    ) {
+        debug_assert!(source_start >= 0 && source_start + count <= self.length);
+        debug_assert!(target_start >= 0 && target_start + count <= target.length);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.ptr.add(source_start as usize),
+                target.ptr.add(target_start as usize),
+                count as usize,
+            );
+        }
+    }
+
+    /// Copies buffer data into a slice.
+    #[inline(always)]
+    pub fn copy_to_slice(&self, source_start: i32, target: &mut [T], target_start: i32, count: i32)
+    where
+        T: Copy,
+    {
+        debug_assert!(source_start >= 0 && source_start + count <= self.length);
+        debug_assert!(target_start >= 0 && (target_start + count) as usize <= target.len());
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.ptr.add(source_start as usize),
+                target.as_mut_ptr().add(target_start as usize),
+                count as usize,
+            );
+        }
+    }
+
+    /// Copies slice data into this buffer.
+    #[inline(always)]
+    pub fn copy_from_slice(
+        &mut self,
+        source: &[T],
+        source_start: i32,
+        target_start: i32,
+        count: i32,
     ) where
         T: Copy,
     {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(
-                source_start + count <= self.length,
-                "Source region out of bounds"
-            );
-            debug_assert!(
-                target_start + count <= target.length,
-                "Target region out of bounds"
-            );
-        }
-
+        debug_assert!(source_start >= 0 && (source_start + count) as usize <= source.len());
+        debug_assert!(target_start >= 0 && target_start + count <= self.length);
         unsafe {
-            copy_nonoverlapping::<T>(
-                self.memory.as_ptr().add(source_start),
-                target.memory.as_ptr().add(target_start),
-                count,
+            std::ptr::copy_nonoverlapping(
+                source.as_ptr().add(source_start as usize),
+                self.ptr.add(target_start as usize),
+                count as usize,
             );
         }
     }
 
-    /// Copies span data into this buffer.
-    pub fn copy_from(
-        &mut self,
-        source: &[T],
-        source_start: usize,
-        target_start: usize,
-        count: usize,
-    ) {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(
-                source_start + count <= source.len(),
-                "Source region out of bounds"
-            );
-            debug_assert!(
-                target_start + count <= self.length,
-                "Target region out of bounds"
-            );
-        }
-
-        unsafe {
-            copy_nonoverlapping::<T>(
-                source.as_ptr().add(source_start),
-                self.memory.as_ptr().add(target_start),
-                count,
-            );
-        }
-    }
-
-    /// Gets the index of an element, if it exists, using the type's default equality comparison.
-    pub fn index_of(&self, element: &T, start: usize, count: usize) -> Option<usize> {
-        #[cfg(debug_assertions)]
-        debug_assert!(start + count <= self.length, "Index region out of bounds");
-
-        for i in start..(start + count) {
-            if self[i] == *element {
-                return Some(i);
-            }
-        }
-        None
-    }
-}
-
-impl<T: Copy> Buffer<T> {
     /// Creates a typed region from the raw buffer with the largest capacity that can fit within the allocated bytes.
-    /// This is a safe operation only if `T` and `TCast` have compatible memory layouts and alignment requirements.
-    pub fn as_cast<TCast>(&self) -> Buffer<TCast>
-    where
-        TCast: Sized,
-    {
-        let new_length = (self.length * std::mem::size_of::<T>()) / std::mem::size_of::<TCast>();
-        unsafe { Buffer::new(self.memory.cast(), new_length, self.id) }
+    #[inline(always)]
+    pub fn cast<U>(&self) -> Buffer<U> {
+        let count = (self.length as usize * size_of::<T>() / size_of::<U>()) as i32;
+        unsafe { Buffer::new(self.ptr as *mut U, count, self.id) }
+    }
+
+    /// Returns a mutable slice to the buffer's contents.
+    #[inline(always)]
+    pub fn as_slice_mut(&mut self) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut(self.ptr, self.length as usize) }
+    }
+
+    /// Returns a slice to the buffer's contents.
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { slice::from_raw_parts(self.ptr, self.length as usize) }
     }
 }
 
-// Implement indexing
-impl<T> Index<usize> for Buffer<T> {
+impl<T> Index<i32> for Buffer<T> {
     type Output = T;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        #[cfg(debug_assertions)]
-        debug_assert!(index < self.length);
-        unsafe { &*self.memory.as_ptr().add(index) }
+    #[inline(always)]
+    fn index(&self, index: i32) -> &Self::Output {
+        unsafe { self.get(index) }
     }
 }
 
-impl<T> IndexMut<usize> for Buffer<T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        #[cfg(debug_assertions)]
-        debug_assert!(index < self.length);
-        unsafe { &mut *self.memory.as_ptr().add(index) }
+impl<T> Index<u32> for Buffer<T> {
+    type Output = T;
+
+    #[inline(always)]
+    fn index(&self, index: u32) -> &Self::Output {
+        self.get(index)
     }
 }
 
-// Allow treating Buffer<T> similarly to slices with Deref
-impl<T> Deref for Buffer<T> {
-    type Target = [T];
-
-    fn deref(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.memory, self.length) }
+impl<T> IndexMut<i32> for Buffer<T> {
+    #[inline(always)]
+    fn index_mut(&mut self, index: i32) -> &mut Self::Output {
+        self.get_mut(index)
     }
 }
 
-impl<T> DerefMut for Buffer<T> {
-    fn deref_mut(&mut self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(self.memory, self.length) }
+impl<T> IndexMut<u32> for Buffer<T> {
+    #[inline(always)]
+    fn index_mut(&mut self, index: u32) -> &mut Self::Output {
+        self.get_mut(index)
+    }
+}
+
+impl<T> Drop for Buffer<T> {
+    fn drop(&mut self) {
+        // We don't deallocate memory here since buffers are managed by pools
     }
 }

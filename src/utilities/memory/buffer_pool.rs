@@ -1,13 +1,11 @@
 use crate::utilities::memory::buffer::Buffer;
-use std::alloc::{self, Layout};
-use std::collections::HashSet;
-use std::ptr::NonNull;
-
+use crate::utilities::memory::unmanaged_mempool::UnmanagedMemoryPool;
 use crate::utilities::memory::{
     managed_id_pool::ManagedIdPool, span_helper::MAXIMUM_SPAN_SIZE_POWER,
 };
-
-use super::unmanaged_mempool::IUnmanagedMemoryPool;
+use std::alloc::{self, Layout};
+use std::collections::HashSet;
+use std::ptr::NonNull;
 
 struct PowerPool {
     blocks: Vec<NonNull<u8>>,
@@ -315,7 +313,7 @@ impl BufferPool {
     }
 }
 
-impl IUnmanagedMemoryPool for BufferPool {
+impl UnmanagedMemoryPool for BufferPool {
     #[inline]
     fn take_at_least<T>(&mut self, count: usize) -> Buffer<T>
     where
@@ -340,10 +338,9 @@ impl IUnmanagedMemoryPool for BufferPool {
 
     /// Returns a buffer to the appropriate pool
     #[inline]
-    fn return_buffer<T>(&mut self, buffer: &mut Buffer<T>)
-    where
-        T: std::marker::Unpin, // Assuming Unpin is the closest trait to unmanaged in this context
-    {
+    fn return_to_pool<T>(&mut self, buffer: &mut Buffer<T>)
+        where
+            T: Copy + Sized {
         #[cfg(debug_assertions)]
         {
             let (power_index, slot_index) = Self::decompose_id(buffer.id);
