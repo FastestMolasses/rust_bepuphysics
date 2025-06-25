@@ -313,6 +313,7 @@ pub fn get_signed_angle_difference(a: &Vector<f32>, b: &Vector<f32>, difference:
 
 #[inline(always)]
 pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
+    // TODO: CHECK PRECISION ACROSS PLATFORMS
     #[cfg(target_arch = "x86_64")]
     unsafe {
         if is_x86_feature_detected!("avx512f") {
@@ -320,7 +321,7 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
             let result512 = _mm512_rcp14_ps(v512);
             std::mem::transmute(result512)
         } else if is_x86_feature_detected!("avx") {
-            let v256 = _mm256_castps128_ps256(_mm_load_ps(v.as_ptr()));
+            let v256 = _mm256_load_ps(v.as_ptr());
             let result256 = _mm256_rcp_ps(v256);
             let result128 = _mm256_castps256_ps128(result256);
             std::mem::transmute(result128)
@@ -329,7 +330,7 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
             let result128 = _mm_rcp_ps(v128);
             std::mem::transmute(result128)
         } else {
-            Vector::<f32>::splat(1.0) / v
+            v.recip()
         }
     }
     #[cfg(target_arch = "aarch64")]
@@ -340,12 +341,13 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
-        Vector::<f32>::splat(1.0) / v
+        v.recip()
     }
 }
 
 #[inline(always)]
 pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
+    // TODO: CHECK PRECISION ACROSS PLATFORMS
     #[cfg(target_arch = "x86_64")]
     unsafe {
         if is_x86_feature_detected!("avx512f") {
@@ -353,7 +355,7 @@ pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
             let result512 = _mm512_rsqrt14_ps(v512);
             std::mem::transmute(result512)
         } else if is_x86_feature_detected!("avx") {
-            let v256 = _mm256_castps128_ps256(_mm_load_ps(v.as_ptr()));
+            let v256 = _mm256_load_ps(v.as_ptr());
             let result256 = _mm256_rsqrt_ps(v256);
             let result128 = _mm256_castps256_ps128(result256);
             std::mem::transmute(result128)

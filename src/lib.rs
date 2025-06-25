@@ -7,6 +7,7 @@ pub mod utilities;
 
 // TODO: REPLACE is_x86_feature_detected WITH CFG, MAYBE OnceLock AND DO FEATURE DETECTION IN BUILD SCRIPT
 // TODO: IMPLEMENT SVE INTRINSICS
+// TODO: MAKE TESTS FOR DETERMINISM ACROSS PLATFORMS
 
 /// Provides a zero-cost abstraction for out parameters similar to C#'s `out` keyword.
 ///
@@ -24,29 +25,12 @@ pub mod utilities;
 /// ```
 /// Symmetric3x3Wide.Scale(ref this, rhs, out var result);
 /// ```
-/// This supports up to two out parameters. When 2 is specified, the macro returns a tuple.
 #[macro_export]
 macro_rules! out {
-    // Single out parameter
     ($e:ident :: $method:ident ( $($arg:expr),* )) => {{
         let mut __result = std::mem::MaybeUninit::uninit();
         $e::$method($($arg,)* unsafe { &mut *(__result.as_mut_ptr()) });
         unsafe { __result.assume_init() }
-    }};
-
-    // Two out parameters
-    ($e:ident :: $method:ident ( $($arg:expr),* ), 2) => {{
-        let mut __result1 = std::mem::MaybeUninit::uninit();
-        let mut __result2 = std::mem::MaybeUninit::uninit();
-        $e::$method(
-            $($arg,)*
-            unsafe { &mut *(__result1.as_mut_ptr()) },
-            unsafe { &mut *(__result2.as_mut_ptr()) }
-        );
-        (
-            unsafe { __result1.assume_init() },
-            unsafe { __result2.assume_init() }
-        )
     }};
 }
 

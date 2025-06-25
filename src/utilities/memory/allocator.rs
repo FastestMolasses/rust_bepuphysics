@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ptr::NonNull};
 
 use crate::utilities::memory::{
-    buffer::Buffer, unmanaged_mempool::IUnmanagedMemoryPool, managed_id_pool::ManagedIdPool,
+    buffer::Buffer, buffer_pool::BufferPool,
 };
 
 /// Represents a chunk of abstract memory supporting allocations and deallocations.
@@ -9,7 +9,7 @@ use crate::utilities::memory::{
 ///
 /// Uses an extremely simple ring buffer that makes no attempt to skip groups of allocations. Not particularly efficient.
 pub struct Allocator {
-    pool: Box<dyn IUnmanagedMemoryPool>,
+    pool: Box<BufferPool>,
     capacity: usize,
     search_start_index: usize,
     allocations: HashMap<u64, Allocation>,
@@ -28,7 +28,7 @@ impl Allocator {
     /// # Arguments
     /// * `capacity`: Size of the memory handled by the allocator in elements.
     /// * `pool`: Pool to pull internal resources from.
-    pub fn new(capacity: usize, pool: Box<dyn IUnmanagedMemoryPool>) -> Self {
+    pub fn new(capacity: usize, pool: Box<BufferPool>) -> Self {
         Self {
             pool,
             capacity,
