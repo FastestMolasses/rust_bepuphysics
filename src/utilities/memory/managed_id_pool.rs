@@ -4,6 +4,7 @@ pub struct ManagedIdPool {
 }
 
 impl ManagedIdPool {
+    #[inline(always)]
     pub fn new(initial_capacity: usize) -> Self {
         #[cfg(debug_assertions)]
         debug_assert!(initial_capacity > 0);
@@ -13,7 +14,7 @@ impl ManagedIdPool {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn take(&mut self) -> usize {
         self.available_ids.pop().unwrap_or_else(|| {
             let id = self.next_index;
@@ -22,27 +23,30 @@ impl ManagedIdPool {
         })
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn return_id(&mut self, id: usize) {
         self.available_ids.push(id);
     }
 
+    #[inline(always)]
     pub fn clear(&mut self) {
         self.next_index = 0;
         self.available_ids.clear();
     }
 
+    #[inline(always)]
     pub fn ensure_capacity(&mut self, count: usize) {
         self.available_ids.reserve(count.saturating_sub(self.available_ids.capacity()));
     }
 
+    #[inline(always)]
     pub fn compact(&mut self, minimum_count: usize) {
         if minimum_count < self.available_ids.capacity() {
             self.available_ids.shrink_to(minimum_count);
         }
     }
 
-    // Getters
+    #[inline(always)]
     pub fn highest_possibly_claimed_id(&self) -> isize {
         if self.next_index == 0 {
             -1
@@ -51,6 +55,7 @@ impl ManagedIdPool {
         }
     }
 
+    #[inline(always)]
     pub fn available_id_count(&self) -> usize {
         self.available_ids.len()
     }

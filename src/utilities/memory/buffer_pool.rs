@@ -243,6 +243,7 @@ pub struct BufferPool {
 }
 
 impl BufferPool {
+    #[inline(always)]
     pub fn new(
         minimum_block_allocation_size: usize,
         expected_pooled_resource_count: usize,
@@ -264,27 +265,30 @@ impl BufferPool {
         Self { pools }
     }
 
+    #[inline(always)]
     pub fn new_with_minimum_block_size(minimum_block_size: usize) -> Self {
         Self::new(minimum_block_size, 16)
     }
 
     /// Ensures the specified power pool has the capacity to handle a given number of bytes
+    #[inline(always)]
     pub fn ensure_capacity_for_power(&mut self, byte_count: usize, power: usize) {
         self.pools[power].ensure_capacity(byte_count);
     }
 
+    #[inline(always)]
     pub fn get_capacity_for_power(&self, power: usize) -> usize {
         self.pools[power].block_count * self.pools[power].block_size
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn take_for_power(&mut self, power: usize) -> Buffer<u8> {
         assert!(power <= MAXIMUM_SPAN_SIZE_POWER);
         self.pools[power].take()
     }
 
     /// Decomposes a buffer ID into its power index and slot index components.
-    #[inline]
+    #[inline(always)]
     fn decompose_id(buffer_id: i32) -> (usize, usize) {
         let power_index = (buffer_id >> PowerPool::ID_POWER_SHIFT) as usize;
         let slot_index = (buffer_id & ((1 << PowerPool::ID_POWER_SHIFT) - 1)) as usize;
@@ -292,7 +296,7 @@ impl BufferPool {
     }
 
     /// Returns a buffer to the pool unsafely by its ID, without performing any checks.
-    #[inline]
+    #[inline(always)]
     pub fn return_unsafely(&mut self, id: i32) {
         let (power_index, slot_index) = Self::decompose_id(id);
         self.pools[power_index].return_slot(slot_index);
@@ -314,20 +318,20 @@ impl BufferPool {
 }
 
 impl UnmanagedMemoryPool for BufferPool {
-    #[inline]
-    fn take_at_least<T>(&mut self, count: usize) -> Buffer<T>
+    #[inline(always)]
+    fn take_at_least<T>(&mut self, count: i32, buffer: &mut Buffer<T>)
     where
         T: Copy,
     {
         let count = count.max(1); // Avoid zero-length spans
-        let total_size = count * std::mem::size_of::<T>();
+        let total_size = count as usize * std::mem::size_of::<T>();
         let power = total_size.next_power_of_two().trailing_zeros() as usize;
         let mut raw_buffer = self.take_for_power(power);
         unsafe { raw_buffer.reinterpret_as::<T>() }
     }
 
-    #[inline]
-    fn take<T>(&mut self, count: usize) -> Buffer<T>
+    #[inline(always)]
+    fn take<T>(&mut self, count: i32, buffer: &mut Buffer<T>)
     where
         T: Copy,
     {
@@ -337,10 +341,11 @@ impl UnmanagedMemoryPool for BufferPool {
     }
 
     /// Returns a buffer to the appropriate pool
-    #[inline]
+    #[inline(always)]
     fn return_to_pool<T>(&mut self, buffer: &mut Buffer<T>)
-        where
-            T: Copy + Sized {
+    where
+        T: Copy + Sized,
+    {
         #[cfg(debug_assertions)]
         {
             let (power_index, slot_index) = Self::decompose_id(buffer.id);
@@ -351,13 +356,35 @@ impl UnmanagedMemoryPool for BufferPool {
         *buffer = Buffer::default();
     }
 
+    #[inline(always)]
+    fn get_capacity_for_count<T>(count: i32) -> i32
+    where
+        T: Sized,
+    {
+        let count = count.max(1); // Ensure at least 1
+        let size_in_bytes = count as usize * std::mem::size_of::<T>();
+        let rounded_up = size_in_bytes.next_power_of_two();
+        debug_assert!(
+            rounded_up as u64 * std::mem::size_of::<T>() as u64 <= i32::MAX as u64,
+            "This function assumes that counts aren't going to overflow a signed 32 bit integer."
+        );
+        rounded_up / std::mem::size_of::<T>()
+    }
+
+    #[inline(always)]
+    fn return_unsafely(&mut self, id: i32) {
+        let (power_index, slot_index) = BufferPool::decompose_id(id);
+        self.pools[power_index].return_slot(slot_index);
+    }
+
+    #[inline(always)]
     fn resize_to_at_least<T>(
         &mut self,
         buffer: &mut Buffer<T>,
-        target_size: usize,
-        copy_count: usize,
+        target_size: i32,
+        copy_count: i32,
     ) where
-        T: std::marker::Unpin + Clone, // Clone is assumed for copying elements
+        T: Copy,
     {
         debug_assert!(
             copy_count <= target_size && copy_count <= buffer.length(),
@@ -366,9 +393,7 @@ impl UnmanagedMemoryPool for BufferPool {
         let target_capacity = self.get_capacity_for_count::<T>(target_size);
 
         if !buffer.allocated() {
-            // Assuming Buffer has an `allocated` method
             debug_assert!(buffer.length() == 0, "If a buffer is pointing at null, then it should be default initialized and have a length of zero too.");
-            // This buffer is not allocated; just return a new one. No copying to be done.
             *buffer = self.take_at_least::<T>(target_capacity);
         } else {
             let original_allocated_size_in_bytes = 1 << (buffer.id >> PowerPool::ID_POWER_SHIFT);
@@ -383,40 +408,29 @@ impl UnmanagedMemoryPool for BufferPool {
                 *buffer = new_buffer;
             } else {
                 // Original allocation is large enough; just update the length.
-                buffer.set_length(original_allocated_size); // Assuming `set_length` is defined for Buffer<T>
+                buffer.set_length(original_allocated_size);
             }
         }
     }
 
-    fn get_capacity_for_count<T>(count: usize) -> usize
+    #[inline(always)]
+    fn resize<T>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32)
     where
-        T: Sized, // Only requirement is that T's size must be known
-    {
-        let count = count.max(1); // Ensure at least 1
-        let size_in_bytes = count * std::mem::size_of::<T>();
-        let rounded_up = size_in_bytes.next_power_of_two();
-        debug_assert!(
-            rounded_up as u64 * std::mem::size_of::<T>() as u64 <= i32::MAX as u64,
-            "This function assumes that counts aren't going to overflow a signed 32 bit integer."
-        );
-        rounded_up / std::mem::size_of::<T>()
-    }
-
-    fn resize<T>(&mut self, buffer: &mut Buffer<T>, target_size: usize, copy_count: usize)
-    where
-        T: Unpin + Clone, // Assuming T needs to be Unpin for certain operations and Clone for copying.
+        T: Copy,
     {
         self.resize_to_at_least(buffer, target_size, copy_count);
-        buffer.set_length(target_size); // Assuming Buffer<T> has a set_length method to adjust its size.
+        buffer.set_length(target_size);
     }
 
     /// Clears all pools, deallocating all memory
-    unsafe fn clear(&mut self) {
+    #[inline(always)]
+    fn clear(&mut self) {
         for pool in &mut self.pools {
             pool.clear();
         }
     }
 
+    #[inline(always)]
     fn get_total_allocated_byte_count(&self) -> u64 {
         self.pools
             .iter()
@@ -432,11 +446,9 @@ impl Default for BufferPool {
 }
 
 impl Drop for BufferPool {
+    #[inline(always)]
     fn drop(&mut self) {
-        unsafe {
-            self.clear();
-        }
-
+        self.clear();
         #[cfg(debug_assertions)]
         {
             let total_block_count: usize = self.pools.iter().map(|p| p.block_count).sum();
