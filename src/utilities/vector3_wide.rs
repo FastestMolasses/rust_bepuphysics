@@ -249,6 +249,10 @@ impl Vector3Wide {
     }
 
     /// Computes the cross product between two vectors, assuming that the vector references are not aliased.
+    ///
+    /// # Safety
+    ///
+    /// The `result` reference must not alias with `a` or `b`. If `result` points to the same memory location as `a` or `b`, the behavior is undefined.
     #[inline(always)]
     pub unsafe fn cross_without_overlap(a: &Self, b: &Self, result: &mut Self) {
         // This will fail if the result reference is actually a or b!
@@ -342,7 +346,7 @@ impl Vector3Wide {
     /// Computes a unit length vector pointing in the same direction as the input.
     #[inline(always)]
     pub fn normalize(v: &Self) -> Self {
-        let length = Self::length(&v);
+        let length = Self::length(v);
         let scale = Vector::splat(1.0) / length;
         Self::scale(v, &scale)
     }
@@ -350,7 +354,7 @@ impl Vector3Wide {
     /// Computes a unit length vector pointing in the same direction as the input, into another vector.
     #[inline(always)]
     pub fn normalize_to(v: &Self, result: &mut Self) {
-        let length = Self::length(&v);
+        let length = Self::length(v);
         let scale = Vector::splat(1.0) / length;
         Self::scale_to(v, &scale, result);
     }

@@ -1,11 +1,11 @@
 mod affine_transform;
 pub use self::affine_transform::*;
 
-// mod collections;
-// pub use self::collections::*;
+pub mod collections;
 pub mod memory;
-// mod task_scheduling;
-// mod thread_dispatcher;
+// TODO: Task scheduling needs significant rewrite - disabled for now
+// pub mod task_scheduling;
+// pub mod thread_dispatcher;
 
 pub mod bounding_box;
 pub mod bounding_sphere;

@@ -204,7 +204,7 @@ impl QuaternionWide {
             ),
             w: use_normal_case.select(dot + Vector::<f32>::splat(1.0), Vector::<f32>::splat(0.0)),
         };
-        return Self::normalize(q);
+        Self::normalize(q)
     }
 
     /// Gets an axis and angle representation of the rotation stored in a quaternion.
@@ -220,7 +220,7 @@ impl QuaternionWide {
         axis.z = should_negate.select(-q.z, q.z);
         let qw = should_negate.select(-q.w, q.w);
 
-        let axis_length = Vector3Wide::length(&axis);
+        let axis_length = Vector3Wide::length(axis);
         *axis = out!(Vector3Wide::scale_to(
             &axis,
             &(Vector::<f32>::splat(1.0) / axis_length)

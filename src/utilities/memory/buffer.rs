@@ -1,38 +1,74 @@
-use crate::utilities::memory::unmanaged_mempool::UnmanagedMemoryPool;
+//! Span over an unmanaged memory region.
+//!
+//! This provides a high-performance, cache-friendly buffer type that wraps raw memory
+//! and is designed to be used with the BufferPool allocator.
+
 use core::marker::PhantomData;
 use std::{
     mem::size_of,
     ops::{Index, IndexMut},
+    ptr,
     slice,
 };
 
+/// Span over an unmanaged memory region.
+///
+/// # Memory Layout
+/// We're primarily interested in x64, so memory + length is 12 bytes.
+/// This struct would/should get padded to 16 bytes for alignment reasons anyway,
+/// so making use of the last 4 bytes to speed up the case where the raw buffer
+/// is taken from a pool (which is basically always) is a good option.
 #[repr(C)]
 #[derive(Debug)]
-/// Span over an unmanaged memory region.
 pub struct Buffer<T> {
     /// Pointer to the beginning of the memory backing this buffer.
     ptr: *mut T,
-    /// Length of the buffer in terms of elements
+    /// Length of the buffer in terms of elements.
     length: i32,
-    /// We're primarily interested in x64, so memory + length is 12 bytes. This struct would/should get padded to 16 bytes for alignment reasons anyway,
-    /// so making use of the last 4 bytes to speed up the case where the raw buffer is taken from a pool (which is basically always) is a good option.
-    pub id: i32,
+    /// Implementation specific identifier of the raw buffer set by its source.
+    /// If taken from a BufferPool, Id includes the index in the power pool from which it was taken.
+    id: i32,
     _phantom: PhantomData<T>,
 }
 
 unsafe impl<T: Send> Send for Buffer<T> {}
 unsafe impl<T: Sync> Sync for Buffer<T> {}
 
+impl<T> Default for Buffer<T> {
+    #[inline(always)]
+    fn default() -> Self {
+        Self {
+            ptr: ptr::null_mut(),
+            length: 0,
+            id: -1,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> Clone for Buffer<T> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        Self {
+            ptr: self.ptr,
+            length: self.length,
+            id: self.id,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for Buffer<T> {}
+
 impl<T> Buffer<T> {
     /// Creates a new buffer.
+    ///
     /// # Safety
-    /// - `ptr` must be valid for reads and writes for `length` elements of T
+    /// - `ptr` must be valid for reads and writes for `length` elements of T (or null)
     /// - `ptr` must be properly aligned for T
     /// - The memory referenced by `ptr` must not be accessed through any other pointer while this Buffer exists
     #[inline(always)]
     pub fn new(ptr: *mut T, length: i32, id: i32) -> Self {
-        debug_assert!(!ptr.is_null());
-        debug_assert!(length >= 0);
         Self {
             ptr,
             length,
@@ -41,25 +77,34 @@ impl<T> Buffer<T> {
         }
     }
 
-    /// Takes a buffer large enough to contain a number of elements of type T.
+    /// Gets the ID of this buffer.
     #[inline(always)]
-    pub fn new_from_pool<P: UnmanagedMemoryPool>(length: i32) -> Self {
-        let mut buffer = unsafe { Self::new(std::ptr::null_mut(), 0, -1) };
-        P::take(length, &mut buffer);
-        buffer
+    pub fn id(&self) -> i32 {
+        self.id
     }
 
-    /// Returns a buffer to a pool. This should only be used if the specified
-    /// pool is the same as the one used to allocate the buffer.
+    /// Gets the raw pointer to the buffer's memory.
     #[inline(always)]
-    pub fn dispose<P: UnmanagedMemoryPool>(&mut self) {
-        P::return_to_pool(self);
+    pub fn as_ptr(&self) -> *const T {
+        self.ptr
+    }
+
+    /// Gets a mutable raw pointer to the buffer's memory.
+    #[inline(always)]
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.ptr
+    }
+
+    /// Sets the length of the buffer.
+    #[inline(always)]
+    pub fn set_length(&mut self, length: i32) {
+        self.length = length;
     }
 
     /// Gets a reference to the element at the given index.
     #[inline(always)]
     pub fn get(&self, index: i32) -> &T {
-        debug_assert!(index >= 0 && index < self.length);
+        debug_assert!(index >= 0 && index < self.length, "Index out of range.");
         unsafe { &*self.ptr.add(index as usize) }
     }
 
@@ -102,14 +147,14 @@ impl<T> Buffer<T> {
     #[inline(always)]
     pub fn slice_count(&self, count: i32) -> Buffer<T> {
         debug_assert!(count >= 0 && count <= self.length);
-        unsafe { Buffer::new(self.ptr, count, self.id) }
+        Buffer::new(self.ptr, count, self.id)
     }
 
     /// Creates a view of a subset of the buffer's memory, starting from the first index.
     #[inline(always)]
     pub fn slice_count_into(&self, count: i32, sliced: &mut Buffer<T>) {
         debug_assert!(count >= 0 && count <= self.length);
-        *sliced = unsafe { Buffer::new(self.ptr, count, self.id) };
+        *sliced = Buffer::new(self.ptr, count, self.id);
     }
 
     /// Gets the length of the buffer in typed elements.
@@ -202,7 +247,7 @@ impl<T> Buffer<T> {
     #[inline(always)]
     pub fn cast<U>(&self) -> Buffer<U> {
         let count = (self.length as usize * size_of::<T>() / size_of::<U>()) as i32;
-        unsafe { Buffer::new(self.ptr as *mut U, count, self.id) }
+        Buffer::new(self.ptr as *mut U, count, self.id)
     }
 
     /// Returns a mutable slice to the buffer's contents.
@@ -216,6 +261,18 @@ impl<T> Buffer<T> {
     pub fn as_slice(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.ptr, self.length as usize) }
     }
+
+    /// Returns an iterator over the buffer's elements.
+    #[inline(always)]
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.as_slice().iter()
+    }
+
+    /// Returns a mutable iterator over the buffer's elements.
+    #[inline(always)]
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.as_slice_mut().iter_mut()
+    }
 }
 
 impl<T> Index<i32> for Buffer<T> {
@@ -223,7 +280,7 @@ impl<T> Index<i32> for Buffer<T> {
 
     #[inline(always)]
     fn index(&self, index: i32) -> &Self::Output {
-        unsafe { self.get(index) }
+        self.get(index)
     }
 }
 
@@ -232,7 +289,16 @@ impl<T> Index<u32> for Buffer<T> {
 
     #[inline(always)]
     fn index(&self, index: u32) -> &Self::Output {
-        self.get(index)
+        self.get(index as i32)
+    }
+}
+
+impl<T> Index<usize> for Buffer<T> {
+    type Output = T;
+
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index as i32)
     }
 }
 
@@ -246,12 +312,13 @@ impl<T> IndexMut<i32> for Buffer<T> {
 impl<T> IndexMut<u32> for Buffer<T> {
     #[inline(always)]
     fn index_mut(&mut self, index: u32) -> &mut Self::Output {
-        self.get_mut(index)
+        self.get_mut(index as i32)
     }
 }
 
-impl<T> Drop for Buffer<T> {
-    fn drop(&mut self) {
-        // We don't deallocate memory here since buffers are managed by pools
+impl<T> IndexMut<usize> for Buffer<T> {
+    #[inline(always)]
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.get_mut(index as i32)
     }
 }

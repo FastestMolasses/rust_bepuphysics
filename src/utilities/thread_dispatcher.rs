@@ -1,29 +1,10 @@
-use std::{
-    marker::PhantomData,
-    ptr::NonNull,
-    sync::{
-        atomic::{AtomicBool, AtomicI32, Ordering},
-        Arc, Condvar, Mutex,
-    },
-    thread::{self, JoinHandle},
-};
+//! Thread dispatcher for multithreaded physics simulation.
 
-use crate::utilities::worker_buffer_pools::WorkerBufferPools;
+use crate::utilities::memory::worker_buffer_pools::WorkerBufferPools;
+use crate::utilities::memory::buffer_pool::BufferPool;
 
-type UnmanagedWorkerFn = unsafe fn(worker_index: i32, dispatcher: &ThreadDispatcher);
-type ManagedWorkerFn = Box<dyn Fn(i32) + Send + Sync>;
-
-#[repr(u8)]
-enum WorkerType {
-    Managed,
-    Unmanaged,
-}
-
-/// A worker in the thread dispatcher
-struct Worker {
-    thread: JoinHandle<()>,
-    signal: Arc<(Mutex<bool>, Condvar)>,
-}
+/// Function to be invoked on a worker thread. Provides the worker index and a reference to the dispatcher.
+pub type WorkerBodyFn = unsafe fn(worker_index: i32, dispatcher: &dyn IThreadDispatcher);
 
 /// Provides multithreading dispatch primitives, a thread count, and per thread resource pools for the simulation to use.
 ///
@@ -34,15 +15,16 @@ struct Worker {
 ///
 /// This is important when a user wants to share some other thread pool, but doesn't want to guarantee extremely high performance and high quality
 /// load balancing. Instead of worrying about that, they can just wrap whatever implementation they happen to have and it'll probably work fine.
-pub trait ThreadDispatcher: Send + Sync {
+pub trait IThreadDispatcher: Send + Sync {
     /// Gets the number of workers available in the thread dispatcher.
     fn thread_count(&self) -> i32;
 
     /// Gets the unmanaged context associated with the current dispatch, if any.
-    unsafe fn unmanaged_context(&self) -> Option<NonNull<()>>;
+    /// This is intended to help pass information to workers.
+    unsafe fn unmanaged_context(&self) -> *mut ();
 
     /// Gets the managed context associated with the current dispatch, if any.
-    fn managed_context(&self) -> Option<&()>;
+    fn managed_context(&self) -> Option<&dyn std::any::Any>;
 
     /// Dispatches all the available workers.
     ///
@@ -51,21 +33,18 @@ pub trait ThreadDispatcher: Send + Sync {
     /// The unmanaged_context must be valid for the duration of the dispatch if provided.
     unsafe fn dispatch_workers(
         &self,
-        worker_body: UnmanagedWorkerFn,
-        maximum_worker_count: Option<i32>,
-        unmanaged_context: Option<NonNull<()>>,
-        managed_context: Option<&()>,
-    );
-
-    /// Dispatches all the available workers with a managed worker function.
-    fn dispatch_workers_managed(
-        &self,
-        worker_body: impl Fn(i32) + Send + Sync + 'static,
-        maximum_worker_count: Option<i32>,
-        unmanaged_context: Option<NonNull<()>>,
-        managed_context: Option<&()>,
+        worker_body: WorkerBodyFn,
+        maximum_worker_count: i32,
+        unmanaged_context: *mut (),
+        managed_context: Option<&dyn std::any::Any>,
     );
 
     /// Gets the set of memory pools associated with thread workers.
+    /// All usages of these worker pools within the simulation are guaranteed to return thread pool memory before the function returns.
     fn worker_pools(&self) -> &WorkerBufferPools;
+
+    /// Gets a specific worker's buffer pool.
+    fn worker_pool(&self, worker_index: i32) -> &BufferPool {
+        &self.worker_pools().pools[worker_index as usize]
+    }
 }

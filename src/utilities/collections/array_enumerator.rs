@@ -1,19 +1,25 @@
-struct ArrayEnumerable<T> {
-    array: &[T], // Using a slice for flexibility
+//! Array enumeration utilities for iterating over slices with custom bounds.
+
+/// An enumerable view over a slice with custom start/end bounds.
+pub struct ArrayEnumerable<'a, T> {
+    array: &'a [T],
     start: usize,
     end: usize,
 }
 
-impl<T> ArrayEnumerable<T> {
+impl<'a, T> ArrayEnumerable<'a, T> {
+    /// Returns the number of elements in the enumerable range.
     pub fn count(&self) -> usize {
         self.end - self.start
     }
 
-    pub fn new(array: &[T], start: usize, end: usize) -> Self {
+    /// Creates a new ArrayEnumerable with custom start and end bounds.
+    pub fn new(array: &'a [T], start: usize, end: usize) -> Self {
         ArrayEnumerable { array, start, end }
     }
 
-    pub fn from_count(array: &[T], count: usize) -> Self {
+    /// Creates a new ArrayEnumerable from the start up to the given count.
+    pub fn from_count(array: &'a [T], count: usize) -> Self {
         ArrayEnumerable {
             array,
             start: 0,
@@ -21,7 +27,8 @@ impl<T> ArrayEnumerable<T> {
         }
     }
 
-    pub fn from_full_array(array: &[T]) -> Self {
+    /// Creates a new ArrayEnumerable over the full array.
+    pub fn from_full_array(array: &'a [T]) -> Self {
         ArrayEnumerable {
             array,
             start: 0,
@@ -30,37 +37,43 @@ impl<T> ArrayEnumerable<T> {
     }
 }
 
-// Implementing the Iterator trait for ArrayEnumerable
-impl<T> IntoIterator for ArrayEnumerable<T> {
-    type Item = T;
-    type IntoIter = ArrayEnumerator<T>;
+impl<'a, T> IntoIterator for ArrayEnumerable<'a, T> {
+    type Item = &'a T;
+    type IntoIter = ArrayEnumerator<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         ArrayEnumerator {
             array: self.array,
-            index: self.start - 1,
+            index: self.start,
             end: self.end,
         }
     }
 }
 
-struct ArrayEnumerator<T> {
-    array: &[T],
+/// An iterator over a slice with custom bounds.
+pub struct ArrayEnumerator<'a, T> {
+    array: &'a [T],
     index: usize,
     end: usize,
 }
 
-// Implementing the Iterator trait for ArrayEnumerator
-impl<T> Iterator for ArrayEnumerator<T> {
-    type Item = T;
+impl<'a, T> Iterator for ArrayEnumerator<'a, T> {
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.index += 1;
         if self.index < self.end {
-            // TODO: The value is cloned when returning from next. Depending on the usage, we could avoid this if we return references to elements within the slice
-            Some(unsafe { self.array.get_unchecked(self.index) }).cloned()
+            let item = unsafe { self.array.get_unchecked(self.index) };
+            self.index += 1;
+            Some(item)
         } else {
             None
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end.saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
 }
+
+impl<'a, T> ExactSizeIterator for ArrayEnumerator<'a, T> {}

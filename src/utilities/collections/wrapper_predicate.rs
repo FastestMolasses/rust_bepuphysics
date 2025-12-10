@@ -1,16 +1,16 @@
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
-use crate::utilities::collections::predicate::Predicate;
 use crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer;
+use crate::utilities::collections::predicate::Predicate;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 /// Provides a default implementation for a reference equality comparer that can be used with any `T` that implements `Hash` and `Eq`.
 pub struct DefaultRefEqualityComparer;
 
 impl<T: Hash + Eq> RefEqualityComparer<T> for DefaultRefEqualityComparer {
-    fn hash(&self, item: &T) -> u64 {
+    fn hash(&self, item: &T) -> i32 {
         let mut hasher = DefaultHasher::new();
         item.hash(&mut hasher);
-        hasher.finish()
+        hasher.finish() as i32
     }
 
     fn equals(&self, a: &T, b: &T) -> bool {
@@ -27,10 +27,9 @@ where
     comparer: C,
 }
 
-impl<T, C> WrapperPredicate<T, C>
+impl<T> WrapperPredicate<T, DefaultRefEqualityComparer>
 where
     T: Hash + Eq,
-    C: RefEqualityComparer<T>,
 {
     /// Creates a default comparer for the given type.
     pub fn new(item: T) -> Self {
@@ -38,6 +37,17 @@ where
             item,
             comparer: DefaultRefEqualityComparer,
         }
+    }
+}
+
+impl<T, C> WrapperPredicate<T, C>
+where
+    T: Hash + Eq,
+    C: RefEqualityComparer<T>,
+{
+    /// Creates with a custom comparer.
+    pub fn with_comparer(item: T, comparer: C) -> Self {
+        WrapperPredicate { item, comparer }
     }
 }
 

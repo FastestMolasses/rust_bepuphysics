@@ -63,7 +63,7 @@ macro_rules! impl_primitive {
             unsafe fn cmp(&self, other: &Self) -> Ordering {
                 let a = *(self as *const $t as *const $as_type);
                 let b = *(other as *const $t as *const $as_type);
-                a.cmp(&b)
+                Ord::cmp(&a, &b)
             }
 
             unsafe fn eq(&self, other: &Self) -> bool {
@@ -74,7 +74,7 @@ macro_rules! impl_primitive {
 
             unsafe fn hash<H: Hasher>(&self, state: &mut H) {
                 let val = *(self as *const $t as *const $as_type);
-                val.hash(state);
+                Hash::hash(&val, state);
             }
         }
     };

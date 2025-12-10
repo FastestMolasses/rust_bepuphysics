@@ -372,7 +372,7 @@ pub fn angle_from_quaternion(q: Quat) -> f32 {
     if qw > 1.0 {
         return 0.0;
     }
-    return 2.0 * qw.acos();
+    2.0 * qw.acos()
 }
 
 /// Computes the axis angle representation of a normalized quaternion.

@@ -1,5 +1,6 @@
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 
 pub trait EqualityComparerRef<T> {
     fn equals(&self, a: &T, b: &T) -> bool;
@@ -8,14 +9,21 @@ pub trait EqualityComparerRef<T> {
 
 /// IEqualityComparerRef wrapper around an EqualityComparer.
 pub struct WrapperEqualityComparer<T> {
-    // This is a simplification, as Rust's standard library does not have an `EqualityComparer` trait like .NET.
-    // In Rust, `Eq` and `Hash` traits are used for these purposes.
+    _phantom: PhantomData<T>,
 }
 
 impl<T> WrapperEqualityComparer<T> {
     /// Creates a default comparer for the given type.
     pub fn new() -> Self {
-        WrapperEqualityComparer {}
+        WrapperEqualityComparer {
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> Default for WrapperEqualityComparer<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
