@@ -1,32 +1,58 @@
+//! Block storage for task continuations.
+//!
+//! ContinuationBlocks form a linked list to allow growing continuation storage
+//! without reallocation (which would introduce race conditions).
+
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::task_scheduling::task_continuation::TaskContinuation;
-use std::ptr::null_mut;
+
+use super::task_continuation::TaskContinuation;
 
 /// Stores a block of task continuations that maintains a pointer to previous blocks.
 #[repr(C)]
 pub struct ContinuationBlock {
-    previous: *mut ContinuationBlock,
-    count: i32,
+    /// Pointer to the previous block in the linked list.
+    pub previous: *mut ContinuationBlock,
+    /// Number of continuations allocated in this block.
+    pub count: i32,
+    /// Buffer holding the continuation data.
     pub continuations: Buffer<TaskContinuation>,
 }
 
 impl ContinuationBlock {
     /// Creates a new block of task continuations.
-    pub unsafe fn create(continuation_capacity: i32, pool: &mut BufferPool) -> *mut ContinuationBlock {
-        let total_size = std::mem::size_of::<TaskContinuation>() * continuation_capacity as usize + std::mem::size_of::<ContinuationBlock>();
-        let raw_buffer = pool.take::<u8>(total_size);
-        let block = raw_buffer.as_mut_ptr() as *mut ContinuationBlock;
-        (*block).continuations = Buffer::new(raw_buffer.offset(std::mem::size_of::<ContinuationBlock>() as isize), continuation_capacity, raw_buffer.id());
+    ///
+    /// # Safety
+    /// The pool must have sufficient memory available.
+    pub unsafe fn create(continuation_capacity: i32, pool: &BufferPool) -> *mut ContinuationBlock {
+        // Allocate memory for both the block header and continuations in one allocation
+        let total_size = std::mem::size_of::<ContinuationBlock>()
+            + std::mem::size_of::<TaskContinuation>() * continuation_capacity as usize;
+
+        let raw_buffer: Buffer<u8> = pool.take(total_size as i32);
+        let block = raw_buffer.as_ptr() as *mut ContinuationBlock;
+
+        // Set up the continuations buffer to point just after the block header
+        let continuations_ptr = (raw_buffer.as_ptr() as *mut u8)
+            .add(std::mem::size_of::<ContinuationBlock>())
+            as *mut TaskContinuation;
+
+        (*block).continuations =
+            Buffer::new(continuations_ptr, continuation_capacity, raw_buffer.id());
         (*block).count = 0;
-        (*block).previous = null_mut();
+        (*block).previous = std::ptr::null_mut();
+
         block
     }
 
-    /// Tries to allocate a continuation, returning a mutable pointer to it if successful.
+    /// Tries to allocate a continuation from this block.
+    ///
+    /// # Returns
+    /// Some(pointer) if allocation succeeded, None if the block is full.
+    #[inline(always)]
     pub unsafe fn try_allocate_continuation(&mut self) -> Option<*mut TaskContinuation> {
-        if self.count < self.continuations.length() {
-            let continuation = self.continuations.as_mut_ptr().offset(self.count as isize);
+        if self.count < self.continuations.len() {
+            let continuation = self.continuations.as_mut_ptr().add(self.count as usize);
             self.count += 1;
             Some(continuation)
         } else {
@@ -34,23 +60,16 @@ impl ContinuationBlock {
         }
     }
 
-    /// Disposes of the continuation block, returning its resources to the pool.
-    pub unsafe fn dispose(&mut self, pool: &mut BufferPool) {
+    /// Disposes of this continuation block and all previous blocks in the chain.
+    ///
+    /// # Safety
+    /// The pool must be the same pool used to allocate this block.
+    pub unsafe fn dispose(&mut self, pool: &BufferPool) {
         let id = self.continuations.id();
         pool.return_unsafely(id);
         if !self.previous.is_null() {
             (*self.previous).dispose(pool);
         }
         *self = std::mem::zeroed();
-    }
-}
-
-// Necessary for correct Rust memory management
-impl Drop for ContinuationBlock {
-    fn drop(&mut self) {
-        // Logic to properly release resources, if needed, goes here.
-        // Since `ContinuationBlock::dispose` must be called explicitly and may involve unsafe code,
-        // careful consideration is required to decide whether any logic should be placed here.
-        // TODO: This might remain empty to enforce explicit management through `dispose`.
     }
 }

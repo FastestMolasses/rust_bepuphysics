@@ -1,59 +1,99 @@
-#![allow(unsafe_code)]
+//! Handle to a continuation within a TaskStack.
+//!
+//! ContinuationHandle provides a wrapper around a pointer to TaskContinuation.
 
-use crate::utilities::task_scheduling::task_continuation::TaskContinuation;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
-use std::ptr::NonNull;
 
-/// Represents a continuation within a TaskStack.
+use super::task_continuation::TaskContinuation;
+
+/// Refers to a continuation within a TaskStack.
+///
+/// This is a thin wrapper around a pointer to TaskContinuation, presenting it as a handle
+/// to hide implementation details and make future changes easier.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct ContinuationHandle {
-    continuation: Option<NonNull<TaskContinuation>>,
+    continuation: *mut TaskContinuation,
+}
+
+// Safety: ContinuationHandle is designed for cross-thread use.
+unsafe impl Send for ContinuationHandle {}
+unsafe impl Sync for ContinuationHandle {}
+
+impl Default for ContinuationHandle {
+    #[inline(always)]
+    fn default() -> Self {
+        Self {
+            continuation: std::ptr::null_mut(),
+        }
+    }
 }
 
 impl ContinuationHandle {
-    /// Creates a new `ContinuationHandle` wrapping a `TaskContinuation`.
+    /// Creates a new ContinuationHandle wrapping a TaskContinuation.
+    ///
+    /// # Safety
+    /// The continuation pointer must be valid and properly aligned.
+    #[inline(always)]
     pub unsafe fn new(continuation: *mut TaskContinuation) -> Self {
-        Self {
-            continuation: NonNull::new(continuation),
-        }
+        Self { continuation }
     }
 
-    /// Returns whether the tasks associated with this continuation have completed.
-    /// If the continuation has not been initialized, this will always return false.
-    pub fn completed(&self) -> bool {
-        self.initialized()
-            && unsafe { self.continuation.unwrap().as_ref().remaining_task_counter <= 0 }
-    }
-
-    /// Retrieves a pointer to the continuation data for `ContinuationHandle`.
-    /// This should not be used if the continuation handle is not known to be valid.
-    pub unsafe fn continuation(&self) -> *const TaskContinuation {
-        self.continuation.unwrap().as_ptr()
-    }
-
-    /// Returns a null continuation handle.
+    /// Gets a null continuation handle.
+    #[inline(always)]
     pub fn null() -> Self {
-        Self { continuation: None }
+        Self::default()
     }
 
-    /// Returns whether this handle ever represented an allocated handle.
+    /// Gets whether this handle ever represented an allocated handle.
+    /// This does not guarantee that the continuation's associated tasks are
+    /// active in the TaskStack that it was allocated from.
+    #[inline(always)]
     pub fn initialized(&self) -> bool {
-        self.continuation.is_some()
+        !self.continuation.is_null()
+    }
+
+    /// Gets whether the tasks associated with this continuation have completed.
+    /// If the continuation has not been initialized, this will always return false.
+    #[inline(always)]
+    pub fn completed(&self) -> bool {
+        self.initialized() && unsafe { (*self.continuation).remaining_task_counter <= 0 }
+    }
+
+    /// Retrieves a pointer to the continuation data.
+    ///
+    /// # Safety
+    /// This should not be used if the continuation handle is not known to be valid.
+    /// The data pointed to could become invalidated if the continuation completes.
+    #[inline(always)]
+    pub unsafe fn continuation(&self) -> *mut TaskContinuation {
+        self.continuation
     }
 
     /// Notifies the continuation that one task was completed.
-    pub unsafe fn notify_task_completed(
-        &self,
-        worker_index: usize,
-        dispatcher: &dyn IThreadDispatcher,
-    ) {
-        let continuation = self.continuation.unwrap().as_ptr();
-        let remaining_task_counter = &mut (*continuation).remaining_task_counter as *mut isize;
-        *remaining_task_counter -= 1;
+    ///
+    /// # Arguments
+    /// * `worker_index` - Worker index to pass to the continuation's delegate, if any.
+    /// * `dispatcher` - Dispatcher to pass to the continuation's delegate, if any.
+    ///
+    /// # Safety
+    /// The continuation must be valid and initialized.
+    #[inline(always)]
+    pub unsafe fn notify_task_completed(&self, worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        debug_assert!(!self.completed());
+        let continuation = self.continuation;
+
+        // Interlocked.Decrement equivalent - returns the NEW value
+        let counter_ptr = &mut (*continuation).remaining_task_counter as *mut i32;
+        let new_count = core::intrinsics::atomic_xsub_acqrel(counter_ptr, 1) - 1;
+
         debug_assert!(
-            *remaining_task_counter >= 0,
+            new_count >= 0,
             "The counter should not go negative. Was notify called too many times?"
         );
-        if *remaining_task_counter == 0 {
+
+        if new_count == 0 {
+            // This entire job has completed.
             let on_completed = &(*continuation).on_completed;
             if let Some(function) = on_completed.function {
                 function(
@@ -68,6 +108,7 @@ impl ContinuationHandle {
 }
 
 impl PartialEq for ContinuationHandle {
+    #[inline(always)]
     fn eq(&self, other: &Self) -> bool {
         self.continuation == other.continuation
     }
@@ -76,7 +117,8 @@ impl PartialEq for ContinuationHandle {
 impl Eq for ContinuationHandle {}
 
 impl std::hash::Hash for ContinuationHandle {
+    #[inline(always)]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::ptr::hash(self.continuation.unwrap().as_ptr(), state);
+        std::ptr::hash(self.continuation, state);
     }
 }

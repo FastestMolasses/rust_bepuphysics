@@ -1,57 +1,84 @@
-extern crate core;
+//! Lock-free task stack for parallel task execution.
+//!
+//! TaskStack provides a thread-safe work-stealing task queue with support for
+//! continuations, job tagging/filtering, and efficient parallel for loops.
 
-use crate::utilities::{
-    memory::{buffer::Buffer, buffer_pool::BufferPool},
-    task_scheduling::{
-        continuation_handle::ContinuationHandle, job::Job, job_filter::*,
-        pop_task_result::PopTaskResult, task::Task, worker::Worker,
-    },
-    thread_dispatcher::IThreadDispatcher,
-};
-// TODO: REMOVE THIS DEPENDENCY LATER
-use crossbeam_utils::CachePadded;
-use std::{
-    ffi::c_void,
-    hint::spin_loop,
-    ptr::null_mut,
-    sync::{
-        atomic::{AtomicBool, AtomicPtr, Ordering},
-        Arc,
-    },
-    thread::yield_now,
-};
+use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::thread_dispatcher::IThreadDispatcher;
 
-/// Manages a linked stack of tasks.
-pub struct TaskStack {
-    workers: Buffer<Worker>,
-    /// Padding to prevent false sharing. Stop flag is volatile in the original implementation,
-    /// here we use an AtomicBool for similar behavior.
-    /// TODO: IN THE ORIGINAL CODE, THE PADDING IS SET TO 256 + 16. CONSIDER CHANGING THIS. CachePadded WILL GIVE 64 BYTES ON X86-64.
-    /// The extra size might help in scenarios where prefetching mechanisms or specific CPU cache policies could otherwise lead to unintended data locality optimizations that negate the false sharing protections.
-    padded_stop: CachePadded<AtomicBool>,
-    /// Most recently pushed job on the stack. May be null if the stack is empty.
-    head: AtomicPtr<Job>,
+use super::continuation_handle::ContinuationHandle;
+use super::job::Job;
+use super::job_filter::{AllowAllJobs, IJobFilter};
+use super::pop_task_result::PopTaskResult;
+use super::task::Task;
+use super::worker::Worker;
+
+use std::ffi::c_void;
+use std::hint::spin_loop;
+use std::ptr;
+
+/// Padding to prevent false sharing on the stop flag.
+/// Uses 256 + 16 bytes to match the C# implementation's cache line isolation.
+#[repr(C, align(128))]
+struct StopPad {
+    /// Padding before the stop flag.
+    _padding_before: [u8; 128],
+    /// Stop flag - when true, workers should stop after exhausting work.
+    stop: bool,
+    /// Padding after the stop flag.
+    _padding_after: [u8; 127],
 }
 
+impl Default for StopPad {
+    fn default() -> Self {
+        Self {
+            _padding_before: [0; 128],
+            stop: false,
+            _padding_after: [0; 127],
+        }
+    }
+}
+
+/// Manages a linked stack of tasks for parallel execution.
+///
+/// TaskStack provides:
+/// - Lock-free concurrent task pushing and popping
+/// - Continuation support for task dependencies
+/// - Job tagging and filtering for selective work stealing
+/// - Parallel for loop primitives
+pub struct TaskStack {
+    /// Per-worker storage for job allocation and continuation management.
+    workers: Buffer<Worker>,
+    /// Padded stop flag to prevent false sharing.
+    padded: StopPad,
+    /// Head of the job stack (most recently pushed job).
+    /// May be null if the stack is empty.
+    head: *mut Job,
+}
+
+// Safety: TaskStack is designed for concurrent access.
 unsafe impl Send for TaskStack {}
 unsafe impl Sync for TaskStack {}
 
 impl TaskStack {
     /// Constructs a new parallel task stack.
+    ///
     /// # Arguments
     /// * `pool` - Buffer pool to allocate non-thread allocated resources from.
-    /// * `dispatcher` - Thread dispatcher to pull thread pools from for thread allocations.
+    /// * `dispatcher` - Thread dispatcher to pull thread pools from.
     /// * `worker_count` - Number of workers to allocate space for.
-    /// * `initial_worker_job_capacity` - Initial number of jobs (groups of tasks submitted together) to allocate space for in each worker.
-    /// * `continuation_block_capacity` - Number of slots to allocate in each block of continuations in each worker.
+    /// * `initial_worker_job_capacity` - Initial job capacity per worker (default: 128).
+    /// * `continuation_block_capacity` - Slots per continuation block (default: 128).
     pub fn new(
-        pool: &mut BufferPool,
+        pool: &BufferPool,
         dispatcher: &dyn IThreadDispatcher,
-        worker_count: usize,
-        initial_worker_job_capacity: usize,
-        continuation_block_capacity: usize,
+        worker_count: i32,
+        initial_worker_job_capacity: i32,
+        continuation_block_capacity: i32,
     ) -> Self {
-        let mut workers = pool.take(worker_count);
+        let mut workers: Buffer<Worker> = pool.take(worker_count);
+
         for i in 0..worker_count {
             workers[i] = Worker::new(
                 i,
@@ -60,447 +87,699 @@ impl TaskStack {
                 continuation_block_capacity,
             );
         }
-        let padded_stop = CachePadded::new(AtomicBool::new(false));
-        let head = AtomicPtr::new(null_mut());
 
-        let mut task_stack = TaskStack {
+        let mut stack = Self {
             workers,
-            padded_stop,
-            head,
+            padded: StopPad::default(),
+            head: ptr::null_mut(),
         };
-        task_stack.reset(dispatcher);
-        task_stack
+
+        stack.reset(dispatcher);
+        stack
     }
 
     /// Returns the stack to a fresh state without reallocating.
+    ///
+    /// # Arguments
+    /// * `dispatcher` - Dispatcher whose thread pools should be used.
     pub fn reset(&mut self, dispatcher: &dyn IThreadDispatcher) {
-        for worker in self.workers.iter_mut() {
-            worker.reset(&dispatcher.worker_pools(worker.worker_index()));
+        for i in 0..self.workers.len() {
+            let pool = dispatcher.worker_pool(self.workers[i].worker_index());
+            unsafe {
+                self.workers[i].reset(pool);
+            }
         }
-        self.padded_stop.store(false, Ordering::SeqCst);
-        self.head.store(null_mut(), Ordering::SeqCst);
+        unsafe {
+            ptr::write_volatile(&mut self.padded.stop, false);
+            ptr::write_volatile(&mut self.head, ptr::null_mut());
+        }
     }
 
-    /// Returns unmanaged resources held by the `TaskStack` to a pool.
-    pub fn dispose(&mut self, pool: &mut BufferPool, dispatcher: &dyn IThreadDispatcher) {
-        for worker in self.workers.iter_mut() {
-            worker.dispose(&dispatcher.worker_pools(worker.worker_index()));
+    /// Returns unmanaged resources held by the TaskStack to a pool.
+    ///
+    /// # Arguments
+    /// * `pool` - Buffer pool to return resources to.
+    /// * `dispatcher` - Dispatcher whose thread pools should be used.
+    pub fn dispose(&mut self, pool: &BufferPool, dispatcher: &dyn IThreadDispatcher) {
+        for i in 0..self.workers.len() {
+            let worker_pool = dispatcher.worker_pool(self.workers[i].worker_index());
+            unsafe {
+                self.workers[i].dispose(worker_pool);
+            }
         }
         pool.return_buffer(&mut self.workers);
     }
 
-    /// Gets the approximate number of active tasks. This is not guaranteed to actually measure
-    /// the true number of tasks at any one point in time.
-    pub fn approximate_task_count(&self) -> usize {
-        let mut sum = 0;
-        let mut job = self.head.load(Ordering::SeqCst);
+    /// Gets the approximate number of active tasks.
+    /// Not guaranteed to measure the true number at any point in time.
+    pub fn approximate_task_count(&self) -> i32 {
+        let mut sum = 0i32;
+        let mut job = unsafe { ptr::read_volatile(&self.head) };
         while !job.is_null() {
             unsafe {
-                sum += std::cmp::max(0, (*job).counter() as isize) as usize;
-                job = (*job).previous();
-
-                // TODO: WHICH ONE IS BETTER?
-                // sum += unsafe { (*job).counter.load(Ordering::SeqCst) }.max(0);
-                // job = unsafe { (*job).previous };
+                sum += (*job).counter().max(0);
+                job = (*job).previous;
             }
         }
         sum
     }
 
-    /// Gets the approximate number of active continuations. This is not guaranteed to actually
-    /// measure the true number of continuations at any one point in time; it checks each worker
-    /// in sequence, and the continuation counts could vary arbitrarily as the checks proceed.
-    pub fn approximate_continuation_count(&self) -> usize {
-        self.workers.iter().fold(0, |acc, worker| {
-            acc + worker.approximate_continuation_count()
-        })
+    /// Gets the approximate number of active continuations.
+    /// Not guaranteed to measure the true number; checks each worker sequentially.
+    pub fn approximate_continuation_count(&self) -> i32 {
+        let mut sum = 0;
+        for i in 0..self.workers.len() {
+            sum += self.workers[i].approximate_continuation_count();
+        }
+        sum
     }
 
     /// Attempts to allocate a continuation for a set of tasks.
+    ///
+    /// # Arguments
+    /// * `task_count` - Number of tasks associated with the continuation.
+    /// * `worker_index` - Worker index to allocate the continuation on.
+    /// * `dispatcher` - Dispatcher for per-thread allocations.
+    /// * `on_completed` - Function to execute upon completing all tasks (optional).
     pub fn allocate_continuation(
-        &self,
-        task_count: usize,
-        worker_index: usize,
+        &mut self,
+        task_count: i32,
+        worker_index: i32,
         dispatcher: &dyn IThreadDispatcher,
-        on_completed: Option<Task>,
+        on_completed: Task,
     ) -> ContinuationHandle {
-        self.workers[worker_index].allocate_continuation(task_count, dispatcher, on_completed)
+        unsafe {
+            self.workers[worker_index].allocate_continuation(task_count, dispatcher, on_completed)
+        }
     }
 
-    /// Attempts to pop a task.
-    pub fn try_pop<TJobFilter>(&self, filter: &mut TJobFilter) -> (PopTaskResult, Option<Task>)
-    where
-        TJobFilter: JobFilter,
-    {
-        let mut job = self.head.load(Ordering::Acquire) as *mut Job;
+    /// Attempts to pop a task from the stack.
+    ///
+    /// # Arguments
+    /// * `filter` - Filter to apply to jobs.
+    ///
+    /// # Returns
+    /// Tuple of (result status, optional task).
+    pub fn try_pop<TJobFilter: IJobFilter>(
+        &self,
+        filter: &TJobFilter,
+    ) -> (PopTaskResult, Option<Task>) {
+        // Note: This implementation does not need locks. We just follow the pointer.
+        let mut job = unsafe { ptr::read_volatile(&self.head) };
+
         loop {
             if job.is_null() {
-                // There is no job to pop from.
-                return (
-                    if self.padded_stop.load(Ordering::Relaxed) {
-                        PopTaskResult::Stop
-                    } else {
-                        PopTaskResult::Empty
-                    },
-                    None,
-                );
+                // No job to pop from
+                let result = if unsafe { ptr::read_volatile(&self.padded.stop) } {
+                    PopTaskResult::Stop
+                } else {
+                    PopTaskResult::Empty
+                };
+                return (result, None);
             }
+
             unsafe {
-                // Try to pop a task from the current job.
+                // Check if this job is allowed by the filter
                 if !filter.allow_job((*job).tag) {
-                    // This job isn't allowed for this pop; go to the next one.
+                    // Skip to next job
                     job = (*job).previous;
                     continue;
                 }
+
+                // Try to pop a task from this job
                 if let Some(task) = (*job).try_pop() {
+                    debug_assert!(task.function.is_some());
                     return (PopTaskResult::Success, Some(task));
                 } else {
-                    // There was no task available in this job, which means the sampled job should be removed from the stack.
-                    let old_head =
-                        self.head
-                            .compare_and_swap(job, (*job).previous, Ordering::AcqRel);
-                    if old_head == job {
-                        // If this fails, the head has changed before we could remove it
-                        job = self.head.load(Ordering::Acquire);
+                    // No task available, try to remove this empty job from the stack
+                    // Other threads might be doing the same; use CAS
+                    let previous = (*job).previous;
+                    let head_ptr = &self.head as *const *mut Job as *mut *mut Job;
+                    let (old, success) = core::intrinsics::atomic_cxchg_acqrel_acquire(head_ptr, job, previous);
+
+                    // If failed, head changed; reload and try again
+                    job = if success {
+                        ptr::read_volatile(&self.head)
                     } else {
-                        job = old_head;
+                        old
+                    };
+                }
+            }
+        }
+    }
+
+    /// Attempts to pop a task without filtering.
+    #[inline(always)]
+    pub fn try_pop_unfiltered(&self) -> (PopTaskResult, Option<Task>) {
+        self.try_pop(&AllowAllJobs)
+    }
+
+    /// Attempts to pop a task and run it.
+    ///
+    /// # Arguments
+    /// * `filter` - Filter to apply to jobs.
+    /// * `worker_index` - Index of the worker to pass into the task function.
+    /// * `dispatcher` - Thread dispatcher running this task stack.
+    ///
+    /// # Returns
+    /// Result status of the pop attempt.
+    #[inline(always)]
+    pub fn try_pop_and_run<TJobFilter: IJobFilter>(
+        &self,
+        filter: &TJobFilter,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+    ) -> PopTaskResult {
+        let (result, task) = self.try_pop(filter);
+        if let Some(task) = task {
+            unsafe {
+                task.run(worker_index, dispatcher);
+            }
+        }
+        result
+    }
+
+    /// Attempts to pop and run without filtering.
+    #[inline(always)]
+    pub fn try_pop_and_run_unfiltered(
+        &self,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+    ) -> PopTaskResult {
+        self.try_pop_and_run(&AllowAllJobs, worker_index, dispatcher)
+    }
+
+    /// Pushes a set of tasks onto the task stack. Not thread safe.
+    ///
+    /// # Safety
+    /// Must not be used while other threads could be performing pushes or pops
+    /// that could affect the specified worker.
+    pub unsafe fn push_unsafely(
+        &mut self,
+        tasks: &[Task],
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+    ) {
+        let job = self.workers[worker_index].allocate_job(tasks, tag, dispatcher);
+        (*job).previous = ptr::read_volatile(&self.head);
+        ptr::write_volatile(&mut self.head, job);
+    }
+
+    /// Pushes a single task onto the task stack. Not thread safe.
+    ///
+    /// # Safety
+    /// Must not be used while other threads could be performing pushes or pops.
+    #[inline(always)]
+    pub unsafe fn push_unsafely_single(
+        &mut self,
+        task: Task,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+    ) {
+        self.push_unsafely(&[task], worker_index, dispatcher, tag);
+    }
+
+    /// Pushes a set of tasks onto the task stack (thread-safe).
+    ///
+    /// # Arguments
+    /// * `tasks` - Tasks composing the job.
+    /// * `worker_index` - Index of the worker stack to push onto.
+    /// * `dispatcher` - Thread dispatcher for allocations.
+    /// * `tag` - User-defined tag for the job.
+    pub fn push(
+        &mut self,
+        tasks: &[Task],
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+    ) {
+        unsafe {
+            let job = self.workers[worker_index].allocate_job(tasks, tag, dispatcher);
+
+            loop {
+                // Pre-set the previous pointer so it's visible when the job is swapped in
+                (*job).previous = ptr::read_volatile(&self.head);
+
+                // Try to atomically swap in the new job
+                let head_ptr = &self.head as *const *mut Job as *mut *mut Job;
+                let (_old, success) = core::intrinsics::atomic_cxchgweak_acqrel_relaxed(head_ptr, (*job).previous, job);
+
+                if success {
+                    break;
+                }
+                // If failed, previous pointer is wrong; loop and try again
+            }
+        }
+    }
+
+    /// Pushes a single task onto the task stack (thread-safe).
+    #[inline(always)]
+    pub fn push_single(
+        &mut self,
+        task: Task,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+    ) {
+        self.push(&[task], worker_index, dispatcher, tag);
+    }
+
+    /// Pushes tasks with a created continuation.
+    ///
+    /// # Arguments
+    /// * `tasks` - Tasks (must not have continuations set).
+    /// * `worker_index` - Worker index.
+    /// * `dispatcher` - Thread dispatcher.
+    /// * `tag` - Job tag.
+    /// * `on_complete` - Task to run when all tasks complete (optional).
+    ///
+    /// # Returns
+    /// Handle of the created continuation.
+    pub fn allocate_continuation_and_push(
+        &mut self,
+        tasks: &mut [Task],
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+        on_complete: Task,
+    ) -> ContinuationHandle {
+        let continuation_handle =
+            self.allocate_continuation(tasks.len() as i32, worker_index, dispatcher, on_complete);
+
+        for task in tasks.iter_mut() {
+            debug_assert!(
+                !task.continuation.initialized(),
+                "This function creates a continuation for the tasks"
+            );
+            task.continuation = continuation_handle;
+        }
+
+        self.push(tasks, worker_index, dispatcher, tag);
+        continuation_handle
+    }
+
+    /// Waits for a continuation to complete, executing other tasks while waiting.
+    ///
+    /// # Arguments
+    /// * `filter` - Filter for jobs to work on while waiting.
+    /// * `continuation` - Continuation to wait on.
+    /// * `worker_index` - Index of the executing worker.
+    /// * `dispatcher` - Thread dispatcher.
+    pub fn wait_for_completion<TJobFilter: IJobFilter>(
+        &self,
+        filter: &TJobFilter,
+        continuation: ContinuationHandle,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+    ) {
+        debug_assert!(
+            continuation.initialized(),
+            "This codepath should only run if the continuation was allocated earlier."
+        );
+
+        let mut spin_count = 0u32;
+
+        while !continuation.completed() {
+            let (result, task) = self.try_pop(filter);
+
+            match result {
+                PopTaskResult::Stop => return,
+                PopTaskResult::Success => {
+                    unsafe {
+                        task.unwrap().run(worker_index, dispatcher);
+                    }
+                    spin_count = 0; // Reset spin count after successful work
+                }
+                PopTaskResult::Empty => {
+                    // Adaptive spinning: start with spin_loop, escalate to yield
+                    spin_count += 1;
+                    if spin_count < 10 {
+                        spin_loop();
+                    } else if spin_count < 20 {
+                        std::thread::yield_now();
+                    } else {
+                        // Brief sleep to avoid burning CPU
+                        std::thread::sleep(std::time::Duration::from_micros(1));
+                        spin_count = 15; // Don't let it grow unboundedly
                     }
                 }
             }
         }
     }
 
-    /// Attempts to pop a task and run it.
-    pub fn try_pop_and_run<TJobFilter>(
+    /// Waits for a continuation without filtering.
+    #[inline(always)]
+    pub fn wait_for_completion_unfiltered(
         &self,
-        filter: &mut TJobFilter,
-        worker_index: usize,
-        dispatcher: Arc<dyn IThreadDispatcher>,
-    ) -> PopTaskResult
-    where
-        TJobFilter: JobFilter,
-    {
-        let (result, task) = self.try_pop(filter);
-        if let Some(task) = task {
-            task.run(worker_index, dispatcher);
-        }
-        result
-    }
-
-    /// Pushes a set of tasks onto the task stack. This function is not thread safe.
-    pub unsafe fn push_unsafely(
-        &mut self,
-        tasks: &[Task],
-        worker_index: usize,
-        dispatcher: Arc<dyn IThreadDispatcher>,
-        tag: u64,
-    ) {
-        let job = self.workers[worker_index].allocate_job(tasks, tag, dispatcher);
-        (*job).previous = self.head.load(Ordering::Relaxed);
-        self.head.store(job, Ordering::Release);
-    }
-
-    /// Pushes a set of tasks onto the task stack.
-    pub fn push(
-        &self,
-        tasks: &[Task],
-        worker_index: usize,
-        dispatcher: Arc<dyn IThreadDispatcher>,
-        tag: u64,
-    ) {
-        unsafe {
-            let job = self.workers[worker_index].allocate_job(tasks, tag, dispatcher);
-            loop {
-                (*job).previous = self.head.load(Ordering::Relaxed);
-                if self
-                    .head
-                    .compare_and_swap((*job).previous, job, Ordering::AcqRel)
-                    == (*job).previous
-                {
-                    break;
-                }
-            }
-        }
-    }
-
-    /// Pushes a set of tasks to the stack with a created continuation.
-    pub fn allocate_continuation_and_push<T: IThreadDispatcher>(
-        &self,
-        tasks: &mut [Task],
-        worker_index: usize,
-        dispatcher: &T,
-        tag: u64,
-        on_complete: Option<Task>,
-    ) -> ContinuationHandle {
-        let continuation_handle =
-            self.allocate_continuation(tasks.len(), worker_index, dispatcher, on_complete);
-        for task in tasks.iter_mut() {
-            debug_assert!(
-                !task.continuation().initialized(),
-                "This function creates a continuation for the tasks"
-            );
-            task.set_continuation(continuation_handle);
-        }
-        self.push(tasks, worker_index, dispatcher, tag);
-        continuation_handle
-    }
-
-    /// Pushes a task to the stack with a created continuation.
-    pub fn allocate_continuation_and_push_single<T: IThreadDispatcher>(
-        &self,
-        task: Task,
-        worker_index: usize,
-        dispatcher: &T,
-        tag: u64,
-        on_complete: Option<Task>,
-    ) -> ContinuationHandle {
-        self.allocate_continuation_and_push(&mut [task], worker_index, dispatcher, tag, on_complete)
-    }
-
-    /// Waits for a continuation to be completed.
-    pub fn wait_for_completion<T: IThreadDispatcher, F: JobFilter>(
-        &self,
-        filter: &mut F,
         continuation: ContinuationHandle,
-        worker_index: usize,
-        dispatcher: &T,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
     ) {
-        debug_assert!(
-            continuation.initialized(),
-            "This codepath should only run if the continuation was allocated earlier."
-        );
-        while !continuation.completed() {
-            match self.try_pop(filter) {
-                PopTaskResult::Stop => return,
-                PopTaskResult::Success(task) => {
-                    task.run(worker_index, dispatcher);
-                }
-                PopTaskResult::Failure => yield_now(), // TODO: LOOK INTO spin_loop
-            }
-        }
+        self.wait_for_completion(&AllowAllJobs, continuation, worker_index, dispatcher);
     }
 
-    /// Pushes a set of tasks to the worker stack and returns when all tasks are complete.
-    pub fn run_tasks<T: IThreadDispatcher, F: JobFilter>(
-        &self,
+    /// Pushes tasks and returns when all are complete.
+    ///
+    /// The calling thread will execute the first task directly, then help
+    /// work on remaining tasks until all complete.
+    ///
+    /// # Arguments
+    /// * `tasks` - Tasks (must not have continuations set).
+    /// * `worker_index` - Index of the executing worker.
+    /// * `dispatcher` - Thread dispatcher.
+    /// * `filter` - Filter for jobs to work on while waiting.
+    /// * `tag` - Job tag.
+    pub fn run_tasks<TJobFilter: IJobFilter>(
+        &mut self,
         tasks: &mut [Task],
-        worker_index: usize,
-        dispatcher: &T,
-        filter: &mut F,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        filter: &TJobFilter,
         tag: u64,
     ) {
         if tasks.is_empty() {
             return;
         }
+
         let mut continuation_handle = ContinuationHandle::default();
+
         if tasks.len() > 1 {
-            let task_count = tasks.len() - 1;
-            let mut tasks_to_push = Vec::with_capacity(task_count);
-            let worker = &mut self.workers[worker_index];
-            continuation_handle = worker.allocate_continuation(task_count, dispatcher);
-            for task in tasks.iter_mut().skip(1) {
+            // Only submit tasks beyond the first to the stack.
+            // The current thread is responsible for task 0.
+            let task_count = (tasks.len() - 1) as i32;
+
+            continuation_handle = unsafe {
+                self.workers[worker_index].allocate_continuation(
+                    task_count,
+                    dispatcher,
+                    Task::default(),
+                )
+            };
+
+            // Set up tasks 1..n with the continuation and push them
+            for task in tasks[1..].iter_mut() {
                 debug_assert!(
-                    !task.continuation().initialized(),
+                    !task.continuation.initialized(),
                     "None of the source tasks should have continuations when provided to run_tasks."
                 );
-                task.set_continuation(continuation_handle);
-                tasks_to_push.push(*task);
+                task.continuation = continuation_handle;
             }
-            self.push(&tasks_to_push, worker_index, dispatcher, tag);
+
+            self.push(&tasks[1..], worker_index, dispatcher, tag);
         }
-        // Task 0 execution.
+
+        // Execute task 0 directly on this thread
         let task0 = &tasks[0];
         debug_assert!(
-            !task0.continuation().initialized(),
+            !task0.continuation.initialized(),
             "None of the source tasks should have continuations when provided to run_tasks."
         );
-        task0.function()(task0.id(), task0.context(), worker_index, dispatcher);
 
+        unsafe {
+            if let Some(func) = task0.function {
+                func(task0.id, task0.context, worker_index, dispatcher);
+            }
+        }
+
+        // If there were more tasks, wait for them to complete
         if tasks.len() > 1 {
             self.wait_for_completion(filter, continuation_handle, worker_index, dispatcher);
         }
     }
 
-    /// Pushes a set of tasks to the worker stack and returns when all tasks are complete.
-    pub fn run_tasks<T: IThreadDispatcher>(
-        &self,
+    /// Pushes tasks and returns when all are complete (no filtering).
+    #[inline(always)]
+    pub fn run_tasks_unfiltered(
+        &mut self,
         tasks: &mut [Task],
-        worker_index: usize,
-        dispatcher: &T,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
         tag: u64,
     ) {
-        let mut filter = AllowAllJobs::default();
-        self.run_tasks_with_filter(tasks, worker_index, dispatcher, &mut filter, tag);
+        self.run_tasks(tasks, worker_index, dispatcher, &AllowAllJobs, tag);
     }
 
-    // TODO: THIS IS SUPPOSED TO BE AN OVERLOAD OF run_tasks
-    /// Pushes a task to the worker stack and returns when it completes.
-    // pub fn run_task<T: IThreadDispatcher>(
-    //     &self,
-    //     task: Task,
-    //     worker_index: usize,
-    //     dispatcher: &T,
-    //     tag: u64,
-    // ) {
-    //     self.run_tasks(&mut [task], worker_index, dispatcher, tag);
-    // }
-
-    /// Pushes a task to the worker stack and returns when all tasks are complete.
-    pub fn run_task_with_filter<T: IThreadDispatcher, F: JobFilter>(
-        &self,
+    /// Runs a single task.
+    #[inline(always)]
+    pub fn run_task(
+        &mut self,
         task: Task,
-        worker_index: usize,
-        dispatcher: &T,
-        filter: &mut F,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
         tag: u64,
     ) {
-        self.run_tasks_with_filter(&mut [task], worker_index, dispatcher, filter, tag);
+        self.run_tasks_unfiltered(&mut [task], worker_index, dispatcher, tag);
     }
 
-    /// Requests that all workers stop. The next time a worker runs out of tasks to run, if it sees a stop command, it will be reported.
-    pub fn request_stop(&self) {
-        self.padded_stop.store(true, Ordering::SeqCst);
-    }
-
-    /// Convenience function for requesting a stop. Requires the context to be a pointer to the expected `TaskStack`.
-    pub fn request_stop_task_function(
-        id: i64,
-        context: *mut c_void,
-        worker_index: usize,
-        dispatcher: &(impl IThreadDispatcher + ?Sized),
+    /// Runs a single task with filtering.
+    #[inline(always)]
+    pub fn run_task_filtered<TJobFilter: IJobFilter>(
+        &mut self,
+        task: Task,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        filter: &TJobFilter,
+        tag: u64,
     ) {
-        unsafe { (*(context as *mut TaskStack)).request_stop() };
+        self.run_tasks(&mut [task], worker_index, dispatcher, filter, tag);
     }
 
-    /// Convenience function for requesting a stop. Requires the context to be a pointer to the expected `TaskStack`.
-    // pub unsafe extern "C" fn request_stop_task_function(
-    //     _id: i64,
-    //     untyped_context: *mut std::ffi::c_void,
-    //     _worker_index: usize,
-    //     _dispatcher: &dyn IThreadDispatcher,
-    // ) {
-    //     (*(untyped_context as *mut TaskStack)).request_stop();
-    // }
+    /// Requests that all workers stop.
+    /// The next time a worker runs out of tasks, if it sees a stop command, it will stop.
+    pub fn request_stop(&self) {
+        unsafe {
+            let stop_ptr = &self.padded.stop as *const bool as *mut bool;
+            ptr::write_volatile(stop_ptr, true);
+        }
+    }
 
-    /// Convenience function for getting a task representing a stop request.
+    /// Convenience function for requesting a stop.
+    /// Requires the context to be a pointer to the TaskStack.
+    pub unsafe fn request_stop_task_function(
+        _id: i64,
+        untyped_context: *mut c_void,
+        _worker_index: i32,
+        _dispatcher: &dyn IThreadDispatcher,
+    ) {
+        (*(untyped_context as *mut TaskStack)).request_stop();
+    }
+
+    /// Gets a task that represents a stop request.
     pub fn get_request_stop_task(stack: *mut TaskStack) -> Task {
         Task::new(
-            Self::request_stop_task_function as *const (),
-            stack as *mut (),
+            Self::request_stop_task_function,
+            stack as *mut c_void,
+            0,
+            ContinuationHandle::default(),
         )
     }
 
-    /// Pushes a for loop onto the task stack. Does not take a lock.
-    pub fn push_for_unsafely<T: IThreadDispatcher>(
-        &self,
-        function: unsafe extern "C" fn(i64, *mut c_void, usize, &T),
+    /// Pushes a for loop onto the task stack (not thread safe).
+    ///
+    /// # Safety
+    /// Must not be used while other threads could affect the specified worker.
+    pub unsafe fn push_for_unsafely(
+        &mut self,
+        function: super::task::TaskFunction,
         context: *mut c_void,
         inclusive_start_index: i32,
         iteration_count: i32,
-        worker_index: usize,
-        dispatcher: &T,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
         tag: u64,
-        continuation: Option<ContinuationHandle>,
+        continuation: ContinuationHandle,
     ) {
-        let mut tasks = Vec::with_capacity(iteration_count as usize);
-        for i in 0..iteration_count {
-            tasks.push(Task::new(
-                function,
-                context,
-                i + inclusive_start_index as i64,
-                continuation,
-            ));
-        }
-        unsafe {
+        // Use stack allocation for small iteration counts
+        if iteration_count <= 64 {
+            let mut tasks = [Task::default(); 64];
+            for i in 0..iteration_count as usize {
+                tasks[i] = Task::new(
+                    function,
+                    context,
+                    (inclusive_start_index + i as i32) as i64,
+                    continuation,
+                );
+            }
+            self.push_unsafely(&tasks[..iteration_count as usize], worker_index, dispatcher, tag);
+        } else {
+            // Heap allocate for larger counts
+            let mut tasks = Vec::with_capacity(iteration_count as usize);
+            for i in 0..iteration_count {
+                tasks.push(Task::new(
+                    function,
+                    context,
+                    (inclusive_start_index + i) as i64,
+                    continuation,
+                ));
+            }
             self.push_unsafely(&tasks, worker_index, dispatcher, tag);
         }
     }
 
-    /// Pushes a for loop onto the task stack.
-    pub fn push_for<T: IThreadDispatcher>(
-        &self,
-        function: unsafe extern "C" fn(i64, *mut c_void, usize, &T),
+    /// Pushes a for loop onto the task stack (thread safe).
+    pub fn push_for(
+        &mut self,
+        function: super::task::TaskFunction,
         context: *mut c_void,
         inclusive_start_index: i32,
         iteration_count: i32,
-        worker_index: usize,
-        dispatcher: &T,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
         tag: u64,
-        continuation: Option<ContinuationHandle>,
+        continuation: ContinuationHandle,
     ) {
-        let mut tasks = Vec::with_capacity(iteration_count as usize);
-        for i in 0..iteration_count {
-            tasks.push(Task::new(
-                function,
-                context,
-                i + inclusive_start_index as i64,
-                continuation,
-            ));
+        // Use stack allocation for small iteration counts
+        if iteration_count <= 64 {
+            let mut tasks = [Task::default(); 64];
+            for i in 0..iteration_count as usize {
+                tasks[i] = Task::new(
+                    function,
+                    context,
+                    (inclusive_start_index + i as i32) as i64,
+                    continuation,
+                );
+            }
+            self.push(&tasks[..iteration_count as usize], worker_index, dispatcher, tag);
+        } else {
+            // Heap allocate for larger counts
+            let mut tasks = Vec::with_capacity(iteration_count as usize);
+            for i in 0..iteration_count {
+                tasks.push(Task::new(
+                    function,
+                    context,
+                    (inclusive_start_index + i) as i64,
+                    continuation,
+                ));
+            }
+            self.push(&tasks, worker_index, dispatcher, tag);
         }
-        self.push(&tasks, worker_index, dispatcher, tag);
     }
 
-    /// Submits a set of tasks representing a for loop over the given indices and returns when all loop iterations are complete.
-    pub fn for_loop<TJobFilter, F>(
-        &self,
-        function: F,
+    /// Submits a for loop and returns when all iterations complete.
+    pub fn for_loop<TJobFilter: IJobFilter>(
+        &mut self,
+        function: super::task::TaskFunction,
         context: *mut c_void,
-        inclusive_start_index: isize,
-        iteration_count: isize,
-        worker_index: usize,
-        dispatcher: Arc<dyn IThreadDispatcher>,
-        filter: &mut TJobFilter,
+        inclusive_start_index: i32,
+        iteration_count: i32,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        filter: &TJobFilter,
         tag: u64,
-    ) where
-        TJobFilter: JobFilter,
-        F: Fn(isize, *mut c_void, isize, Arc<dyn IThreadDispatcher>)
-            + Send
-            + Sync
-            + 'static,
-    {
+    ) {
         if iteration_count <= 0 {
             return;
         }
 
-        let tasks: Vec<Task> = (0..iteration_count)
-            .map(|i| {
-                Task::new(Box::new(move || {
-                    function(inclusive_start_index + i, context, i, dispatcher.clone())
-                }))
-            })
-            .collect();
+        // Use stack allocation for small iteration counts
+        if iteration_count <= 64 {
+            let mut tasks = [Task::default(); 64];
+            for i in 0..iteration_count as usize {
+                tasks[i] = Task::with_context(
+                    function,
+                    context,
+                    (inclusive_start_index + i as i32) as i64,
+                );
+            }
+            self.run_tasks(
+                &mut tasks[..iteration_count as usize],
+                worker_index,
+                dispatcher,
+                filter,
+                tag,
+            );
+        } else {
+            // Heap allocate for larger counts
+            let mut tasks = Vec::with_capacity(iteration_count as usize);
+            for i in 0..iteration_count {
+                tasks.push(Task::with_context(
+                    function,
+                    context,
+                    (inclusive_start_index + i) as i64,
+                ));
+            }
+            self.run_tasks(&mut tasks, worker_index, dispatcher, filter, tag);
+        }
+    }
 
-        self.run_tasks(tasks, worker_index, dispatcher, filter, tag);
+    /// Submits a for loop and returns when all iterations complete (no filtering).
+    #[inline(always)]
+    pub fn for_loop_unfiltered(
+        &mut self,
+        function: super::task::TaskFunction,
+        context: *mut c_void,
+        inclusive_start_index: i32,
+        iteration_count: i32,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+    ) {
+        self.for_loop(
+            function,
+            context,
+            inclusive_start_index,
+            iteration_count,
+            worker_index,
+            dispatcher,
+            &AllowAllJobs,
+            tag,
+        );
     }
 
     /// Worker function that pops tasks from the stack and executes them.
-    pub fn dispatch_worker_function(worker_index: usize, dispatcher: Arc<dyn IThreadDispatcher>) {
-        unsafe {
-            let task_stack_ptr = dispatcher.unmanaged_context() as *mut TaskStack;
-            let task_stack = &*task_stack_ptr;
-            loop {
-                match task_stack.try_pop_and_run(worker_index, &dispatcher) {
-                    PopTaskResult::Stop => return,
-                    PopTaskResult::Success => {}
-                    _ => spin_loop(),
+    ///
+    /// # Arguments
+    /// * `worker_index` - Index of the worker calling this function.
+    /// * `dispatcher` - Thread dispatcher responsible for the invocation.
+    pub fn dispatch_worker_function(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        let task_stack = unsafe { &*(dispatcher.unmanaged_context() as *const TaskStack) };
+        let mut spin_count = 0u32;
+
+        loop {
+            match task_stack.try_pop_and_run_unfiltered(worker_index, dispatcher) {
+                PopTaskResult::Stop => {
+                    // Done!
+                    return;
+                }
+                PopTaskResult::Success => {
+                    // If we ran a task, reset spin count - more work may be available
+                    spin_count = 0;
+                }
+                PopTaskResult::Empty => {
+                    // No work available, but keep going with adaptive spin
+                    spin_count += 1;
+                    if spin_count < 10 {
+                        spin_loop();
+                    } else if spin_count < 20 {
+                        std::thread::yield_now();
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_micros(1));
+                        spin_count = 15;
+                    }
                 }
             }
         }
     }
 
     /// Dispatches workers to execute tasks from the given stack.
+    ///
+    /// # Arguments
+    /// * `dispatcher` - Thread dispatcher to dispatch workers with.
+    /// * `task_stack` - Task stack to pull work from.
+    /// * `maximum_worker_count` - Maximum number of workers to spin up.
     pub fn dispatch_workers(
-        dispatcher: Arc<dyn IThreadDispatcher>,
-        task_stack: Arc<TaskStack>,
-        maximum_worker_count: usize,
+        dispatcher: &dyn IThreadDispatcher,
+        task_stack: *mut TaskStack,
+        maximum_worker_count: i32,
     ) {
         unsafe {
             dispatcher.dispatch_workers(
-                Box::new(move |worker_index, dispatcher| {
-                    Self::dispatch_worker_function(worker_index, dispatcher)
-                }),
+                Self::dispatch_worker_function,
                 maximum_worker_count,
-                Arc::into_raw(task_stack) as *mut _,
+                task_stack as *mut (),
+                None,
             );
         }
     }

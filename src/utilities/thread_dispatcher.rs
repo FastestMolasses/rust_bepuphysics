@@ -1,10 +1,10 @@
 //! Thread dispatcher for multithreaded physics simulation.
 
-use crate::utilities::memory::worker_buffer_pools::WorkerBufferPools;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::memory::worker_buffer_pools::WorkerBufferPools;
 
 /// Function to be invoked on a worker thread. Provides the worker index and a reference to the dispatcher.
-pub type WorkerBodyFn = unsafe fn(worker_index: i32, dispatcher: &dyn IThreadDispatcher);
+pub type WorkerBodyFn = fn(worker_index: i32, dispatcher: &dyn IThreadDispatcher);
 
 /// Provides multithreading dispatch primitives, a thread count, and per thread resource pools for the simulation to use.
 ///
@@ -17,11 +17,14 @@ pub type WorkerBodyFn = unsafe fn(worker_index: i32, dispatcher: &dyn IThreadDis
 /// load balancing. Instead of worrying about that, they can just wrap whatever implementation they happen to have and it'll probably work fine.
 pub trait IThreadDispatcher: Send + Sync {
     /// Gets the number of workers available in the thread dispatcher.
+    ///
+    /// Note that some systems (like the solver) expect the ThreadCount to be backed by truly independent threads capable of progression even when one is blocked.
+    /// If the ThreadCount doesn't represent independent threads, deadlocks will occur.
     fn thread_count(&self) -> i32;
 
     /// Gets the unmanaged context associated with the current dispatch, if any.
     /// This is intended to help pass information to workers.
-    unsafe fn unmanaged_context(&self) -> *mut ();
+    fn unmanaged_context(&self) -> *mut ();
 
     /// Gets the managed context associated with the current dispatch, if any.
     fn managed_context(&self) -> Option<&dyn std::any::Any>;

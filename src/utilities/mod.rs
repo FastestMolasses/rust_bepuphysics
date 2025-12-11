@@ -3,9 +3,8 @@ pub use self::affine_transform::*;
 
 pub mod collections;
 pub mod memory;
-// TODO: Task scheduling needs significant rewrite - disabled for now
-// pub mod task_scheduling;
-// pub mod thread_dispatcher;
+pub mod task_scheduling;
+pub mod thread_dispatcher;
 
 pub mod bounding_box;
 pub mod bounding_sphere;
