@@ -21,10 +21,11 @@ mod worker;
 
 // Re-export public API
 pub use continuation_handle::ContinuationHandle;
-pub use job_filter::{AllowAllJobs, DelegateJobFilter, ExactTagFilter, FunctionPointerJobFilter, IJobFilter, MinimumTagFilter};
+pub use job_filter::{
+    AllowAllJobs, DelegateJobFilter, EqualTagFilter, FunctionPointerJobFilter, IJobFilter,
+    MinimumTagFilter,
+};
 pub use pop_task_result::PopTaskResult;
 pub use task::{Task, TaskFunction};
-pub use task_stack::TaskStack;
-
-// Internal but exposed for advanced use
 pub use task_continuation::TaskContinuation;
+pub use task_stack::TaskStack;

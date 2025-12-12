@@ -5,12 +5,6 @@
 /// Determines which jobs are allowed to serve a pop request from the TaskStack.
 pub trait IJobFilter {
     /// Determines whether a job with the given tag should be allowed to serve a pop request.
-    ///
-    /// # Arguments
-    /// * `job_tag` - Tag of the candidate job.
-    ///
-    /// # Returns
-    /// True if the job should be allowed to serve a request, false otherwise.
     fn allow_job(&self, job_tag: u64) -> bool;
 }
 
@@ -77,7 +71,7 @@ impl IJobFilter for FunctionPointerJobFilter {
     }
 }
 
-/// A filter that requires the job tag to meet or exceed a threshold value.
+/// A job filter that requires the job tag to meet or exceed a threshold value.
 #[derive(Clone, Copy)]
 pub struct MinimumTagFilter {
     /// Minimum tag value that must be met for a job to be allowed.
@@ -99,14 +93,14 @@ impl IJobFilter for MinimumTagFilter {
     }
 }
 
-/// A filter that requires the job tag to exactly match a specific value.
+/// A job filter that requires the job tag to exactly match a specific value.
 #[derive(Clone, Copy)]
-pub struct ExactTagFilter {
+pub struct EqualTagFilter {
     /// Tag value that must be matched for a job to be allowed.
     pub required_tag: u64,
 }
 
-impl ExactTagFilter {
+impl EqualTagFilter {
     /// Creates a new exact tag filter.
     #[inline(always)]
     pub fn new(required_tag: u64) -> Self {
@@ -114,7 +108,7 @@ impl ExactTagFilter {
     }
 }
 
-impl IJobFilter for ExactTagFilter {
+impl IJobFilter for EqualTagFilter {
     #[inline(always)]
     fn allow_job(&self, job_tag: u64) -> bool {
         job_tag == self.required_tag

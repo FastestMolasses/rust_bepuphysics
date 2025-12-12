@@ -6,7 +6,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use std::ops::{Mul, Sub};
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Matrix3x3Wide {
     pub x: Vector3Wide,
     pub y: Vector3Wide,

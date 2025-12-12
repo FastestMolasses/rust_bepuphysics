@@ -7,7 +7,7 @@ use std::{
 };
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 /// Three dimensional vector with SIMD lanes.
 pub struct Vector3Wide {
     /// First component of the vector.

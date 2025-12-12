@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+profile = []
+
 [dependencies]
 glam = { version = "0.27" }
 crossbeam-utils = { version = "0.8" }

@@ -10,6 +10,24 @@ use super::continuation_block::ContinuationBlock;
 use super::continuation_handle::ContinuationHandle;
 use super::job::Job;
 use super::task::Task;
+use super::task_continuation::TaskContinuation;
+
+/// Obtains a mutable reference to a BufferPool for the given worker from the dispatcher.
+///
+/// Uses `IThreadDispatcher::worker_pool_ptr` which goes through `UnsafeCell::get()`,
+/// the correct Rust mechanism for interior mutability.
+///
+/// # Safety
+/// The caller must guarantee exclusive access to this pool. In the task scheduling system,
+/// this is ensured by the design constraint that each worker thread exclusively accesses
+/// its own pool.
+#[inline(always)]
+pub(crate) unsafe fn pool_mut(
+    dispatcher: &dyn IThreadDispatcher,
+    worker_index: i32,
+) -> &mut BufferPool {
+    &mut *dispatcher.worker_pool_ptr(worker_index)
+}
 
 /// A worker responsible for executing tasks and managing their lifecycles.
 ///
@@ -18,7 +36,7 @@ use super::task::Task;
 #[repr(C)]
 pub struct Worker {
     /// Tracks allocations made over the course of the worker's lifetime for later disposal.
-    /// Stores raw pointers to jobs.
+    /// Stores raw pointers to jobs as `usize` (matching C#'s `QuickList<nuint>`).
     allocated_jobs: QuickList<usize>,
     /// Head of the linked list of continuation blocks.
     continuation_head: *mut ContinuationBlock,
@@ -33,19 +51,13 @@ unsafe impl Sync for Worker {}
 
 impl Worker {
     /// Creates a new worker with a specified index.
-    ///
-    /// # Arguments
-    /// * `worker_index` - Index of this worker in the thread pool.
-    /// * `dispatcher` - Thread dispatcher to get buffer pools from.
-    /// * `initial_job_capacity` - Initial number of jobs to allocate space for.
-    /// * `continuation_block_capacity` - Number of slots in each continuation block.
     pub fn new(
         worker_index: i32,
         dispatcher: &dyn IThreadDispatcher,
         initial_job_capacity: i32,
         continuation_block_capacity: i32,
     ) -> Self {
-        let thread_pool = dispatcher.worker_pool(worker_index);
+        let thread_pool = unsafe { pool_mut(dispatcher, worker_index) };
         let allocated_jobs = QuickList::with_capacity(initial_job_capacity, thread_pool);
         let continuation_head =
             unsafe { ContinuationBlock::create(continuation_block_capacity, thread_pool) };
@@ -90,7 +102,7 @@ impl Worker {
     ///
     /// # Safety
     /// The thread_pool must be the correct pool for this worker.
-    pub unsafe fn dispose(&mut self, thread_pool: &BufferPool) {
+    pub unsafe fn dispose(&mut self, thread_pool: &mut BufferPool) {
         for i in 0..self.allocated_jobs.count {
             let job_ptr = self.allocated_jobs.span[i] as *mut Job;
             (*job_ptr).dispose(thread_pool);
@@ -105,7 +117,7 @@ impl Worker {
     ///
     /// # Safety
     /// The thread_pool must be the correct pool for this worker.
-    pub unsafe fn reset(&mut self, thread_pool: &BufferPool) {
+    pub unsafe fn reset(&mut self, thread_pool: &mut BufferPool) {
         for i in 0..self.allocated_jobs.count {
             let job_ptr = self.allocated_jobs.span[i] as *mut Job;
             (*job_ptr).dispose(thread_pool);
@@ -118,17 +130,9 @@ impl Worker {
 
     /// Allocates a job consisting of a set of tasks.
     ///
-    /// # Arguments
-    /// * `tasks` - Tasks composing the job.
-    /// * `tag` - User tag associated with the job.
-    /// * `dispatcher` - Dispatcher used to pull thread allocations if necessary.
-    ///
-    /// # Returns
-    /// Pointer to the newly created job.
-    ///
     /// # Safety
     /// - If the worker associated with this stack might be active, this function
-    ///   can only be called by the worker.
+    ///   can only be called by the owning worker.
     /// - Tasks must not be empty.
     pub unsafe fn allocate_job(
         &mut self,
@@ -141,18 +145,15 @@ impl Worker {
             "Probably shouldn't be trying to push zero tasks."
         );
 
-        let thread_pool = dispatcher.worker_pool(self.worker_index);
+        let thread_pool = pool_mut(dispatcher, self.worker_index);
+        // Note that we allocate jobs on the heap directly; it's safe to resize the
+        // AllocatedJobs list because it's just storing pointers.
         let job = Job::create(tasks, tag, thread_pool);
         *self.allocated_jobs.allocate(thread_pool) = job as usize;
         job
     }
 
     /// Allocates a continuation for a set of tasks.
-    ///
-    /// # Arguments
-    /// * `task_count` - Number of tasks associated with the continuation.
-    /// * `dispatcher` - Dispatcher from which to pull a buffer pool if needed.
-    /// * `on_completed` - Function to execute upon completing all associated tasks.
     ///
     /// # Returns
     /// Handle to the newly allocated continuation.
@@ -162,32 +163,26 @@ impl Worker {
         dispatcher: &dyn IThreadDispatcher,
         on_completed: Task,
     ) -> ContinuationHandle {
-        // Try to allocate from the current head block
-        if let Some(continuation) = (*self.continuation_head).try_allocate_continuation() {
-            // Initialize the continuation
-            (*continuation).on_completed = on_completed;
-            (*continuation).remaining_task_counter = task_count;
-            return ContinuationHandle::new(continuation);
+        let mut continuation: *mut TaskContinuation = std::ptr::null_mut();
+
+        if !(*self.continuation_head).try_allocate_continuation(&mut continuation) {
+            // Couldn't allocate; need to allocate a new block.
+            // (The reason for the linked list style allocation is that resizing a buffer—
+            // and returning the old buffer—opens up a potential race condition.)
+            let thread_pool = pool_mut(dispatcher, self.worker_index);
+            let capacity = (*self.continuation_head).continuations.len();
+            let new_block = ContinuationBlock::create(capacity, thread_pool);
+            (*new_block).previous = self.continuation_head;
+            self.continuation_head = new_block;
+
+            let allocated = (*self.continuation_head).try_allocate_continuation(&mut continuation);
+            debug_assert!(allocated, "Just created that block! Is the capacity wrong?");
         }
 
-        // Couldn't allocate; need to allocate a new block.
-        // (The linked list style allocation avoids race conditions that would occur
-        // if we resized and returned the old buffer.)
-        let thread_pool = dispatcher.worker_pool(self.worker_index);
-        let capacity = (*self.continuation_head).continuations.len();
-        let new_block = ContinuationBlock::create(capacity, thread_pool);
-
-        // Link new block to old
-        (*new_block).previous = self.continuation_head;
-        self.continuation_head = new_block;
-
-        // Allocate from the new block
-        let continuation = (*self.continuation_head)
-            .try_allocate_continuation()
-            .expect("Just created that block! Is the capacity wrong?");
-
         (*continuation).on_completed = on_completed;
-        (*continuation).remaining_task_counter = task_count;
+        // C# plain write: continuation->RemainingTaskCounter = taskCount;
+        // Single-threaded initialization before the continuation is shared.
+        *(*continuation).remaining_task_counter.get() = task_count;
         ContinuationHandle::new(continuation)
     }
 

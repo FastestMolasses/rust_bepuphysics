@@ -449,3 +449,50 @@ impl Drop for BufferPool {
 // Implement Send and Sync - BufferPool is safe to send between threads,
 // though not safe to share without synchronization
 unsafe impl Send for BufferPool {}
+
+impl super::unmanaged_mempool::UnmanagedMemoryPool for BufferPool {
+    #[inline(always)]
+    fn take_at_least<T>(&mut self, count: i32) -> Buffer<T> {
+        BufferPool::take_at_least(self, count)
+    }
+
+    #[inline(always)]
+    fn take<T>(&mut self, count: i32) -> Buffer<T> {
+        BufferPool::take(self, count)
+    }
+
+    #[inline(always)]
+    fn return_buffer<T>(&mut self, buffer: &mut Buffer<T>) {
+        BufferPool::return_buffer(self, buffer)
+    }
+
+    #[inline(always)]
+    fn get_capacity_for_count<T>(count: i32) -> i32 {
+        BufferPool::get_capacity_for_count::<T>(count)
+    }
+
+    #[inline(always)]
+    fn return_unsafely(&mut self, id: i32) {
+        BufferPool::return_unsafely(self, id)
+    }
+
+    #[inline(always)]
+    fn resize_to_at_least<T: Copy>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32) {
+        BufferPool::resize_to_at_least(self, buffer, target_size, copy_count)
+    }
+
+    #[inline(always)]
+    fn resize<T: Copy>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32) {
+        BufferPool::resize(self, buffer, target_size, copy_count)
+    }
+
+    #[inline(always)]
+    fn clear(&mut self) {
+        BufferPool::clear(self)
+    }
+
+    #[inline(always)]
+    fn get_total_allocated_byte_count(&self) -> u64 {
+        BufferPool::get_total_allocated_byte_count(self)
+    }
+}

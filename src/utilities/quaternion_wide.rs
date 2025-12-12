@@ -10,7 +10,7 @@ use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
 use std::simd::{Mask, StdFloat};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct QuaternionWide {
     pub x: Vector<f32>,
     pub y: Vector<f32>,

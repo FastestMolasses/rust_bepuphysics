@@ -1,3 +1,14 @@
-mod leaf;
-mod node;
+pub mod leaf;
+pub mod node;
 mod ray_batcher;
+pub mod tree;
+mod tree_add;
+mod tree_cache_optimizer;
+mod tree_diagnostics;
+mod tree_intertree_queries;
+mod tree_ray_cast;
+mod tree_refit;
+mod tree_remove;
+mod tree_self_queries;
+mod tree_sweep;
+mod tree_volume_query;

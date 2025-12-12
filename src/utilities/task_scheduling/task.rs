@@ -8,10 +8,16 @@ use std::ffi::c_void;
 use super::continuation_handle::ContinuationHandle;
 
 /// Function pointer type for task execution.
-/// Takes as arguments: task id, context pointer, worker index, and dispatcher reference.
+/// Arguments: task id, context pointer, worker index, dispatcher reference.
 pub type TaskFunction = unsafe fn(i64, *mut c_void, i32, &dyn IThreadDispatcher);
 
 /// Description of a task to be submitted to a TaskStack.
+///
+/// Memory layout matches C# (32 bytes on 64-bit):
+/// - Function: 8 bytes (function pointer, None = null)
+/// - Context: 8 bytes (raw pointer)
+/// - Continuation: 8 bytes (ContinuationHandle wrapper around pointer)
+/// - Id: 8 bytes (i64)
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Task {
@@ -45,12 +51,6 @@ impl Default for Task {
 
 impl Task {
     /// Creates a new task.
-    ///
-    /// # Arguments
-    /// * `function` - Function to be executed by the task.
-    /// * `context` - Context pointer to pass to the function.
-    /// * `task_id` - Id of this task to be passed into the function.
-    /// * `continuation` - Continuation to notify after the completion of this task, if any.
     #[inline(always)]
     pub fn new(
         function: TaskFunction,
@@ -77,7 +77,7 @@ impl Task {
         }
     }
 
-    /// Creates a task from a function with context and id.
+    /// Creates a task from a function with context and id but no continuation.
     #[inline(always)]
     pub fn with_context(function: TaskFunction, context: *mut c_void, task_id: i64) -> Self {
         Self {
@@ -90,10 +90,6 @@ impl Task {
 
     /// Runs the task and, if necessary, notifies the associated continuation of its completion.
     ///
-    /// # Arguments
-    /// * `worker_index` - Worker index to pass to the function.
-    /// * `dispatcher` - Dispatcher running this task.
-    ///
     /// # Safety
     /// The function pointer and context must be valid.
     #[inline(always)]
@@ -103,14 +99,13 @@ impl Task {
             "Task must have a valid function and non-completed continuation"
         );
 
-        // Execute the task function
-        if let Some(func) = self.function {
-            func(self.id, self.context, worker_index, dispatcher);
-        }
+        // Execute the task function. We know function is Some from the debug_assert.
+        (self.function.unwrap_unchecked())(self.id, self.context, worker_index, dispatcher);
 
         // Notify continuation if initialized
         if self.continuation.initialized() {
-            self.continuation.notify_task_completed(worker_index, dispatcher);
+            self.continuation
+                .notify_task_completed(worker_index, dispatcher);
         }
     }
 }

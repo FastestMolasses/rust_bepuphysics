@@ -46,8 +46,23 @@ pub trait IThreadDispatcher: Send + Sync {
     /// All usages of these worker pools within the simulation are guaranteed to return thread pool memory before the function returns.
     fn worker_pools(&self) -> &WorkerBufferPools;
 
-    /// Gets a specific worker's buffer pool.
+    /// Gets a specific worker's buffer pool as an immutable reference.
+    ///
+    /// # Safety
+    /// Caller must ensure no mutable access is happening concurrently.
     fn worker_pool(&self, worker_index: i32) -> &BufferPool {
-        &self.worker_pools().pools[worker_index as usize]
+        unsafe { self.worker_pools().get_pool_ref(worker_index as usize) }
+    }
+
+    /// Gets a raw mutable pointer to a specific worker's buffer pool.
+    ///
+    /// Uses `UnsafeCell::get()` internally, which is the correct Rust mechanism for
+    /// obtaining interior mutability.
+    ///
+    /// # Safety
+    /// The caller must guarantee exclusive access to this pool. By the task scheduling design,
+    /// each worker thread exclusively accesses its own pool.
+    fn worker_pool_ptr(&self, worker_index: i32) -> *mut BufferPool {
+        self.worker_pools().get_pool_ptr(worker_index as usize)
     }
 }

@@ -4,7 +4,7 @@ use glam::Vec3;
 
 /// Lower left triangle (including diagonal) of a symmetric 3x3 matrix.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Symmetric3x3 {
     /// First row, first column of the matrix.
     pub xx: f32,

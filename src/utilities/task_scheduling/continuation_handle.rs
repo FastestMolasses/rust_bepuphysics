@@ -2,6 +2,8 @@
 //!
 //! ContinuationHandle provides a wrapper around a pointer to TaskContinuation.
 
+use std::sync::atomic::{AtomicI32, Ordering};
+
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 
 use super::task_continuation::TaskContinuation;
@@ -17,6 +19,7 @@ pub struct ContinuationHandle {
 }
 
 // Safety: ContinuationHandle is designed for cross-thread use.
+// The pointer is only dereferenced when known to be valid.
 unsafe impl Send for ContinuationHandle {}
 unsafe impl Sync for ContinuationHandle {}
 
@@ -30,12 +33,9 @@ impl Default for ContinuationHandle {
 }
 
 impl ContinuationHandle {
-    /// Creates a new ContinuationHandle wrapping a TaskContinuation.
-    ///
-    /// # Safety
-    /// The continuation pointer must be valid and properly aligned.
+    /// Creates a new ContinuationHandle wrapping a TaskContinuation pointer.
     #[inline(always)]
-    pub unsafe fn new(continuation: *mut TaskContinuation) -> Self {
+    pub(crate) fn new(continuation: *mut TaskContinuation) -> Self {
         Self { continuation }
     }
 
@@ -57,7 +57,14 @@ impl ContinuationHandle {
     /// If the continuation has not been initialized, this will always return false.
     #[inline(always)]
     pub fn completed(&self) -> bool {
-        self.initialized() && unsafe { (*self.continuation).remaining_task_counter <= 0 }
+        // C#: continuation->RemainingTaskCounter <= 0 (plain read, NOT volatile/Interlocked)
+        // Relaxed = plain load on all architectures, avoids Rust data-race UB.
+        self.initialized()
+            && unsafe {
+                AtomicI32::from_ptr((*self.continuation).remaining_task_counter.get())
+                    .load(Ordering::Relaxed)
+                    <= 0
+            }
     }
 
     /// Retrieves a pointer to the continuation data.
@@ -72,20 +79,22 @@ impl ContinuationHandle {
 
     /// Notifies the continuation that one task was completed.
     ///
-    /// # Arguments
-    /// * `worker_index` - Worker index to pass to the continuation's delegate, if any.
-    /// * `dispatcher` - Dispatcher to pass to the continuation's delegate, if any.
-    ///
     /// # Safety
     /// The continuation must be valid and initialized.
     #[inline(always)]
-    pub unsafe fn notify_task_completed(&self, worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
-        debug_assert!(!self.completed());
+    pub unsafe fn notify_task_completed(
+        &self,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+    ) {
         let continuation = self.continuation;
+        debug_assert!(!self.completed());
 
-        // Interlocked.Decrement equivalent - returns the NEW value
-        let counter_ptr = &mut (*continuation).remaining_task_counter as *mut i32;
-        let new_count = core::intrinsics::atomic_xsub_acqrel(counter_ptr, 1) - 1;
+        // Interlocked.Decrement(ref continuation->RemainingTaskCounter)
+        // fetch_sub returns OLD value; new = old - 1.
+        let old_count = AtomicI32::from_ptr((*continuation).remaining_task_counter.get())
+            .fetch_sub(1, Ordering::AcqRel);
+        let new_count = old_count - 1;
 
         debug_assert!(
             new_count >= 0,
