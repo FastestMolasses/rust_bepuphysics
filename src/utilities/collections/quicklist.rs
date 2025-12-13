@@ -354,3 +354,14 @@ impl<T: Copy> Default for QuickList<T> {
         }
     }
 }
+
+impl<T> Clone for QuickList<T> {
+    fn clone(&self) -> Self {
+        Self {
+            span: self.span,
+            count: self.count,
+        }
+    }
+}
+
+impl<T> Copy for QuickList<T> {}

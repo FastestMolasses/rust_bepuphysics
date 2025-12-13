@@ -122,7 +122,7 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
 
     /// Gets the table indices for a given key, returns (table_index, element_index).
     #[inline(always)]
-    fn get_table_indices(&self, key: &TKey, table_index: &mut i32, element_index: &mut i32) -> bool {
+    pub fn get_table_indices(&self, key: &TKey, table_index: &mut i32, element_index: &mut i32) -> bool {
         let hash_code = self.equality_comparer.hash(key);
         *table_index = HashHelper::rehash(hash_code) & self.table_mask;
 
@@ -279,6 +279,62 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
         true
     }
 
+    /// Removes a key from the dictionary using pre-computed table and element indices.
+    /// Does not preserve the order of elements in the dictionary.
+    #[inline(always)]
+    pub fn fast_remove_at(&mut self, table_index: i32, element_index: i32) {
+        // Clear the table entry
+        self.table[table_index] = 0;
+        self.count -= 1;
+
+        // If this wasn't the last element, move the last element to this position
+        if element_index < self.count {
+            let last_key = self.keys[self.count];
+            let last_value = self.values[self.count];
+
+            // Update the table entry for the moved element
+            let last_hash = self.equality_comparer.hash(&last_key);
+            let mut last_table_index = HashHelper::rehash(last_hash) & self.table_mask;
+            while self.table[last_table_index] != self.count + 1 {
+                last_table_index = (last_table_index + 1) & self.table_mask;
+            }
+            self.table[last_table_index] = element_index + 1;
+
+            // Move the element
+            self.keys[element_index] = last_key;
+            self.values[element_index] = last_value;
+        }
+    }
+
+    /// Finds the existing slot for a key, or allocates a new one if it doesn't exist.
+    /// Returns true if the key already existed, false if a new slot was allocated.
+    /// In either case, slot_index is set to the element index.
+    #[inline(always)]
+    pub fn find_or_allocate_slot_unsafely(&mut self, key: &TKey, slot_index: &mut i32) -> bool {
+        let hash_code = self.equality_comparer.hash(key);
+        let mut table_index = HashHelper::rehash(hash_code) & self.table_mask;
+
+        loop {
+            let element_index = self.table[table_index] - 1;
+
+            if element_index < 0 {
+                // Empty slot — allocate new entry.
+                *slot_index = self.count;
+                self.keys[self.count] = *key;
+                self.table[table_index] = self.count + 1;
+                self.count += 1;
+                return false;
+            }
+
+            if self.equality_comparer.equals(&self.keys[element_index], key) {
+                *slot_index = element_index;
+                return true;
+            }
+
+            table_index = (table_index + 1) & self.table_mask;
+        }
+    }
+
     /// Removes all elements from the dictionary.
     #[inline(always)]
     pub fn clear(&mut self) {
@@ -368,5 +424,21 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     pub fn value_at_mut(&mut self, index: i32) -> &mut TValue {
         debug_assert!(index >= 0 && index < self.count);
         &mut self.values[index]
+    }
+}
+
+impl<TKey: Copy, TValue: Copy, TEqualityComparer: Default> Default
+    for QuickDictionary<TKey, TValue, TEqualityComparer>
+{
+    fn default() -> Self {
+        Self {
+            count: 0,
+            table_mask: 0,
+            table_power_offset: 0,
+            table: Buffer::default(),
+            keys: Buffer::default(),
+            values: Buffer::default(),
+            equality_comparer: TEqualityComparer::default(),
+        }
     }
 }

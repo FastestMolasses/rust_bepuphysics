@@ -2,7 +2,7 @@ use glam::Vec3;
 
 /// A child node in a tree structure, containing bounding box and metadata.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct NodeChild {
     /// Minimum bounds of the bounding box
     pub min: Vec3,

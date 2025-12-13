@@ -9,7 +9,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use std::ops::{Add, Mul};
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Symmetric3x3Wide {
     /// First row, first column of the matrix.
     pub xx: Vector<f32>,

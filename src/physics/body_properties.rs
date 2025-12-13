@@ -283,11 +283,13 @@ impl RigidPoseWide {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct BodyVelocityWide {
     pub linear: Vector3Wide,
     pub angular: Vector3Wide,
 }
 
+#[derive(Clone, Copy)]
 pub struct BodyInertiaWide {
     pub inverse_inertia_tensor: Symmetric3x3Wide,
     pub inverse_mass: Vector<f32>,

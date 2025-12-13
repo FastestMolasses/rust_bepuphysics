@@ -1,10 +1,11 @@
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
 use glam::Vec2;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
 use std::simd::Mask;
 
 /// Two dimensional vector with SIMD lanes.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Vector2Wide {
     /// First component of the vector.
     pub x: Vector<f32>,
@@ -178,6 +179,44 @@ impl std::ops::Mul<Vector2Wide> for Vector<f32> {
             x: vector.x * self,
             y: vector.y * self,
         }
+    }
+}
+
+impl Sub for Vector2Wide {
+    type Output = Self;
+    #[inline(always)]
+    fn sub(self, other: Self) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl Neg for Vector2Wide {
+    type Output = Self;
+    #[inline(always)]
+    fn neg(self) -> Self {
+        Self {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
+
+impl AddAssign for Vector2Wide {
+    #[inline(always)]
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
+    }
+}
+
+impl MulAssign<Vector<f32>> for Vector2Wide {
+    #[inline(always)]
+    fn mul_assign(&mut self, scalar: Vector<f32>) {
+        self.x *= scalar;
+        self.y *= scalar;
     }
 }
 

@@ -27,7 +27,7 @@ impl BoundingBox4 {
 
 /// Provides simple axis-aligned bounding box functionality.
 #[repr(C, align(32))]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct BoundingBox {
     /// Location with the lowest X, Y, and Z coordinates in the axis-aligned bounding box.
     pub min: Vec3,

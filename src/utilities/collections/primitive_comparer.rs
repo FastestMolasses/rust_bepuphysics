@@ -1,7 +1,10 @@
 use std::cmp::Ordering;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::mem::transmute;
+
+use crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer;
 
 // the original code leverages the Unsafe.As method to reinterpret the references of
 // generic types (T) as specific primitive types without actual copying or boxing,
@@ -10,6 +13,7 @@ use std::mem::transmute;
 // locality and avoiding heap allocations are paramount.
 
 /// Provides optimized equality testing, comparison, and hashing for primitive types.
+#[derive(Clone, Copy, Default)]
 pub struct PrimitiveComparer<T> {
     _marker: PhantomData<T>,
 }
@@ -94,6 +98,20 @@ impl_primitive!(isize, isize);
 impl_primitive!(f32, u32);
 impl_primitive!(f64, u64);
 impl_primitive!(char, char);
+
+impl<T: Primitive + Copy> RefEqualityComparer<T> for PrimitiveComparer<T> {
+    fn hash(&self, item: &T) -> i32 {
+        let mut hasher = DefaultHasher::new();
+        unsafe {
+            item.hash(&mut hasher);
+        }
+        hasher.finish() as i32
+    }
+
+    fn equals(&self, a: &T, b: &T) -> bool {
+        unsafe { a.eq(b) }
+    }
+}
 
 // TODO: TESTS
 #[cfg(test)]

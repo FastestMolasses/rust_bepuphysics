@@ -5,7 +5,7 @@ use crate::utilities::vector4_wide::Vector4Wide;
 
 /// A wide SIMD-accelerated symmetric 4x4 matrix.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Symmetric4x4Wide {
     /// First row, first column of the matrix.
     pub xx: Vector<f32>,

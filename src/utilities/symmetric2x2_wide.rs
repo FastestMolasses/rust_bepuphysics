@@ -4,7 +4,7 @@ use crate::utilities::vector2_wide::Vector2Wide;
 
 /// Stores the lower left triangle (including diagonal) of a 2x2 matrix.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Symmetric2x2Wide {
     pub xx: Vector<f32>,
     pub yx: Vector<f32>,

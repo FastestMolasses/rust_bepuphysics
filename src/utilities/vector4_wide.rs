@@ -4,7 +4,7 @@ use glam::Vec4;
 use std::simd::{num::SimdFloat, Mask, StdFloat};
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Vector4Wide {
     pub x: Vector<f32>,
     pub y: Vector<f32>,

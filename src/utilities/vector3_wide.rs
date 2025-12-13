@@ -2,7 +2,7 @@ use crate::{out_unsafe, utilities::gather_scatter::GatherScatter};
 use crate::utilities::vector::Vector;
 use glam::Vec3;
 use std::{
-    ops::{Add, Div, Mul, Neg, Sub},
+    ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub},
     simd::{num::SimdFloat, Mask},
 };
 
@@ -607,6 +607,37 @@ impl Mul for &Vector3Wide {
             y: self.y * other.y,
             z: self.z * other.z,
         }
+    }
+}
+
+impl Sub for Vector3Wide {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, other: Self) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+            z: self.z - other.z,
+        }
+    }
+}
+
+impl AddAssign for Vector3Wide {
+    #[inline(always)]
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
+        self.z += other.z;
+    }
+}
+
+impl MulAssign<Vector<f32>> for Vector3Wide {
+    #[inline(always)]
+    fn mul_assign(&mut self, scalar: Vector<f32>) {
+        self.x *= scalar;
+        self.y *= scalar;
+        self.z *= scalar;
     }
 }
 
