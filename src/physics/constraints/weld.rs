@@ -12,6 +12,7 @@ use glam::{Quat, Vec3};
 pub const BATCH_TYPE_ID: i32 = 31;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Weld {
     pub local_offset: Vec3,
     pub local_orientation: Quat,

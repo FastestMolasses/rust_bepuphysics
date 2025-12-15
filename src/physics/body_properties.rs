@@ -283,13 +283,13 @@ impl RigidPoseWide {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct BodyVelocityWide {
     pub linear: Vector3Wide,
     pub angular: Vector3Wide,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct BodyInertiaWide {
     pub inverse_inertia_tensor: Symmetric3x3Wide,
     pub inverse_mass: Vector<f32>,
@@ -303,6 +303,10 @@ pub struct BodyActivity {
     pub sleep_threshold: f32,
     /// The number of time steps that the body must be under the sleep threshold before becoming a sleep candidate.
     pub minimum_timesteps_under_threshold: u8,
+    /// If the body is awake, this is the number of time steps that the body has had a velocity below the sleep threshold.
+    pub timesteps_under_threshold_count: u8,
+    /// True if this body is a candidate for being slept. If all the bodies that it is connected to by constraints are also candidates, this body may go to sleep.
+    pub sleep_candidate: bool,
 }
 
 impl Default for BodyActivity {
@@ -310,6 +314,8 @@ impl Default for BodyActivity {
         Self {
             sleep_threshold: 0.0,
             minimum_timesteps_under_threshold: 0,
+            timesteps_under_threshold_count: 0,
+            sleep_candidate: false,
         }
     }
 }

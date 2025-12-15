@@ -1,10 +1,13 @@
 // Translated from BepuPhysics/SequentialFallbackBatch.cs
 
 use crate::physics::bodies::Bodies;
+use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::handles::BodyHandle;
+use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::collections::primitive_comparer::PrimitiveComparer;
 use crate::utilities::collections::quick_dictionary::QuickDictionary;
 use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
 /// Trait for getting body references — active set returns body index, inactive set returns handle.
@@ -109,6 +112,65 @@ impl SequentialFallbackBatch {
             pool,
             minimum_body_capacity.max(8),
         );
+    }
+
+    /// Removes a constraint from the fallback batch. Walks the body references of the constraint
+    /// and decrements the dynamic body constraint counts. If a dynamic body has no more constraints
+    /// in the fallback batch, it is removed from the fallback batch handles set.
+    pub(crate) unsafe fn remove(
+        &mut self,
+        solver: *const crate::physics::solver::Solver,
+        pool: &mut BufferPool,
+        batch: &mut ConstraintBatch,
+        fallback_batch_handles: &mut IndexSet,
+        type_id: i32,
+        index_in_type_batch: i32,
+    ) {
+        let solver_ref = &*solver;
+        let type_processor = solver_ref.type_processors[type_id as usize].as_ref().unwrap();
+        let body_count = type_processor.bodies_per_constraint;
+
+        // Collect body indices by enumerating body references.
+        let mut body_indices = vec![0i32; body_count as usize];
+        let type_batch_index = *batch.type_index_to_type_batch_index.get(type_id);
+        let type_batch = batch.type_batches.get(type_batch_index);
+
+        // Use the raw body reference enumeration.
+        let bodies_per_constraint = body_count;
+        let bytes_per_bundle = bodies_per_constraint * std::mem::size_of::<std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32;
+        let mut bundle_index = 0usize;
+        let mut inner_index = 0usize;
+        crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
+            index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
+        let start_byte = bundle_index as i32 * bytes_per_bundle + inner_index as i32 * 4;
+        for i in 0..body_count {
+            body_indices[i as usize] = *(type_batch.body_references.as_ptr().add(
+                (start_byte + i * std::mem::size_of::<std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32) as usize,
+            ) as *const i32);
+        }
+
+        let maximum_allocation_ids_to_free = 3 + body_count as usize * 2;
+        let initial_span: Buffer<i32> = pool.take_at_least(maximum_allocation_ids_to_free as i32);
+        let mut allocation_ids_to_free = QuickList::new(initial_span);
+
+        for i in 0..body_count {
+            let raw_body_index = body_indices[i as usize];
+            if Bodies::is_encoded_dynamic_reference(raw_body_index) {
+                let body_index = raw_body_index & Bodies::BODY_REFERENCE_MASK;
+                if self.remove_one_body_reference_from_dynamics_set(body_index, &mut allocation_ids_to_free) {
+                    let bodies = &*solver_ref.bodies;
+                    let body_handle = bodies.active_set().index_to_handle.get(body_index).0;
+                    fallback_batch_handles.unset(body_handle);
+                }
+            }
+        }
+
+        for i in 0..allocation_ids_to_free.count {
+            pool.return_unsafely(*allocation_ids_to_free.get(i));
+        }
     }
 
     /// Removes a constraint from a body in the fallback batch.

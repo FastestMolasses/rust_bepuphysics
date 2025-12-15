@@ -19,6 +19,13 @@ pub struct TypeBatch {
 }
 
 impl TypeBatch {
+    /// Returns the capacity of the type batch in terms of individual constraints.
+    /// This is determined by the length of the IndexToHandle buffer.
+    #[inline(always)]
+    pub fn capacity(&self) -> i32 {
+        self.index_to_handle.len()
+    }
+
     #[inline(always)]
     pub fn bundle_count(&self) -> usize {
         BundleIndexing::get_bundle_count(self.constraint_count as usize)

@@ -6,6 +6,7 @@ use std::cmp::min;
 /// Collection of unique indices supporting add, remove, and contains operations.
 /// Uses packed bitfields where each bit represents one index's containment state.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct IndexSet {
     /// Packed bitfields representing index containment.
     pub flags: Buffer<u64>,

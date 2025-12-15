@@ -1,4 +1,3 @@
 /target
 .DS_Store
-prompt*.txt
-validated.txt
+*.txt

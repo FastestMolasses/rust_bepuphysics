@@ -13,6 +13,7 @@ use glam::Vec3;
 pub const BATCH_TYPE_ID: i32 = 39;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct LinearAxisMotor {
     pub local_offset_a: Vec3,
     pub local_offset_b: Vec3,
@@ -48,7 +49,7 @@ impl LinearAxisMotorFunctions {
     #[inline(always)]
     pub fn warm_start(
         position_a: &Vector3Wide,
-        _orientation_a: &QuaternionWide,
+        orientation_a: &QuaternionWide,
         inertia_a: &crate::physics::body_properties::BodyInertiaWide,
         position_b: &Vector3Wide,
         orientation_b: &QuaternionWide,
@@ -57,7 +58,6 @@ impl LinearAxisMotorFunctions {
         accumulated_impulses: &Vector<f32>,
         wsv_a: &mut crate::physics::body_properties::BodyVelocityWide,
         wsv_b: &mut crate::physics::body_properties::BodyVelocityWide,
-        orientation_a: &QuaternionWide,
     ) {
         let mut ab = Vector3Wide::default();
         Vector3Wide::subtract(position_b, position_a, &mut ab);

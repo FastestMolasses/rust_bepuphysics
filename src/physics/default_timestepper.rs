@@ -5,7 +5,9 @@
 // data structure optimization.
 // Each substep of the solve simulates and integrates a sub-timestep of length dt/substepCount.
 
+use crate::physics::simulation::Simulation;
 use crate::physics::timestepper::{ITimestepper, TimestepperStageHandler};
+use crate::utilities::thread_dispatcher::IThreadDispatcher;
 
 /// Default timestepper that executes:
 /// Sleep -> PredictBBs -> CollisionDetection -> Solve -> OptimizeDataStructures.
@@ -39,27 +41,31 @@ impl ITimestepper for DefaultTimestepper {
         dt: f32,
         thread_dispatcher: *mut u8,
     ) {
-        // TODO: Call simulation methods once Simulation is translated:
-        // (*simulation).sleep(thread_dispatcher);
+        let sim = &mut *(simulation as *mut Simulation);
+        // TODO: thread_dispatcher casting requires a fat pointer (vtable).
+        // For now, the single-threaded path is used regardless of the dispatcher argument.
+        let td: Option<&dyn IThreadDispatcher> = None;
+
+        sim.sleep(td);
         if let Some(ref handler) = self.slept {
             handler(dt, thread_dispatcher);
         }
 
-        // (*simulation).predict_bounding_boxes(dt, thread_dispatcher);
+        sim.predict_bounding_boxes(dt, td);
         if let Some(ref handler) = self.before_collision_detection {
             handler(dt, thread_dispatcher);
         }
 
-        // (*simulation).collision_detection(dt, thread_dispatcher);
+        sim.collision_detection(dt, td);
         if let Some(ref handler) = self.collisions_detected {
             handler(dt, thread_dispatcher);
         }
 
-        // (*simulation).solve(dt, thread_dispatcher);
+        sim.solve(dt, td);
         if let Some(ref handler) = self.constraints_solved {
             handler(dt, thread_dispatcher);
         }
 
-        // (*simulation).incrementally_optimize_data_structures(thread_dispatcher);
+        sim.incrementally_optimize_data_structures(td);
     }
 }

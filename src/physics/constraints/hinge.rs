@@ -17,6 +17,7 @@ use glam::Vec3;
 pub const BATCH_TYPE_ID: i32 = 47;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Hinge {
     pub local_offset_a: Vec3,
     pub local_hinge_axis_a: Vec3,

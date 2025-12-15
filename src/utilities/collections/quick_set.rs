@@ -174,7 +174,7 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
     }
 
     /// Resizes the internal buffers.
-    fn resize(&mut self, new_size: i32, pool: &mut impl UnmanagedMemoryPool) {
+    pub fn resize(&mut self, new_size: i32, pool: &mut impl UnmanagedMemoryPool) {
         let mut new_span = pool.take_at_least::<T>(new_size);
         let table_capacity = (new_span.len() << self.table_power_offset).max(1 << self.table_power_offset);
         let mut new_table = pool.take_at_least::<i32>(table_capacity);

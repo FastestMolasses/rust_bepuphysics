@@ -7,6 +7,7 @@
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::handles::ConstraintHandle;
+use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
@@ -66,6 +67,111 @@ pub trait ITypeProcessor {
 
     /// Scales all accumulated impulses by the given factor.
     fn scale_accumulated_impulses(&self, type_batch: &mut TypeBatch, scale: f32);
+
+    /// Copies constraint data from a sleeping set's type batch into the active set's type batch.
+    fn copy_sleeping_to_active(
+        &self,
+        _source_set: i32,
+        _batch_index: i32,
+        _source_type_batch_index: i32,
+        _target_type_batch_index: i32,
+        _source_start: i32,
+        _target_start: i32,
+        _count: i32,
+        _bodies: &crate::physics::bodies::Bodies,
+        _solver: &crate::physics::solver::Solver,
+    ) {
+        // Default: no-op stub. Concrete implementations will override.
+    }
+
+    /// Adds body handles referenced by the waking type batch to the batch's referenced handles set.
+    fn add_waking_body_handles_to_batch_references(
+        &self,
+        _type_batch: &TypeBatch,
+        _target_batch_referenced_handles: &mut IndexSet,
+    ) {
+        // Default: no-op stub. Concrete implementations will override.
+    }
+
+    /// Transfers a constraint from one batch to another.
+    fn transfer_constraint(
+        &self,
+        _source_batch: &mut TypeBatch,
+        _target_batch: &mut TypeBatch,
+        _source_index: i32,
+        _target_index: i32,
+        _handle_to_constraint: &mut Buffer<ConstraintLocation>,
+        _constraint_handle: i32,
+    ) {
+        // Default: no-op stub.
+    }
+
+    /// Updates body references within a constraint when a body is moved in memory.
+    /// Returns true if the moved body is kinematic.
+    fn update_for_body_memory_move(
+        &self,
+        _type_batch: &mut TypeBatch,
+        _index_in_type_batch: i32,
+        _body_index_in_constraint: i32,
+        _new_body_location: i32,
+    ) -> bool {
+        // Default: no-op stub.
+        false
+    }
+
+    /// Returns the capacity of the given type batch.
+    fn capacity(&self, _type_batch: &TypeBatch) -> i32 {
+        // Default stub
+        0
+    }
+
+    /// Warm-starts the constraints in the given type batch. The warm start applies previously
+    /// accumulated impulses to the body velocities to accelerate convergence.
+    ///
+    /// The integration flags, callbacks, and integration mode are handled internally by each
+    /// concrete type processor. This simplified signature is for the solver's main dispatch.
+    fn warm_start(
+        &self,
+        type_batch: &mut TypeBatch,
+        bodies: &crate::physics::bodies::Bodies,
+        dt: f32,
+        inverse_dt: f32,
+        start_bundle: i32,
+        exclusive_end_bundle: i32,
+    ) {
+        // Default: no-op. Concrete implementations will override.
+        let _ = (type_batch, bodies, dt, inverse_dt, start_bundle, exclusive_end_bundle);
+    }
+
+    /// Solves the constraint velocity iteration for the given bundle range.
+    fn solve(
+        &self,
+        type_batch: &mut TypeBatch,
+        bodies: &crate::physics::bodies::Bodies,
+        dt: f32,
+        inverse_dt: f32,
+        start_bundle: i32,
+        exclusive_end_bundle: i32,
+    ) {
+        // Default: no-op. Concrete implementations will override.
+        let _ = (type_batch, bodies, dt, inverse_dt, start_bundle, exclusive_end_bundle);
+    }
+
+    /// Performs an incremental update for substeps beyond the first.
+    /// Only called for constraint types where `requires_incremental_substep_updates` returns true.
+    fn incrementally_update_for_substep(
+        &self,
+        type_batch: &mut TypeBatch,
+        bodies: &crate::physics::bodies::Bodies,
+        dt: f32,
+        inverse_dt: f32,
+        start_bundle: i32,
+        exclusive_end_bundle: i32,
+    ) {
+        // Default: debug fail, should not be called unless the type supports it.
+        debug_assert!(false, "An incremental update was scheduled for a type batch that does not have a contact data update implementation.");
+        let _ = (type_batch, bodies, dt, inverse_dt, start_bundle, exclusive_end_bundle);
+    }
 }
 
 /// Concrete metadata holder for a type processor. Stores cached type id and bodies-per-constraint
