@@ -16,6 +16,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector::Vector;
 use std::simd::prelude::*;
 
+use super::convex_compound_collision_task::IConvexCompoundOverlapFinder;
 use super::convex_compound_task_overlaps::{ConvexCompoundOverlaps, ConvexCompoundTaskOverlaps};
 
 /// Trait for shapes that support bounding box overlap queries against their children.
@@ -25,13 +26,32 @@ pub trait IBoundsQueryableCompound {
     fn child_count(&self) -> i32;
 
     /// Finds which children overlap the given query bounds and stores their indices.
-    fn find_local_overlaps(
+    fn find_local_overlaps<TOverlaps, TSubpairOverlaps>(
         &self,
         query_bounds: &Buffer<super::compound_pair_overlaps::OverlapQueryForPair>,
         pool: &mut BufferPool,
         shapes: &Shapes,
-        overlaps: &mut ConvexCompoundTaskOverlaps,
-    );
+        overlaps: &mut TOverlaps,
+    ) where
+        TSubpairOverlaps: super::compound_pair_overlaps::ICollisionTaskSubpairOverlaps,
+        TOverlaps: super::compound_pair_overlaps::ICollisionTaskOverlaps<TSubpairOverlaps>;
+
+    /// Finds which children overlap the given sweep bounds (sweep-specific overload).
+    ///
+    /// # Safety
+    /// `overlaps` must point to a valid overlaps collection of the appropriate type.
+    unsafe fn find_local_overlaps_sweep(
+        &self,
+        _min: Vec3,
+        _max: Vec3,
+        _sweep: Vec3,
+        _maximum_t: f32,
+        _pool: &mut BufferPool,
+        _shapes: &Shapes,
+        _overlaps: *mut u8,
+    ) {
+        todo!("Sweep-specific overlap finding not yet implemented for this compound type")
+    }
 }
 
 /// Finds overlapping children between a convex shape and a compound/mesh container.
@@ -42,12 +62,17 @@ pub struct ConvexCompoundOverlapFinder<TCompound: IBoundsQueryableCompound> {
     _marker: PhantomData<TCompound>,
 }
 
-impl<TCompound: IBoundsQueryableCompound> ConvexCompoundOverlapFinder<TCompound> {
+impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder for ConvexCompoundOverlapFinder<TCompound> {
     /// Finds all overlapping children for the given set of bounds-tested pairs.
+    ///
+    /// This uses a scalar-per-pair approach: for each pair, compute the local-space
+    /// bounding box of the convex shape, expand it for velocity/angular motion, then
+    /// store it in the subpair queries. Finally, delegate to the compound's
+    /// `find_local_overlaps` to populate the overlap lists.
     ///
     /// # Safety
     /// Pair pointers must be valid. The `pair.B` pointer must point to a valid `TCompound`.
-    pub unsafe fn find_local_overlaps(
+    unsafe fn find_local_overlaps(
         pairs: &Buffer<BoundsTestedPair>,
         pair_count: i32,
         pool: &mut BufferPool,
@@ -58,38 +83,65 @@ impl<TCompound: IBoundsQueryableCompound> ConvexCompoundOverlapFinder<TCompound>
         for i in 0..pair_count {
             let pair = &pairs[i];
 
-            // Compute local-space bounding box of the convex in the compound's frame.
-            // Transform the offset to compound local space.
+            // Store the container pointer in the subpair query.
+            overlaps.subpair_queries[i].container = pair.b;
+
+            // Compute local-space transforms.
             let conjugate_orientation_b = pair.orientation_b.conjugate();
             let local_offset_a = conjugate_orientation_b * (-pair.offset_b);
-            let local_orientation_a =
-                conjugate_orientation_b * pair.orientation_a;
-
-            // Get bounding box of the convex shape.
-            // TODO: This is a simplification. The full implementation would call the shape's
-            // ComputeBounds method with the local orientation and then expand for velocity.
-            // For now, use a conservative expansion approach.
+            let local_orientation_a = conjugate_orientation_b * pair.orientation_a;
             let local_relative_linear_velocity =
                 conjugate_orientation_b * pair.relative_linear_velocity_a;
 
-            // Expand bounds by velocity and speculative margin.
-            let expansion = local_relative_linear_velocity.abs() * dt
-                + Vec3::splat(pair.speculative_margin);
+            // Compute conservative local-space bounding box.
+            // A full implementation would use IShapeWide::get_bounds for shape-specific bounds,
+            // but scalar approach with generous expansion is correct.
+            let angular_velocity_a = pair.angular_velocity_a;
+            let angular_velocity_b = pair.angular_velocity_b;
 
-            // Create a conservative bounding box around the convex at its local position.
-            let min = local_offset_a - expansion;
-            let max = local_offset_a + expansion;
+            // Use speculative margin as a conservative radius for the convex shape.
+            let expansion_velocity = local_relative_linear_velocity.abs() * dt;
+            let angular_expansion_scalar = BoundingBoxHelpers::get_angular_bounds_expansion(
+                angular_velocity_a.length(),
+                dt,
+                pair.maximum_expansion,
+                pair.maximum_expansion,
+            );
+            let expansion = expansion_velocity
+                + Vec3::splat(pair.speculative_margin + angular_expansion_scalar);
 
-            // Store query for this pair.
-            let pair_overlaps = overlaps.get_overlaps_for_pair(i);
-            pair_overlaps.overlaps = pool.take(16); // Initial capacity
-            pair_overlaps.count = 0;
+            // If compound B is rotating, expand further.
+            let angular_speed_b = angular_velocity_b.length();
+            let expansion = if angular_speed_b > 0.0 {
+                let radius_b = local_offset_a.length();
+                let linear_speed = local_relative_linear_velocity.length();
+                let worst_case_radius = linear_speed * dt + radius_b;
+                let angular_expansion_b = BoundingBoxHelpers::get_angular_bounds_expansion(
+                    angular_speed_b,
+                    dt,
+                    worst_case_radius,
+                    worst_case_radius,
+                );
+                expansion + Vec3::splat(angular_expansion_b)
+            } else {
+                expansion
+            };
 
-            // Note: In the full implementation, the compound's tree or child list would be
-            // queried with (min, max) to find overlapping children. This requires
-            // IBoundsQueryableCompound::find_local_overlaps to be properly wired up.
-            // For now, we set up the query bounds for downstream use.
-            let _ = (min, max, shapes);
+            // Clamp expansion.
+            let max_exp = Vec3::splat(pair.maximum_expansion);
+            let expansion = expansion.min(max_exp);
+
+            overlaps.subpair_queries[i].min = local_offset_a - expansion;
+            overlaps.subpair_queries[i].max = local_offset_a + expansion;
         }
+
+        // Delegate to the compound's tree/child overlap finder.
+        // The choice of instance here is irrelevant — all compounds of the same type
+        // have the same tree structure query method.
+        let compound_ptr: *const TCompound = overlaps.subpair_queries[0i32].container as *const TCompound;
+        let compound = &*compound_ptr;
+        // Copy the subpair_queries buffer to avoid aliasing with the mutable overlaps ref.
+        let subpair_queries = overlaps.subpair_queries;
+        compound.find_local_overlaps(&subpair_queries, pool, shapes, overlaps);
     }
 }

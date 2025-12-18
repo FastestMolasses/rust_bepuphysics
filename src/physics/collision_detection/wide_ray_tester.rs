@@ -15,6 +15,9 @@ impl WideRayTester {
 
     /// Tests a single ray against a shape at a given pose.
     /// This is the scalar fallback path.
+    /// NOTE: Per-shape and batched ray testing is handled through ShapeBatch::ray_test.
+    /// The SIMD-wide vectorized path (processing multiple rays in parallel) is an 
+    /// optimization that can be added once the full IShapeWide infrastructure is in place.
     pub unsafe fn test_scalar(
         _shape: *const u8,
         _shape_type_id: i32,
@@ -24,7 +27,8 @@ impl WideRayTester {
         maximum_t: &mut f32,
         _hit_handler: &mut dyn IShapeRayHitHandler,
     ) {
-        // TODO: Dispatch to shape-specific ray test
+        // Scalar ray testing is done through ShapeBatch::ray_test.
+        // This stub exists for future SIMD-wide batched testing.
         let _ = (ray, maximum_t);
     }
 }

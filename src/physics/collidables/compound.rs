@@ -8,9 +8,23 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use super::typed_index::TypedIndex;
-use super::shape::{IShape, IShapeRayHitHandler};
+use super::shape::{IShape, IShapeRayHitHandler, IDisposableShape, ICompoundShape};
 use super::shapes::Shapes;
-use super::ray::RayData;
+use super::compound_builder::CompoundBuilder;
+use crate::physics::collision_detection::ray_batchers::RayData;
+
+use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
+use crate::physics::collision_detection::collision_tasks::convex_compound_task_overlaps::ConvexCompoundTaskOverlaps;
+use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::{
+    ICollisionTaskOverlaps, ICollisionTaskSubpairOverlaps, OverlapQueryForPair,
+};
+use crate::utilities::bounding_box::BoundingBox;
+
+/// Collects overlap results from compound overlap queries.
+pub trait IOverlapCollector {
+    /// Adds a child index to the overlap results.
+    fn add(&mut self, child_index: i32);
+}
 
 /// Shape and pose of a child within a compound shape.
 #[repr(C)]
@@ -270,67 +284,30 @@ impl Compound {
         for i in 0..self.children.len() as usize {
             if hit_handler.allow_test(i as i32) {
                 let child = &self.children[i];
-                let child_pose = RigidPose {
-                    position: child.local_position,
-                    orientation: child.local_orientation,
-                };
 
-                // Get the child shape batch and perform a scalar ray test
-                if let Some(batch) = shape_batches.get_batch(child.shape_index.type_id() as usize)
-                {
-                    // Transform ray into child local space
-                    let child_offset = local_origin - child.local_position;
-                    let mut child_local_origin = Vec3::ZERO;
-                    let mut child_orientation = Matrix3x3::default();
-                    Matrix3x3::create_from_quaternion(&child.local_orientation, &mut child_orientation);
-                    Matrix3x3::transform_transpose(&child_offset, &child_orientation, &mut child_local_origin);
-                    let mut child_local_direction = Vec3::ZERO;
-                    Matrix3x3::transform_transpose(&local_direction, &child_orientation, &mut child_local_direction);
-
-                    // Use the batch's compute_bounds to check, then do a per-shape ray test via shape data
-                    let mut t = 0.0f32;
-                    let mut local_normal = Vec3::ZERO;
-
-                    // Access the shape and test the ray
-                    let (shape_ptr, shape_size) =
-                        unsafe { batch.get_shape_data(child.shape_index.index() as usize) };
-                    let _ = (shape_ptr, shape_size); // We can't directly call ray_test through the batch
-
-                    // Use the child pose relative to compound local space for the ray test
-                    let local_ray = RayData {
-                        origin: local_origin,
-                        direction: local_direction,
-                        id: 0,
+                // Get the child shape batch and perform a ray test
+                if let Some(batch) = shape_batches.get_batch(child.shape_index.type_id() as usize) {
+                    // Build the child's world-space-relative pose (pose in compound local space)
+                    let child_pose = RigidPose {
+                        position: child.local_position,
+                        orientation: child.local_orientation,
                     };
 
-                    // For now, test using bounds as a rough filter
-                    // A full implementation would call the typed ray test through the batch
-                    let mut child_min = Vec3::ZERO;
-                    let mut child_max = Vec3::ZERO;
-                    batch.compute_bounds_by_pose(
-                        child.shape_index.index() as usize,
-                        &child_pose,
-                        &mut child_min,
-                        &mut child_max,
-                    );
+                    // Build a ray in compound-local space
+                    let mut local_ray = RayData::default();
+                    local_ray.origin = local_origin;
+                    local_ray.direction = local_direction;
+                    local_ray.id = ray.id;
 
-                    // Simple AABB ray intersection test for the child
-                    let inv_dir = Vec3::new(
-                        if local_direction.x != 0.0 { 1.0 / local_direction.x } else { f32::MAX },
-                        if local_direction.y != 0.0 { 1.0 / local_direction.y } else { f32::MAX },
-                        if local_direction.z != 0.0 { 1.0 / local_direction.z } else { f32::MAX },
-                    );
-                    let t1 = (child_min - local_origin) * inv_dir;
-                    let t2 = (child_max - local_origin) * inv_dir;
-                    let t_min_v = t1.min(t2);
-                    let t_max_v = t1.max(t2);
-                    let t_enter = t_min_v.x.max(t_min_v.y).max(t_min_v.z).max(0.0);
-                    let t_exit = t_max_v.x.min(t_max_v.y).min(t_max_v.z);
-
-                    if t_enter <= t_exit && t_enter <= *maximum_t {
-                        // TODO: Full per-shape ray test requires ShapeBatch::ray_test method
-                        // which needs to be added to the ShapeBatch trait.
-                        // For now, report intersection at the AABB entry point with the bounding box normal.
+                    // Delegate to the child's shape batch ray test
+                    unsafe {
+                        batch.ray_test(
+                            child.shape_index.index() as usize,
+                            &child_pose,
+                            &local_ray,
+                            maximum_t,
+                            hit_handler,
+                        );
                     }
                 }
             }
@@ -354,14 +331,162 @@ impl Compound {
         pool.resize(&mut self.children, last_index as i32, last_index as i32);
     }
 
-    // TODO: add_child_bounds_to_batcher — requires BoundingBoxBatcher (blocked on BroadPhase)
-    // TODO: find_local_overlaps — requires collision detection infrastructure
-    // TODO: compute_inertia — delegates to CompoundBuilder (will be added with compound_builder.rs)
+    // NOTE: add_child_bounds_to_batcher — requires full SIMD BoundingBoxBatcher wide path
+
+    /// Computes the inertia of this compound using the shapes collection.
+    /// Does not recenter children.
+    pub fn compute_inertia(
+        &self,
+        child_masses: &[f32],
+        shapes: &Shapes,
+    ) -> BodyInertia {
+        CompoundBuilder::compute_inertia(&self.children, child_masses, shapes)
+    }
+
+    /// Computes the inertia of this compound using the shapes collection.
+    /// Recenters children around the calculated center of mass.
+    pub fn compute_inertia_recentered(
+        &mut self,
+        child_masses: &[f32],
+        shapes: &Shapes,
+    ) -> (BodyInertia, glam::Vec3) {
+        CompoundBuilder::compute_inertia_recentered(&mut self.children, child_masses, shapes)
+    }
 }
 
 impl IShape for Compound {
     #[inline(always)]
     fn type_id() -> i32 {
         Self::ID
+    }
+}
+
+impl IDisposableShape for Compound {
+    fn dispose(&mut self, pool: &mut BufferPool) {
+        self.dispose(pool);
+    }
+}
+
+impl ICompoundShape for Compound {
+    fn child_count(&self) -> i32 {
+        self.children.len()
+    }
+
+    fn get_child(&self, child_index: i32) -> &CompoundChild {
+        &self.children[child_index as usize]
+    }
+
+    fn compute_bounds(&self, _orientation: Quat, _min: &mut Vec3, _max: &mut Vec3) {
+        // Note: Compound.compute_bounds requires a Shapes reference which is not
+        // available through this trait signature. This method should not be called
+        // without access to the shapes collection — use the inherent method instead.
+        panic!("Compound::compute_bounds requires Shapes; use the inherent method with shape_batches parameter.");
+    }
+
+    fn find_local_overlaps<TOverlaps: IOverlapCollector>(
+        &self,
+        _local_min: &Vec3,
+        _local_max: &Vec3,
+        overlaps: &mut TOverlaps,
+    ) {
+        // List-based compounds have no acceleration structure.
+        // Just report all children as potentially overlapping.
+        for i in 0..self.children.len() {
+            overlaps.add(i);
+        }
+    }
+}
+
+impl IBoundsQueryableCompound for Compound {
+    fn child_count(&self) -> i32 {
+        self.children.len()
+    }
+
+    fn find_local_overlaps<TOverlaps, TSubpairOverlaps>(
+        &self,
+        query_bounds: &Buffer<OverlapQueryForPair>,
+        pool: &mut BufferPool,
+        shapes: &Shapes,
+        overlaps: &mut TOverlaps,
+    ) where
+        TSubpairOverlaps: ICollisionTaskSubpairOverlaps,
+        TOverlaps: ICollisionTaskOverlaps<TSubpairOverlaps>,
+    {
+        for pair_index in 0..query_bounds.len() {
+            let pair = &query_bounds[pair_index as usize];
+            let compound = unsafe { &*(pair.container as *const Compound) };
+            for i in 0..compound.children.len() as usize {
+                let child = &compound.children[i];
+                let mut min_bound = Vec3::ZERO;
+                let mut max_bound = Vec3::ZERO;
+                if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
+                    let mut _max_radius = 0.0f32;
+                    let mut _max_angular = 0.0f32;
+                    batch.compute_bounds_with_angular_data(
+                        child.shape_index.index() as usize,
+                        child.local_orientation,
+                        &mut _max_radius,
+                        &mut _max_angular,
+                        &mut min_bound,
+                        &mut max_bound,
+                    );
+                }
+                min_bound += child.local_position;
+                max_bound += child.local_position;
+                if BoundingBox::intersects_bounds(min_bound, max_bound, pair.min, pair.max) {
+                    let overlaps_for_pair = overlaps.get_overlaps_for_pair(pair_index);
+                    *overlaps_for_pair.allocate(pool) = i as i32;
+                }
+            }
+        }
+    }
+
+    unsafe fn find_local_overlaps_sweep(
+        &self,
+        min: Vec3,
+        max: Vec3,
+        sweep: Vec3,
+        maximum_t: f32,
+        pool: &mut BufferPool,
+        shapes: &Shapes,
+        overlaps: *mut u8,
+    ) {
+        use crate::physics::trees::tree::Tree;
+        use crate::physics::trees::ray_batcher::TreeRay;
+
+        let mut sweep_origin = Vec3::ZERO;
+        let mut expansion = Vec3::ZERO;
+        Tree::convert_box_to_centroid_with_extent(min, max, &mut sweep_origin, &mut expansion);
+        let mut ray = TreeRay {
+            origin_over_direction: Vec3::ZERO,
+            maximum_t: 0.0,
+            inverse_direction: Vec3::ZERO,
+        };
+        TreeRay::create_from(sweep_origin, sweep, maximum_t, &mut ray);
+        let overlaps_ref = &mut *(overlaps as *mut crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::ChildOverlapsCollection);
+        for i in 0..self.children.len() as usize {
+            let child = &self.children[i];
+            let mut child_min = Vec3::ZERO;
+            let mut child_max = Vec3::ZERO;
+            if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
+                let mut _max_radius = 0.0f32;
+                let mut _max_angular = 0.0f32;
+                batch.compute_bounds_with_angular_data(
+                    child.shape_index.index() as usize,
+                    child.local_orientation,
+                    &mut _max_radius,
+                    &mut _max_angular,
+                    &mut child_min,
+                    &mut child_max,
+                );
+            }
+            child_min = child_min + child.local_position - expansion;
+            child_max = child_max + child.local_position + expansion;
+            let mut _t = 0.0f32;
+            if Tree::intersects_ray(child_min, child_max, &ray as *const TreeRay, &mut _t) {
+                use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::ICollisionTaskSubpairOverlaps;
+                *overlaps_ref.allocate(pool) = i as i32;
+            }
+        }
     }
 }

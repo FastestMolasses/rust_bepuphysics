@@ -1,7 +1,66 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTaskRegistry.cs
 
+use super::collision_batcher_continuations::{BatcherContinuations, PairContinuation};
+use super::compound_mesh_reduction::CompoundMeshReduction;
+use super::contact_manifold::ConvexContactManifold;
+use super::mesh_reduction::MeshReduction;
+use super::nonconvex_reduction::NonconvexReduction;
 use super::untyped_list::UntypedList;
+use crate::physics::body_properties::BodyVelocity;
+use crate::utilities::memory::buffer_pool::BufferPool;
+use glam::{Quat, Vec3};
 // ICollisionCallbacks is defined in collision_batcher.rs
+
+/// Type-erased function pointer table for collision batcher operations.
+///
+/// This enables compound collision tasks (which generate subtasks back into the batcher)
+/// to call batcher methods without knowing the concrete `TCallbacks` type.
+/// In C#, this is handled via the generic virtual method `ExecuteBatch<TCallbacks>`;
+/// in Rust, we provide an explicit vtable since trait objects cannot have generic methods.
+#[repr(C)]
+pub struct BatcherVtable {
+    /// Type-erased pointer to the `CollisionBatcher<TCallbacks>`.
+    pub batcher: *mut u8,
+    /// Memory pool.
+    pub pool: *mut BufferPool,
+    /// Shapes collection.
+    pub shapes: *mut crate::physics::collidables::shapes::Shapes,
+    /// Timestep duration.
+    pub dt: f32,
+    /// NonconvexReduction continuations manager.
+    pub nonconvex_reductions: *mut BatcherContinuations<NonconvexReduction>,
+    /// MeshReduction continuations manager.
+    pub mesh_reductions: *mut BatcherContinuations<MeshReduction>,
+    /// CompoundMeshReduction continuations manager.
+    pub compound_mesh_reductions: *mut BatcherContinuations<CompoundMeshReduction>,
+
+    /// Process a convex collision result (used by convex tasks).
+    pub process_convex_result: unsafe fn(*mut u8, &mut ConvexContactManifold, &PairContinuation),
+    /// Add a child pair directly to the batcher for testing (used by compound tasks).
+    pub add_directly: unsafe fn(
+        batcher: *mut u8,
+        shape_type_a: i32,
+        shape_type_b: i32,
+        shape_a: *const u8,
+        shape_b: *const u8,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        velocity_a: &BodyVelocity,
+        velocity_b: &BodyVelocity,
+        speculative_margin: f32,
+        maximum_expansion: f32,
+        pair_continuation: &PairContinuation,
+    ),
+    /// Process an empty result (no overlaps found for a pair).
+    pub process_empty_result: unsafe fn(batcher: *mut u8, continuation: &PairContinuation),
+    /// Process an untested subpair result (testing was blocked by callback).
+    pub process_untested_subpair_convex_result:
+        unsafe fn(batcher: *mut u8, continuation: &PairContinuation),
+    /// Check if collision testing is allowed for a pair.
+    pub allow_collision_testing:
+        unsafe fn(batcher: *mut u8, pair_id: i32, child_a: i32, child_b: i32) -> bool,
+}
 
 /// Describes the data requirements for a collision pair type in a CollisionBatcher.
 #[repr(i32)]
@@ -32,7 +91,11 @@ pub trait CollisionTask {
     /// Gets the pair type that the execute_batch call requires.
     fn pair_type(&self) -> CollisionTaskPairType;
     /// Executes the task on the given input.
-    fn execute_batch(&self, batch: &mut UntypedList, batcher: *mut u8);
+    fn execute_batch(
+        &self,
+        batch: &mut UntypedList,
+        vtable: &BatcherVtable,
+    );
 }
 
 /// Metadata about a collision task.

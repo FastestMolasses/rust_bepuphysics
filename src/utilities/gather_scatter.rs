@@ -37,7 +37,7 @@ impl GatherScatter {
 
         ptr::copy_nonoverlapping(source_base, target_base, Vector::<i32>::LEN);
 
-        // TODO: CHECK IF THIS MANUAL UNROLL IS NEEDED, OR IF THE COMPILER CAN DO IT
+        // NOTE: CHECK IF THIS MANUAL UNROLL IS NEEDED, OR IF THE COMPILER CAN DO IT
         let mut offset = Vector::<i32>::LEN;
         // 8-wide unroll for maximum throughput
         while offset + Vector::<i32>::LEN * 8 <= size_in_ints {

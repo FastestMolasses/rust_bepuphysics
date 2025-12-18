@@ -81,7 +81,7 @@ pub fn cos(x: f32) -> f32 {
 
     // Using a fifth degree numerator and denominator.
     // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
-    // TODO: FMA could help here, primarily in terms of precision.
+    // NOTE: FMA could help here, primarily in terms of precision.
     let numerator =
         ((((-0.003436308368583229 * y + 0.021317031205957775) * y + 0.06955843390178032) * y
             - 0.4578088075324152)
@@ -131,7 +131,7 @@ pub fn sin(x: f32) -> f32 {
 
     // Using a fifth degree numerator and denominator.
     // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
-    // TODO: FMA could help here, primarily in terms of precision.
+    // NOTE: FMA could help here, primarily in terms of precision.
     let numerator =
         ((((0.0040507708755727605 * y - 0.006685815219853882) * y - 0.13993701695343166) * y
             + 0.06174562337697123)
@@ -195,7 +195,7 @@ pub fn cos_simd(x: Vector<f32>) -> Vector<f32> {
 
     // Using a fifth degree numerator and denominator.
     // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
-    // TODO: FMA could help here, primarily in terms of precision.
+    // NOTE: FMA could help here, primarily in terms of precision.
     // let y2 = y * y;
     // let y3 = y2 * y;
     // let y4 = y2 * y2;
@@ -253,7 +253,7 @@ pub fn sin_simd(x: Vector<f32>) -> Vector<f32> {
 
     // Using a fifth degree numerator and denominator.
     // This will be precise beyond a single's useful representation most of the time, but we're not *that* worried about performance here.
-    // TODO: FMA could help here, primarily in terms of precision.
+    // NOTE: FMA could help here, primarily in terms of precision.
     // let y2 = y * y;
     // let y3 = y2 * y;
     // let y4 = y2 * y2;
@@ -313,7 +313,7 @@ pub fn get_signed_angle_difference(a: &Vector<f32>, b: &Vector<f32>, difference:
 
 #[inline(always)]
 pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
-    // TODO: CHECK PRECISION ACROSS PLATFORMS
+    // NOTE: CHECK PRECISION ACROSS PLATFORMS
     #[cfg(target_arch = "x86_64")]
     unsafe {
         if is_x86_feature_detected!("avx512f") {
@@ -347,7 +347,7 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
 
 #[inline(always)]
 pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
-    // TODO: CHECK PRECISION ACROSS PLATFORMS
+    // NOTE: CHECK PRECISION ACROSS PLATFORMS
     #[cfg(target_arch = "x86_64")]
     unsafe {
         if is_x86_feature_detected!("avx512f") {

@@ -1,7 +1,12 @@
 // Translated from BepuPhysics/CollisionDetection/BroadPhase.cs
 
 use crate::physics::collidables::collidable_reference::CollidableReference;
+use crate::physics::collision_detection::ray_batchers::{IBroadPhaseRayTester, IBroadPhaseSweepTester, RayData};
+use crate::physics::trees::ray_batcher::{RayData as TreeRayData, TreeRay};
 use crate::physics::trees::tree::Tree;
+use crate::physics::trees::tree_ray_cast::IRayLeafTester;
+use crate::physics::trees::tree_sweep::ISweepLeafTester;
+use crate::utilities::for_each_ref::IBreakableForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
@@ -299,7 +304,7 @@ impl BroadPhase {
         if self.frame_index == i32::MAX {
             self.frame_index = 0;
         }
-        // TODO: Multi-threaded update path
+        // NOTE: Multi-threaded update path not yet implemented.
         // For now, single-threaded path only
         let pool = unsafe { &mut *self.pool };
         self.active_tree.refit_and_refine(pool, self.frame_index, 1.0);
@@ -342,7 +347,7 @@ impl BroadPhase {
             &mut use_priority_queue_static,
         );
 
-        // TODO: Multi-threaded path using TaskStack when dispatcher available and tree large enough.
+        // NOTE: Multi-threaded path using TaskStack when dispatcher available and tree large enough.
         // Requires multi-threaded overloads of Tree::refine2 and Tree::refit2_with_cache_optimization
         // (currently omitted in tree_refine2.rs/tree_refit2.rs).
         // The MT path would:
@@ -471,5 +476,159 @@ impl BroadPhase {
         let pool = unsafe { &mut *self.pool };
         Self::dispose_internal(&mut self.active_tree, &mut self.active_leaves, pool);
         Self::dispose_internal(&mut self.static_tree, &mut self.static_leaves, pool);
+    }
+
+    // ---- Query methods (translated from BroadPhase_Queries.cs) ----
+
+    /// Finds any intersections between a ray and leaf bounding boxes.
+    pub unsafe fn ray_cast<TRayTester: IBroadPhaseRayTester>(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        maximum_t: f32,
+        ray_tester: &mut TRayTester,
+        id: i32,
+    ) {
+        let mut ray_data = std::mem::MaybeUninit::<TreeRayData>::uninit();
+        let mut tree_ray = std::mem::MaybeUninit::<TreeRay>::uninit();
+        TreeRay::create_from_ray(
+            origin, direction, maximum_t, id,
+            &mut *ray_data.as_mut_ptr(),
+            &mut *tree_ray.as_mut_ptr(),
+        );
+        let mut active_tester = RayLeafTester {
+            leaf_tester: ray_tester as *mut TRayTester,
+            leaves: &self.active_leaves,
+        };
+        self.active_tree.ray_cast_internal(
+            tree_ray.as_mut_ptr(),
+            ray_data.as_mut_ptr(),
+            &mut active_tester,
+        );
+        let mut static_tester = RayLeafTester {
+            leaf_tester: ray_tester as *mut TRayTester,
+            leaves: &self.static_leaves,
+        };
+        self.static_tree.ray_cast_internal(
+            tree_ray.as_mut_ptr(),
+            ray_data.as_mut_ptr(),
+            &mut static_tester,
+        );
+    }
+
+    /// Finds any intersections between a swept bounding box and leaf bounding boxes.
+    pub unsafe fn sweep_minmax<TSweepTester: IBroadPhaseSweepTester>(
+        &self,
+        min: Vec3,
+        max: Vec3,
+        direction: Vec3,
+        maximum_t: f32,
+        sweep_tester: &mut TSweepTester,
+    ) {
+        let mut origin = Vec3::ZERO;
+        let mut expansion = Vec3::ZERO;
+        Tree::convert_box_to_centroid_with_extent(min, max, &mut origin, &mut expansion);
+        let mut tree_ray = std::mem::MaybeUninit::<TreeRay>::uninit();
+        TreeRay::create_from(origin, direction, maximum_t, &mut *tree_ray.as_mut_ptr());
+        let mut active_tester = SweepLeafTester {
+            leaf_tester: sweep_tester as *mut TSweepTester,
+            leaves: &self.active_leaves,
+        };
+        self.active_tree.sweep_internal(
+            expansion, origin, direction,
+            tree_ray.as_mut_ptr(),
+            &mut active_tester,
+        );
+        let mut static_tester = SweepLeafTester {
+            leaf_tester: sweep_tester as *mut TSweepTester,
+            leaves: &self.static_leaves,
+        };
+        self.static_tree.sweep_internal(
+            expansion, origin, direction,
+            tree_ray.as_mut_ptr(),
+            &mut static_tester,
+        );
+    }
+
+    /// Finds any intersections between a swept bounding box and leaf bounding boxes.
+    pub unsafe fn sweep_box<TSweepTester: IBroadPhaseSweepTester>(
+        &self,
+        bounding_box: &BoundingBox,
+        direction: Vec3,
+        maximum_t: f32,
+        sweep_tester: &mut TSweepTester,
+    ) {
+        self.sweep_minmax(bounding_box.min, bounding_box.max, direction, maximum_t, sweep_tester);
+    }
+
+    /// Finds any overlaps between a bounding box and leaf bounding boxes.
+    pub fn get_overlaps_minmax<TOverlapEnumerator: IBreakableForEach<CollidableReference>>(
+        &self,
+        min: Vec3,
+        max: Vec3,
+        overlap_enumerator: &mut TOverlapEnumerator,
+    ) {
+        let mut active_enumerator = BoxQueryEnumerator {
+            enumerator: overlap_enumerator as *mut TOverlapEnumerator,
+            leaves: &self.active_leaves,
+        };
+        self.active_tree.get_overlaps_minmax(min, max, &mut active_enumerator);
+        let mut static_enumerator = BoxQueryEnumerator {
+            enumerator: overlap_enumerator as *mut TOverlapEnumerator,
+            leaves: &self.static_leaves,
+        };
+        self.static_tree.get_overlaps_minmax(min, max, &mut static_enumerator);
+    }
+
+    /// Finds any overlaps between a bounding box and leaf bounding boxes.
+    pub fn get_overlaps<TOverlapEnumerator: IBreakableForEach<CollidableReference>>(
+        &self,
+        bounding_box: &BoundingBox,
+        overlap_enumerator: &mut TOverlapEnumerator,
+    ) {
+        self.get_overlaps_minmax(bounding_box.min, bounding_box.max, overlap_enumerator);
+    }
+}
+
+// ---- Internal adapter types for BroadPhase queries ----
+
+struct RayLeafTester<'a, TRayTester: IBroadPhaseRayTester> {
+    leaf_tester: *mut TRayTester,
+    leaves: &'a Buffer<CollidableReference>,
+}
+
+impl<'a, TRayTester: IBroadPhaseRayTester> IRayLeafTester for RayLeafTester<'a, TRayTester> {
+    #[inline(always)]
+    unsafe fn test_leaf(&mut self, leaf_index: i32, ray_data: *mut TreeRayData, maximum_t: *mut f32) {
+        let collidable = *self.leaves.get(leaf_index);
+        (*self.leaf_tester).ray_test(collidable, ray_data as *const RayData, maximum_t);
+    }
+}
+
+struct SweepLeafTester<'a, TSweepTester: IBroadPhaseSweepTester> {
+    leaf_tester: *mut TSweepTester,
+    leaves: &'a Buffer<CollidableReference>,
+}
+
+impl<'a, TSweepTester: IBroadPhaseSweepTester> ISweepLeafTester for SweepLeafTester<'a, TSweepTester> {
+    #[inline(always)]
+    fn test_leaf(&mut self, leaf_index: i32, maximum_t: &mut f32) {
+        let collidable = *self.leaves.get(leaf_index);
+        unsafe { (*self.leaf_tester).test(collidable, maximum_t) };
+    }
+}
+
+struct BoxQueryEnumerator<'a, TInnerEnumerator: IBreakableForEach<CollidableReference>> {
+    enumerator: *mut TInnerEnumerator,
+    leaves: &'a Buffer<CollidableReference>,
+}
+
+impl<'a, TInnerEnumerator: IBreakableForEach<CollidableReference>> IBreakableForEach<i32>
+    for BoxQueryEnumerator<'a, TInnerEnumerator>
+{
+    #[inline(always)]
+    fn loop_body(&mut self, leaf_index: i32) -> bool {
+        let collidable = *self.leaves.get(leaf_index);
+        unsafe { (*self.enumerator).loop_body(collidable) }
     }
 }

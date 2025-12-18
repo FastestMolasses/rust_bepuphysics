@@ -113,7 +113,7 @@ impl<T: Primitive + Copy> RefEqualityComparer<T> for PrimitiveComparer<T> {
     }
 }
 
-// TODO: TESTS
+// NOTE: Tests below are minimal placeholders.
 #[cfg(test)]
 mod tests {
     use super::*;

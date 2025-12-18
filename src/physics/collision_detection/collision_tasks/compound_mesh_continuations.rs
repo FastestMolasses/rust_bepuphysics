@@ -6,9 +6,11 @@ use glam::Vec3;
 
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::compound::Compound;
-use crate::physics::collidables::triangle::Triangle;
-use crate::physics::collision_detection::collision_batcher::{BoundsTestedPair, ICollisionCallbacks};
+use crate::physics::collidables::shape::IHomogeneousCompoundShape;
+use crate::physics::collidables::triangle::{Triangle, TriangleWide};
+use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::physics::collision_detection::collision_batcher_continuations::CollisionContinuationType;
+use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
 use crate::physics::collision_detection::compound_mesh_reduction::CompoundMeshReduction;
 use crate::physics::collision_detection::mesh_reduction::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
@@ -33,67 +35,54 @@ impl<TCompound, TMesh> Default for CompoundMeshContinuations<TCompound, TMesh> {
     }
 }
 
-impl<TCompound, TMesh> ICompoundPairContinuationHandler<CompoundMeshReduction>
+impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> ICompoundPairContinuationHandler<CompoundMeshReduction>
     for CompoundMeshContinuations<TCompound, TMesh>
 {
     fn collision_continuation_type(&self) -> CollisionContinuationType {
         CollisionContinuationType::CompoundMeshReduction
     }
 
-    unsafe fn create_continuation<TCallbacks: ICollisionCallbacks>(
+    unsafe fn create_continuation(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         total_child_count: i32,
         pair_overlaps: &mut Buffer<ChildOverlapsCollection>,
         pair_queries: &mut Buffer<OverlapQueryForPair>,
         pair: &BoundsTestedPair,
         continuation_index: &mut i32,
     ) -> *mut CompoundMeshReduction {
-        // TODO: Once CollisionBatcher has CompoundMeshReductions field:
-        // let continuation = (*batcher).compound_mesh_reductions.create_continuation(
-        //     total_child_count, &mut *(*batcher).pool, continuation_index
-        // );
-        // let pool = &mut *(*batcher).pool;
-        //
-        // // Pass ownership of triangle and region buffers to the continuation.
-        // (*continuation).triangles = pool.take(total_child_count);
-        // (*continuation).child_manifold_regions = pool.take(pair_overlaps.len());
-        // (*continuation).query_bounds = pool.take(pair_overlaps.len());
-        // (*continuation).region_count = pair_overlaps.len();
-        // (*continuation).mesh_orientation = pair.orientation_b;
-        // (*continuation).mesh = pair.b as *mut u8;
-        // (*continuation).requires_flip = pair.flip_mask == 0;
-        //
-        // // All regions must be assigned ahead of time. Some trailing regions may be empty,
-        // // so the dispatch may occur before all children are visited in the later loop.
-        // let mut next_child_index = 0i32;
-        // debug_assert!(pair_overlaps.len() == pair_queries.len());
-        // for j in 0..pair_overlaps.len() {
-        //     let child_overlaps = &pair_overlaps[j];
-        //     (*continuation).child_manifold_regions[j] = (next_child_index, child_overlaps.count);
-        //     next_child_index += child_overlaps.count;
-        //     (*continuation).query_bounds[j] = BoundingBox {
-        //         min: pair_queries[j].min,
-        //         max: pair_queries[j].max,
-        //         ..Default::default()
-        //     };
-        // }
-        // continuation
+        let pool = &mut *vtable.pool;
+        let (index, continuation) = (&mut *vtable.compound_mesh_reductions).create_continuation(total_child_count, pool);
+        *continuation_index = index;
+        // Pass ownership of triangle and region buffers to the continuation.
+        continuation.triangles = pool.take(total_child_count);
+        continuation.child_manifold_regions = pool.take(pair_overlaps.len());
+        continuation.query_bounds = pool.take(pair_overlaps.len());
+        continuation.region_count = pair_overlaps.len() as i32;
+        continuation.mesh_orientation = pair.orientation_b;
+        continuation.mesh = pair.b as *mut u8;
+        continuation.requires_flip = pair.flip_mask == 0;
 
-        let _ = (
-            batcher,
-            total_child_count,
-            pair_overlaps,
-            pair_queries,
-            pair,
-            continuation_index,
-        );
-        std::ptr::null_mut()
+        // All regions must be assigned ahead of time. Some trailing regions may be empty,
+        // so the dispatch may occur before all children are visited in the later loop.
+        let mut next_child_index = 0i32;
+        debug_assert!(pair_overlaps.len() == pair_queries.len());
+        for j in 0..pair_overlaps.len() as i32 {
+            let child_overlaps = &pair_overlaps[j];
+            continuation.child_manifold_regions[j] = (next_child_index, child_overlaps.count);
+            next_child_index += child_overlaps.count;
+            continuation.query_bounds[j] = BoundingBox {
+                min: pair_queries[j].min,
+                max: pair_queries[j].max,
+                ..Default::default()
+            };
+        }
+        continuation as *mut CompoundMeshReduction
     }
 
-    unsafe fn get_child_a_data<TCallbacks: ICollisionCallbacks>(
+    unsafe fn get_child_a_data(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         _continuation: *mut CompoundMeshReduction,
         pair: &BoundsTestedPair,
         child_index_a: i32,
@@ -113,13 +102,15 @@ impl<TCompound, TMesh> ICompoundPairContinuationHandler<CompoundMeshReduction>
         );
 
         *child_type_a = compound_child.shape_index.type_id();
-        // TODO: Access shape data through shapes batch registry once wired up.
-        *child_shape_data_a = std::ptr::null();
+        let shapes = &*vtable.shapes;
+        let batch = shapes.get_batch(*child_type_a as usize).expect("Shape batch must exist");
+        let (shape_data, _) = batch.get_shape_data(compound_child.shape_index.index() as usize);
+        *child_shape_data_a = shape_data;
     }
 
-    unsafe fn configure_continuation_child<TCallbacks: ICollisionCallbacks>(
+    unsafe fn configure_continuation_child(
         &self,
-        _batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        _vtable: &BatcherVtable,
         continuation: *mut CompoundMeshReduction,
         continuation_child_index: i32,
         pair: &BoundsTestedPair,
@@ -139,9 +130,8 @@ impl<TCompound, TMesh> ICompoundPairContinuationHandler<CompoundMeshReduction>
         *child_shape_data_b = triangle_ptr as *const u8;
         *child_type_b = Triangle::ID;
 
-        // TODO: Get the local child triangle from the mesh:
-        // let mesh = &*(pair.b as *const TMesh);
-        // mesh.get_local_child(child_index_b, &mut (*continuation).triangles[continuation_child_index]);
+        let mesh = &*(pair.b as *const TMesh);
+        mesh.get_local_child(child_index_b, &mut cont.triangles[continuation_child_index]);
 
         // In meshes, the triangle's vertices already contain the offset,
         // so there is no additional offset — just the orientation.

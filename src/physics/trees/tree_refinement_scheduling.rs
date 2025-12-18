@@ -7,7 +7,7 @@ use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
 impl Tree {
-    fn refit_and_measure(&self, child: &mut NodeChild) -> f32 {
+    pub(crate) fn refit_and_measure(&self, child: &mut NodeChild) -> f32 {
         unsafe {
             let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
                 .add(child.index as usize);
@@ -38,7 +38,7 @@ impl Tree {
         }
     }
 
-    fn refit_and_mark(
+    pub(crate) fn refit_and_mark(
         &self,
         child: &mut NodeChild,
         leaf_count_threshold: i32,
@@ -176,7 +176,7 @@ impl Tree {
         }
     }
 
-    fn get_refit_and_mark_tuning(
+    pub(crate) fn get_refit_and_mark_tuning(
         &self,
     ) -> (
         i32, /* maximum_subtrees */
@@ -195,7 +195,7 @@ impl Tree {
         )
     }
 
-    fn get_refine_tuning(
+    pub(crate) fn get_refine_tuning(
         &self,
         frame_index: i32,
         refinement_candidates_count: i32,

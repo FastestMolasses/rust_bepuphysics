@@ -4,6 +4,7 @@ use crate::physics::bodies::Bodies;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::handy_enumerators::PassthroughReferenceCollector;
 use crate::physics::solver::Solver;
+use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
@@ -244,7 +245,7 @@ pub struct ConstraintRemover {
 
     batches: Option<RemovalCache>,
     removed_type_batches: Vec<TypeBatchIndex>,
-    allocation_ids_to_free: Vec<i32>,
+    allocation_ids_to_free: QuickList<i32>,
     batch_removal_locker: Mutex<()>,
 }
 
@@ -270,7 +271,7 @@ impl ConstraintRemover {
             thread_count: 0,
             batches: None,
             removed_type_batches: Vec::new(),
-            allocation_ids_to_free: Vec::new(),
+            allocation_ids_to_free: QuickList::default(),
             batch_removal_locker: Mutex::new(()),
         }
     }
@@ -305,6 +306,15 @@ impl ConstraintRemover {
         } else {
             self.worker_caches
                 .push(WorkerCache::new(self.pool, batch_capacity, capacity_per_batch));
+        }
+
+        // Allocate the fallback deallocation list if needed.
+        unsafe {
+            let solver = &*self.solver;
+            if solver.active_set().batches.count > solver.fallback_batch_threshold() {
+                let pool = &mut *self.pool;
+                self.allocation_ids_to_free = QuickList::with_capacity(3, pool);
+            }
         }
     }
 
@@ -341,7 +351,7 @@ impl ConstraintRemover {
             }
         }
 
-        // TODO: Deterministic sorting if needed
+        // Deterministic sorting: sort within each type batch and between batches.
         if deterministic {
             // Sort within each type batch by constraint handle (and for removal targets, by constraint + body handle).
             for i in 0..batches.batch_count {
@@ -484,6 +494,68 @@ impl ConstraintRemover {
         }
     }
 
+    /// Removes constraints from batch referenced handles (non-fallback batches).
+    pub fn remove_constraints_from_batch_referenced_handles(&mut self) {
+        if let Some(ref batches) = self.batches {
+            unsafe {
+                let solver = &mut *self.solver;
+                let fallback_threshold = solver.fallback_batch_threshold();
+                for i in 0..batches.batch_count {
+                    let type_batch_idx = *batches.type_batches.get(i);
+                    if type_batch_idx.batch as i32 == fallback_threshold {
+                        // Fallback batch is handled separately.
+                        continue;
+                    }
+                    let removals = &(*batches.removals_for_type_batches.get(i))
+                        .per_body_removal_targets;
+                    for j in 0..removals.len() {
+                        let target = &removals[j];
+                        solver
+                            .batch_referenced_handles
+                            .get_mut(target.batch_index)
+                            .unset(target.body_handle.0);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Removes constraints from fallback batch referenced handles.
+    pub fn remove_constraints_from_fallback_batch_referenced_handles(&mut self) {
+        if let Some(ref batches) = self.batches {
+            unsafe {
+                let solver = &mut *self.solver;
+                let fallback_threshold = solver.fallback_batch_threshold();
+                debug_assert!((*solver).active_set().batches.count > fallback_threshold);
+                for i in 0..batches.batch_count {
+                    let type_batch_idx = *batches.type_batches.get(i);
+                    if type_batch_idx.batch as i32 != fallback_threshold {
+                        continue;
+                    }
+                    let removals = &(*batches.removals_for_type_batches.get(i))
+                        .per_body_removal_targets;
+                    for j in 0..removals.len() {
+                        let target = &removals[j];
+                        let encoded = target.encoded_body_index & Bodies::BODY_REFERENCE_MASK;
+                        if solver
+                            .active_set_mut()
+                            .sequential_fallback
+                            .remove_one_body_reference_from_dynamics_set(
+                                encoded,
+                                &mut self.allocation_ids_to_free,
+                            )
+                        {
+                            solver
+                                .batch_referenced_handles
+                                .get_mut(target.batch_index)
+                                .unset(target.body_handle.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Post-flush cleanup: removes empty type batches and returns worker cache allocations.
     pub fn postflush(&mut self) {
         unsafe {
@@ -505,10 +577,12 @@ impl ConstraintRemover {
 
             // Return any fallback allocation ids.
             let pool = &mut *self.pool;
-            for &id in &self.allocation_ids_to_free {
-                pool.return_unsafely(id);
+            if self.allocation_ids_to_free.span.allocated() {
+                for i in 0..self.allocation_ids_to_free.count {
+                    pool.return_unsafely(*self.allocation_ids_to_free.get(i));
+                }
+                self.allocation_ids_to_free.dispose(pool);
             }
-            self.allocation_ids_to_free.clear();
         }
 
         if let Some(mut batches) = self.batches.take() {

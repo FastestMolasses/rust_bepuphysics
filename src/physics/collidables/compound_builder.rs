@@ -300,6 +300,81 @@ impl CompoundBuilder {
         result
     }
 
+    /// Computes inverse inertia for a set of compound children with recentering.
+    /// Child positions will have the center of mass subtracted.
+    pub fn compute_inverse_inertia_recentered(
+        children: &mut Buffer<CompoundChild>,
+        inverse_local_inertias: &[Symmetric3x3],
+        child_masses: &[f32],
+    ) -> (BodyInertia, Vec3) {
+        let (center_of_mass, inverse_mass) =
+            Self::compute_center_of_mass(children, child_masses);
+        let mut summed_inertia = Symmetric3x3::default();
+        for i in 0..children.len() as usize {
+            children[i].local_position -= center_of_mass;
+            let child = &children[i];
+            summed_inertia = summed_inertia
+                + Self::compute_inertia_for_child(
+                    child.local_position,
+                    child.local_orientation,
+                    &inverse_local_inertias[i],
+                    child_masses[i],
+                );
+        }
+        let mut inverse_inertia = Symmetric3x3::default();
+        Symmetric3x3::invert(&summed_inertia, &mut inverse_inertia);
+        let mut result = BodyInertia::default();
+        result.inverse_mass = inverse_mass;
+        result.inverse_inertia_tensor = inverse_inertia;
+        (result, center_of_mass)
+    }
+
+    /// Computes the inertia of a compound using the shapes collection to look up
+    /// per-child inertia tensors. Does not recenter the children.
+    pub fn compute_inertia(
+        children: &Buffer<CompoundChild>,
+        child_masses: &[f32],
+        shapes: &Shapes,
+    ) -> BodyInertia {
+        let len = children.len() as usize;
+        let mut local_inverse_inertias = vec![Symmetric3x3::default(); len];
+        for i in 0..len {
+            let child = &children[i];
+            if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
+                if let Some(inertia) = batch.try_compute_inertia(
+                    child.shape_index.index() as usize,
+                    child_masses[i],
+                ) {
+                    local_inverse_inertias[i] = inertia.inverse_inertia_tensor;
+                }
+            }
+        }
+        Self::compute_inverse_inertia(children, &local_inverse_inertias, child_masses)
+    }
+
+    /// Computes the inertia of a compound using the shapes collection to look up
+    /// per-child inertia tensors. Recenters children around the calculated center of mass.
+    pub fn compute_inertia_recentered(
+        children: &mut Buffer<CompoundChild>,
+        child_masses: &[f32],
+        shapes: &Shapes,
+    ) -> (BodyInertia, Vec3) {
+        let len = children.len() as usize;
+        let mut local_inverse_inertias = vec![Symmetric3x3::default(); len];
+        for i in 0..len {
+            let child = &children[i];
+            if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
+                if let Some(inertia) = batch.try_compute_inertia(
+                    child.shape_index.index() as usize,
+                    child_masses[i],
+                ) {
+                    local_inverse_inertias[i] = inertia.inverse_inertia_tensor;
+                }
+            }
+        }
+        Self::compute_inverse_inertia_recentered(children, &local_inverse_inertias, child_masses)
+    }
+
     /// Empties out the accumulated children.
     pub fn reset(&mut self) {
         self.children.clear();

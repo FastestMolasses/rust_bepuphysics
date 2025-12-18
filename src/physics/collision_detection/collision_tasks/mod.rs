@@ -35,3 +35,4 @@ pub mod compound_pair_overlaps;
 pub mod compound_mesh_continuations;
 pub mod mesh_pair_overlap_finder;
 pub mod mesh_pair_continuations;
+pub mod pair_trait_impls;

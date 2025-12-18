@@ -4,9 +4,10 @@
 
 use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{BodyVelocity, RigidPose};
-use crate::physics::collidables::collidable::ContinuousDetection;
+use crate::physics::collidables::collidable::{ContinuousDetection, ContinuousDetectionMode};
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
 use crate::physics::collidables::typed_index::TypedIndex;
+use crate::physics::collision_detection::broad_phase::BroadPhase;
 use crate::physics::collision_detection::collision_batcher::{
     CollisionBatcher, ICollisionCallbacks,
 };
@@ -25,19 +26,23 @@ use crate::physics::collision_detection::narrow_phase_callbacks::{
 use crate::physics::collision_detection::pair_cache::{
     CollidablePair, ConstraintCache, PairCache, PairCacheChangeIndex,
 };
-use crate::physics::collision_detection::sweep_task_registry::SweepTaskRegistry;
+use crate::physics::collision_detection::sweep_task_registry::{ISweepFilter, SweepTaskRegistry};
 use crate::physics::collision_detection::untyped_list::UntypedList;
 use crate::physics::constraints::constraint_description::IConstraintDescription;
 use crate::physics::handles::ConstraintHandle;
 use crate::physics::pose_integration::PoseIntegration;
 use crate::physics::solver::Solver;
 use crate::physics::statics::Statics;
+use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::collections::quicksort::Quicksort;
+use crate::utilities::collections::comparer_ref::RefComparer;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use glam::Vec3;
+use std::cell::UnsafeCell;
 use std::mem;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -205,10 +210,20 @@ impl Default for PreflushJob {
 }
 
 /// Sort target for deterministic constraint adds.
+#[derive(Clone, Copy, Default)]
 pub struct SortConstraintTarget {
     pub worker_index: i32,
     pub byte_index_in_cache: i32,
     pub sort_key: u64,
+}
+
+/// Comparer for sorting pending constraints by their sort key.
+struct PendingConstraintComparer;
+
+impl RefComparer<SortConstraintTarget> for PendingConstraintComparer {
+    fn compare(&self, a: &SortConstraintTarget, b: &SortConstraintTarget) -> std::cmp::Ordering {
+        a.sort_key.cmp(&b.sort_key)
+    }
 }
 
 // ============================================================================
@@ -565,7 +580,7 @@ impl PendingConstraintAddCache {
         for i in 0..narrow_phase.contact_constraint_accessors.len() {
             if let Some(ref accessor) = narrow_phase.contact_constraint_accessors[i] {
                 let list = unsafe { self.pending_constraints_by_type.get_mut(i as i32) };
-                accessor.flush_sequentially(list, i as i32, solver, pair_cache);
+                accessor.flush_sequentially(list, i as i32, narrow_phase as *const NarrowPhase, solver, pair_cache);
             }
         }
     }
@@ -630,6 +645,23 @@ impl PendingConstraintAddCache {
         count
     }
 
+    /// Flushes pending constraints using speculative batch indices. Nondeterministic order.
+    pub(crate) fn flush_with_speculative_batches(
+        &mut self,
+        accessors: &[Option<Box<dyn ContactConstraintAccessor>>],
+        narrow_phase: *const NarrowPhase,
+        solver: &mut Solver,
+        pair_cache: &mut PairCache,
+    ) {
+        for i in 0..accessors.len() {
+            if let Some(ref accessor) = accessors[i] {
+                let list = unsafe { self.pending_constraints_by_type.get_mut(i as i32) };
+                let speculative = &mut self.speculative_batch_indices;
+                accessor.flush_with_speculative_batches(list, i as i32, speculative, narrow_phase, solver, pair_cache);
+            }
+        }
+    }
+
     /// Disposes all pending constraint buffers.
     pub fn dispose(&mut self) {
         let pool_ref = unsafe { &mut *self.pool };
@@ -691,10 +723,12 @@ pub struct NarrowPhase {
     pub shapes: *mut crate::physics::collidables::shapes::Shapes,
     pub sweep_task_registry: *mut SweepTaskRegistry,
     pub collision_task_registry: *mut CollisionTaskRegistry,
+    pub broad_phase: *mut BroadPhase,
     pub constraint_remover: ConstraintRemover,
     pub(crate) freshness_checker: Option<FreshnessChecker>,
     pub pair_cache: PairCache,
     pub(crate) timestep_duration: f32,
+    pub(crate) awakener: *mut crate::physics::island_awakener::IslandAwakener,
 
     pub(crate) contact_constraint_accessors: Vec<Option<Box<dyn ContactConstraintAccessor>>>,
 
@@ -720,6 +754,7 @@ impl NarrowPhase {
         shapes: *mut crate::physics::collidables::shapes::Shapes,
         collision_task_registry: *mut CollisionTaskRegistry,
         sweep_task_registry: *mut SweepTaskRegistry,
+        broad_phase: *mut BroadPhase,
         constraint_remover: ConstraintRemover,
         initial_set_capacity: i32,
         minimum_mapping_size: i32,
@@ -739,10 +774,12 @@ impl NarrowPhase {
             shapes,
             sweep_task_registry,
             collision_task_registry,
+            broad_phase,
             constraint_remover,
             freshness_checker: None,
             pair_cache,
             timestep_duration: 0.0,
+            awakener: std::ptr::null_mut(),
             contact_constraint_accessors: Vec::new(),
             worker_awakening_ptrs: Vec::new(),
             worker_pending_constraints: Vec::new(),
@@ -834,10 +871,10 @@ impl NarrowPhase {
                 self.constraint_remover.return_constraint_handles();
             }
             NarrowPhaseFlushJobType::RemoveConstraintFromBatchReferencedHandles => {
-                // TODO: self.constraint_remover.remove_constraints_from_batch_referenced_handles();
+                self.constraint_remover.remove_constraints_from_batch_referenced_handles();
             }
             NarrowPhaseFlushJobType::RemoveConstraintsFromFallbackBatch => {
-                // TODO: self.constraint_remover.remove_constraints_from_fallback_batch_referenced_handles();
+                self.constraint_remover.remove_constraints_from_fallback_batch_referenced_handles();
             }
             NarrowPhaseFlushJobType::RemoveConstraintFromTypeBatch => {
                 self.constraint_remover
@@ -853,7 +890,7 @@ impl NarrowPhase {
     pub fn flush(&mut self, _thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         let mut flush_jobs = Vec::with_capacity(128);
 
-        // TODO: self.pair_cache.prepare_flush_jobs(&mut flush_jobs);
+        self.pair_cache.prepare_flush_jobs(&mut flush_jobs);
         let removal_batch_job_count = self.constraint_remover.create_flush_jobs(false);
 
         flush_jobs.push(NarrowPhaseFlushJob {
@@ -868,6 +905,17 @@ impl NarrowPhase {
             job_type: NarrowPhaseFlushJobType::RemoveConstraintFromBatchReferencedHandles,
             index: 0,
         });
+
+        // Add fallback batch removal if the solver has enough batches.
+        unsafe {
+            let solver = &*self.solver;
+            if solver.active_set().batches.count > solver.fallback_batch_threshold() {
+                flush_jobs.push(NarrowPhaseFlushJob {
+                    job_type: NarrowPhaseFlushJobType::RemoveConstraintsFromFallbackBatch,
+                    index: 0,
+                });
+            }
+        }
 
         for i in 0..removal_batch_job_count {
             flush_jobs.push(NarrowPhaseFlushJob {
@@ -929,6 +977,30 @@ pub struct NarrowPhaseGeneric<TCallbacks: INarrowPhaseCallbacks> {
     pub base: NarrowPhase,
     pub callbacks: TCallbacks,
     pub(crate) overlap_workers: Vec<OverlapWorker<TCallbacks>>,
+    /// Sorted constraint targets for deterministic preflush.
+    sorted_constraints: Buffer<QuickList<SortConstraintTarget>>,
+    /// Job index for multithreaded preflush (accessed via Interlocked.Increment in C#).
+    preflush_job_index: UnsafeCell<i32>,
+    /// List of preflush jobs for multithreaded dispatch.
+    preflush_jobs: QuickList<PreflushJob>,
+}
+
+/// Filter for CCD sweep tests that delegates to the narrow phase callbacks.
+struct CCDSweepFilter<TCallbacks: INarrowPhaseCallbacks> {
+    narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
+    pair: CollidablePair,
+    worker_index: i32,
+}
+
+impl<TCallbacks: INarrowPhaseCallbacks> ISweepFilter for CCDSweepFilter<TCallbacks> {
+    #[inline(always)]
+    fn allow_test(&self, child_a: i32, child_b: i32) -> bool {
+        unsafe {
+            (*self.narrow_phase)
+                .callbacks
+                .allow_contact_generation_for_children(self.worker_index, self.pair, child_a, child_b)
+        }
+    }
 }
 
 impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
@@ -941,6 +1013,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         shapes: *mut crate::physics::collidables::shapes::Shapes,
         collision_task_registry: *mut CollisionTaskRegistry,
         sweep_task_registry: *mut SweepTaskRegistry,
+        broad_phase: *mut BroadPhase,
         constraint_remover: ConstraintRemover,
         callbacks: TCallbacks,
         initial_set_capacity: i32,
@@ -955,6 +1028,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             shapes,
             collision_task_registry,
             sweep_task_registry,
+            broad_phase,
             constraint_remover,
             initial_set_capacity,
             minimum_mapping_size,
@@ -964,6 +1038,9 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             base,
             callbacks,
             overlap_workers: Vec::new(),
+            sorted_constraints: Buffer::default(),
+            preflush_job_index: UnsafeCell::new(-1),
+            preflush_jobs: QuickList::default(),
         }
     }
 
@@ -1405,7 +1482,6 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
     }
 
     /// Creates batch entries for a pair given all their properties.
-    /// Handles CCD sweep logic: if both are continuous, performs a sweep test.
     #[inline(always)]
     fn add_batch_entries(
         &mut self,
@@ -1435,11 +1511,135 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         // Create continuation for the pair given CCD state.
         let mut continuation_index = CCDContinuationIndex::default();
 
-        // TODO: CCD sweep logic — when ContinuousDetectionMode::Continuous is set on either
-        // collidable, a sweep test should be performed here. For now, fallback to discrete.
-        // The sweep test requires SweepTaskRegistry.get_task(), shapes data access, and
-        // broad phase tree bounds access — these will be wired up when the sweep infrastructure
-        // is complete.
+        if continuity_a.mode == ContinuousDetectionMode::Continuous
+            || continuity_b.mode == ContinuousDetectionMode::Continuous
+        {
+            let sweep_task_registry = unsafe { &*self.base.sweep_task_registry };
+            if let Some(sweep_task) = sweep_task_registry.get_task(shape_a.type_id(), shape_b.type_id()) {
+                // Estimate max radius from broadphase bounding boxes (hot in L1 cache).
+                let broad_phase = unsafe { &*self.base.broad_phase };
+                let bodies = unsafe { &*self.base.bodies };
+                let a_in_static_tree = pair.a.mobility() == CollidableMobility::Static
+                    || unsafe { (*bodies.handle_to_location.get(pair.a.raw_handle_value())).set_index > 0 };
+                let b_in_static_tree = pair.b.mobility() == CollidableMobility::Static
+                    || unsafe { (*bodies.handle_to_location.get(pair.b.raw_handle_value())).set_index > 0 };
+                let a_tree = if a_in_static_tree { &broad_phase.static_tree } else { &broad_phase.active_tree };
+                let b_tree = if b_in_static_tree { &broad_phase.static_tree } else { &broad_phase.active_tree };
+                let (a_min, a_max) = unsafe { a_tree.get_bounds_pointers(broad_phase_index_a) };
+                let (b_min, b_max) = unsafe { b_tree.get_bounds_pointers(broad_phase_index_b) };
+                let maximum_radius_a = unsafe { (*a_max - *a_min).length() * 0.5 };
+                let maximum_radius_b = unsafe { (*b_max - *b_min).length() * 0.5 };
+                let timestep_duration = self.base.timestep_duration;
+
+                // Check whether sweep is needed: angular+linear displacement > speculative margin.
+                if (velocity_a.angular.length() * maximum_radius_a
+                    + velocity_b.angular.length() * maximum_radius_b
+                    + (velocity_b.linear - velocity_a.linear).length())
+                    * timestep_duration
+                    > speculative_margin
+                {
+                    let shapes = unsafe { &*self.base.shapes };
+                    let (shape_data_a, _) = unsafe { shapes.get_batch(shape_a.type_id() as usize).unwrap().get_shape_data(shape_a.index() as usize) };
+                    let (shape_data_b, _) = unsafe { shapes.get_batch(shape_b.type_id() as usize).unwrap().get_shape_data(shape_b.index() as usize) };
+
+                    // Get sweep thresholds — use the smaller of the two collidables' values.
+                    let (min_timestep_a, convergence_a) = if continuity_a.mode == ContinuousDetectionMode::Continuous {
+                        (continuity_a.minimum_sweep_timestep, continuity_a.sweep_convergence_threshold)
+                    } else {
+                        (f32::MAX, f32::MAX)
+                    };
+                    let (min_timestep_b, convergence_b) = if continuity_b.mode == ContinuousDetectionMode::Continuous {
+                        (continuity_b.minimum_sweep_timestep, continuity_b.sweep_convergence_threshold)
+                    } else {
+                        (f32::MAX, f32::MAX)
+                    };
+
+                    // Create filter that delegates to the narrow phase callbacks.
+                    let mut filter = CCDSweepFilter {
+                        narrow_phase: self as *mut _,
+                        pair: *pair,
+                        worker_index,
+                    };
+
+                    let mut t0 = 0.0f32;
+                    let mut t1 = 0.0f32;
+                    let mut hit_location = Vec3::ZERO;
+                    let mut hit_normal = Vec3::ZERO;
+
+                    let hit = unsafe {
+                        sweep_task.sweep_filtered(
+                            shape_data_a,
+                            shape_a.type_id(),
+                            pose_a.orientation,
+                            velocity_a,
+                            shape_data_b,
+                            shape_b.type_id(),
+                            pose_b.position - pose_a.position,
+                            pose_b.orientation,
+                            velocity_b,
+                            timestep_duration,
+                            min_timestep_a.min(min_timestep_b),
+                            convergence_a.min(convergence_b),
+                            25, // fixed high iteration threshold
+                            &mut filter as *mut CCDSweepFilter<TCallbacks> as *mut u8,
+                            self.base.shapes as *mut crate::physics::collidables::shapes::Shapes,
+                            self.base.sweep_task_registry as *mut SweepTaskRegistry,
+                            self.base.pool as *mut BufferPool,
+                            &mut t0,
+                            &mut t1,
+                            &mut hit_location,
+                            &mut hit_normal,
+                        )
+                    };
+
+                    if hit {
+                        // Create the pair at the time of intersection (t1).
+                        // The continuation handler will rewind depths to create speculative contacts.
+                        let worker = &mut self.overlap_workers[worker_index as usize];
+                        continuation_index = worker.batcher.callbacks.add_continuous(
+                            pair,
+                            velocity_b.linear - velocity_a.linear,
+                            velocity_a.angular,
+                            velocity_b.angular,
+                            t1,
+                        );
+
+                        // Integrate poses to t1.
+                        let mut integrated_orientation_a = glam::Quat::IDENTITY;
+                        let mut integrated_orientation_b = glam::Quat::IDENTITY;
+                        PoseIntegration::integrate_orientation(
+                            pose_a.orientation,
+                            velocity_a.angular,
+                            t1,
+                            &mut integrated_orientation_a,
+                        );
+                        PoseIntegration::integrate_orientation(
+                            pose_b.orientation,
+                            velocity_b.angular,
+                            t1,
+                            &mut integrated_orientation_b,
+                        );
+                        let offset_b = pose_b.position - pose_a.position
+                            + (velocity_b.linear - velocity_a.linear) * t1;
+
+                        unsafe {
+                            worker.batcher.add(
+                                shape_a,
+                                shape_b,
+                                offset_b,
+                                integrated_orientation_a,
+                                integrated_orientation_b,
+                                velocity_a,
+                                velocity_b,
+                                speculative_margin,
+                                maximum_expansion,
+                                PairContinuation::direct(continuation_index.packed as i32),
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         if !continuation_index.exists() {
             // No CCD continuation was created, so create a discrete one.
@@ -1464,15 +1664,157 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
     }
 
     // ========================================================================
+    // Preflush (from NarrowPhasePreflush.cs) — multithreaded infrastructure
+    // ========================================================================
+
+    /// Builds sorting targets from all workers for a given constraint type.
+    fn build_sorting_targets(
+        &self,
+        list: &mut QuickList<SortConstraintTarget>,
+        type_index: i32,
+        worker_count: i32,
+    ) {
+        for i in 0..worker_count {
+            let worker_list = unsafe {
+                &(*self.overlap_workers[i as usize].pending_constraints.pending_constraints_by_type
+                    .get(type_index))
+            };
+            if worker_list.count > 0 {
+                let entry_size_in_bytes = worker_list.byte_count / worker_list.count;
+                let mut index_in_bytes = 0i32;
+                for _j in 0..worker_list.count {
+                    let constraint = list.allocate_unsafely();
+                    constraint.worker_index = i;
+                    constraint.byte_index_in_cache = index_in_bytes;
+                    // Sort key is the first 8 bytes (CollidablePair) of each pending constraint.
+                    constraint.sort_key = unsafe {
+                        *(worker_list.buffer.as_ptr().add(index_in_bytes as usize) as *const u64)
+                    };
+                    index_in_bytes += entry_size_in_bytes;
+                }
+            }
+        }
+    }
+
+    /// Executes a single preflush job.
+    fn execute_preflush_job(&mut self, _worker_index: i32, job: &PreflushJob) {
+        match job.job_type {
+            PreflushJobType::CheckFreshness => {
+                if let Some(ref mut checker) = self.base.freshness_checker {
+                    unsafe { checker.check_freshness_in_region(_worker_index, job.start, job.end); }
+                }
+            }
+            PreflushJobType::SortContactConstraintType => {
+                // Use raw pointer to avoid borrow conflicts between sorted_constraints and overlap_workers.
+                let self_ptr = self as *mut Self;
+                let sorted = unsafe { (*self_ptr).sorted_constraints.get_mut(job.type_index) };
+                unsafe { (*self_ptr).build_sorting_targets(sorted, job.type_index, job.worker_index_or_count); }
+                let comparer = PendingConstraintComparer;
+                if sorted.count > 1 {
+                    Quicksort::sort_keys(
+                        sorted.span.as_slice_mut(),
+                        0,
+                        sorted.count - 1,
+                        &comparer,
+                    );
+                }
+            }
+            PreflushJobType::SpeculativeConstraintBatchSearch => {
+                let solver = unsafe { &*self.base.solver };
+                unsafe {
+                    self.overlap_workers[job.worker_index_or_count as usize]
+                        .pending_constraints
+                        .speculative_constraint_batch_search(
+                            solver,
+                            job.type_index,
+                            job.start,
+                            job.end,
+                        );
+                }
+            }
+            PreflushJobType::NondeterministicConstraintAdd => {
+                let np_ptr = &self.base as *const NarrowPhase;
+                let solver = unsafe { &mut *self.base.solver };
+                let pair_cache = &mut self.base.pair_cache;
+                let accessors = &self.base.contact_constraint_accessors;
+                for i in 0..job.worker_index_or_count {
+                    self.overlap_workers[i as usize]
+                        .pending_constraints
+                        .flush_with_speculative_batches(accessors, np_ptr, solver, pair_cache);
+                }
+            }
+            PreflushJobType::DeterministicConstraintAdd => {
+                let np_ptr = &self.base as *const NarrowPhase;
+                let solver = unsafe { &mut *self.base.solver };
+                let pair_cache = &mut self.base.pair_cache;
+                let accessors = &self.base.contact_constraint_accessors;
+                let worker_ptrs = &self.base.worker_pending_constraints;
+                for type_index in 0..accessors.len() {
+                    if let Some(ref accessor) = accessors[type_index] {
+                        let sorted = unsafe { self.sorted_constraints.get_mut(type_index as i32) };
+                        accessor.deterministically_add(
+                            type_index as i32,
+                            worker_ptrs,
+                            sorted,
+                            np_ptr,
+                            solver,
+                            pair_cache,
+                        );
+                    }
+                }
+            }
+            PreflushJobType::AwakenerPhaseOne => {
+                if !self.base.awakener.is_null() {
+                    unsafe { (*self.base.awakener).execute_phase_one_job(job.job_index); }
+                }
+            }
+            PreflushJobType::AwakenerPhaseTwo => {
+                if !self.base.awakener.is_null() {
+                    unsafe { (*self.base.awakener).execute_phase_two_job(job.job_index); }
+                }
+            }
+        }
+    }
+
+    /// Worker loop for multithreaded preflush. Uses atomic increment on preflush_job_index.
+    fn preflush_worker_loop(&mut self, _worker_index: i32) {
+        loop {
+            let job_index = unsafe {
+                AtomicI32::from_ptr(self.preflush_job_index.get())
+                    .fetch_add(1, Ordering::AcqRel)
+            };
+            if job_index >= self.preflush_jobs.count {
+                break;
+            }
+            let job = self.preflush_jobs[job_index];
+            self.execute_preflush_job(_worker_index, &job);
+        }
+    }
+
+    // ========================================================================
     // Preflush (from NarrowPhasePreflush.cs) — single-threaded path
     // ========================================================================
 
     /// Preflush for single-threaded execution.
-    pub(crate) fn preflush_single_threaded(&mut self) {
+    pub(crate) fn preflush_single_threaded(
+        &mut self,
+        phase_one_job_count: i32,
+        phase_two_job_count: i32,
+    ) {
         // Single threaded: awakenings, constraint flush, freshness check.
         let original_mapping_count = self.base.pair_cache.mapping.count;
 
-        // TODO: awakener phase one + phase two
+        // Execute awakener phase one + phase two jobs.
+        if !self.base.awakener.is_null() {
+            unsafe {
+                for i in 0..phase_one_job_count {
+                    (*self.base.awakener).execute_phase_one_job(i);
+                }
+                for i in 0..phase_two_job_count {
+                    (*self.base.awakener).execute_phase_two_job(i);
+                }
+            }
+        }
 
         // Flush pending constraints sequentially.
         let solver = unsafe { &mut *self.base.solver };
@@ -1499,23 +1841,255 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
 
         // Count new constraints and prepare capacity.
         let mut new_constraint_count = 0i32;
+        let mut _sets_to_awaken_capacity = 0i32;
         for i in 0..thread_count {
             new_constraint_count += self.overlap_workers[i].pending_constraints.count_constraints();
+            _sets_to_awaken_capacity += self.overlap_workers[i].pending_set_awakenings.count;
         }
 
-        // TODO: ensure solver + pair cache capacities
+        // Ensure solver + pair cache capacities for incoming constraints.
+        unsafe {
+            let solver = &mut *self.base.solver;
+            let target_capacity = solver.handle_pool.highest_possibly_claimed_id() + 1 + new_constraint_count;
+            self.base.pair_cache.ensure_constraint_to_pair_mapping_capacity(solver, target_capacity);
+            solver.ensure_solver_capacities(1, target_capacity);
+        }
 
-        if thread_count <= 1 || thread_dispatcher.is_none() {
-            self.preflush_single_threaded();
+        // Accumulate unique awakening indices and prepare awakener jobs.
+        let mut sets_to_awaken;
+        let mut awakener_phase_one_job_count = 0i32;
+        let mut awakener_phase_two_job_count = 0i32;
+        unsafe {
+            let pool = &mut *self.base.pool;
+            sets_to_awaken = QuickList::with_capacity(_sets_to_awaken_capacity, pool);
+            if !self.base.awakener.is_null() {
+                let bodies = &*self.base.bodies;
+                let mut unique_set = IndexSet::new(pool, bodies.sets.len() as i32);
+                for i in 0..thread_count {
+                    (*self.base.awakener).accumulate_unique_indices(
+                        &self.overlap_workers[i].pending_set_awakenings,
+                        &mut unique_set,
+                        &mut sets_to_awaken,
+                    );
+                }
+                unique_set.dispose(pool);
+                for i in 0..thread_count {
+                    let worker_pool = if thread_count > 1 {
+                        // Multi-threaded: use per-worker pool (but currently not available, use main)
+                        pool as *mut BufferPool
+                    } else {
+                        pool as *mut BufferPool
+                    };
+                    self.overlap_workers[i].pending_set_awakenings.dispose(&mut *worker_pool);
+                }
+                (awakener_phase_one_job_count, awakener_phase_two_job_count) =
+                    (*self.base.awakener).prepare_jobs(&mut sets_to_awaken, false, thread_count as i32);
+            }
+        }
+
+        let _awakener_phase_one_job_count = awakener_phase_one_job_count;
+        let _awakener_phase_two_job_count = awakener_phase_two_job_count;
+
+        if thread_count > 1 && thread_dispatcher.is_some() {
+            let pool = unsafe { &mut *self.base.pool };
+            // Fixed initial capacity of 128 + max awakener jobs
+            let initial_capacity = 128 + std::cmp::max(_awakener_phase_one_job_count, _awakener_phase_two_job_count);
+            self.preflush_jobs = QuickList::with_capacity(initial_capacity, pool);
+
+            // FIRST PHASE: sort, awakener phase one, speculative batch search
+            for i in 0..thread_count {
+                self.overlap_workers[i].pending_constraints.allocate_for_speculative_search();
+            }
+            for i in 0.._awakener_phase_one_job_count {
+                self.preflush_jobs.add(PreflushJob {
+                    job_type: PreflushJobType::AwakenerPhaseOne,
+                    job_index: i,
+                    ..PreflushJob::default()
+                }, pool);
+            }
+
+            if deterministic {
+                self.sorted_constraints = pool.take_at_least(PairCache::COLLISION_CONSTRAINT_TYPE_COUNT);
+                self.sorted_constraints.clear(0, PairCache::COLLISION_CONSTRAINT_TYPE_COUNT);
+                for type_index in 0..PairCache::COLLISION_CONSTRAINT_TYPE_COUNT {
+                    let mut count_in_type = 0;
+                    for worker_index in 0..thread_count {
+                        count_in_type += unsafe {
+                            self.overlap_workers[worker_index]
+                                .pending_constraints
+                                .pending_constraints_by_type
+                                .get(type_index)
+                                .count
+                        };
+                    }
+                    if count_in_type > 0 {
+                        unsafe {
+                            *self.sorted_constraints.get_mut(type_index) =
+                                QuickList::with_capacity(count_in_type, pool);
+                        }
+                        self.preflush_jobs.add(PreflushJob {
+                            job_type: PreflushJobType::SortContactConstraintType,
+                            type_index: type_index as i32,
+                            worker_index_or_count: thread_count as i32,
+                            ..PreflushJob::default()
+                        }, pool);
+                    }
+                }
+            }
+
+            const MAXIMUM_CONSTRAINTS_PER_JOB: i32 = 16;
+            for type_index in 0..PairCache::COLLISION_CONSTRAINT_TYPE_COUNT {
+                for worker_index in 0..thread_count {
+                    let count = unsafe {
+                        self.overlap_workers[worker_index]
+                            .pending_constraints
+                            .pending_constraints_by_type
+                            .get(type_index)
+                            .count
+                    };
+                    if count > 0 {
+                        let job_count = 1 + count / MAXIMUM_CONSTRAINTS_PER_JOB;
+                        let job_size = count / job_count;
+                        let remainder = count - job_count * job_size;
+                        let mut previous_end = 0;
+                        for i in 0..job_count {
+                            let job_start = previous_end;
+                            let mut constraints_in_job = job_size;
+                            if i < remainder {
+                                constraints_in_job += 1;
+                            }
+                            previous_end += constraints_in_job;
+                            self.preflush_jobs.add(PreflushJob {
+                                job_type: PreflushJobType::SpeculativeConstraintBatchSearch,
+                                start: job_start,
+                                end: previous_end,
+                                type_index: type_index as i32,
+                                worker_index_or_count: worker_index as i32,
+                                job_index: 0,
+                            }, pool);
+                        }
+                        debug_assert!(previous_end == count);
+                    }
+                }
+            }
+
+            let original_pair_cache_mapping_count = self.base.pair_cache.mapping.count;
+            // Dispatch phase 1
+            unsafe { *self.preflush_job_index.get() = -1; }
+            // NOTE: thread_dispatcher.dispatch_workers(preflush_worker_loop, preflush_jobs.count) not yet implemented.
+            // For now, single-threaded fallback:
+            self.preflush_worker_loop(0);
+
+            // SECOND PHASE: awakener phase two
+            self.preflush_jobs.clear();
+            for i in 0.._awakener_phase_two_job_count {
+                let pool = unsafe { &mut *self.base.pool };
+                self.preflush_jobs.add(PreflushJob {
+                    job_type: PreflushJobType::AwakenerPhaseTwo,
+                    job_index: i,
+                    ..PreflushJob::default()
+                }, pool);
+            }
+            unsafe { *self.preflush_job_index.get() = -1; }
+            // NOTE: thread_dispatcher.dispatch_workers(preflush_worker_loop, preflush_jobs.count) not yet implemented.
+            self.preflush_worker_loop(0);
+
+            // THIRD PHASE: constraint adds + freshness checker
+            self.preflush_jobs.clear();
+            let pool = unsafe { &mut *self.base.pool };
+            if deterministic {
+                self.preflush_jobs.add(PreflushJob {
+                    job_type: PreflushJobType::DeterministicConstraintAdd,
+                    ..PreflushJob::default()
+                }, pool);
+            } else {
+                self.preflush_jobs.add(PreflushJob {
+                    job_type: PreflushJobType::NondeterministicConstraintAdd,
+                    worker_index_or_count: thread_count as i32,
+                    ..PreflushJob::default()
+                }, pool);
+            }
+            // Create freshness check jobs (matching FreshnessChecker.CreateJobs logic).
+            if self.base.freshness_checker.is_some() && original_pair_cache_mapping_count > 0 {
+                let pool = unsafe { &mut *self.base.pool };
+                if thread_count > 1 {
+                    const JOBS_PER_THREAD: i32 = 2;
+                    let mapping_count = original_pair_cache_mapping_count;
+                    let freshness_job_count = i32::min(thread_count as i32 * JOBS_PER_THREAD, mapping_count);
+                    let pairs_per_job = mapping_count / freshness_job_count;
+                    let remainder = mapping_count - pairs_per_job * freshness_job_count;
+                    let mut previous_end = 0i32;
+                    let mut job_index = 0i32;
+                    while previous_end < mapping_count {
+                        let pairs_in_job = if job_index < remainder {
+                            pairs_per_job + 1
+                        } else {
+                            pairs_per_job
+                        };
+                        let mut next_end = ((previous_end + pairs_in_job + 7) >> 3) << 3;
+                        if next_end > mapping_count {
+                            next_end = mapping_count;
+                        }
+                        self.preflush_jobs.add(PreflushJob {
+                            job_type: PreflushJobType::CheckFreshness,
+                            start: previous_end,
+                            end: next_end,
+                            ..PreflushJob::default()
+                        }, pool);
+                        previous_end = next_end;
+                        job_index += 1;
+                    }
+                } else {
+                    self.preflush_jobs.add(PreflushJob {
+                        job_type: PreflushJobType::CheckFreshness,
+                        start: 0,
+                        end: original_pair_cache_mapping_count,
+                        ..PreflushJob::default()
+                    }, pool);
+                }
+            }
+            unsafe { *self.preflush_job_index.get() = -1; }
+            // NOTE: thread_dispatcher.dispatch_workers(preflush_worker_loop, preflush_jobs.count) not yet implemented.
+            self.preflush_worker_loop(0);
+
+            // Cleanup
+            for i in 0..thread_count {
+                self.overlap_workers[i].pending_constraints.dispose_speculative_search();
+            }
+            if deterministic {
+                let pool = unsafe { &mut *self.base.pool };
+                for i in 0..PairCache::COLLISION_CONSTRAINT_TYPE_COUNT {
+                    let type_list = unsafe { self.sorted_constraints.get_mut(i) };
+                    if type_list.span.allocated() {
+                        type_list.dispose(pool);
+                    }
+                }
+                pool.return_buffer(&mut self.sorted_constraints);
+            }
+            let pool = unsafe { &mut *self.base.pool };
+            self.preflush_jobs.dispose(pool);
         } else {
-            // TODO: multithreaded preflush (3-phase dispatch)
-            // For now, fall back to single-threaded.
-            self.preflush_single_threaded();
+            self.preflush_single_threaded(
+                awakener_phase_one_job_count,
+                awakener_phase_two_job_count,
+            );
         }
 
         // Dispose pending constraint caches.
         for i in 0..thread_count {
             self.overlap_workers[i].pending_constraints.dispose();
+        }
+
+        // Dispose awakener resources.
+        if !self.base.awakener.is_null() && sets_to_awaken.count > 0 {
+            unsafe {
+                let pool = &mut *self.base.pool;
+                (*self.base.awakener).dispose_for_completed_awakenings(&mut sets_to_awaken);
+                sets_to_awaken.dispose(pool);
+            }
+        } else if sets_to_awaken.span.allocated() {
+            let pool = unsafe { &mut *self.base.pool };
+            sets_to_awaken.dispose(pool);
         }
     }
 

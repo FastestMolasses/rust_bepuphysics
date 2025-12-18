@@ -271,6 +271,78 @@ impl PairCache {
         }
     }
 
+    /// Prepares flush jobs by returning the pair freshness buffer, ensuring mapping capacity,
+    /// and adding a FlushPairCacheChanges job to the job list.
+    pub fn prepare_flush_jobs(&mut self, jobs: &mut Vec<super::narrow_phase::NarrowPhaseFlushJob>) {
+        // The freshness cache should have already been used to generate constraint removal requests;
+        // dispose it now.
+        let pool_ref = unsafe { &mut *self.pool };
+        pool_ref.return_buffer(&mut self.pair_freshness);
+
+        // Ensure the overlap mapping size is sufficient up front by scanning all pending sizes.
+        let mut largest_intermediate_size = self.mapping.count;
+        let mut new_mapping_size = self.mapping.count;
+        for i in 0..self.worker_pending_changes.len() {
+            let cache = unsafe { &*self.worker_pending_changes.get(i) };
+            // Removes occur first, so this cache can only result in a larger mapping
+            // if there are more adds than removes.
+            new_mapping_size += cache.pending_adds.count - cache.pending_removes.count;
+            if new_mapping_size > largest_intermediate_size {
+                largest_intermediate_size = new_mapping_size;
+            }
+        }
+        self.mapping.ensure_capacity(largest_intermediate_size, pool_ref);
+
+        jobs.push(super::narrow_phase::NarrowPhaseFlushJob {
+            job_type: super::narrow_phase::NarrowPhaseFlushJobType::FlushPairCacheChanges,
+            index: 0,
+        });
+    }
+
+    /// Completes a constraint addition by recording the constraint handle in the pair cache
+    /// mapping and scattering cached impulses into the solver's type batch.
+    ///
+    /// # Safety
+    /// `narrow_phase` and `solver` must be valid and non-aliased.
+    /// `impulses` must point to valid contact impulses of the appropriate type for the constraint.
+    pub(crate) unsafe fn complete_constraint_add(
+        &mut self,
+        narrow_phase: *const super::narrow_phase::NarrowPhase,
+        solver: *mut crate::physics::solver::Solver,
+        impulses: *const u8,
+        pair_cache_change_index: PairCacheChangeIndex,
+        constraint_handle: ConstraintHandle,
+        pair: &CollidablePair,
+    ) {
+        // Write the constraint handle back into the appropriate location.
+        if pair_cache_change_index.is_pending() {
+            (*self.worker_pending_changes.get_mut(pair_cache_change_index.worker_index))
+                .pending_adds
+                .get_mut(pair_cache_change_index.index)
+                .cache
+                .constraint_handle = constraint_handle;
+        } else {
+            (*self.mapping.values.get_mut(pair_cache_change_index.index)).constraint_handle =
+                constraint_handle;
+        }
+
+        // Scatter cached impulses into the solver's constraint type batch.
+        let reference = (*solver).get_constraint_reference(constraint_handle);
+        debug_assert!(
+            reference.index_in_type_batch >= 0
+                && reference.index_in_type_batch < (*reference.type_batch_pointer).constraint_count
+        );
+        let type_id = (*reference.type_batch_pointer).type_id;
+        let np = &*narrow_phase;
+        np.contact_constraint_accessors[type_id as usize]
+            .as_ref()
+            .expect("Accessor must exist for the constraint type")
+            .scatter_new_impulses(&reference, impulses as *const f32);
+
+        // Record the pair so we can look up which CollidablePair owns a given constraint handle.
+        (*self.constraint_handle_to_pair.get_mut(constraint_handle.0)).pair = *pair;
+    }
+
     /// Flush all deferred changes from the last narrow phase execution.
     pub fn flush_mapping_changes(&mut self) {
         // Flush all pending adds from the new set.

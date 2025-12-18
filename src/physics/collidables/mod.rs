@@ -12,6 +12,7 @@ pub mod capsule;
 pub mod cylinder;
 pub mod triangle;
 pub mod convex_hull;
+pub mod convex_hull_helper;
 
 // Compound shapes
 pub mod compound;

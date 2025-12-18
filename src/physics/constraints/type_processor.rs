@@ -111,6 +111,22 @@ pub trait ITypeProcessor {
         // Default: no-op stub. Concrete implementations will override.
     }
 
+    /// Gathers constraint data from the active set into an inactive type batch.
+    /// For each constraint handle in the source scaffold, copies prestep data, accumulated impulses,
+    /// sets index_to_handle, and converts body references from encoded indices to handles.
+    fn gather_active_constraints(
+        &self,
+        _bodies: &crate::physics::bodies::Bodies,
+        _solver: &crate::physics::solver::Solver,
+        _source_scaffold: &crate::physics::island_scaffold::IslandScaffoldTypeBatch,
+        _start_index: i32,
+        _end_index: i32,
+        _target_type_batch: &mut TypeBatch,
+    ) {
+        // Default: no-op stub. Concrete type processors will override with
+        // lane-copy logic and body reference index→handle conversion.
+    }
+
     /// Adds body handles referenced by the waking type batch to the batch's referenced handles set.
     fn add_waking_body_handles_to_batch_references(
         &self,

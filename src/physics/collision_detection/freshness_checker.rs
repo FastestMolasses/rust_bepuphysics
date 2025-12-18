@@ -172,7 +172,7 @@ impl FreshnessChecker {
         let pool = if self.cached_dispatcher.is_none() {
             pair_cache.pool
         } else {
-            // TODO: Use dispatcher.worker_pools[worker_index] when thread dispatcher is fully hooked up
+            // NOTE: Use dispatcher.worker_pools[worker_index] when thread dispatcher is fully hooked up
             pair_cache.pool
         };
 

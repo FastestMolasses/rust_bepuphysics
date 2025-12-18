@@ -1,5 +1,5 @@
 use crate::{out, utilities::matrix3x3::Matrix3x3};
-use core::ops::{Add, Mul, Sub};
+use core::ops::{Add, AddAssign, Mul, Sub};
 use glam::Vec3;
 
 /// Lower left triangle (including diagonal) of a symmetric 3x3 matrix.
@@ -24,7 +24,7 @@ impl Symmetric3x3 {
     /// Computes rT * m * r for a symmetric matrix m and a rotation matrix r.
     #[inline(always)]
     pub fn rotation_sandwich(r: &Matrix3x3, m: &Self, sandwich: &mut Self) {
-        // TODO: We just copied this from the wide implementation. There are a lot of ways to improve this, should it be necessary.
+        // NOTE: We just copied this from the wide implementation. There are a lot of ways to improve this, should it be necessary.
         // (There's virtually no chance that optimizing this to a serious degree would be worth it- at the time of writing, it's only called by the pose integrator, which is
         // horribly memory bound anyway.)
         let i11 = r.x.x * m.xx + r.y.x * m.yx + r.z.x * m.zx;
@@ -136,6 +136,7 @@ impl Symmetric3x3 {
     }
 
     /// Transforms a vector by a symmetric matrix.
+    #[inline(always)]
     pub fn transform(v: Vec3, m: &Self) -> Vec3 {
         Vec3::new(
             v.x * m.xx + v.y * m.yx + v.z * m.zx,
@@ -158,6 +159,18 @@ impl Add for Symmetric3x3 {
             zy: self.zy + other.zy,
             zz: self.zz + other.zz,
         }
+    }
+}
+
+impl AddAssign for Symmetric3x3 {
+    #[inline(always)]
+    fn add_assign(&mut self, other: Self) {
+        self.xx += other.xx;
+        self.yx += other.yx;
+        self.yy += other.yy;
+        self.zx += other.zx;
+        self.zy += other.zy;
+        self.zz += other.zz;
     }
 }
 

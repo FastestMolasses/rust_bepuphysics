@@ -56,6 +56,15 @@ impl ChildOverlapsCollection {
     }
 }
 
+impl ChildOverlapsCollection {
+    /// Disposes the overlaps buffer back to the pool.
+    pub fn dispose(&mut self, pool: &mut BufferPool) {
+        if self.overlaps.allocated() {
+            pool.return_buffer(&mut self.overlaps);
+        }
+    }
+}
+
 impl ICollisionTaskSubpairOverlaps for ChildOverlapsCollection {
     fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
         ChildOverlapsCollection::allocate(self, pool)

@@ -371,9 +371,6 @@ impl ManifoldCandidateHelper {
             .to_int();
     }
 
-    // TODO: The full scalar Reduce method (ManifoldCandidateScalar* variant) is also needed
-    // for per-slot reduction in non-convex compound pairs. ~200 lines of scalar algorithms.
-
     #[inline(always)]
     unsafe fn place_candidate_in_slot(
         candidate: &ManifoldCandidateScalar,

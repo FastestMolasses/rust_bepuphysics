@@ -65,7 +65,7 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
     let np = &mut *(narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>);
     let bp = &mut *broad_phase_ptr;
 
-    // TODO: Multi-threaded overlap dispatch using MultithreadedSelfTest/MultithreadedIntertreeTest.
+    // NOTE: Multi-threaded overlap dispatch using MultithreadedSelfTest/MultithreadedIntertreeTest not yet implemented.
     // These C# types are in the missing multi-threaded tree files (tree_self_queries_mt.rs,
     // tree_intertree_queries_mt.rs). When available, the thread_dispatcher would be passed
     // to prepare() and used to create per-worker handlers + dispatch.
@@ -137,7 +137,7 @@ impl CollidableOverlapFinder {
         dt: f32,
         _thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
-        // TODO: When multi-threaded overlap dispatch is implemented (requires
+        // NOTE: When multi-threaded overlap dispatch is implemented (requires
         // MultithreadedSelfTest/MultithreadedIntertreeTest tree types), pass
         // thread_dispatcher through to prepare and create per-worker handlers.
         unsafe {

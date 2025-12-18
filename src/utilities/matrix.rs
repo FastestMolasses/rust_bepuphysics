@@ -188,7 +188,7 @@ impl Matrix {
     #[inline(always)]
     pub fn create_from_axis_angle(axis: Vec3, angle: f32, result: &mut Self) {
         // From original code:
-        // TODO: Could be better simdified.
+        // NOTE: Could be better simdified.
         let xx = axis.x * axis.x;
         let yy = axis.y * axis.y;
         let zz = axis.z * axis.z;
@@ -366,7 +366,7 @@ impl Matrix {
     #[inline(always)]
     pub fn invert(m: &Self, inverted: &mut Self) {
         // From original code:
-        // TODO: This could be quite a bit faster, especially once shuffles exist... But inverting a 4x4 matrix should approximately never occur.
+        // NOTE: This could be quite a bit faster, especially once shuffles exist... But inverting a 4x4 matrix should approximately never occur.
         let s0 = m.x.x * m.y.y - m.y.x * m.x.y;
         let s1 = m.x.x * m.y.z - m.y.x * m.x.z;
         let s2 = m.x.x * m.y.w - m.y.x * m.x.w;

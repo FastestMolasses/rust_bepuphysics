@@ -14,7 +14,7 @@ use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use super::mesh_inertia_helper::MeshInertiaHelper;
-use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
+use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use super::ray::RayWide;
 
 /// Collision shape representing an individual triangle.
@@ -278,6 +278,8 @@ impl TriangleWide {
     }
 }
 
+impl IShapeWideAllocation for TriangleWide {}
+
 impl IShapeWide<Triangle> for TriangleWide {
     fn allow_offset_memory_access(&self) -> bool {
         true
@@ -388,6 +390,7 @@ impl IShapeWide<Triangle> for TriangleWide {
 }
 
 /// Support finder for triangles.
+#[derive(Default)]
 pub struct TriangleSupportFinder;
 
 impl ISupportFinder<Triangle, TriangleWide> for TriangleSupportFinder {
@@ -439,5 +442,60 @@ impl ISupportFinder<Triangle, TriangleWide> for TriangleSupportFinder {
         let pick_c = max_val.simd_eq(c_dot).to_int();
         *support = Vector3Wide::conditional_select(&pick_a, &shape.a, &shape.b);
         *support = Vector3Wide::conditional_select(&pick_c, &shape.c, support);
+    }
+}
+
+/// One-param ISupportFinder impl for GJK distance testing.
+impl crate::physics::collision_detection::support_finder::ISupportFinder<TriangleWide>
+    for TriangleSupportFinder
+{
+    fn has_margin() -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn get_margin(_shape: &TriangleWide, margin: &mut Vector<f32>) {
+        *margin = Vector::<f32>::default();
+    }
+
+    #[inline(always)]
+    fn compute_local_support(
+        shape: &TriangleWide,
+        direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let mut a_dot = Vector::<f32>::splat(0.0);
+        let mut b_dot = Vector::<f32>::splat(0.0);
+        let mut c_dot = Vector::<f32>::splat(0.0);
+        Vector3Wide::dot(&shape.a, direction, &mut a_dot);
+        Vector3Wide::dot(&shape.b, direction, &mut b_dot);
+        Vector3Wide::dot(&shape.c, direction, &mut c_dot);
+        let max_val = a_dot.simd_max(b_dot.simd_max(c_dot));
+        let pick_a = max_val.simd_eq(a_dot).to_int();
+        let pick_c = max_val.simd_eq(c_dot).to_int();
+        *support = Vector3Wide::conditional_select(&pick_a, &shape.a, &shape.b);
+        *support = Vector3Wide::conditional_select(&pick_c, &shape.c, support);
+    }
+
+    #[inline(always)]
+    fn compute_support(
+        shape: &TriangleWide,
+        orientation: &Matrix3x3Wide,
+        direction: &Vector3Wide,
+        terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let mut local_direction = Vector3Wide::default();
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            direction,
+            orientation,
+            &mut local_direction,
+        );
+        let mut local_support = Vector3Wide::default();
+        <Self as crate::physics::collision_detection::support_finder::ISupportFinder<TriangleWide>>::compute_local_support(
+            shape, &local_direction, terminated_lanes, &mut local_support,
+        );
+        Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }

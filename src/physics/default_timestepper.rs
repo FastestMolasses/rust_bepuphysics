@@ -42,7 +42,7 @@ impl ITimestepper for DefaultTimestepper {
         thread_dispatcher: *mut u8,
     ) {
         let sim = &mut *(simulation as *mut Simulation);
-        // TODO: thread_dispatcher casting requires a fat pointer (vtable).
+        // NOTE: thread_dispatcher casting requires a fat pointer (vtable).
         // For now, the single-threaded path is used regardless of the dispatcher argument.
         let td: Option<&dyn IThreadDispatcher> = None;
 

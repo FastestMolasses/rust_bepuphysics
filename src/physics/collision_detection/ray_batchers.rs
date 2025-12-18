@@ -44,8 +44,9 @@ impl Default for RayData {
 }
 
 /// A source of ray data for batched testing.
+/// Only used by the SIMD-batched ray path (not yet implemented).
+/// The per-ray path in BroadPhaseRayBatcher dispatches rays immediately.
 pub struct RaySource {
-    // TODO: implement once the ray batcher infrastructure is fully wired
     _placeholder: i32,
 }
 
@@ -53,6 +54,10 @@ pub struct RaySource {
 pub trait IRayHitHandler {
     /// Whether to allow testing against the given collidable.
     fn allow_test(&self, collidable: CollidableReference) -> bool;
+
+    /// Whether to allow testing against a specific child of a collidable.
+    /// Only called by shape types that can have more than one child (compounds, meshes).
+    fn allow_test_child(&self, collidable: CollidableReference, child_index: i32) -> bool;
 
     /// Called when a ray intersects a collidable.
     fn on_ray_hit(
@@ -89,29 +94,34 @@ pub trait IBroadPhaseSweepTester {
 }
 
 /// Helps test the broad phase's active and static trees with a custom leaf tester.
-pub struct BroadPhaseRayBatcher {
+/// Currently uses per-ray traversal via BroadPhase::ray_cast. 
+/// A future optimization would use the batched RayBatcher for SIMD ray streaming.
+pub struct BroadPhaseRayBatcher<'a, TRayTester: IBroadPhaseRayTester> {
     broad_phase: *const BroadPhase,
     pool: *mut BufferPool,
-    // TODO: Add RayBatcher once tree ray batching is implemented
+    ray_tester: &'a mut TRayTester,
 }
 
-impl BroadPhaseRayBatcher {
-    pub fn new(pool: *mut BufferPool, broad_phase: *const BroadPhase) -> Self {
-        Self { broad_phase, pool }
+impl<'a, TRayTester: IBroadPhaseRayTester> BroadPhaseRayBatcher<'a, TRayTester> {
+    pub fn new(pool: *mut BufferPool, broad_phase: *const BroadPhase, ray_tester: &'a mut TRayTester) -> Self {
+        Self { broad_phase, pool, ray_tester }
     }
 
-    /// Adds a ray to the batcher. If the batch is full, rays are automatically tested.
-    pub fn add(&mut self, _origin: &Vec3, _direction: &Vec3, _maximum_t: f32, _id: i32) {
-        // TODO: Batch rays and test against trees when batch is full
+    /// Adds a ray to the batcher. Tests immediately via per-ray traversal.
+    pub fn add(&mut self, origin: &Vec3, direction: &Vec3, maximum_t: f32, id: i32) {
+        unsafe {
+            (&*self.broad_phase).ray_cast(*origin, *direction, maximum_t, self.ray_tester, id);
+        }
     }
 
     /// Tests any accumulated rays against the broad phase trees and resets.
+    /// In the per-ray implementation, rays are tested immediately in add(), so this is a no-op.
     pub fn flush(&mut self) {
-        // TODO: Flush remaining rays
+        // Per-ray implementation: rays are dispatched immediately in add().
     }
 
     /// Disposes the batcher resources.
     pub fn dispose(&mut self) {
-        // TODO: Return ray buffer to pool
+        // Per-ray implementation: no backing buffers to dispose.
     }
 }

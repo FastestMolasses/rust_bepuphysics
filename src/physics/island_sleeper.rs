@@ -1,6 +1,7 @@
 // Translated from BepuPhysics/IslandSleeper.cs
 
 use crate::physics::bodies::Bodies;
+use crate::physics::body_set::BodySet;
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_set::ConstraintSet;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
@@ -14,18 +15,14 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-// Use real BroadPhase from its module. ConstraintRemover and PairCache remain opaque until translated.
+// Use real BroadPhase, PairCache, and ConstraintRemover from their modules.
 use crate::physics::collision_detection::broad_phase::BroadPhase;
-
-pub struct ConstraintRemover {
-    _opaque: [u8; 0],
-}
-
-pub struct PairCache {
-    _opaque: [u8; 0],
-}
+use crate::physics::collision_detection::constraint_remover::ConstraintRemover;
+use crate::physics::collision_detection::inactive_set_builder::SleepingSetBuilder;
+use crate::physics::collision_detection::pair_cache::PairCache;
 
 /// Provides functionality for putting bodies to sleep when they become inactive.
 pub struct IslandSleeper {
@@ -51,7 +48,7 @@ pub struct IslandSleeper {
 
     // Worker dispatch state
     schedule_offset: i32,
-    job_index: AtomicI32,
+    job_index: UnsafeCell<i32>,
 
     target_traversed_body_count_per_thread: i32,
     target_slept_body_count_per_thread: i32,
@@ -132,7 +129,7 @@ impl IslandSleeper {
             target_slept_fraction: 0.005,
             target_traversed_fraction: 0.01,
             schedule_offset: 0,
-            job_index: AtomicI32::new(-1),
+            job_index: UnsafeCell::new(-1),
             target_traversed_body_count_per_thread: 0,
             target_slept_body_count_per_thread: 0,
             traversal_start_body_indices: QuickList::default(),
@@ -351,14 +348,14 @@ impl IslandSleeper {
         target_traversed_body_count: i32,
         force_sleep: bool,
     ) {
-        let bodies = self.bodies();
+        let bodies = &*self.bodies;
         if bodies.active_set().count == 0 || traversal_start_body_indices.count == 0 {
             return;
         }
 
         // Phase 1: TRAVERSAL - Find islands
-        let pool = self.pool();
-        let solver = self.solver();
+        let pool = &mut *self.pool;
+        let solver = &*self.solver;
 
         let mut body_indices = QuickList::with_capacity(
             self.initial_island_body_capacity.min(bodies.active_set().count),
@@ -431,12 +428,171 @@ impl IslandSleeper {
             return;
         }
 
-        // Phase 2-4: GATHERING, REMOVAL, CONSTRAINT REMOVAL
-        // TODO: Full implementation of gathering data into inactive sets,
-        // removing from active set, and cleaning up constraint type batches.
-        // This requires ConstraintRemover, PairCache, BroadPhase integration.
+        // Phase 2: GATHERING — allocate inactive sets and copy body/constraint data.
+        let bodies_ptr = self.bodies;
+        let solver_ptr = self.solver;
+        let self_ptr = self as *mut IslandSleeper;
 
-        // For now, dispose the islands
+        struct InactiveSetReference {
+            index: i32,
+        }
+        let mut new_inactive_sets: Vec<InactiveSetReference> = Vec::new();
+
+        for island in &mut islands {
+            // Allocate a new inactive set index.
+            let set_index = (*self_ptr).set_id_pool.take();
+            new_inactive_sets.push(InactiveSetReference { index: set_index });
+            (*self_ptr).ensure_sets_capacity(set_index + 1);
+
+            // Create the inactive body set.
+            let body_count = island.body_indices.count;
+            *(*bodies_ptr).sets.get_mut(set_index) = BodySet::new(body_count, pool);
+            (*bodies_ptr).sets.get_mut(set_index).count = body_count;
+
+            // Copy body data from active set to inactive set.
+            let source_set_ptr = (*bodies_ptr).sets.get(0) as *const crate::physics::body_set::BodySet;
+            let target_set_ptr = (*bodies_ptr).sets.get_mut(set_index) as *mut crate::physics::body_set::BodySet;
+            for target_index in 0..body_count {
+                let source_index = *island.body_indices.get(target_index);
+                let source_set = &*source_set_ptr;
+                let target_set = &mut *target_set_ptr;
+                *target_set.index_to_handle.get_mut(target_index) = *source_set.index_to_handle.get(source_index);
+                *target_set.activity.get_mut(target_index) = *source_set.activity.get(source_index);
+                *target_set.collidables.get_mut(target_index) = *source_set.collidables.get(source_index);
+                *target_set.constraints.get_mut(target_index) = *source_set.constraints.get(source_index);
+                *target_set.dynamics_state.get_mut(target_index) = *source_set.dynamics_state.get(source_index);
+            }
+
+            // Create the inactive constraint set from the scaffold.
+            if island.protobatches.count > 0 {
+                *(*solver_ptr).sets.get_mut(set_index) = ConstraintSet::new(pool, island.protobatches.count);
+                let constraint_set = &mut *(*solver_ptr).sets.get_mut(set_index);
+                for batch_index in 0..island.protobatches.count {
+                    let source_batch = &*island.protobatches.get(batch_index);
+                    let target_batch = constraint_set.batches.allocate_unsafely();
+                    *target_batch = ConstraintBatch::new(pool, source_batch.type_id_to_index.len());
+                    for type_batch_index in 0..source_batch.type_batches.count {
+                        let source_type_batch = &*source_batch.type_batches.get(type_batch_index);
+                        let tp = (&(*solver_ptr).type_processors)[source_type_batch.type_id as usize]
+                            .as_ref()
+                            .unwrap();
+                        let target_type_batch = (*target_batch).create_new_type_batch(
+                            source_type_batch.type_id,
+                            tp.inner(),
+                            source_type_batch.handles.count,
+                            pool,
+                        );
+                        (*target_type_batch).constraint_count = source_type_batch.handles.count;
+
+                        // Copy constraint data from active to inactive type batch.
+                        tp.inner().gather_active_constraints(
+                            &*bodies_ptr,
+                            &*solver_ptr,
+                            source_type_batch,
+                            0,
+                            source_type_batch.handles.count,
+                            &mut *target_type_batch,
+                        );
+                    }
+                }
+
+                // Copy fallback batch if applicable.
+                if island.protobatches.count > (*solver_ptr).fallback_batch_threshold() {
+                    constraint_set.sequential_fallback = SequentialFallbackBatch::create_from(
+                        &island.fallback_batch,
+                        pool,
+                    );
+                }
+            }
+
+            // Enqueue constraints for removal.
+            let constraint_remover = &mut *(*self_ptr).constraint_remover;
+            constraint_remover.prepare(None);
+            if (*solver_ptr).sets.get(set_index).allocated() {
+                let cset = (*solver_ptr).sets.get(set_index);
+                for bi in 0..cset.batches.count {
+                    let batch = cset.batches.get(bi);
+                    for tbi in 0..batch.type_batches.count {
+                        let tb = batch.type_batches.get(tbi);
+                        for ci in 0..tb.constraint_count {
+                            let handle = *tb.index_to_handle.get(ci);
+                            constraint_remover.enqueue_removal(0, handle);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Phase 3: REMOVAL — remove bodies from active set, notify pair cache.
+        let constraint_remover = &mut *(*self_ptr).constraint_remover;
+        let type_batch_removal_job_count = constraint_remover.create_flush_jobs(_deterministic);
+
+        // 3a: Notify pair cache — move overlap pairs to sleeping sets.
+        if !(*self_ptr).pair_cache.is_null() {
+            let pair_cache = &mut *(*self_ptr).pair_cache;
+            let mut largest_body_count = 0;
+            for set_ref in &new_inactive_sets {
+                let set_count = (*bodies_ptr).sets.get(set_ref.index).count;
+                if set_count > largest_body_count {
+                    largest_body_count = set_count;
+                }
+            }
+            let mut set_builder = SleepingSetBuilder::new(pool, largest_body_count * 4);
+            for set_ref in &new_inactive_sets {
+                pair_cache.sleep_type_batch_pairs(
+                    &mut set_builder,
+                    set_ref.index,
+                    &*solver_ptr,
+                );
+            }
+            set_builder.dispose(pool);
+        }
+
+        // 3b: Remove bodies from active set and update handle→location mappings.
+        let bodies = &mut *bodies_ptr;
+        for set_ref in &new_inactive_sets {
+            let inactive_body_count = (*bodies_ptr).sets.get(set_ref.index).count;
+            for body_index_in_inactive_set in 0..inactive_body_count {
+                let body_handle = *(*bodies_ptr).sets.get(set_ref.index).index_to_handle.get(body_index_in_inactive_set);
+                let active_index = (*bodies_ptr).handle_to_location.get(body_handle.0).index;
+                bodies.remove_from_active_set(active_index);
+                // Update the handle→body mapping to point at the inactive set.
+                let location = &mut *(*bodies_ptr).handle_to_location.get_mut(body_handle.0);
+                location.set_index = set_ref.index;
+                location.index = body_index_in_inactive_set;
+            }
+        }
+
+        // 3c: Remove constraints from batch referenced handles.
+        let constraint_remover = &mut *(*self_ptr).constraint_remover;
+        constraint_remover.remove_constraints_from_batch_referenced_handles();
+
+        // Phase 4: CONSTRAINT REMOVAL FROM TYPE BATCHES.
+        for i in 0..type_batch_removal_job_count {
+            (&mut *(*self_ptr).constraint_remover).remove_constraints_from_type_batch(i);
+        }
+
+        // Sequential: update handle→constraint mappings for all sleeping constraints.
+        for set_ref in &new_inactive_sets {
+            let set = (*solver_ptr).sets.get(set_ref.index);
+            for batch_index in 0..set.batches.count {
+                let batch = set.batches.get(batch_index);
+                for type_batch_index in 0..batch.type_batches.count {
+                    let type_batch = batch.type_batches.get(type_batch_index);
+                    for index_in_type_batch in 0..type_batch.constraint_count {
+                        let handle = *type_batch.index_to_handle.get(index_in_type_batch);
+                        let constraint_location = &mut *(*solver_ptr).handle_to_constraint.get_mut(handle.0);
+                        constraint_location.set_index = set_ref.index;
+                        constraint_location.batch_index = batch_index;
+                        constraint_location.index_in_type_batch = index_in_type_batch;
+                    }
+                }
+            }
+        }
+
+        (&mut *(*self_ptr).constraint_remover).postflush();
+
+        // Dispose the islands.
         for island in &mut islands {
             island.dispose(pool);
         }
@@ -477,7 +633,12 @@ impl IslandSleeper {
         if sets_capacity > solver.sets.len() {
             solver.resize_sets_capacity(sets_capacity, potentially_allocated);
         }
-        // TODO: if sets_capacity > pair_cache.sleeping_sets.len()
+        if !self.pair_cache.is_null() {
+            let pair_cache = unsafe { &mut *self.pair_cache };
+            if sets_capacity > pair_cache.sleeping_sets.len() {
+                pair_cache.resize_sets_capacity(sets_capacity, potentially_allocated);
+            }
+        }
     }
 
     /// Resizes the sets capacity for Bodies and Solver.
@@ -492,7 +653,10 @@ impl IslandSleeper {
 
         bodies.resize_sets_capacity(target, potentially_allocated);
         solver.resize_sets_capacity(target, potentially_allocated);
-        // TODO: pair_cache.resize_sets_capacity(...)
+        if !self.pair_cache.is_null() {
+            let pair_cache = unsafe { &mut *self.pair_cache };
+            pair_cache.resize_sets_capacity(target, potentially_allocated);
+        }
     }
 
     pub fn clear(&mut self) {

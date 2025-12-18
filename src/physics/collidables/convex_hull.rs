@@ -16,10 +16,11 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use super::mesh_inertia_helper::{MeshInertiaHelper, ITriangleSource};
-use super::shape::{IShape, IConvexShape, IDisposableShape, IShapeWide, ISupportFinder};
+use super::shape::{IShape, IConvexShape, IDisposableShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use super::ray::RayWide;
 
 /// Bounding plane of a convex hull face.
+#[derive(Clone, Copy, Default)]
 pub struct HullBoundingPlanes {
     /// Normal of the bounding plane.
     pub normal: Vector3Wide,
@@ -377,6 +378,14 @@ pub struct ConvexHullWide {
     pub hulls: Buffer<ConvexHull>,
 }
 
+impl Default for ConvexHullWide {
+    fn default() -> Self {
+        Self {
+            hulls: Buffer::default(),
+        }
+    }
+}
+
 impl ConvexHullWide {
     /// Estimates an epsilon scale for the convex hull by sampling the first point of each hull.
     #[inline(always)]
@@ -396,6 +405,21 @@ impl ConvexHullWide {
         }
         *epsilon_scale = (bundle.x.abs() + bundle.y.abs() + bundle.z.abs())
             * Vector::<f32>::splat(1.0 / 3.0);
+    }
+}
+
+impl IShapeWideAllocation for ConvexHullWide {
+    fn internal_allocation_size_of(&self) -> usize {
+        Vector::<f32>::LEN * std::mem::size_of::<ConvexHull>()
+    }
+
+    fn initialize_allocation(&mut self, memory: &Buffer<u8>) {
+        debug_assert!(memory.len() as usize == self.internal_allocation_size_of());
+        self.hulls = memory.cast::<ConvexHull>();
+    }
+
+    unsafe fn write_slot_raw(&mut self, index: usize, source: *const u8) {
+        <Self as IShapeWide<ConvexHull>>::write_slot(self, index, &*(source as *const ConvexHull));
     }
 }
 
@@ -542,6 +566,7 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
 }
 
 /// Support finder for convex hulls.
+#[derive(Default)]
 pub struct ConvexHullSupportFinder;
 
 impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {

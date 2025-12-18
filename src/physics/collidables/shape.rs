@@ -8,15 +8,8 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 
-use super::ray::RayData;
-
-/// Trait for ray hit handling during shape ray tests.
-pub trait IShapeRayHitHandler {
-    /// Returns true if the child at the given index should be tested.
-    fn allow_test(&self, child_index: i32) -> bool;
-    /// Called when a ray hits a shape.
-    fn on_ray_hit(&mut self, ray: &RayData, maximum_t: &mut f32, t: f32, normal: Vec3, child_index: i32);
-}
+// Re-export from canonical location.
+pub use crate::physics::collision_detection::ray_batchers::{IShapeRayHitHandler, RayData};
 
 /// Defines a type usable as a shape by collidables.
 pub trait IShape {
@@ -56,6 +49,33 @@ pub trait IConvexShape: IShape {
 pub trait IDisposableShape: IShape {
     /// Returns all resources used by the shape instance to the given pool.
     fn dispose(&mut self, pool: &mut BufferPool);
+}
+
+/// Internal allocation interface for shape wide types that may need dynamic memory.
+/// Separated from `IShapeWide<TShape>` so it can be constrained without knowing TShape.
+pub trait IShapeWideAllocation {
+    /// Gets the number of bytes required for internal allocations. Returns 0 for most shapes.
+    fn internal_allocation_size_of(&self) -> usize { 0 }
+    /// Provides memory for internal allocations. No-op for shapes with zero allocation size.
+    fn initialize_allocation(&mut self, _memory: &Buffer<u8>) {}
+
+    /// Writes a scalar shape from a raw pointer into the specified SIMD lane.
+    ///
+    /// The default implementation assumes the wide type is composed entirely of `Vector<f32>`
+    /// fields (valid for Sphere, Capsule, Box, Triangle, Cylinder). Types with non-uniform
+    /// layouts (e.g. ConvexHullWide) must override.
+    ///
+    /// # Safety
+    /// `source` must point to a valid instance of the corresponding scalar shape type.
+    unsafe fn write_slot_raw(&mut self, index: usize, source: *const u8) where Self: Sized {
+        let vector_width = crate::utilities::vector::VECTOR_WIDTH;
+        let scalar_float_count = std::mem::size_of::<Self>() / (vector_width * std::mem::size_of::<f32>());
+        let src = source as *const f32;
+        let dst = self as *mut Self as *mut f32;
+        for i in 0..scalar_float_count {
+            *dst.add(i * vector_width + index) = *src.add(i);
+        }
+    }
 }
 
 /// Widely vectorized bundle representation of a shape.
@@ -128,5 +148,57 @@ pub trait ISupportFinder<TShape: IConvexShape, TShapeWide: IShapeWide<TShape>> {
         direction: &Vector3Wide,
         terminated_lanes: &Vector<i32>,
         support: &mut Vector3Wide,
+    );
+}
+
+// Forward declarations for compound shape traits.
+use crate::physics::collidables::compound::CompoundChild;
+
+/// Defines a compound shape type that has children of potentially different types.
+pub trait ICompoundShape: IDisposableShape {
+    /// Gets the number of children in the compound shape.
+    fn child_count(&self) -> i32;
+
+    /// Gets a child from the compound by index.
+    fn get_child(&self, child_index: i32) -> &CompoundChild;
+
+    /// Computes the bounding box of the compound shape.
+    fn compute_bounds(&self, orientation: glam::Quat, min: &mut glam::Vec3, max: &mut glam::Vec3);
+
+    /// Finds overlapping children within a local bounding box.
+    fn find_local_overlaps<TOverlaps: super::compound::IOverlapCollector>(
+        &self,
+        local_min: &glam::Vec3,
+        local_max: &glam::Vec3,
+        overlaps: &mut TOverlaps,
+    );
+}
+
+/// Defines a compound shape type that has children of only one type.
+pub trait IHomogeneousCompoundShape<TChildShape: IConvexShape, TChildShapeWide: IShapeWide<TChildShape>>:
+    IDisposableShape
+{
+    /// Gets the number of children in the compound shape.
+    fn child_count(&self) -> i32;
+
+    /// Gets a child shape as it appears in the compound's local space.
+    fn get_local_child(&self, child_index: i32, child_data: &mut TChildShape);
+
+    /// Gets a local child and writes it into the first slot of a wide instance.
+    /// Used with `GatherScatter::get_offset_instance_mut` to fill specific SIMD lanes.
+    fn get_local_child_wide(&self, child_index: i32, target: &mut TChildShapeWide);
+
+    /// Gets a child shape and its pose in the compound's local space.
+    fn get_posed_local_child(&self, child_index: i32, child_data: &mut TChildShape, child_pose: &mut RigidPose);
+
+    /// Computes the bounding box of the compound shape.
+    fn compute_bounds(&self, orientation: glam::Quat, min: &mut glam::Vec3, max: &mut glam::Vec3);
+
+    /// Finds overlapping children within a local bounding box.
+    fn find_local_overlaps<TOverlaps: super::compound::IOverlapCollector>(
+        &self,
+        local_min: &glam::Vec3,
+        local_max: &glam::Vec3,
+        overlaps: &mut TOverlaps,
     );
 }

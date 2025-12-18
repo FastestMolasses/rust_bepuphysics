@@ -13,7 +13,7 @@ use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
+use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use super::ray::RayWide;
 
 /// Collision shape representing a sphere-expanded line segment.
@@ -201,6 +201,8 @@ pub struct CapsuleWide {
     pub half_length: Vector<f32>,
 }
 
+impl IShapeWideAllocation for CapsuleWide {}
+
 impl IShapeWide<Capsule> for CapsuleWide {
     fn allow_offset_memory_access(&self) -> bool {
         true
@@ -364,6 +366,7 @@ impl IShapeWide<Capsule> for CapsuleWide {
 }
 
 /// Support finder for capsules.
+#[derive(Default)]
 pub struct CapsuleSupportFinder;
 
 impl ISupportFinder<Capsule, CapsuleWide> for CapsuleSupportFinder {

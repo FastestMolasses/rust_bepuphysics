@@ -20,6 +20,7 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use crate::utilities::vector::Vector;
+use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Provides functionality for efficiently waking up sleeping bodies.
@@ -31,10 +32,10 @@ pub struct IslandAwakener {
     sleeper: *mut IslandSleeper,
     pool: *mut BufferPool,
 
-    // TODO: pub(crate) pair_cache: *mut PairCache,
+    pub(crate) pair_cache: *mut PairCache,
 
     // Worker dispatch state
-    job_index: AtomicI32,
+    job_index: UnsafeCell<i32>,
     job_count: i32,
 
     reset_activity_states: bool,
@@ -45,6 +46,7 @@ pub struct IslandAwakener {
 
 // Use real types from their modules.
 use crate::physics::collision_detection::broad_phase::BroadPhase;
+use crate::physics::collision_detection::pair_cache::PairCache;
 use crate::physics::island_sleeper::IslandSleeper;
 
 // --- Job types ---
@@ -146,6 +148,7 @@ impl IslandAwakener {
         solver: *mut Solver,
         broad_phase: *mut BroadPhase,
         sleeper: *mut IslandSleeper,
+        pair_cache: *mut PairCache,
         pool: *mut BufferPool,
     ) -> Self {
         Self {
@@ -154,8 +157,9 @@ impl IslandAwakener {
             solver,
             broad_phase,
             sleeper,
+            pair_cache,
             pool,
-            job_index: AtomicI32::new(-1),
+            job_index: UnsafeCell::new(-1),
             job_count: 0,
             reset_activity_states: false,
             unique_set_indices: QuickList::default(),
@@ -276,10 +280,12 @@ impl IslandAwakener {
         let job = *self.phase_one_jobs.get(index);
         match job.job_type {
             PhaseOneJobType::PairCache => {
-                // TODO: Update pair cache for awakened sets
-                // for i in 0..self.unique_set_indices.count {
-                //     self.pair_cache.awaken_set(self.unique_set_indices[i]);
-                // }
+                // Update pair cache for awakened sets
+                let pair_cache = &mut *self.pair_cache;
+                for i in 0..self.unique_set_indices.count {
+                    let set_index = *self.unique_set_indices.get(i);
+                    pair_cache.awaken_set(set_index);
+                }
             }
             PhaseOneJobType::UpdateBatchReferencedHandles => {
                 let solver = self.solver_mut();
@@ -703,7 +709,12 @@ impl IslandAwakener {
             if solver.sets.get(set_index).allocated() {
                 solver.sets.get_mut(set_index).dispose(pool);
             }
-            // TODO: dispose pair cache set if allocated
+            // Dispose pair cache sleeping set if allocated
+            let pair_cache = &mut *self.pair_cache;
+            let sleeping_set = pair_cache.sleeping_sets.get_mut(set_index);
+            if sleeping_set.allocated() {
+                sleeping_set.dispose(pool);
+            }
             // Return the set id to the sleeper
             (&mut *self.sleeper).return_set_id(set_index);
         }

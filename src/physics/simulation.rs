@@ -2,6 +2,9 @@
 
 use crate::physics::batch_compressor::BatchCompressor;
 use crate::physics::bodies::Bodies;
+use crate::physics::body_properties::{BodyVelocity, RigidPose};
+use crate::physics::collidables::shape::IConvexShape;
+use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::island_sleeper::IslandSleeper;
 use crate::physics::pose_integration::IPoseIntegratorCallbacks;
@@ -152,6 +155,8 @@ impl Simulation {
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
         let solver = &mut *self.solver;
+        // Wire the pose integrator into the solver for kinematic integration during substepping.
+        solver.pose_integrator = Some(self.pose_integrator);
         // profiler.start(solver);
         let constrained_body_set = solver.prepare_constraint_integration_responsibilities(thread_dispatcher);
         solver.solve(dt, thread_dispatcher);
@@ -254,33 +259,9 @@ unsafe impl Sync for Simulation {}
 
 use glam::Vec3;
 
-/// Data about a ray being cast.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RayData {
-    pub origin: Vec3,
-    pub direction: Vec3,
-    pub id: i32,
-}
-
-/// Defines a type capable of filtering ray test candidates on individual children of shapes.
-pub trait IShapeRayHitHandler {
-    /// Checks whether a child of a collidable should be tested against a ray.
-    fn allow_test(&self, child_index: i32) -> bool;
-
-    /// Called when a ray impact has been found.
-    fn on_ray_hit(
-        &mut self,
-        ray: &RayData,
-        maximum_t: &mut f32,
-        t: f32,
-        normal: Vec3,
-        child_index: i32,
-    );
-}
-
-// TODO: forward declaration
-pub struct CollidableReference;
+// Re-export types from ray_batchers for public API.
+pub use crate::physics::collision_detection::ray_batchers::{RayData, IShapeRayHitHandler};
+pub use crate::physics::collidables::collidable_reference::CollidableReference;
 
 /// Defines a type capable of filtering ray test candidates and handling ray hit results.
 pub trait IRayHitHandler {
@@ -325,26 +306,327 @@ pub trait ISweepHitHandler {
 }
 
 impl Simulation {
+    /// Gets the pose and shape for a collidable reference.
+    ///
+    /// # Safety
+    /// The collidable reference must be valid (i.e. the handle must exist in bodies or statics).
+    #[inline(always)]
+    pub unsafe fn get_pose_and_shape(
+        &self,
+        reference: CollidableReference,
+    ) -> (*const RigidPose, TypedIndex) {
+        use crate::physics::collidables::collidable_reference::CollidableMobility;
+        if reference.mobility() == CollidableMobility::Static {
+            let statics = &*self.statics;
+            let index = *statics.handle_to_index.get(reference.static_handle().0);
+            let s = statics.statics_buffer.get(index);
+            (&s.pose as *const RigidPose, s.shape)
+        } else {
+            let bodies = &*self.bodies;
+            let location = bodies.handle_to_location.get(reference.body_handle().0);
+            let set = bodies.sets.get(location.set_index);
+            let dynamics = set.dynamics_state.get(location.index);
+            (&dynamics.motion.pose as *const RigidPose, set.collidables.get(location.index).shape)
+        }
+    }
+
     /// Intersects a ray against the simulation.
     pub unsafe fn ray_cast<H: IRayHitHandler>(
         &self,
-        _origin: Vec3,
-        _direction: Vec3,
-        _maximum_t: f32,
-        _hit_handler: &mut H,
-        _id: i32,
+        origin: Vec3,
+        direction: Vec3,
+        maximum_t: f32,
+        hit_handler: &mut H,
+        id: i32,
     ) {
-        // TODO: Requires BroadPhase.ray_cast and Shapes integration
-        // Build a RayHitDispatcher that wraps the hit_handler,
-        // calls broad_phase.ray_cast, then for each candidate calls shapes[type].ray_test.
+        use crate::physics::collision_detection::ray_batchers::{
+            IBroadPhaseRayTester, IShapeRayHitHandler, RayData,
+        };
+
+        // ShapeRayHitHandler wraps the user's IRayHitHandler to implement IShapeRayHitHandler.
+        struct ShapeRayHitHandler<'a, H: IRayHitHandler> {
+            hit_handler: &'a mut H,
+            collidable: CollidableReference,
+        }
+
+        impl<H: IRayHitHandler> IShapeRayHitHandler for ShapeRayHitHandler<'_, H> {
+            #[inline(always)]
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.hit_handler.allow_test_child(&self.collidable, child_index)
+            }
+
+            #[inline(always)]
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.hit_handler.on_ray_hit(ray, maximum_t, t, normal, &self.collidable, child_index);
+            }
+        }
+
+        // RayHitDispatcher implements IBroadPhaseRayTester for the broad phase traversal.
+        struct RayHitDispatcher<'a, H: IRayHitHandler> {
+            simulation: &'a Simulation,
+            shape_hit_handler: ShapeRayHitHandler<'a, H>,
+        }
+
+        impl<H: IRayHitHandler> IBroadPhaseRayTester for RayHitDispatcher<'_, H> {
+            #[inline(always)]
+            unsafe fn ray_test(
+                &mut self,
+                collidable: CollidableReference,
+                ray_data: *const RayData,
+                maximum_t: *mut f32,
+            ) {
+                if self.shape_hit_handler.hit_handler.allow_test_collidable(&collidable) {
+                    self.shape_hit_handler.collidable = collidable;
+                    let (pose, shape) = self.simulation.get_pose_and_shape(collidable);
+                    type RealShapes = crate::physics::collidables::shapes::Shapes;
+                    let shapes = &*(self.simulation.shapes as *const RealShapes);
+                    if let Some(batch) = shapes.get_batch(shape.type_id() as usize) {
+                        batch.ray_test(
+                            shape.index() as usize,
+                            &*pose,
+                            &*ray_data,
+                            &mut *maximum_t,
+                            &mut self.shape_hit_handler,
+                        );
+                    }
+                }
+            }
+        }
+
+        let mut dispatcher = RayHitDispatcher {
+            simulation: self,
+            shape_hit_handler: ShapeRayHitHandler {
+                hit_handler,
+                collidable: CollidableReference::from_raw(
+                    crate::physics::collidables::collidable_reference::CollidableMobility::Static,
+                    0,
+                ),
+            },
+        };
+
+        type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
+        let broad_phase = &*(self.broad_phase as *const RealBroadPhase);
+        broad_phase.ray_cast(origin, direction, maximum_t, &mut dispatcher, id);
     }
 
     /// Sweeps a shape against the simulation.
+    /// Simulation objects are treated as stationary during the sweep.
+    ///
+    /// # Safety
+    /// The shape data pointer must be valid for the given shape type.
+    /// The pool must be valid. All broad phase and narrow phase pointers must be valid.
     pub unsafe fn sweep<H: ISweepHitHandler>(
         &self,
-        // shape, pose, velocity, maximum_t, pool, hit_handler, ...
-        _hit_handler: &mut H,
+        shape_data: *const u8,
+        shape_type: i32,
+        pose: &RigidPose,
+        velocity: &BodyVelocity,
+        maximum_t: f32,
+        pool: *mut BufferPool,
+        hit_handler: &mut H,
+        minimum_progression: f32,
+        convergence_threshold: f32,
+        maximum_iteration_count: i32,
+        min: Vec3,
+        max: Vec3,
     ) {
-        // TODO: Requires BroadPhase.sweep, NarrowPhase.sweep_task_registry, and Shapes integration
+        use crate::physics::collision_detection::ray_batchers::IBroadPhaseSweepTester;
+        use crate::physics::collision_detection::sweep_task_registry::{ISweepFilter, SweepTaskRegistry};
+
+        // SweepFilter delegates child-level filtering to the user's hit handler.
+        struct SweepFilter<'a, H: ISweepHitHandler> {
+            hit_handler: &'a H,
+            collidable_being_tested: CollidableReference,
+        }
+
+        impl<H: ISweepHitHandler> ISweepFilter for SweepFilter<'_, H> {
+            #[inline(always)]
+            fn allow_test(&self, _child_a: i32, child_b: i32) -> bool {
+                // Simulation sweep does not permit nonconvex sweep shapes, so childA is irrelevant.
+                self.hit_handler.allow_test_child(&self.collidable_being_tested, child_b)
+            }
+        }
+
+        // SweepHitDispatcher implements IBroadPhaseSweepTester for the broad phase traversal.
+        struct SweepHitDispatcher<'a, H: ISweepHitHandler> {
+            simulation: &'a Simulation,
+            pool: *mut BufferPool,
+            shape_data: *const u8,
+            shape_type: i32,
+            pose: RigidPose,
+            velocity: BodyVelocity,
+            hit_handler: &'a mut H,
+            collidable_being_tested: CollidableReference,
+            minimum_progression: f32,
+            convergence_threshold: f32,
+            maximum_iteration_count: i32,
+        }
+
+        impl<H: ISweepHitHandler> IBroadPhaseSweepTester for SweepHitDispatcher<'_, H> {
+            #[inline(always)]
+            fn test(&mut self, collidable: CollidableReference, maximum_t: &mut f32) {
+                if self.hit_handler.allow_test(&collidable) {
+                    let (target_pose, target_shape) =
+                        unsafe { self.simulation.get_pose_and_shape(collidable) };
+                    type RealShapes = crate::physics::collidables::shapes::Shapes;
+                    let shapes = unsafe { &*(self.simulation.shapes as *const RealShapes) };
+                    let (target_shape_data, _) = unsafe {
+                        shapes
+                            .get_batch(target_shape.type_id() as usize)
+                            .unwrap()
+                            .get_shape_data(target_shape.index() as usize)
+                    };
+
+                    self.collidable_being_tested = collidable;
+
+                    type RealNarrowPhase =
+                        crate::physics::collision_detection::narrow_phase::NarrowPhase;
+                    let narrow_phase =
+                        unsafe { &*(self.simulation.narrow_phase as *const RealNarrowPhase) };
+                    let sweep_task_registry =
+                        unsafe { &*narrow_phase.sweep_task_registry };
+
+                    if let Some(task) =
+                        sweep_task_registry.get_task(self.shape_type, target_shape.type_id())
+                    {
+                        let zero_velocity = BodyVelocity::default();
+                        let mut t0 = 0.0f32;
+                        let mut t1 = 0.0f32;
+                        let mut hit_location = Vec3::ZERO;
+                        let mut hit_normal = Vec3::ZERO;
+
+                        let mut filter = SweepFilter {
+                            hit_handler: &*self.hit_handler,
+                            collidable_being_tested: collidable,
+                        };
+
+                        let result = unsafe {
+                            task.sweep_filtered(
+                                self.shape_data,
+                                self.shape_type,
+                                self.pose.orientation,
+                                &self.velocity,
+                                target_shape_data,
+                                target_shape.type_id(),
+                                unsafe { (*target_pose).position } - self.pose.position,
+                                unsafe { (*target_pose).orientation },
+                                &zero_velocity,
+                                *maximum_t,
+                                self.minimum_progression,
+                                self.convergence_threshold,
+                                self.maximum_iteration_count,
+                                &mut filter as *mut SweepFilter<'_, H> as *mut u8,
+                                self.simulation.shapes
+                                    as *mut crate::physics::collidables::shapes::Shapes,
+                                narrow_phase.sweep_task_registry as *mut SweepTaskRegistry,
+                                self.pool,
+                                &mut t0,
+                                &mut t1,
+                                &mut hit_location,
+                                &mut hit_normal,
+                            )
+                        };
+
+                        if result {
+                            if t1 > 0.0 {
+                                hit_location += self.pose.position;
+                                self.hit_handler
+                                    .on_hit(maximum_t, t1, hit_location, hit_normal, &collidable);
+                            } else {
+                                self.hit_handler.on_hit_at_zero_t(maximum_t, &collidable);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut dispatcher = SweepHitDispatcher {
+            simulation: self,
+            pool,
+            shape_data,
+            shape_type,
+            pose: *pose,
+            velocity: *velocity,
+            hit_handler,
+            collidable_being_tested: CollidableReference::from_raw(
+                crate::physics::collidables::collidable_reference::CollidableMobility::Static,
+                0,
+            ),
+            minimum_progression,
+            convergence_threshold,
+            maximum_iteration_count,
+        };
+
+        type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
+        let broad_phase = &*(self.broad_phase as *const RealBroadPhase);
+        broad_phase.sweep_minmax(min, max, velocity.linear, maximum_t, &mut dispatcher);
+    }
+
+    /// Sweeps a convex shape against the simulation with automatically estimated termination conditions.
+    /// Simulation objects are treated as stationary during the sweep.
+    ///
+    /// # Safety
+    /// The shape must be a valid convex shape. All simulation pointers must be valid.
+    pub unsafe fn sweep_shape<TShape: IConvexShape, H: ISweepHitHandler>(
+        &self,
+        shape: &TShape,
+        pose: &RigidPose,
+        velocity: &BodyVelocity,
+        maximum_t: f32,
+        pool: *mut BufferPool,
+        hit_handler: &mut H,
+    ) {
+        // Estimate reasonable termination conditions from shape size.
+        let mut maximum_radius = 0.0f32;
+        let mut maximum_angular_expansion = 0.0f32;
+        shape.compute_angular_expansion_data(&mut maximum_radius, &mut maximum_angular_expansion);
+        let minimum_radius = maximum_radius - maximum_angular_expansion;
+        let size_estimate = minimum_radius.max(maximum_radius * 0.25);
+        let minimum_progression_distance = 0.1 * size_estimate;
+        let convergence_threshold_distance = 1e-5 * size_estimate;
+        let tangent_velocity = (velocity.angular.length() * maximum_radius)
+            .min(maximum_angular_expansion / maximum_t);
+        let inverse_velocity = 1.0 / (velocity.linear.length() + tangent_velocity);
+        let minimum_progression_t = minimum_progression_distance * inverse_velocity;
+        let convergence_threshold_t = convergence_threshold_distance * inverse_velocity;
+        let maximum_iteration_count = 25;
+
+        // Compute bounding box.
+        let mut min = Vec3::ZERO;
+        let mut max = Vec3::ZERO;
+        shape.compute_bounds(pose.orientation, &mut min, &mut max);
+        let angular_expansion = Vec3::splat(
+            crate::physics::bounding_box_helpers::BoundingBoxHelpers::get_angular_bounds_expansion(
+                velocity.angular.length(),
+                maximum_t,
+                maximum_radius,
+                maximum_angular_expansion,
+            ),
+        );
+        min = min - angular_expansion + pose.position;
+        max = max + angular_expansion + pose.position;
+
+        self.sweep(
+            shape as *const TShape as *const u8,
+            TShape::type_id(),
+            pose,
+            velocity,
+            maximum_t,
+            pool,
+            hit_handler,
+            minimum_progression_t,
+            convergence_threshold_t,
+            maximum_iteration_count,
+            min,
+            max,
+        );
     }
 }

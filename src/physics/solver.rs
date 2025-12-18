@@ -4,7 +4,7 @@ use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::BodyInertia;
 use crate::physics::body_set::BodyConstraintReference;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
-use crate::physics::collision_detection::pair_cache::CollidablePair;
+use crate::physics::collision_detection::pair_cache::{CollidablePair, PairCache};
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraint_reference::ConstraintReference;
@@ -22,6 +22,7 @@ use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
+use crate::physics::pose_integrator::IPoseIntegrator;
 use std::simd::prelude::*;
 use crate::utilities::vector::Vector;
 
@@ -39,8 +40,9 @@ pub struct Solver {
     pub type_processors: Vec<Option<TypeProcessor>>,
 
     pub(crate) bodies: *mut Bodies,
-    // TODO: pub(crate) pair_cache: *mut PairCache,
+    pub(crate) pair_cache: *mut PairCache,
     pub(crate) awakener: *mut IslandAwakener,
+    pub(crate) pose_integrator: Option<*mut dyn IPoseIntegrator>,
 
     /// Pool to retrieve constraint handles from when creating new constraints.
     pub handle_pool: IdPool,
@@ -248,7 +250,9 @@ impl Solver {
             batch_referenced_handles: QuickList::default(),
             type_processors: Vec::new(),
             bodies,
+            pair_cache: std::ptr::null_mut(),
             awakener: std::ptr::null_mut(),
+            pose_integrator: None,
             handle_pool: IdPool::new(128, pool_ref),
             pool,
             handle_to_constraint: Buffer::default(),
@@ -728,7 +732,9 @@ impl Solver {
         // Remove constraint from all connected body constraints lists.
         self.remove_constraint_references_from_bodies(handle);
 
-        // TODO: pair_cache.remove_reference_if_contact_constraint(handle, location.type_id);
+        if !self.pair_cache.is_null() {
+            (*self.pair_cache).remove_reference_if_contact_constraint(handle, location.type_id);
+        }
 
         self.remove_from_batch(location.batch_index, location.type_id, location.index_in_type_batch);
 
@@ -1492,13 +1498,29 @@ impl Solver {
                         }
                     }
                 }
-                // TODO: Integrate kinematic poses and velocities for substeps > 0
-                // PoseIntegrator.IntegrateKinematicPosesAndVelocities(...)
+                // Integrate kinematic poses and velocities for substeps > 0.
+                if let Some(pi_ptr) = (*self_ptr).pose_integrator {
+                    let pi = &*pi_ptr;
+                    let handles = &(*self_ptr).constrained_kinematic_handles;
+                    let handle_buf = handles.span.slice_count(handles.count);
+                    let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
+                    pi.integrate_kinematic_poses_and_velocities_dispatch(
+                        &handle_buf, 0, bundle_count, substep_dt, 0,
+                    );
+                }
             } else {
                 // First substep: integrate kinematic velocities if needed.
-                // TODO: if PoseIntegrator.Callbacks.IntegrateVelocityForKinematics {
-                //     PoseIntegrator.IntegrateKinematicVelocities(...)
-                // }
+                if let Some(pi_ptr) = (*self_ptr).pose_integrator {
+                    let pi = &*pi_ptr;
+                    if pi.integrate_velocity_for_kinematics() {
+                        let handles = &(*self_ptr).constrained_kinematic_handles;
+                        let handle_buf = handles.span.slice_count(handles.count);
+                        let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
+                        pi.integrate_kinematic_velocities_dispatch(
+                            &handle_buf, 0, bundle_count, substep_dt, 0,
+                        );
+                    }
+                }
             }
 
             // Warm start all batches.

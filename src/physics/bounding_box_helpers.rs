@@ -1,12 +1,17 @@
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
 use crate::utilities::math_helper;
+use crate::utilities::quaternion_ex;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 
-use crate::physics::body_properties::BodyVelocityWide;
+use crate::physics::body_properties::{BodyVelocity, BodyVelocityWide, RigidPose};
+use crate::physics::collidables::compound::Compound;
+use crate::physics::collidables::shape::IConvexShape;
+use crate::physics::collidables::shapes::Shapes;
+use crate::physics::collidables::typed_index::TypedIndex;
 
 /// Helper functions for computing bounding box expansions.
 pub struct BoundingBoxHelpers;
@@ -139,6 +144,82 @@ impl BoundingBoxHelpers {
 
     // --- Scalar versions ---
 
+    /// Expands local bounding boxes (min/max already computed from shape bounds)
+    /// to account for velocity, angular motion, and then offsets by local position.
+    ///
+    /// This is used by overlap finders when computing the local-space bounding box of one shape
+    /// relative to another (e.g., convex in compound's local space).
+    #[inline(always)]
+    pub fn expand_local_bounding_boxes(
+        min: &mut Vector3Wide,
+        max: &mut Vector3Wide,
+        radius_a: Vector<f32>,
+        local_position_a: &Vector3Wide,
+        local_relative_linear_velocity_a: &Vector3Wide,
+        angular_velocity_a: &Vector3Wide,
+        angular_velocity_b: &Vector3Wide,
+        dt: f32,
+        maximum_radius: Vector<f32>,
+        maximum_angular_expansion: Vector<f32>,
+        maximum_allowed_expansion: Vector<f32>,
+    ) {
+        let dt_wide = Vector::<f32>::splat(dt);
+        let mut min_expansion = Vector3Wide::default();
+        let mut max_expansion = Vector3Wide::default();
+        Self::get_bounds_expansion_wide_full(
+            local_relative_linear_velocity_a,
+            angular_velocity_a,
+            dt_wide,
+            maximum_radius + radius_a,
+            maximum_angular_expansion + radius_a,
+            &mut min_expansion,
+            &mut max_expansion,
+        );
+        let mut angular_speed_b_squared = Vector::<f32>::default();
+        Vector3Wide::length_squared_to(angular_velocity_b, &mut angular_speed_b_squared);
+        let zero = Vector::<f32>::splat(0.0);
+        if angular_speed_b_squared.simd_gt(zero).any() {
+            // Worst case radius assumes the linear motion is separating the objects as directly as possible.
+            let mut radius_b = Vector::<f32>::default();
+            Vector3Wide::length_into(local_position_a, &mut radius_b);
+            let mut linear_speed = Vector::<f32>::default();
+            Vector3Wide::length_into(local_relative_linear_velocity_a, &mut linear_speed);
+            let worst_case_radius = linear_speed * Vector::<f32>::splat(dt) + radius_b;
+            let angular_expansion_b = Self::get_angular_bounds_expansion_wide(
+                angular_speed_b_squared.sqrt(),
+                maximum_radius + worst_case_radius,
+                maximum_angular_expansion + worst_case_radius,
+                dt_wide,
+            );
+            let angular_expansion_b_3 = Vector3Wide {
+                x: angular_expansion_b,
+                y: angular_expansion_b,
+                z: angular_expansion_b,
+            };
+            min_expansion.x -= angular_expansion_b;
+            min_expansion.y -= angular_expansion_b;
+            min_expansion.z -= angular_expansion_b;
+            max_expansion += angular_expansion_b_3;
+        }
+
+        // Clamp the expansion to the pair imposed limit.
+        let neg_max = -maximum_allowed_expansion;
+        max_expansion.x = max_expansion.x.simd_min(maximum_allowed_expansion);
+        max_expansion.y = max_expansion.y.simd_min(maximum_allowed_expansion);
+        max_expansion.z = max_expansion.z.simd_min(maximum_allowed_expansion);
+        min_expansion.x = min_expansion.x.simd_max(neg_max);
+        min_expansion.y = min_expansion.y.simd_max(neg_max);
+        min_expansion.z = min_expansion.z.simd_max(neg_max);
+
+        // Apply expansion and offset by local position.
+        *min += min_expansion;
+        *max += max_expansion;
+        *min += *local_position_a;
+        *max += *local_position_a;
+    }
+
+    // --- Scalar versions ---
+
     /// Computes the angular bounds expansion (scalar version).
     #[inline(always)]
     pub fn get_angular_bounds_expansion(
@@ -264,5 +345,124 @@ impl BoundingBoxHelpers {
         let max_expansion = expansion.max(Vec3::ZERO);
         *min += min_expansion;
         *max += max_expansion;
+    }
+
+    /// Computes a bounding box in the local space of B for a sweep of shape A.
+    ///
+    /// # Safety
+    /// Types must be valid and aligned.
+    pub unsafe fn get_local_bounding_box_for_sweep_shape<TShapeA: IConvexShape>(
+        shape_a: &TShapeA,
+        orientation_a: Quat,
+        velocity_a: &BodyVelocity,
+        offset_b: Vec3,
+        orientation_b: Quat,
+        velocity_b: &BodyVelocity,
+        dt: f32,
+        sweep: &mut Vec3,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        let inverse_orientation_b = quaternion_ex::conjugate(orientation_b);
+        quaternion_ex::transform_without_overlap(
+            (velocity_a.linear - velocity_b.linear) * dt,
+            inverse_orientation_b,
+            sweep,
+        );
+        let mut local_offset_b = Vec3::ZERO;
+        quaternion_ex::transform_without_overlap(offset_b, inverse_orientation_b, &mut local_offset_b);
+        let mut local_orientation_a = Quat::IDENTITY;
+        quaternion_ex::concatenate_without_overlap(orientation_a, inverse_orientation_b, &mut local_orientation_a);
+
+        let mut maximum_radius_a = 0f32;
+        let mut maximum_angular_expansion_a = 0f32;
+        shape_a.compute_angular_expansion_data(&mut maximum_radius_a, &mut maximum_angular_expansion_a);
+        let angular_expansion_a = Self::get_angular_bounds_expansion(
+            velocity_a.angular.length(),
+            dt,
+            maximum_radius_a,
+            maximum_angular_expansion_a,
+        );
+        // The furthest the convex can be from the compound is no further than the sweep pushing it directly away from the compound.
+        let worst_case_radius_b = sweep.length() + local_offset_b.length();
+        let angular_expansion_b = Self::get_angular_bounds_expansion(
+            velocity_b.angular.length(),
+            dt,
+            worst_case_radius_b + maximum_radius_a,
+            worst_case_radius_b + maximum_angular_expansion_a,
+        );
+        let combined_angular_expansion = Vec3::splat(angular_expansion_a + angular_expansion_b);
+
+        shape_a.compute_bounds(local_orientation_a, min, max);
+        *min = *min - local_offset_b - combined_angular_expansion;
+        *max = *max - local_offset_b + combined_angular_expansion;
+    }
+
+    /// Computes a bounding box in the local space of B for a sweep of a compound child.
+    ///
+    /// # Safety
+    /// Types must be valid and aligned.
+    pub unsafe fn get_local_bounding_box_for_sweep_child(
+        shape_index: TypedIndex,
+        shapes: &Shapes,
+        local_pose: &RigidPose,
+        orientation_a: Quat,
+        velocity_a: &BodyVelocity,
+        offset_b: Vec3,
+        orientation_b: Quat,
+        velocity_b: &BodyVelocity,
+        dt: f32,
+        sweep: &mut Vec3,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        let inverse_orientation_b = quaternion_ex::conjugate(orientation_b);
+        quaternion_ex::transform_without_overlap(
+            (velocity_a.linear - velocity_b.linear) * dt,
+            inverse_orientation_b,
+            sweep,
+        );
+        let mut local_offset_b = Vec3::ZERO;
+        quaternion_ex::transform_without_overlap(offset_b, inverse_orientation_b, &mut local_offset_b);
+        let mut orientation_a_local_to_b = Quat::IDENTITY;
+        quaternion_ex::concatenate_without_overlap(orientation_a, inverse_orientation_b, &mut orientation_a_local_to_b);
+        let mut pose_a_rotated_into_b_local_space = RigidPose::default();
+        Compound::get_rotated_child_pose_from_pose(
+            local_pose,
+            orientation_a_local_to_b,
+            &mut pose_a_rotated_into_b_local_space,
+        );
+        let local_origin_to_a = pose_a_rotated_into_b_local_space.position - local_offset_b;
+
+        let mut maximum_radius_a = 0f32;
+        let mut maximum_angular_expansion_a = 0f32;
+        shapes.get_batch(shape_index.type_id() as usize).unwrap().compute_bounds_with_angular_data(
+            shape_index.index() as usize,
+            pose_a_rotated_into_b_local_space.orientation,
+            &mut maximum_radius_a,
+            &mut maximum_angular_expansion_a,
+            min,
+            max,
+        );
+        // Object A could rotate around its center.
+        let worst_case_radius_a = local_pose.position.length();
+        let angular_expansion_a = Self::get_angular_bounds_expansion(
+            velocity_a.angular.length(),
+            dt,
+            worst_case_radius_a + maximum_radius_a,
+            worst_case_radius_a + maximum_angular_expansion_a,
+        );
+        // Rotation of object B could induce an arc in object A.
+        let worst_case_radius_b = sweep.length() + local_offset_b.length() + worst_case_radius_a;
+        let angular_expansion_b = Self::get_angular_bounds_expansion(
+            velocity_b.angular.length(),
+            dt,
+            worst_case_radius_b + maximum_radius_a,
+            worst_case_radius_b + maximum_angular_expansion_a,
+        );
+        let combined_angular_expansion = Vec3::splat(angular_expansion_a + angular_expansion_b);
+
+        *min = local_origin_to_a + *min - combined_angular_expansion;
+        *max = local_origin_to_a + *max + combined_angular_expansion;
     }
 }

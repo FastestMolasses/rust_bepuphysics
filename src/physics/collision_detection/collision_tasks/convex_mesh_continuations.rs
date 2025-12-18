@@ -5,11 +5,12 @@ use std::marker::PhantomData;
 use glam::Vec3;
 
 use crate::physics::body_properties::RigidPose;
-use crate::physics::collidables::triangle::Triangle;
-use crate::physics::collision_detection::collision_batcher::{BoundsTestedPair, ICollisionCallbacks};
+use crate::physics::collidables::shape::IHomogeneousCompoundShape;
+use crate::physics::collidables::triangle::{Triangle, TriangleWide};
+use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::physics::collision_detection::collision_batcher_continuations::CollisionContinuationType;
+use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
 use crate::physics::collision_detection::mesh_reduction::MeshReduction;
-use crate::utilities::memory::buffer_pool::BufferPool;
 
 use super::compound_pair_overlaps::OverlapQueryForPair;
 use super::convex_compound_collision_task::IConvexCompoundContinuationHandler;
@@ -30,44 +31,39 @@ impl<TMesh> Default for ConvexMeshContinuations<TMesh> {
     }
 }
 
-impl<TMesh> IConvexCompoundContinuationHandler<MeshReduction>
+impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> IConvexCompoundContinuationHandler<MeshReduction>
     for ConvexMeshContinuations<TMesh>
 {
     fn collision_continuation_type(&self) -> CollisionContinuationType {
         CollisionContinuationType::MeshReduction
     }
 
-    unsafe fn create_continuation<TCallbacks: ICollisionCallbacks>(
+    unsafe fn create_continuation(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         child_count: i32,
         pair: &BoundsTestedPair,
         query_for_pair: &OverlapQueryForPair,
         continuation_index: &mut i32,
     ) -> *mut MeshReduction {
-        // TODO: Once CollisionBatcher has MeshReductions field:
-        // let continuation = (*batcher).mesh_reductions.create_continuation(
-        //     child_count, &mut *(*batcher).pool, continuation_index
-        // );
-        // Pass ownership of the triangles buffer to the continuation.
-        // let pool = &mut *(*batcher).pool;
-        // (*continuation).triangles = pool.take(child_count);
-        // (*continuation).mesh_orientation = pair.orientation_b;
-        // // A flip is required whenever contacts are generated as if the triangle is in slot B,
-        // // which is whenever this pair has *not* been flipped.
-        // (*continuation).requires_flip = pair.flip_mask == 0;
-        // (*continuation).query_bounds.min = query_for_pair.min;
-        // (*continuation).query_bounds.max = query_for_pair.max;
-        // // TODO: Not flexible with respect to different mesh types.
-        // (*continuation).mesh = query_for_pair.container as *mut u8;
-        // continuation
-        let _ = (batcher, child_count, pair, query_for_pair, continuation_index);
-        std::ptr::null_mut()
+        let pool = &mut *vtable.pool;
+        let (index, continuation) = (&mut *vtable.mesh_reductions).create_continuation(child_count, pool);
+        *continuation_index = index;
+        // Pass ownership of the triangles buffer to the continuation. It'll dispose of the buffer.
+        continuation.triangles = pool.take(child_count);
+        continuation.mesh_orientation = pair.orientation_b;
+        // A flip is required in mesh reduction whenever contacts are being generated as if the triangle is in slot B,
+        // which is whenever this pair has *not* been flipped.
+        continuation.requires_flip = pair.flip_mask == 0;
+        continuation.query_bounds.min = query_for_pair.min;
+        continuation.query_bounds.max = query_for_pair.max;
+        continuation.mesh = query_for_pair.container as *mut u8;
+        continuation as *mut MeshReduction
     }
 
-    unsafe fn configure_continuation_child<TCallbacks: ICollisionCallbacks>(
+    unsafe fn configure_continuation_child(
         &self,
-        _batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        _vtable: &BatcherVtable,
         continuation: *mut MeshReduction,
         continuation_child_index: i32,
         pair: &BoundsTestedPair,
@@ -84,9 +80,8 @@ impl<TMesh> IConvexCompoundContinuationHandler<MeshReduction>
         *child_shape_data_b = triangle_ptr as *const u8;
         *child_type_b = Triangle::ID;
 
-        // TODO: Get the local child from the mesh:
-        // let mesh = &*(pair.b as *const TMesh);
-        // mesh.get_local_child(child_index, &mut (*continuation).triangles[continuation_child_index]);
+        let mesh = &*(pair.b as *const TMesh);
+        mesh.get_local_child(child_index, &mut cont.triangles[continuation_child_index]);
 
         // Triangles already have their local pose baked into their vertices,
         // so we just need the orientation.

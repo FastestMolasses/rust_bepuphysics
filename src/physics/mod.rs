@@ -5,6 +5,7 @@ pub mod body_description;
 pub mod body_properties;
 pub mod body_reference;
 pub mod body_set;
+pub mod bounding_box_batcher;
 pub mod bounding_box_helpers;
 pub mod collidable_property;
 pub mod collidables;

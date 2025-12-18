@@ -6,7 +6,7 @@ use crate::physics::collision_detection::collision_batcher_continuations::{
     BatcherContinuations, CollisionContinuationType, ICollisionTestContinuation, PairContinuation,
 };
 use crate::physics::collision_detection::collision_task_registry::{
-    CollisionTaskPairType, CollisionTaskRegistry,
+    BatcherVtable, CollisionTaskPairType, CollisionTaskRegistry,
 };
 use crate::physics::collision_detection::compound_mesh_reduction::CompoundMeshReduction;
 use crate::physics::collision_detection::contact_manifold::{
@@ -362,14 +362,101 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             let type_matrix = &*self.type_matrix;
             // Use raw pointer to avoid double-mutable-borrow since batch borrows from self.batches
             let batch_ptr = batch as *mut CollisionBatch;
+            let vtable = self.make_vtable();
             type_matrix.tasks[reference.task_index as usize].execute_batch(
                 &mut (*batch_ptr).pairs,
-                self as *mut Self as *mut u8,
+                &vtable,
             );
             (*batch_ptr).pairs.count = 0;
             (*batch_ptr).pairs.byte_count = 0;
             (*batch_ptr).shapes.byte_count = 0;
         }
+    }
+
+    /// Constructs a type-erased vtable for batcher operations.
+    ///
+    /// This enables compound collision tasks (which generate subtasks back into the batcher)
+    /// to call batcher methods without knowing the concrete `TCallbacks` type.
+    unsafe fn make_vtable(&mut self) -> BatcherVtable {
+        BatcherVtable {
+            batcher: self as *mut Self as *mut u8,
+            pool: self.pool,
+            shapes: self.shapes,
+            dt: self.dt,
+            nonconvex_reductions: &mut self.nonconvex_reductions,
+            mesh_reductions: &mut self.mesh_reductions,
+            compound_mesh_reductions: &mut self.compound_mesh_reductions,
+            process_convex_result: Self::process_convex_result_trampoline,
+            add_directly: Self::add_directly_trampoline,
+            process_empty_result: Self::process_empty_result_trampoline,
+            process_untested_subpair_convex_result: Self::process_untested_subpair_trampoline,
+            allow_collision_testing: Self::allow_collision_testing_trampoline,
+        }
+    }
+
+    /// Type-erased trampoline for calling `process_convex_result` from collision tasks.
+    /// This allows collision tasks to dispatch results without knowing `TCallbacks`.
+    unsafe fn process_convex_result_trampoline(
+        batcher: *mut u8,
+        manifold: &mut ConvexContactManifold,
+        continuation: &PairContinuation,
+    ) {
+        let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
+        batcher.process_convex_result(manifold, continuation);
+    }
+
+    /// Type-erased trampoline for `add_directly`.
+    unsafe fn add_directly_trampoline(
+        batcher: *mut u8,
+        shape_type_a: i32,
+        shape_type_b: i32,
+        shape_a: *const u8,
+        shape_b: *const u8,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        velocity_a: &BodyVelocity,
+        velocity_b: &BodyVelocity,
+        speculative_margin: f32,
+        maximum_expansion: f32,
+        pair_continuation: &PairContinuation,
+    ) {
+        let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
+        batcher.add_directly(
+            shape_type_a, shape_type_b, shape_a, shape_b,
+            offset_b, orientation_a, orientation_b,
+            velocity_a, velocity_b, speculative_margin, maximum_expansion,
+            pair_continuation,
+        );
+    }
+
+    /// Type-erased trampoline for `process_empty_result`.
+    unsafe fn process_empty_result_trampoline(
+        batcher: *mut u8,
+        continuation: &PairContinuation,
+    ) {
+        let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
+        batcher.process_empty_result(continuation);
+    }
+
+    /// Type-erased trampoline for `process_untested_subpair_convex_result`.
+    unsafe fn process_untested_subpair_trampoline(
+        batcher: *mut u8,
+        continuation: &PairContinuation,
+    ) {
+        let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
+        batcher.process_untested_subpair_convex_result(continuation);
+    }
+
+    /// Type-erased trampoline for `allow_collision_testing`.
+    unsafe fn allow_collision_testing_trampoline(
+        batcher: *mut u8,
+        pair_id: i32,
+        child_a: i32,
+        child_b: i32,
+    ) -> bool {
+        let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
+        batcher.callbacks.allow_collision_testing(pair_id, child_a, child_b)
     }
 
     /// Reports the result of a convex collision test to the callbacks and, if necessary, to any continuations for postprocessing.
@@ -479,14 +566,14 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
     pub fn flush(&mut self) {
         unsafe {
             let type_matrix = &*self.type_matrix;
-            let self_ptr = self as *mut Self as *mut u8;
+            let vtable = self.make_vtable();
             // Execute remaining partial batches
             for i in self.minimum_batch_index..=self.maximum_batch_index {
                 let batch_ptr = self.batches.get_mut_ptr(i) as *mut CollisionBatch;
                 if (*batch_ptr).pairs.count > 0 {
                     type_matrix.tasks[i as usize].execute_batch(
                         &mut (*batch_ptr).pairs,
-                        self_ptr,
+                        &vtable,
                     );
                 }
             }

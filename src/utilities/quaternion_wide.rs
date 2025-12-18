@@ -116,7 +116,7 @@ impl QuaternionWide {
 
     #[inline(always)]
     pub fn normalize(q: Self) -> Self {
-        // TODO: fast path is possible with intrinsics.
+        // NOTE: fast path is possible with intrinsics.
         let inverse_norm =
             Vector::<f32>::splat(1.0) / (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
         Self {

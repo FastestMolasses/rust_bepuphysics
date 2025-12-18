@@ -4,12 +4,10 @@ use std::marker::PhantomData;
 
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::compound::Compound;
-use crate::physics::collision_detection::collision_batcher::{BoundsTestedPair, ICollisionCallbacks};
-use crate::physics::collision_detection::collision_batcher_continuations::{
-    CollisionContinuationType, PairContinuation,
-};
+use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
+use crate::physics::collision_detection::collision_batcher_continuations::CollisionContinuationType;
+use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
 use crate::physics::collision_detection::nonconvex_reduction::NonconvexReduction;
-use crate::utilities::memory::buffer_pool::BufferPool;
 
 use super::compound_pair_overlaps::OverlapQueryForPair;
 use super::convex_compound_collision_task::IConvexCompoundContinuationHandler;
@@ -37,23 +35,23 @@ impl<TCompound> IConvexCompoundContinuationHandler<NonconvexReduction>
         CollisionContinuationType::NonconvexReduction
     }
 
-    unsafe fn create_continuation<TCallbacks: ICollisionCallbacks>(
+    unsafe fn create_continuation(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         child_count: i32,
         _pair: &BoundsTestedPair,
         _query_for_pair: &OverlapQueryForPair,
         continuation_index: &mut i32,
     ) -> *mut NonconvexReduction {
-        // TODO: Once CollisionBatcher has NonconvexReductions field:
-        // (*batcher).nonconvex_reductions.create_continuation(child_count, &mut *(*batcher).pool, continuation_index)
-        let _ = (batcher, child_count, continuation_index);
-        std::ptr::null_mut()
+        let pool = &mut *vtable.pool;
+        let (index, continuation) = (&mut *vtable.nonconvex_reductions).create_continuation(child_count, pool);
+        *continuation_index = index;
+        continuation as *mut NonconvexReduction
     }
 
-    unsafe fn configure_continuation_child<TCallbacks: ICollisionCallbacks>(
+    unsafe fn configure_continuation_child(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         continuation: *mut NonconvexReduction,
         continuation_child_index: i32,
         pair: &BoundsTestedPair,
@@ -78,10 +76,10 @@ impl<TCompound> IConvexCompoundContinuationHandler<NonconvexReduction>
 
         // Get the shape data for the child.
         *child_type_b = compound_child.shape_index.type_id();
-        // TODO: Access shape data through shapes batch registry once wired up.
-        // let batch = shapes.get_batch(*child_type_b as usize);
-        // *child_shape_data_b = batch.get_shape_data_ptr(compound_child.shape_index.index());
-        *child_shape_data_b = std::ptr::null();
+        let shapes = &*vtable.shapes;
+        let batch = shapes.get_batch(*child_type_b as usize).expect("Shape batch must exist");
+        let (shape_data, _) = batch.get_shape_data(compound_child.shape_index.index() as usize);
+        *child_shape_data_b = shape_data;
 
         // Configure the continuation child with offset and index data.
         let cont = &mut *continuation;

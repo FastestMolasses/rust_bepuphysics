@@ -31,7 +31,7 @@ impl Tree {
         }
     }
 
-    fn test_leaf_against_node<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn test_leaf_against_node<TOverlapHandler: IOverlapHandler>(
         &self,
         leaf_index: i32,
         leaf_child: &NodeChild,
@@ -79,7 +79,7 @@ impl Tree {
         }
     }
 
-    fn get_overlaps_between_different_nodes<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn get_overlaps_between_different_nodes<TOverlapHandler: IOverlapHandler>(
         &self,
         a: &Node,
         b: &Node,
@@ -107,7 +107,7 @@ impl Tree {
         }
     }
 
-    fn get_overlaps_in_node<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn get_overlaps_in_node<TOverlapHandler: IOverlapHandler>(
         &self,
         node: &Node,
         results: &mut TOverlapHandler,

@@ -44,6 +44,22 @@ pub trait ShapeBatch {
         max: &mut Vec3,
     );
 
+    /// Computes bounds for a shape at the given index with the given orientation,
+    /// also returning maximum radius and angular expansion data.
+    /// Only valid for convex shape batches; nonconvex shapes will panic.
+    fn compute_bounds_with_angular_data(
+        &self,
+        shape_index: usize,
+        orientation: Quat,
+        maximum_radius: &mut f32,
+        maximum_angular_expansion: &mut f32,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        let _ = (shape_index, orientation, maximum_radius, maximum_angular_expansion, min, max);
+        panic!("Nonconvex shapes are not required to have a maximum radius or angular expansion implementation. This should only ever be called on convexes.");
+    }
+
     /// Computes bounds for a shape at the given index with the given pose.
     fn compute_bounds_by_pose(
         &self,
@@ -56,6 +72,16 @@ pub trait ShapeBatch {
         *min += pose.position;
         *max += pose.position;
     }
+
+    /// Dispatches batched bounding box computations to the given batcher.
+    /// Each shape batch type knows how to invoke the correct batcher method.
+    ///
+    /// # Safety
+    /// The batcher must be properly initialized and the shape data must be valid.
+    unsafe fn compute_bounds_for_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+    );
 
     /// Frees all shape slots without returning resources to the pool.
     fn clear(&mut self);
@@ -80,6 +106,25 @@ pub trait ShapeBatch {
     /// # Safety
     /// Caller must provide valid shape data of the correct type and size.
     unsafe fn add_raw(&mut self, data: *const u8) -> usize;
+
+    /// Tests a ray against a shape at the given index.
+    ///
+    /// # Safety
+    /// Caller must ensure shape_index is valid and pose/ray data are valid.
+    unsafe fn ray_test(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        ray: &crate::physics::collision_detection::ray_batchers::RayData,
+        maximum_t: &mut f32,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    );
+
+    /// Tries to compute inertia for a shape. Returns `Some` for convex shape batches,
+    /// `None` for non-convex (compound/mesh) batches.
+    fn try_compute_inertia(&self, _shape_index: usize, _mass: f32) -> Option<BodyInertia> {
+        None
+    }
 }
 
 /// Trait for convex shape batches that support inertia computation.
@@ -166,6 +211,27 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
         self.shapes[shape_index].compute_bounds(orientation, min, max);
     }
 
+    fn compute_bounds_with_angular_data(
+        &self,
+        shape_index: usize,
+        orientation: Quat,
+        maximum_radius: &mut f32,
+        maximum_angular_expansion: &mut f32,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        let shape = &self.shapes[shape_index];
+        shape.compute_bounds(orientation, min, max);
+        shape.compute_angular_expansion_data(maximum_radius, maximum_angular_expansion);
+    }
+
+    unsafe fn compute_bounds_for_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+    ) {
+        batcher.execute_convex_batch(self);
+    }
+
     fn clear(&mut self) {
         self.id_pool.clear();
     }
@@ -196,6 +262,25 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
     unsafe fn add_raw(&mut self, data: *const u8) -> usize {
         let shape = *(data as *const TShape);
         self.add(shape)
+    }
+
+    unsafe fn ray_test(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        ray: &crate::physics::collision_detection::ray_batchers::RayData,
+        maximum_t: &mut f32,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
+        let mut t = 0.0f32;
+        let mut normal = Vec3::ZERO;
+        if self.shapes[shape_index].ray_test(pose, ray.origin, ray.direction, &mut t, &mut normal) && t <= *maximum_t {
+            hit_handler.on_ray_hit(ray, maximum_t, t, normal, 0);
+        }
+    }
+
+    fn try_compute_inertia(&self, shape_index: usize, mass: f32) -> Option<BodyInertia> {
+        Some(self.shapes[shape_index].compute_inertia(mass))
     }
 }
 

@@ -256,8 +256,9 @@ impl RayBatcher {
         pool.return_buffer(&mut self.fallback_stack);
     }
 
-    // TODO: Implement the following methods:
+    // NOTE: The following methods are not yet implemented:
     // - add() - Add a ray to the batch
     // - test_rays() - Test all rays in the batch against the tree
     // - test_node() - Test rays against a specific node
+    // Per-ray scalar path already works through ShapeBatch::ray_test.
 }

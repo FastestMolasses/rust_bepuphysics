@@ -41,7 +41,7 @@ impl IslandScaffoldTypeBatch {
     }
 }
 
-// TODO: There's quite a bit of redundant logic here with the constraint batch and solver. Very likely that we could share more.
+// NOTE: There's quite a bit of redundant logic here with the constraint batch and solver. Very likely that we could share more.
 #[derive(Clone, Copy)]
 pub(crate) struct IslandScaffoldConstraintBatch {
     pub type_id_to_index: Buffer<i32>,

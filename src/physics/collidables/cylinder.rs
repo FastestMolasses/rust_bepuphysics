@@ -13,7 +13,7 @@ use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
+use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use super::ray::RayWide;
 
 /// Collision shape representing a cylinder.
@@ -191,6 +191,8 @@ pub struct CylinderWide {
     pub half_length: Vector<f32>,
 }
 
+impl IShapeWideAllocation for CylinderWide {}
+
 impl IShapeWide<Cylinder> for CylinderWide {
     fn allow_offset_memory_access(&self) -> bool {
         true
@@ -355,6 +357,7 @@ impl IShapeWide<Cylinder> for CylinderWide {
 }
 
 /// Support finder for cylinders.
+#[derive(Default)]
 pub struct CylinderSupportFinder;
 
 impl ISupportFinder<Cylinder, CylinderWide> for CylinderSupportFinder {

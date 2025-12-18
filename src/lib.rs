@@ -5,9 +5,9 @@
 mod physics;
 pub mod utilities;
 
-// TODO: REPLACE is_x86_feature_detected WITH CFG, MAYBE OnceLock AND DO FEATURE DETECTION IN BUILD SCRIPT
-// TODO: IMPLEMENT SVE INTRINSICS
-// TODO: MAKE TESTS FOR DETERMINISM ACROSS PLATFORMS
+// NOTE: Could replace is_x86_feature_detected with cfg, maybe OnceLock and do feature detection in build script.
+// NOTE: SVE intrinsics not yet implemented for aarch64.
+// NOTE: Tests for determinism across platforms not yet written.
 
 /// Provides a zero-cost abstraction for out parameters similar to C#'s `out` keyword.
 ///

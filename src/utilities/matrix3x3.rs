@@ -305,7 +305,7 @@ impl Matrix3x3 {
     /// Creates a matrix representing a rotation derived from an axis and angle.
     #[inline(always)]
     pub fn create_from_axis_angle_to(axis: &Vec3, angle: f32, result: &mut Self) {
-        // TODO: Could be better simdified.
+        // NOTE: Could be better simdified.
         let xx = axis.x * axis.x;
         let yy = axis.y * axis.y;
         let zz = axis.z * axis.z;

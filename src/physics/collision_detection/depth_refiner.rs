@@ -499,7 +499,7 @@ impl DepthRefiner {
                         .simd_le(termination_epsilon_squared)
                         .to_int());
 
-            // TODO: Wrapping this in a condition under the assumption that we just terminated is a little iffy. Measure.
+            // NOTE: Wrapping this in a condition under the assumption that we just terminated is a little iffy. Measure.
             if (use_edge & !*terminated_lanes).simd_lt(zero_i).any() {
                 let t = use_ab
                     .simd_ne(zero_i)

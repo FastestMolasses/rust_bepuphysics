@@ -25,40 +25,8 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 
-// Forward-declared type for BroadPhase.
-pub struct BroadPhase {
-    _opaque: [u8; 0],
-}
-
-/// Stub for BoundingBoxBatcher (requires CollisionDetection module).
-/// TODO: Implement fully when CollisionDetection is translated.
-struct BoundingBoxBatcher;
-
-impl BoundingBoxBatcher {
-    fn new(
-        _bodies: &Bodies,
-        _shapes: &Shapes,
-        _broad_phase: &BroadPhase,
-        _pool: &BufferPool,
-        _dt: f32,
-    ) -> Self {
-        BoundingBoxBatcher
-    }
-
-    fn add(
-        &mut self,
-        _body_index: i32,
-        _pose: RigidPose,
-        _velocity: BodyVelocity,
-        _collidable: Collidable,
-    ) {
-        // TODO: Implement when CollisionDetection is translated.
-    }
-
-    fn flush(&mut self) {
-        // TODO: Implement when CollisionDetection is translated.
-    }
-}
+use crate::physics::bounding_box_batcher::BoundingBoxBatcher;
+use crate::physics::collision_detection::broad_phase::BroadPhase;
 
 /// Trait for pose integrator dispatch.
 pub trait IPoseIntegrator {
@@ -75,6 +43,29 @@ pub trait IPoseIntegrator {
         dt: f32,
         substep_count: i32,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
+    );
+
+    /// Whether the callbacks want to integrate velocity for kinematics.
+    fn integrate_velocity_for_kinematics(&self) -> bool;
+
+    /// Integrates the velocities of kinematic bodies (first substep only).
+    unsafe fn integrate_kinematic_velocities_dispatch(
+        &self,
+        body_handles: &Buffer<i32>,
+        bundle_start_index: i32,
+        bundle_end_index: i32,
+        substep_dt: f32,
+        worker_index: i32,
+    );
+
+    /// Integrates poses then velocities of kinematic bodies (substeps > 0).
+    unsafe fn integrate_kinematic_poses_and_velocities_dispatch(
+        &self,
+        body_handles: &Buffer<i32>,
+        bundle_start_index: i32,
+        bundle_end_index: i32,
+        substep_dt: f32,
+        worker_index: i32,
     );
 }
 
@@ -269,9 +260,9 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
 
                 bounding_box_batcher.add(
                     body_index,
-                    body_pose,
-                    body_velocity,
-                    *collidables.get(body_index),
+                    &body_pose,
+                    &body_velocity,
+                    collidables.get(body_index),
                 );
             }
         }
@@ -685,12 +676,12 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
 
             if let Some(td) = thread_dispatcher {
                 self.prepare_for_multithreaded_execution(bundle_count, dt, td.thread_count(), 1);
-                // TODO: multi-threaded dispatch via threadDispatcher.DispatchWorkers
+                // NOTE: multi-threaded dispatch via threadDispatcher.DispatchWorkers not yet implemented.
                 // For now, fall through to single-threaded path.
             }
 
             let mut bounding_box_batcher =
-                BoundingBoxBatcher::new(bodies, &*self.shapes, &*self.broad_phase, pool, dt);
+                BoundingBoxBatcher::new(self.bodies, self.shapes, self.broad_phase, pool as *mut BufferPool, dt);
             self.predict_bounding_boxes_inner(
                 0,
                 bundle_count,
@@ -735,7 +726,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
                         substep_count,
                     );
                     self.constrained_bodies = Some(*constrained_bodies);
-                    // TODO: multi-threaded dispatch via threadDispatcher.DispatchWorkers
+                    // NOTE: multi-threaded dispatch via threadDispatcher.DispatchWorkers not yet implemented.
                     self.constrained_bodies = None;
                 }
             }
@@ -750,6 +741,44 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
                 0,
             );
         }
+    }
+
+    fn integrate_velocity_for_kinematics(&self) -> bool {
+        self.callbacks.integrate_velocity_for_kinematics()
+    }
+
+    unsafe fn integrate_kinematic_velocities_dispatch(
+        &self,
+        body_handles: &Buffer<i32>,
+        bundle_start_index: i32,
+        bundle_end_index: i32,
+        substep_dt: f32,
+        worker_index: i32,
+    ) {
+        self.integrate_kinematic_velocities(
+            body_handles,
+            bundle_start_index,
+            bundle_end_index,
+            substep_dt,
+            worker_index,
+        );
+    }
+
+    unsafe fn integrate_kinematic_poses_and_velocities_dispatch(
+        &self,
+        body_handles: &Buffer<i32>,
+        bundle_start_index: i32,
+        bundle_end_index: i32,
+        substep_dt: f32,
+        worker_index: i32,
+    ) {
+        self.integrate_kinematic_poses_and_velocities(
+            body_handles,
+            bundle_start_index,
+            bundle_end_index,
+            substep_dt,
+            worker_index,
+        );
     }
 }
 

@@ -20,7 +20,7 @@ impl Tree {
         }
     }
 
-    fn test_node_against_leaf<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn test_node_against_leaf<TOverlapHandler: IOverlapHandler>(
         &self,
         node_index: i32,
         leaf_index: i32,
@@ -67,7 +67,7 @@ impl Tree {
         }
     }
 
-    fn test_leaf_against_node_intertree<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn test_leaf_against_node_intertree<TOverlapHandler: IOverlapHandler>(
         leaf_index: i32,
         leaf_child: &NodeChild,
         node_index: i32,
@@ -135,7 +135,7 @@ impl Tree {
         }
     }
 
-    fn get_overlaps_between_different_nodes_intertree<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn get_overlaps_between_different_nodes_intertree<TOverlapHandler: IOverlapHandler>(
         &self,
         a: &Node,
         b: &Node,

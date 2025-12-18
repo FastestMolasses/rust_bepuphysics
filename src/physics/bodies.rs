@@ -608,7 +608,7 @@ impl Bodies {
         removed_location.index = -1;
     }
 
-    fn remove_from_active_set(&mut self, active_body_index: i32) -> BodyHandle {
+    pub(crate) fn remove_from_active_set(&mut self, active_body_index: i32) -> BodyHandle {
         debug_assert!(active_body_index >= 0 && active_body_index < self.sets.get(0).count);
         self.validate_existing_handle(*self.sets.get(0).index_to_handle.get(active_body_index));
         let collidable = *self.sets.get(0).collidables.get(active_body_index);

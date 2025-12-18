@@ -1,10 +1,14 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ConvexCompoundCollisionTask.cs
 
-use crate::physics::body_properties::RigidPose;
-use crate::physics::collision_detection::collision_batcher::{BoundsTestedPair, ICollisionCallbacks};
+use crate::physics::body_properties::{BodyVelocity, RigidPose};
+use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::physics::collision_detection::collision_batcher_continuations::{
     CollisionContinuationType, ICollisionTestContinuation, PairContinuation,
 };
+use crate::physics::collision_detection::collision_task_registry::{
+    BatcherVtable, CollisionTask, CollisionTaskPairType,
+};
+use crate::physics::collision_detection::untyped_list::UntypedList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
@@ -21,10 +25,10 @@ pub trait IConvexCompoundContinuationHandler<TContinuation: ICollisionTestContin
     /// Creates a continuation for processing child manifolds.
     ///
     /// # Safety
-    /// Caller must ensure batcher and pair references are valid.
-    unsafe fn create_continuation<TCallbacks: ICollisionCallbacks>(
+    /// Caller must ensure vtable pointers are valid.
+    unsafe fn create_continuation(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         child_count: i32,
         pair: &BoundsTestedPair,
         query_for_pair: &OverlapQueryForPair,
@@ -35,9 +39,9 @@ pub trait IConvexCompoundContinuationHandler<TContinuation: ICollisionTestContin
     ///
     /// # Safety
     /// Caller must ensure all pointers are valid.
-    unsafe fn configure_continuation_child<TCallbacks: ICollisionCallbacks>(
+    unsafe fn configure_continuation_child(
         &self,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
+        vtable: &BatcherVtable,
         continuation: *mut TContinuation,
         continuation_child_index: i32,
         pair: &BoundsTestedPair,
@@ -56,11 +60,10 @@ pub trait IConvexCompoundOverlapFinder {
     /// # Safety
     /// Pair buffer pointers must be valid.
     unsafe fn find_local_overlaps(
-        &self,
         pairs: &Buffer<BoundsTestedPair>,
         pair_count: i32,
         pool: &mut BufferPool,
-        shapes: *mut crate::physics::collidables::shapes::Shapes,
+        shapes: &crate::physics::collidables::shapes::Shapes,
         dt: f32,
         overlaps: &mut ConvexCompoundTaskOverlaps,
     );
@@ -115,31 +118,31 @@ impl<
     /// 3. Spawns child collision tests through the batcher
     ///
     /// # Safety
-    /// All pointers in pairs and the batcher must be valid.
-    pub unsafe fn execute_batch<TCallbacks: ICollisionCallbacks>(
+    /// All pointers in pairs and the vtable must be valid.
+    pub unsafe fn execute_batch(
         &self,
         pairs: &Buffer<BoundsTestedPair>,
         pair_count: i32,
-        batcher: *mut crate::physics::collision_detection::collision_batcher::CollisionBatcher<TCallbacks>,
-        overlap_finder: &TOverlapFinder,
+        vtable: &BatcherVtable,
         continuation_handler: &TContinuationHandler,
     ) {
-        let batcher_ref = &mut *batcher;
-        let pool = &mut *batcher_ref.pool;
+        let pool = &mut *vtable.pool;
 
         // Find all overlaps up front to improve cache behavior.
         let mut overlaps = ConvexCompoundTaskOverlaps::new(pool, pair_count);
-        overlap_finder.find_local_overlaps(
+        TOverlapFinder::find_local_overlaps(
             pairs,
             pair_count,
             pool,
-            batcher_ref.shapes,
-            batcher_ref.dt,
+            &*vtable.shapes,
+            vtable.dt,
             &mut overlaps,
         );
 
         for i in 0..pair_count {
-            let pair_overlaps = overlaps.get_overlaps_for_pair(i);
+            // Use raw pointer access to avoid double mutable borrow — accessing different fields.
+            let pair_overlaps = &mut *overlaps.pair_overlaps.get_mut(i);
+            let pair_query = &*overlaps.subpair_queries.get(i);
             let pair = &pairs[i];
 
             if pair_overlaps.count > 0 {
@@ -155,10 +158,10 @@ impl<
 
                 let mut continuation_index = 0i32;
                 let continuation = continuation_handler.create_continuation(
-                    batcher,
+                    vtable,
                     overlap_count,
                     pair,
-                    &OverlapQueryForPair::default(),
+                    pair_query,
                     &mut continuation_index,
                 );
 
@@ -175,7 +178,7 @@ impl<
 
                     let continuation_child_index = next_continuation_child_index;
                     next_continuation_child_index += 1;
-                    let _subpair_continuation = PairContinuation::new(
+                    let subpair_continuation = PairContinuation::new(
                         pair.continuation.pair_id,
                         child_a,
                         child_b,
@@ -184,31 +187,106 @@ impl<
                         continuation_child_index,
                     );
 
-                    // TODO: Check AllowCollisionTesting callback, then configure and
-                    // add the child pair to the batcher. Requires full batcher AddDirectly
-                    // method implementation.
-                    let mut child_pose_b = RigidPose::IDENTITY;
-                    let mut child_type_b = 0i32;
-                    let mut child_shape_data_b: *const u8 = std::ptr::null();
-                    continuation_handler.configure_continuation_child(
-                        batcher,
-                        continuation,
-                        continuation_child_index,
-                        pair,
-                        self.shape_type_index_a,
-                        child_index,
-                        &mut child_pose_b,
-                        &mut child_type_b,
-                        &mut child_shape_data_b,
-                    );
+                    if (vtable.allow_collision_testing)(
+                        vtable.batcher,
+                        pair.continuation.pair_id,
+                        child_a,
+                        child_b,
+                    ) {
+                        let mut child_pose_b = RigidPose::IDENTITY;
+                        let mut child_type_b = 0i32;
+                        let mut child_shape_data_b: *const u8 = std::ptr::null();
+                        continuation_handler.configure_continuation_child(
+                            vtable,
+                            continuation,
+                            continuation_child_index,
+                            pair,
+                            self.shape_type_index_a,
+                            child_index,
+                            &mut child_pose_b,
+                            &mut child_type_b,
+                            &mut child_shape_data_b,
+                        );
 
-                    // TODO: Dispatch child pair via batcher.add_directly(...)
+                        let convex_to_child = child_pose_b.position + pair.offset_b;
+                        if pair.flip_mask < 0 {
+                            // By reversing the order of the parameters, the manifold orientation is flipped.
+                            // This compensates for the flip induced by order requirements on this task.
+                            (vtable.add_directly)(
+                                vtable.batcher,
+                                child_type_b,
+                                self.shape_type_index_a,
+                                child_shape_data_b,
+                                pair.a,
+                                -convex_to_child,
+                                child_pose_b.orientation,
+                                pair.orientation_a,
+                                &BodyVelocity::default(),
+                                &BodyVelocity::default(),
+                                pair.speculative_margin,
+                                0.0,
+                                &subpair_continuation,
+                            );
+                        } else {
+                            (vtable.add_directly)(
+                                vtable.batcher,
+                                self.shape_type_index_a,
+                                child_type_b,
+                                pair.a,
+                                child_shape_data_b,
+                                convex_to_child,
+                                pair.orientation_a,
+                                child_pose_b.orientation,
+                                &BodyVelocity::default(),
+                                &BodyVelocity::default(),
+                                pair.speculative_margin,
+                                0.0,
+                                &subpair_continuation,
+                            );
+                        }
+                    } else {
+                        (vtable.process_untested_subpair_convex_result)(
+                            vtable.batcher,
+                            &subpair_continuation,
+                        );
+                    }
                 }
             } else {
-                // TODO: batcher.process_empty_result(pair.continuation)
+                (vtable.process_empty_result)(vtable.batcher, &pair.continuation);
             }
         }
 
         overlaps.dispose(pool);
+    }
+}
+
+impl<
+        TOverlapFinder: IConvexCompoundOverlapFinder + 'static,
+        TContinuationHandler: IConvexCompoundContinuationHandler<TContinuation> + Default + 'static,
+        TContinuation: ICollisionTestContinuation + 'static,
+    > CollisionTask
+    for ConvexCompoundCollisionTask<TOverlapFinder, TContinuationHandler, TContinuation>
+{
+    fn batch_size(&self) -> i32 {
+        self.batch_size
+    }
+    fn shape_type_index_a(&self) -> i32 {
+        self.shape_type_index_a
+    }
+    fn shape_type_index_b(&self) -> i32 {
+        self.shape_type_index_b
+    }
+    fn subtask_generator(&self) -> bool {
+        true
+    }
+    fn pair_type(&self) -> CollisionTaskPairType {
+        CollisionTaskPairType::BoundsTestedPair
+    }
+    fn execute_batch(&self, batch: &mut UntypedList, vtable: &BatcherVtable) {
+        unsafe {
+            let pairs = batch.buffer.cast::<BoundsTestedPair>();
+            let handler = TContinuationHandler::default();
+            self.execute_batch(&pairs, batch.count, vtable, &handler);
+        }
     }
 }

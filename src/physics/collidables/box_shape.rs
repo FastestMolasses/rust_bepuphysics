@@ -12,7 +12,7 @@ use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
+use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use super::ray::RayWide;
 
 /// Collision shape representing a solid cuboid.
@@ -192,6 +192,8 @@ pub struct BoxWide {
     pub half_length: Vector<f32>,
 }
 
+impl IShapeWideAllocation for BoxWide {}
+
 impl IShapeWide<Box> for BoxWide {
     fn allow_offset_memory_access(&self) -> bool {
         true
@@ -351,6 +353,7 @@ impl IShapeWide<Box> for BoxWide {
 }
 
 /// Support finder for boxes.
+#[derive(Default)]
 pub struct BoxSupportFinder;
 
 impl ISupportFinder<Box, BoxWide> for BoxSupportFinder {

@@ -24,3 +24,4 @@ pub mod untyped_list;
 pub mod wide_ray_tester;
 pub mod worker_pair_cache;
 pub mod collision_tasks;
+pub mod sweep_tasks;

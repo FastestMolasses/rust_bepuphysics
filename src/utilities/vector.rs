@@ -139,3 +139,6 @@ pub const fn optimal_lanes<T>() -> usize {
 }
 
 pub type Vector<T> = std::simd::Simd<T, { optimal_lanes::<T>() }>;
+
+/// The number of f32 lanes in a SIMD vector (equivalent to C# `Vector<float>.Count`).
+pub const VECTOR_WIDTH: usize = optimal_lanes::<f32>();
