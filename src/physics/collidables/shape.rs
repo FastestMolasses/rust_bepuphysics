@@ -10,9 +10,6 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 
 use super::ray::RayData;
 
-// Forward declarations for types not yet translated
-// TODO: These will be filled in when their respective modules are translated
-
 /// Trait for ray hit handling during shape ray tests.
 pub trait IShapeRayHitHandler {
     /// Returns true if the child at the given index should be tested.

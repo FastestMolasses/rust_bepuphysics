@@ -1,5 +1,6 @@
-use glam::Vec3;
+use glam::{Quat, Vec3};
 
+use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
@@ -70,13 +71,48 @@ impl Mesh {
         // TODO: self.tree.dispose(pool);
     }
 
+    /// Creates a mesh without building the tree (for use before tree build is available).
+    pub fn create_without_tree_build(triangles: Buffer<Triangle>, scale: Vec3) -> Self {
+        let inverse_scale = Vec3::new(
+            if scale.x != 0.0 { 1.0 / scale.x } else { f32::MAX },
+            if scale.y != 0.0 { 1.0 / scale.y } else { f32::MAX },
+            if scale.z != 0.0 { 1.0 / scale.z } else { f32::MAX },
+        );
+        Self {
+            triangles,
+            scale,
+            inverse_scale,
+        }
+    }
+
+    /// Computes the bounding box of the mesh given an orientation.
+    pub fn compute_bounds(&self, orientation: Quat, min: &mut Vec3, max: &mut Vec3) {
+        let mut r = Matrix3x3::default();
+        Matrix3x3::create_from_quaternion(&orientation, &mut r);
+        *min = Vec3::splat(f32::MAX);
+        *max = Vec3::splat(f32::MIN);
+        for i in 0..self.triangles.len() as usize {
+            let triangle = &self.triangles[i];
+            let mut a = Vec3::ZERO;
+            let mut b = Vec3::ZERO;
+            let mut c = Vec3::ZERO;
+            Matrix3x3::transform(&(self.scale * triangle.a), &r, &mut a);
+            Matrix3x3::transform(&(self.scale * triangle.b), &r, &mut b);
+            Matrix3x3::transform(&(self.scale * triangle.c), &r, &mut c);
+            let min0 = a.min(b);
+            let min1 = c.min(*min);
+            let max0 = a.max(b);
+            let max1 = c.max(*max);
+            *min = min0.min(min1);
+            *max = max0.max(max1);
+        }
+    }
+
     // TODO: The following methods depend on Tree and collision infrastructure:
     // - fill_subtrees_for_triangles
-    // - create_without_tree_build
     // - create_with_sweep_build
-    // - new (constructor with binned build)
+    // - new (constructor with binned build — requires Tree)
     // - serialize / deserialize
-    // - compute_bounds
     // - ray_test
     // - find_local_overlaps
 }

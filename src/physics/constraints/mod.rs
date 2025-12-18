@@ -43,6 +43,7 @@ pub mod twist_motor;
 pub mod twist_servo;
 pub mod two_body_type_processor;
 pub mod type_batch;
+pub mod type_batch_alloc;
 pub mod type_processor;
 pub mod volume_constraint;
 pub mod weld;

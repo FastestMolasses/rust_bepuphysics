@@ -1,19 +1,25 @@
 // Translated from BepuPhysics/IslandAwakener.cs
 
 use crate::physics::bodies::Bodies;
+use crate::physics::body_set::BodySet;
+use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_set::ConstraintSet;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::island_scaffold::IslandScaffold;
+use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::physics::solver::{PrimitiveComparer, Solver};
 use crate::physics::statics::Statics;
+use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::index_set::IndexSet;
+use crate::utilities::collections::quick_dictionary::QuickDictionary;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use crate::utilities::vector::Vector;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Provides functionality for efficiently waking up sleeping bodies.
@@ -37,20 +43,9 @@ pub struct IslandAwakener {
     phase_two_jobs: QuickList<PhaseTwoJob>,
 }
 
-// Forward declarations for types not yet fully translated
-pub struct BroadPhase {
-    _opaque: [u8; 0],
-}
-
-pub struct IslandSleeper {
-    _opaque: [u8; 0],
-}
-
-impl IslandSleeper {
-    pub unsafe fn return_set_id(&self, _id: i32) {
-        // TODO: implement
-    }
-}
+// Use real types from their modules.
+use crate::physics::collision_detection::broad_phase::BroadPhase;
+use crate::physics::island_sleeper::IslandSleeper;
 
 // --- Job types ---
 
@@ -187,7 +182,7 @@ impl IslandAwakener {
 
     /// Wakes up a body if it is sleeping. All bodies that can be found by traversing the
     /// constraint graph from the body will also be awakened. If already awake, does nothing.
-    pub fn awaken_body(&self, body_handle: BodyHandle) {
+    pub fn awaken_body(&mut self, body_handle: BodyHandle) {
         let bodies = self.bodies();
         bodies.validate_existing_handle(body_handle);
         let set_index = unsafe { bodies.handle_to_location.get(body_handle.0) }.set_index;
@@ -195,20 +190,20 @@ impl IslandAwakener {
     }
 
     /// Wakes up any sleeping bodies associated with a constraint.
-    pub fn awaken_constraint(&self, constraint_handle: ConstraintHandle) {
+    pub fn awaken_constraint(&mut self, constraint_handle: ConstraintHandle) {
         let set_index = unsafe { self.solver().handle_to_constraint.get(constraint_handle.0) }.set_index;
         self.awaken_set(set_index);
     }
 
     /// Wakes up all bodies and constraints within a set.
     /// Doesn't do anything if the set is awake (index zero).
-    pub fn awaken_set(&self, set_index: i32) {
+    pub fn awaken_set(&mut self, set_index: i32) {
         if set_index > 0 {
             let pool = self.pool();
             let mut list = QuickList::with_capacity(1, pool);
             list.add_unsafely(set_index);
-            // TODO: self.awaken_sets(&mut list, None);
-            list.dispose(pool);
+            unsafe { self.awaken_sets(&mut list, None); }
+            list.dispose(self.pool());
         }
     }
 
@@ -266,8 +261,7 @@ impl IslandAwakener {
             }
         }
         if unique_set_indices.count > 0 {
-            // Sort to ensure deterministic order
-            // TODO: QuickSort.sort with PrimitiveComparer<i32>
+            // Sort to ensure deterministic order (Rust sort_unstable maps to C# QuickSort.Sort)
             let slice = unsafe {
                 std::slice::from_raw_parts_mut(
                     unique_set_indices.span.get_ptr(0) as *mut i32,
@@ -308,19 +302,42 @@ impl IslandAwakener {
                 }
             }
             PhaseOneJobType::MoveFallbackBatchBodies => {
-                // TODO: Move fallback batch bodies from sleeping to active
+                // Move fallback batch body tracking from sleeping sets to active set.
+                // Inactive sets store body handles; active set stores body indices. Make the transition.
+                let solver = self.solver_mut();
+                let solver_ptr = solver as *mut Solver;
+                let bodies = &*self.bodies;
+                for i in 0..self.unique_set_indices.count {
+                    let set_index = *self.unique_set_indices.get(i);
+                    debug_assert!(set_index > 0);
+                    let source_fallback = &(*solver_ptr).sets.get(set_index).sequential_fallback;
+                    if source_fallback.dynamic_body_constraint_counts.count > 0 {
+                        let source_count = source_fallback.dynamic_body_constraint_counts.count;
+                        // Collect source data first to avoid borrow conflicts
+                        for j in 0..source_count {
+                            // Inactive set keys are body handles; translate to body indices via HandleToLocation.
+                            // HandleToLocation was updated during job setup, so indices point to the active set.
+                            let body_handle = *(*solver_ptr).sets.get(set_index).sequential_fallback.dynamic_body_constraint_counts.key_at(j);
+                            let value = *(*solver_ptr).sets.get(set_index).sequential_fallback.dynamic_body_constraint_counts.value_at(j);
+                            let body_location = bodies.handle_to_location.get(body_handle);
+                            debug_assert!(body_location.set_index == 0,
+                                "Any batch moved into active set should deal with bodies already in the active set.");
+                            (*solver_ptr).active_set_mut().sequential_fallback.dynamic_body_constraint_counts.add_unsafely(body_location.index, value);
+                        }
+                    }
+                }
             }
             PhaseOneJobType::CopyBodyRegion => {
                 let bodies = &mut *self.bodies;
-                let source_set = bodies.sets.get(job.source_set);
+                let source_set_ptr = bodies.sets.get(job.source_set) as *const BodySet;
                 let target_set = bodies.active_set_mut();
 
                 // Copy body data from sleeping set to active set
-                // source_set.collidables.copy_to(job.source_start, target_set.collidables, job.target_start, job.count);
-                // source_set.constraints.copy_to(...);
-                // source_set.dynamics_state.copy_to(...);
-                // source_set.activity.copy_to(...);
-                // source_set.index_to_handle.copy_to(...);
+                (*source_set_ptr).collidables.copy_to(job.source_start, &mut target_set.collidables, job.target_start, job.count);
+                (*source_set_ptr).constraints.copy_to(job.source_start, &mut target_set.constraints, job.target_start, job.count);
+                (*source_set_ptr).dynamics_state.copy_to(job.source_start, &mut target_set.dynamics_state, job.target_start, job.count);
+                (*source_set_ptr).activity.copy_to(job.source_start, &mut target_set.activity, job.target_start, job.count);
+                (*source_set_ptr).index_to_handle.copy_to(job.source_start, &mut target_set.index_to_handle, job.target_start, job.count);
 
                 if self.reset_activity_states {
                     // Reset activity states for woken bodies
@@ -338,7 +355,46 @@ impl IslandAwakener {
         let job = &*self.phase_two_jobs.get(index);
         match job.job_type {
             PhaseTwoJobType::BroadPhase => {
-                // TODO: Move collidables from static tree back to active tree
+                // Move collidables from static tree back to active tree.
+                // The broad phase add/remove has a dependency on the body copies (hence phase two).
+                let bodies = &mut *self.bodies;
+                let broad_phase = &mut *self.broad_phase;
+                let statics = &mut *self.statics;
+
+                for i in 0..self.unique_set_indices.count {
+                    let set_index = *self.unique_set_indices.get(i);
+                    // Use raw pointer to sleeping set to avoid borrow conflict with active set.
+                    let sleeping_set_ptr = bodies.sets.get(set_index) as *const BodySet;
+                    let sleeping_count = (*sleeping_set_ptr).count;
+                    for j in 0..sleeping_count {
+                        let handle_value = (*sleeping_set_ptr).index_to_handle.get(j).0;
+                        let body_location = *bodies.handle_to_location.get(handle_value);
+                        debug_assert!(body_location.set_index == 0);
+                        // The broad phase index value is currently the static index.
+                        let collidable = bodies.active_set_mut().collidables.get_mut(body_location.index);
+                        let broad_phase_index = collidable.broad_phase_index;
+                        if broad_phase_index >= 0 {
+                            // Get bounds from static tree.
+                            let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(broad_phase_index);
+                            let min = *min_ptr;
+                            let max = *max_ptr;
+                            let leaf = *broad_phase.static_leaves.get(broad_phase_index);
+                            // Add to active tree.
+                            collidable.broad_phase_index = broad_phase.add_active(leaf, &min, &max);
+
+                            // Remove from static tree.
+                            let static_index_to_remove = broad_phase_index;
+                            let mut moved_leaf = CollidableReference::default();
+                            if broad_phase.remove_static_at(static_index_to_remove, &mut moved_leaf) {
+                                if moved_leaf.mobility() == CollidableMobility::Static {
+                                    statics.get_direct_reference_mut(moved_leaf.static_handle()).broad_phase_index = static_index_to_remove;
+                                } else {
+                                    bodies.update_collidable_broad_phase_index(moved_leaf.body_handle(), static_index_to_remove);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             PhaseTwoJobType::CopyConstraintRegion => {
                 let j = &job.copy_constraint_region;
@@ -359,7 +415,21 @@ impl IslandAwakener {
                 );
             }
             PhaseTwoJobType::AddFallbackTypeBatchConstraints => {
-                // TODO: Add sleeping fallback constraints to active set
+                let solver = self.solver_mut();
+                let bodies = &*self.bodies;
+                for i in 0..job.fallback_sources.len() {
+                    let source = *job.fallback_sources.get(i);
+                    let type_proc = solver.type_processors[job.fallback_type_id as usize]
+                        .as_ref()
+                        .unwrap();
+                    type_proc.inner().add_sleeping_to_active_for_fallback(
+                        source.source_set,
+                        source.source_type_batch_index,
+                        job.fallback_target_type_batch,
+                        bodies,
+                        solver,
+                    );
+                }
             }
         }
     }
@@ -443,80 +513,175 @@ impl IslandAwakener {
             job.job_type = PhaseTwoJobType::BroadPhase;
         }
 
+        // Multiple source sets can contribute to the same target type batch in the fallback.
+        // Track those as we enumerate sets so we can create a single job for each target after the loop.
+        let mut target_fallback_type_batches_to_sources: QuickDictionary<i32, QuickList<FallbackAddSource>, PrimitiveComparer<i32>> =
+            if highest_new_batch_count > solver.fallback_batch_threshold() {
+                QuickDictionary::with_capacity(8, 3, pool, PrimitiveComparer::<i32>::default())
+            } else {
+                QuickDictionary::default()
+            };
+
         // CopyBodyRegion jobs + CopyConstraintRegion jobs
-        let active_body_count = bodies.active_set().count;
+        let bodies_mut = &mut *self.bodies;
+        let active_set_ptr = bodies_mut.active_set_mut() as *mut BodySet;
         for i in 0..set_indices.count {
             let source_set_index = *set_indices.get(i);
 
             // Body copy jobs
-            const BODY_JOB_SIZE: i32 = 64;
-            let source_count = bodies.sets.get(source_set_index).count;
-            let set_job_count = 1.max(source_count / BODY_JOB_SIZE);
-            let base_per_job = source_count / set_job_count;
-            let remainder = source_count - base_per_job * set_job_count;
-            let mut previous_source_end = 0;
+            {
+                const BODY_JOB_SIZE: i32 = 64;
+                let source_set = bodies_mut.sets.get(source_set_index);
+                let source_count = source_set.count;
+                let set_job_count = 1.max(source_count / BODY_JOB_SIZE);
+                let base_per_job = source_count / set_job_count;
+                let remainder = source_count - base_per_job * set_job_count;
+                let mut previous_source_end = 0;
 
-            let phase_one_jobs = &mut *(&mut self.phase_one_jobs as *mut QuickList<PhaseOneJob>);
-            phase_one_jobs.ensure_capacity(
-                phase_one_jobs.count + set_job_count,
-                pool,
-            );
-            for job_index in 0..set_job_count {
-                let job = phase_one_jobs.allocate_unsafely();
-                job.job_type = PhaseOneJobType::CopyBodyRegion;
-                job.source_set = source_set_index;
-                job.source_start = previous_source_end;
-                job.target_start = active_body_count;
-                job.count = if job_index < remainder {
-                    base_per_job + 1
-                } else {
-                    base_per_job
-                };
-                previous_source_end += job.count;
-                // Note: in full implementation, active_set.count is incremented here
-            }
+                let phase_one_jobs = &mut *(&mut self.phase_one_jobs as *mut QuickList<PhaseOneJob>);
+                phase_one_jobs.ensure_capacity(
+                    phase_one_jobs.count + set_job_count,
+                    pool,
+                );
+                for job_index in 0..set_job_count {
+                    let job = phase_one_jobs.allocate_unsafely();
+                    job.job_type = PhaseOneJobType::CopyBodyRegion;
+                    job.source_set = source_set_index;
+                    job.source_start = previous_source_end;
+                    job.target_start = (*active_set_ptr).count;
+                    job.count = if job_index < remainder {
+                        base_per_job + 1
+                    } else {
+                        base_per_job
+                    };
+                    previous_source_end += job.count;
+                    (*active_set_ptr).count += job.count;
 
-            // Constraint copy jobs
-            const CONSTRAINT_JOB_SIZE: i32 = 32;
-            let source_constraint_set = solver.sets.get(source_set_index);
-            let fallback_index = solver.fallback_batch_threshold();
-
-            let sync_batch_count = if source_constraint_set.batches.count > fallback_index {
-                fallback_index
-            } else {
-                source_constraint_set.batches.count
-            };
-
-            for batch_index in 0..sync_batch_count {
-                let source_batch = source_constraint_set.batches.get(batch_index);
-                for source_type_batch_index in 0..source_batch.type_batches.count {
-                    let source_type_batch = source_batch.type_batches.get(source_type_batch_index);
-                    let job_count = 1.max(source_type_batch.constraint_count / CONSTRAINT_JOB_SIZE);
-                    let base = source_type_batch.constraint_count / job_count;
-                    let rem = source_type_batch.constraint_count - base * job_count;
-                    let mut prev_end = 0;
-
-                    let phase_two_jobs = &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
-                    phase_two_jobs
-                        .ensure_capacity(phase_two_jobs.count + job_count, pool);
-                    for j in 0..job_count {
-                        let count = if j < rem { base + 1 } else { base };
-                        let job = phase_two_jobs.allocate_unsafely();
-                        job.job_type = PhaseTwoJobType::CopyConstraintRegion;
-                        job.copy_constraint_region = CopyConstraintRegionJob {
-                            type_id: source_type_batch.type_id,
-                            batch: batch_index,
-                            source_set: source_set_index,
-                            source_type_batch: source_type_batch_index,
-                            target_type_batch: 0, // TODO: look up target
-                            count,
-                            source_start: prev_end,
-                            target_start: 0, // TODO: look up target
-                        };
-                        prev_end += count;
+                    // Update HandleToLocation up front — MoveFallbackBatchBodies and the narrow phase
+                    // flush depend on it being current before phase one executes.
+                    let source_set = bodies_mut.sets.get(source_set_index);
+                    for j in 0..job.count {
+                        let source_index = job.source_start + j;
+                        let target_index = job.target_start + j;
+                        let handle_value = source_set.index_to_handle.get(source_index).0;
+                        let body_location = bodies_mut.handle_to_location.get_mut(handle_value);
+                        body_location.set_index = 0;
+                        body_location.index = target_index;
                     }
                 }
             }
+
+            // Constraint copy jobs
+            {
+                const CONSTRAINT_JOB_SIZE: i32 = 32;
+                let solver_ptr = solver as *mut Solver;
+                let source_constraint_set = (*solver_ptr).sets.get(source_set_index) as *const ConstraintSet;
+                let fallback_index = (*solver_ptr).fallback_batch_threshold();
+                let active_solver_set = (*solver_ptr).active_set_mut() as *mut ConstraintSet;
+
+                let sync_batch_count = if (*source_constraint_set).batches.count > fallback_index {
+                    fallback_index
+                } else {
+                    (*source_constraint_set).batches.count
+                };
+
+                for batch_index in 0..sync_batch_count {
+                    let source_batch = (*source_constraint_set).batches.get(batch_index);
+                    let target_batch = (*active_solver_set).batches.get_mut(batch_index);
+                    for source_type_batch_index in 0..source_batch.type_batches.count {
+                        let source_type_batch = source_batch.type_batches.get(source_type_batch_index);
+                        let target_type_batch_index = *target_batch.type_index_to_type_batch_index.get(source_type_batch.type_id);
+                        let target_type_batch = target_batch.type_batches.get_mut(target_type_batch_index);
+                        let job_count = 1.max(source_type_batch.constraint_count / CONSTRAINT_JOB_SIZE);
+                        let base = source_type_batch.constraint_count / job_count;
+                        let rem = source_type_batch.constraint_count - base * job_count;
+                        let mut prev_end = 0;
+
+                        let phase_two_jobs = &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
+                        phase_two_jobs
+                            .ensure_capacity(phase_two_jobs.count + job_count, pool);
+                        for j in 0..job_count {
+                            let count = if j < rem { base + 1 } else { base };
+                            let job = phase_two_jobs.allocate_unsafely();
+                            job.job_type = PhaseTwoJobType::CopyConstraintRegion;
+                            job.copy_constraint_region = CopyConstraintRegionJob {
+                                type_id: source_type_batch.type_id,
+                                batch: batch_index,
+                                source_set: source_set_index,
+                                source_type_batch: source_type_batch_index,
+                                target_type_batch: target_type_batch_index,
+                                count,
+                                source_start: prev_end,
+                                target_start: target_type_batch.constraint_count,
+                            };
+                            prev_end += count;
+                            let old_bundle_count = target_type_batch.bundle_count();
+                            target_type_batch.constraint_count += count;
+                            if target_type_batch.bundle_count() != old_bundle_count {
+                                // A new bundle was created; guarantee trailing slots are -1.
+                                let bodies_per_constraint = (&(*solver_ptr).type_processors)[source_type_batch.type_id as usize]
+                                    .as_ref()
+                                    .unwrap()
+                                    .bodies_per_constraint;
+                                let vector_size = std::mem::size_of::<Vector<i32>>();
+                                let bundle_start = target_type_batch.body_references.as_ptr()
+                                    .add((target_type_batch.bundle_count() - 1) * bodies_per_constraint as usize * vector_size)
+                                    as *mut Vector<i32>;
+                                let neg_one = Vector::<i32>::splat(-1);
+                                for vi in 0..bodies_per_constraint as usize {
+                                    *bundle_start.add(vi) = neg_one;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fallback batch handling
+                if (*source_constraint_set).batches.count > fallback_index {
+                    let source_batch = (*source_constraint_set).batches.get(fallback_index);
+                    let target_batch = (*active_solver_set).batches.get_mut(fallback_index);
+                    for source_type_batch_index in 0..source_batch.type_batches.count {
+                        let source_type_batch = source_batch.type_batches.get(source_type_batch_index);
+                        let target_type_batch_index = *target_batch.type_index_to_type_batch_index.get(source_type_batch.type_id);
+                        let mut slot_index = 0i32;
+                        target_fallback_type_batches_to_sources.ensure_capacity(
+                            target_fallback_type_batches_to_sources.count + 1, pool);
+                        if !target_fallback_type_batches_to_sources.find_or_allocate_slot_unsafely(
+                            &target_type_batch_index, &mut slot_index) {
+                            *target_fallback_type_batches_to_sources.value_at_mut(slot_index) =
+                                QuickList::with_capacity(8, pool);
+                        }
+                        let sources_list = target_fallback_type_batches_to_sources.value_at_mut(slot_index);
+                        sources_list.ensure_capacity(sources_list.count + 1, pool);
+                        *sources_list.allocate_unsafely() = FallbackAddSource {
+                            source_set: source_set_index,
+                            source_type_batch_index,
+                        };
+                    }
+                }
+            }
+        }
+
+        // Create fallback jobs from accumulated dictionary
+        if target_fallback_type_batches_to_sources.keys.allocated() {
+            let phase_two_jobs = &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
+            phase_two_jobs.ensure_capacity(
+                phase_two_jobs.count + target_fallback_type_batches_to_sources.count, pool);
+            for i in 0..target_fallback_type_batches_to_sources.count {
+                let job = phase_two_jobs.allocate_unsafely();
+                job.job_type = PhaseTwoJobType::AddFallbackTypeBatchConstraints;
+                let target_tb_index = *target_fallback_type_batches_to_sources.key_at(i);
+                let list = target_fallback_type_batches_to_sources.value_at(i);
+                // Slice the span to create a buffer of just the used portion
+                job.fallback_sources = list.span.slice_count(list.count);
+                job.fallback_target_type_batch = target_tb_index;
+                let active_solver_set = solver.active_set();
+                let fallback_batch = active_solver_set.batches.get(solver.fallback_batch_threshold());
+                job.fallback_type_id = fallback_batch.type_batches.get(target_tb_index).type_id;
+            }
+            // Dispose the dictionary container, but NOT the per-target lists —
+            // the spans are referenced by the phase two jobs and disposed in dispose_for_completed_awakenings.
+            target_fallback_type_batches_to_sources.dispose(pool);
         }
 
         (self.phase_one_jobs.count, self.phase_two_jobs.count)

@@ -9,6 +9,7 @@ use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraints::body_access_filter::{AccessAll, AccessOnlyVelocity, IBodyAccessFilter};
 use crate::physics::constraints::type_batch::TypeBatch;
+use crate::physics::constraints::type_batch_alloc;
 use crate::physics::constraints::type_processor::ITypeProcessor;
 use crate::physics::handles::ConstraintHandle;
 use crate::utilities::collections::index_set::IndexSet;
@@ -109,42 +110,91 @@ impl<
 
     fn allocate_in_type_batch(
         &self,
-        _type_batch: &mut TypeBatch,
-        _handle: ConstraintHandle,
-        _encoded_body_indices: &[i32],
-        _pool: &mut BufferPool,
+        type_batch: &mut TypeBatch,
+        handle: ConstraintHandle,
+        encoded_body_indices: &[i32],
+        pool: &mut BufferPool,
     ) -> i32 {
-        // TODO: implement typed allocation
-        0
+        unsafe {
+            type_batch_alloc::allocate_in_type_batch(
+                type_batch,
+                handle,
+                encoded_body_indices,
+                pool,
+                1, // bodies_per_constraint
+                std::mem::size_of::<Vector<i32>>(),
+                std::mem::size_of::<TPrestepData>(),
+                std::mem::size_of::<TAccumulatedImpulse>(),
+            )
+        }
     }
 
     fn allocate_in_type_batch_for_fallback(
         &self,
-        _type_batch: &mut TypeBatch,
-        _handle: ConstraintHandle,
-        _encoded_body_indices: &[i32],
-        _pool: &mut BufferPool,
+        type_batch: &mut TypeBatch,
+        handle: ConstraintHandle,
+        encoded_body_indices: &[i32],
+        pool: &mut BufferPool,
     ) -> i32 {
-        // TODO: implement typed fallback allocation
-        0
+        unsafe {
+            type_batch_alloc::allocate_in_type_batch_for_fallback(
+                type_batch,
+                handle,
+                encoded_body_indices,
+                pool,
+                1, // bodies_per_constraint
+                std::mem::size_of::<Vector<i32>>(),
+                std::mem::size_of::<TPrestepData>(),
+                std::mem::size_of::<TAccumulatedImpulse>(),
+            )
+        }
     }
 
     fn remove(
         &self,
-        _type_batch: &mut TypeBatch,
-        _index: i32,
-        _handles_to_constraints: &mut Buffer<ConstraintLocation>,
-        _is_fallback: bool,
+        type_batch: &mut TypeBatch,
+        index: i32,
+        handles_to_constraints: &mut Buffer<ConstraintLocation>,
+        is_fallback: bool,
     ) {
-        // TODO: implement typed removal with swap-back
+        unsafe {
+            if is_fallback {
+                type_batch_alloc::remove_from_type_batch_fallback::<
+                    Vector<i32>,
+                    TPrestepData,
+                    TAccumulatedImpulse,
+                >(type_batch, index, handles_to_constraints, 1);
+            } else {
+                type_batch_alloc::remove_from_type_batch::<
+                    Vector<i32>,
+                    TPrestepData,
+                    TAccumulatedImpulse,
+                >(type_batch, index, handles_to_constraints, 1);
+            }
+        }
     }
 
-    fn initialize(&self, _type_batch: &mut TypeBatch, _initial_capacity: i32, _pool: &mut BufferPool) {
-        // TODO: implement typed TypeBatch initialization
+    fn initialize(&self, type_batch: &mut TypeBatch, initial_capacity: i32, pool: &mut BufferPool) {
+        type_batch_alloc::initialize_type_batch(
+            type_batch,
+            self.type_id,
+            initial_capacity,
+            pool,
+            std::mem::size_of::<Vector<i32>>(),
+            std::mem::size_of::<TPrestepData>(),
+            std::mem::size_of::<TAccumulatedImpulse>(),
+        );
     }
 
-    fn resize(&self, _type_batch: &mut TypeBatch, _new_capacity: i32, _pool: &mut BufferPool) {
-        // TODO: implement typed TypeBatch resize
+    fn resize(&self, type_batch: &mut TypeBatch, new_capacity: i32, pool: &mut BufferPool) {
+        type_batch_alloc::resize_type_batch(
+            type_batch,
+            new_capacity,
+            pool,
+            std::mem::size_of::<Vector<i32>>(),
+            std::mem::size_of::<TPrestepData>(),
+            std::mem::size_of::<TAccumulatedImpulse>(),
+        );
     }
 
     fn scale_accumulated_impulses(&self, type_batch: &mut TypeBatch, scale: f32) {

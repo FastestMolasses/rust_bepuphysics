@@ -159,15 +159,20 @@ impl BatchCompressor {
             }
         }
 
-        // TODO: call type_processor.transfer_constraint when that method is fully translated.
-        // type_processor.inner.transfer_constraint(
-        //     &mut source_batch.get_type_batch_mut(location.type_id),
-        //     source_batch_index,
-        //     location.index_in_type_batch,
-        //     solver,
-        //     bodies,
-        //     compression.target_batch,
-        // );
+        let solver_ptr = self.solver;
+        let bodies_ptr = self.bodies;
+        let batch = (*solver_ptr).sets.get_mut(0).batches.get_mut(location.batch_index);
+        let type_batch_index = *batch.type_index_to_type_batch_index.get(location.type_id);
+        let type_batch = batch.type_batches.get_mut(type_batch_index);
+        let type_proc = (&(*solver_ptr).type_processors)[location.type_id as usize].as_ref().unwrap();
+        type_proc.inner().transfer_constraint_auto_collect(
+            type_batch,
+            source_batch_index,
+            location.index_in_type_batch,
+            solver_ptr,
+            bodies_ptr,
+            compression.target_batch,
+        );
     }
 
     /// Incrementally finds and applies a set of compressions.

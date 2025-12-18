@@ -1,8 +1,11 @@
+use glam::{Quat, Vec3};
+
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
-use super::compound::CompoundChild;
+use super::compound::{Compound, CompoundChild};
 use super::shape::IShape;
+use super::shapes::Shapes;
 
 // Forward reference: Tree type from physics::trees module
 // use crate::physics::trees::Tree;
@@ -43,16 +46,40 @@ impl BigCompound {
         // TODO: self.tree.dispose(pool);
     }
 
-    // TODO: The following methods depend on Shapes, BoundingBoxBatcher, Tree, and collision detection:
+    /// Computes the bounding box for the big compound given an orientation.
+    /// Delegates to Compound::compute_child_bounds for each child.
+    pub fn compute_bounds(
+        &self,
+        orientation: Quat,
+        shape_batches: &Shapes,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        Compound::compute_child_bounds(&self.children[0], orientation, shape_batches, min, max);
+        for i in 1..self.children.len() as usize {
+            let mut child_min = Vec3::ZERO;
+            let mut child_max = Vec3::ZERO;
+            Compound::compute_child_bounds(
+                &self.children[i],
+                orientation,
+                shape_batches,
+                &mut child_min,
+                &mut child_max,
+            );
+            *min = min.min(child_min);
+            *max = max.max(child_max);
+        }
+    }
+
+    // TODO: The following methods depend on Tree and collision detection:
     // - create_without_tree_build
     // - fill_subtrees_for_children
     // - create_with_sweep_build
-    // - new (BigCompound constructor with binned build)
-    // - compute_bounds
+    // - new (BigCompound constructor with binned build — requires Tree)
     // - add_child_bounds_to_batcher
-    // - ray_test (both single and batched)
+    // - ray_test (both single and batched — requires Tree)
     // - find_local_overlaps
-    // - compute_inertia
+    // - compute_inertia (delegates to CompoundBuilder)
     // - add / remove_at
 }
 

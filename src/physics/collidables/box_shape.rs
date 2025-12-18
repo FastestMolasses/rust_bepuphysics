@@ -11,6 +11,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
 use super::ray::RayWide;
 
@@ -394,5 +395,48 @@ impl ISupportFinder<Box, BoxWide> for BoxSupportFinder {
         support.x = direction.x.simd_lt(zero).select(-shape.half_width, shape.half_width);
         support.y = direction.y.simd_lt(zero).select(-shape.half_height, shape.half_height);
         support.z = direction.z.simd_lt(zero).select(-shape.half_length, shape.half_length);
+    }
+}
+
+impl DepthRefinerSupportFinder<BoxWide> for BoxSupportFinder {
+    fn has_margin() -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn get_margin(_shape: &BoxWide, margin: &mut Vector<f32>) {
+        *margin = Vector::<f32>::splat(0.0);
+    }
+
+    #[inline(always)]
+    fn compute_local_support(
+        shape: &BoxWide,
+        direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let zero = Vector::<f32>::splat(0.0);
+        support.x = direction.x.simd_lt(zero).select(-shape.half_width, shape.half_width);
+        support.y = direction.y.simd_lt(zero).select(-shape.half_height, shape.half_height);
+        support.z = direction.z.simd_lt(zero).select(-shape.half_length, shape.half_length);
+    }
+
+    #[inline(always)]
+    fn compute_support(
+        shape: &BoxWide,
+        orientation: &Matrix3x3Wide,
+        direction: &Vector3Wide,
+        terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let mut local_direction = Vector3Wide::default();
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            direction,
+            orientation,
+            &mut local_direction,
+        );
+        let mut local_support = Vector3Wide::default();
+        <Self as DepthRefinerSupportFinder<BoxWide>>::compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }

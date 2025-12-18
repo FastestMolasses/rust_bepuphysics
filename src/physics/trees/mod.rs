@@ -16,6 +16,7 @@ mod tree_refit;
 mod tree_refit2;
 mod tree_remove;
 mod tree_self_queries;
+pub use tree_self_queries::IOverlapHandler;
 mod tree_sweep;
 mod tree_sweep_builder;
 mod tree_volume_query;

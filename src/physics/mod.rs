@@ -8,6 +8,7 @@ pub mod body_set;
 pub mod bounding_box_helpers;
 pub mod collidable_property;
 pub mod collidables;
+pub mod collision_detection;
 pub mod constraint_batch;
 pub mod constraint_location;
 pub mod constraint_reference;

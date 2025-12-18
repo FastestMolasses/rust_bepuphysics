@@ -10,6 +10,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
 use super::ray::RayWide;
 
@@ -257,6 +258,38 @@ impl ISupportFinder<Sphere, SphereWide> for SphereSupportFinder {
     fn compute_local_support(
         &self,
         _shape: &SphereWide,
+        _direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        *support = Vector3Wide::default();
+    }
+}
+
+impl DepthRefinerSupportFinder<SphereWide> for SphereSupportFinder {
+    fn has_margin() -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn get_margin(shape: &SphereWide, margin: &mut Vector<f32>) {
+        *margin = shape.radius;
+    }
+
+    #[inline(always)]
+    fn compute_local_support(
+        _shape: &SphereWide,
+        _direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        *support = Vector3Wide::default();
+    }
+
+    #[inline(always)]
+    fn compute_support(
+        _shape: &SphereWide,
+        _orientation: &Matrix3x3Wide,
         _direction: &Vector3Wide,
         _terminated_lanes: &Vector<i32>,
         support: &mut Vector3Wide,

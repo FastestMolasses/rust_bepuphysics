@@ -36,9 +36,44 @@ pub struct HingePrestepData {
     pub spring_settings: SpringSettingsWide,
 }
 
+impl Hinge {
+    pub fn apply_description(
+        &self,
+        prestep_data: &mut HingePrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+    ) {
+        let target = unsafe {
+            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
+        };
+        Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
+        Vector3Wide::write_first(self.local_hinge_axis_a, &mut target.local_hinge_axis_a);
+        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
+        Vector3Wide::write_first(self.local_hinge_axis_b, &mut target.local_hinge_axis_b);
+        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
+    }
+
+    pub fn build_description(
+        prestep_data: &HingePrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+        description: &mut Hinge,
+    ) {
+        let source = unsafe {
+            GatherScatter::get_offset_instance(prestep_data, inner_index)
+        };
+        Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
+        Vector3Wide::read_first(&source.local_hinge_axis_a, &mut description.local_hinge_axis_a);
+        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
+        Vector3Wide::read_first(&source.local_hinge_axis_b, &mut description.local_hinge_axis_b);
+        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+    }
+}
+
 impl HingePrestepData {
+    /// Legacy build_description on PrestepData (prefer Hinge::build_description).
     #[inline(always)]
-    pub fn build_description(&self, description: &mut Hinge, _bundle_index: usize) {
+    pub fn build_description_from_prestep(&self, description: &mut Hinge, _bundle_index: usize) {
         Vector3Wide::read_first(&self.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&self.local_hinge_axis_a, &mut description.local_hinge_axis_a);
         Vector3Wide::read_first(&self.local_offset_b, &mut description.local_offset_b);

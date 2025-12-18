@@ -12,6 +12,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
 use super::ray::RayWide;
 
@@ -402,5 +403,52 @@ impl ISupportFinder<Cylinder, CylinderWide> for CylinderSupportFinder {
         let use_horizontal = horizontal_length.simd_gt(Vector::<f32>::splat(1e-8));
         support.x = use_horizontal.select(direction.x * normalize_scale, zero);
         support.z = use_horizontal.select(direction.z * normalize_scale, zero);
+    }
+}
+
+impl DepthRefinerSupportFinder<CylinderWide> for CylinderSupportFinder {
+    fn has_margin() -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn get_margin(_shape: &CylinderWide, margin: &mut Vector<f32>) {
+        *margin = Vector::<f32>::default();
+    }
+
+    #[inline(always)]
+    fn compute_local_support(
+        shape: &CylinderWide,
+        direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let zero = Vector::<f32>::splat(0.0);
+        support.y = direction.y.simd_gt(zero).select(shape.half_length, -shape.half_length);
+        let horizontal_length =
+            (direction.x * direction.x + direction.z * direction.z).sqrt();
+        let normalize_scale = shape.radius / horizontal_length;
+        let use_horizontal = horizontal_length.simd_gt(Vector::<f32>::splat(1e-8));
+        support.x = use_horizontal.select(direction.x * normalize_scale, zero);
+        support.z = use_horizontal.select(direction.z * normalize_scale, zero);
+    }
+
+    #[inline(always)]
+    fn compute_support(
+        shape: &CylinderWide,
+        orientation: &Matrix3x3Wide,
+        direction: &Vector3Wide,
+        terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let mut local_direction = Vector3Wide::default();
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            direction,
+            orientation,
+            &mut local_direction,
+        );
+        let mut local_support = Vector3Wide::default();
+        <Self as DepthRefinerSupportFinder<CylinderWide>>::compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }

@@ -16,9 +16,11 @@ pub mod convex_hull;
 // Compound shapes
 pub mod compound;
 pub mod big_compound;
+pub mod compound_builder;
 
 // Mesh
 pub mod mesh;
+pub mod mesh_inertia_helper;
 
 // Shape batch management
 pub mod shapes;

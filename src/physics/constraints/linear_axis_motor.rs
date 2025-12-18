@@ -32,9 +32,44 @@ pub struct LinearAxisMotorPrestepData {
     pub settings: MotorSettingsWide,
 }
 
+impl LinearAxisMotor {
+    pub fn apply_description(
+        &self,
+        prestep_data: &mut LinearAxisMotorPrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+    ) {
+        let target = unsafe {
+            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
+        };
+        Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
+        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
+        Vector3Wide::write_first(self.local_axis, &mut target.local_plane_normal);
+        unsafe { *GatherScatter::get_first_mut(&mut target.target_velocity) = self.target_velocity; }
+        MotorSettingsWide::write_first(&self.settings, &mut target.settings);
+    }
+
+    pub fn build_description(
+        prestep_data: &LinearAxisMotorPrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+        description: &mut LinearAxisMotor,
+    ) {
+        let source = unsafe {
+            GatherScatter::get_offset_instance(prestep_data, inner_index)
+        };
+        Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
+        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
+        Vector3Wide::read_first(&source.local_plane_normal, &mut description.local_axis);
+        description.target_velocity = unsafe { *GatherScatter::get_first(&source.target_velocity) };
+        MotorSettingsWide::read_first(&source.settings, &mut description.settings);
+    }
+}
+
 impl LinearAxisMotorPrestepData {
+    /// Legacy build_description on PrestepData (prefer LinearAxisMotor::build_description).
     #[inline(always)]
-    pub fn build_description(&self, description: &mut LinearAxisMotor, _bundle_index: usize) {
+    pub fn build_description_from_prestep(&self, description: &mut LinearAxisMotor, _bundle_index: usize) {
         Vector3Wide::read_first(&self.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&self.local_offset_b, &mut description.local_offset_b);
         Vector3Wide::read_first(&self.local_plane_normal, &mut description.local_axis);

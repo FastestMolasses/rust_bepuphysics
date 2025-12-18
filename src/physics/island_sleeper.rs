@@ -16,10 +16,8 @@ use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-// Forward declarations for types not yet fully translated
-pub struct BroadPhase {
-    _opaque: [u8; 0],
-}
+// Use real BroadPhase from its module. ConstraintRemover and PairCache remain opaque until translated.
+use crate::physics::collision_detection::broad_phase::BroadPhase;
 
 pub struct ConstraintRemover {
     _opaque: [u8; 0],
@@ -474,7 +472,7 @@ impl IslandSleeper {
             .min(solver.sets.len());
 
         if sets_capacity > bodies.sets.len() {
-            // TODO: bodies.resize_sets_capacity(sets_capacity, potentially_allocated);
+            bodies.resize_sets_capacity(sets_capacity, potentially_allocated);
         }
         if sets_capacity > solver.sets.len() {
             solver.resize_sets_capacity(sets_capacity, potentially_allocated);
@@ -492,7 +490,7 @@ impl IslandSleeper {
             .min(solver.sets.len());
         let target = potentially_allocated.max(sets_capacity);
 
-        // TODO: bodies.resize_sets_capacity(target, potentially_allocated);
+        bodies.resize_sets_capacity(target, potentially_allocated);
         solver.resize_sets_capacity(target, potentially_allocated);
         // TODO: pair_cache.resize_sets_capacity(...)
     }

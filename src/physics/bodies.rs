@@ -7,35 +7,17 @@ use crate::physics::collidables::collidable::Collidable;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collidables::typed_index::TypedIndex;
+use crate::physics::collision_detection::broad_phase::BroadPhase;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
+use crate::physics::island_awakener::IslandAwakener;
+use crate::physics::island_sleeper::IslandSleeper;
+use crate::physics::solver::Solver;
+use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::vector::Vector;
 use std::simd::prelude::*;
-
-// Forward-declared opaque types for circular dependencies.
-// These will be replaced with actual implementations when their files are translated.
-
-/// Placeholder for BroadPhase (from CollisionDetection).
-pub struct BroadPhase {
-    _opaque: [u8; 0],
-}
-
-/// Placeholder for Solver.
-pub struct Solver {
-    _opaque: [u8; 0],
-}
-
-/// Placeholder for IslandAwakener.
-pub struct IslandAwakener {
-    _opaque: [u8; 0],
-}
-
-/// Placeholder for IslandSleeper.
-pub struct IslandSleeper {
-    _opaque: [u8; 0],
-}
 
 /// Location of a body in memory.
 #[repr(C)]
@@ -232,7 +214,9 @@ impl Bodies {
         };
 
         if description.collidable.shape.exists() {
-            // TODO: AddCollidableToBroadPhase - requires BroadPhase implementation
+            // Use raw pointer to avoid double mutable borrow of self.
+            let collidable_ptr = self.sets.get_mut(0).collidables.get_mut(index) as *mut Collidable;
+            unsafe { self.add_collidable_to_broad_phase(handle, &description.pose, &description.local_inertia, &mut *collidable_ptr); }
         } else {
             self.sets.get_mut(0).collidables.get_mut(index).broad_phase_index = -1;
         }
@@ -467,16 +451,23 @@ impl Bodies {
         let set = self.sets.get(location.set_index);
         let collidable = *set.collidables.get(location.index);
         if collidable.shape.exists() {
-            // TODO: shapes.update_bounds + broadPhase.update_active_bounds / update_static_bounds
-            // Requires BroadPhase and Shapes implementations
+            let shapes = unsafe { &*self.shapes };
+            let pose = &set.dynamics_state.get(location.index).motion.pose;
+            let mut body_bounds = BoundingBox::default();
+            shapes.update_bounds(pose, &collidable.shape, &mut body_bounds);
+            let broad_phase = unsafe { &mut *self.broad_phase };
+            if location.set_index == 0 {
+                broad_phase.update_active_bounds(collidable.broad_phase_index, body_bounds.min, body_bounds.max);
+            } else {
+                broad_phase.update_static_bounds(collidable.broad_phase_index, body_bounds.min, body_bounds.max);
+            }
         }
     }
 
     fn update_for_kinematic_state_change(
         &mut self,
-        _handle: BodyHandle,
+        handle: BodyHandle,
         location: &BodyMemoryLocation,
-        _set: &mut BodySet,
         previously_kinematic: bool,
         currently_kinematic: bool,
     ) {
@@ -485,23 +476,49 @@ impl Bodies {
             "If we're changing kinematic state, we should have already awoken the body."
         );
         if previously_kinematic != currently_kinematic {
-            // TODO: Update broad phase collidable references and solver references.
-            // Requires BroadPhase and Solver implementations.
+            let collidable = *self.sets.get(location.set_index).collidables.get(location.index);
+            if collidable.shape.exists() {
+                // Update the mobility encoded in the broad phase leaf.
+                let mobility = if currently_kinematic {
+                    CollidableMobility::Kinematic
+                } else {
+                    CollidableMobility::Dynamic
+                };
+                let broad_phase = unsafe { &mut *self.broad_phase };
+                if location.set_index == 0 {
+                    *broad_phase.active_leaves.get_mut(collidable.broad_phase_index) =
+                        CollidableReference::from_body(mobility, handle);
+                } else {
+                    *broad_phase.static_leaves.get_mut(collidable.broad_phase_index) =
+                        CollidableReference::from_body(mobility, handle);
+                }
+            }
+            // Update solver constraint references for kinematic state change.
+            let solver = unsafe { &mut *self.solver };
+            if currently_kinematic {
+                unsafe { solver.update_references_for_body_becoming_kinematic(handle, location.index); }
+            } else {
+                unsafe { solver.update_references_for_body_becoming_dynamic(handle, location.index); }
+            }
         }
     }
 
     fn update_for_shape_change(
         &mut self,
-        _handle: BodyHandle,
-        _active_body_index: i32,
+        handle: BodyHandle,
+        active_body_index: i32,
         old_shape: TypedIndex,
         new_shape: TypedIndex,
     ) {
         if old_shape.exists() != new_shape.exists() {
             if new_shape.exists() {
-                // TODO: Add collidable to broad phase for the new shape.
+                // Add a collidable to the simulation for the new shape.
+                let state = *self.sets.get(0).dynamics_state.get(active_body_index);
+                let collidable_ptr = self.sets.get_mut(0).collidables.get_mut(active_body_index) as *mut Collidable;
+                unsafe { self.add_collidable_to_broad_phase(handle, &state.motion.pose, &state.inertia.local, &mut *collidable_ptr); }
             } else {
-                // TODO: Remove the now-unused collidable from the broad phase.
+                // Remove the now-unused collidable from the simulation.
+                self.remove_collidable_from_broad_phase(active_body_index);
             }
         }
     }
@@ -513,16 +530,16 @@ impl Bodies {
         let location = *self.handle_to_location.get(handle.0);
         if location.set_index > 0 {
             // Body is inactive — wake it up.
-            // TODO: awakener.awaken_body(handle) — requires IslandAwakener implementation
+            unsafe { (*self.awakener).awaken_body(handle); }
         }
         let location = *self.handle_to_location.get(handle.0);
         let set = self.sets.get_mut(location.set_index);
         let inertias = &mut set.dynamics_state.get_mut(location.index).inertia;
-        let _previously_kinematic = Self::is_kinematic(&inertias.local);
-        let _now_kinematic = Self::is_kinematic(local_inertia);
+        let previously_kinematic = Self::is_kinematic(&inertias.local);
+        let now_kinematic = Self::is_kinematic(local_inertia);
         inertias.local = *local_inertia;
         inertias.world = BodyInertia::default();
-        // TODO: update_for_kinematic_state_change — requires BroadPhase and Solver
+        self.update_for_kinematic_state_change(handle, &location, previously_kinematic, now_kinematic);
     }
 
     /// Changes the shape of a body. Properly handles the transition between shapeless and shapeful.
@@ -530,15 +547,16 @@ impl Bodies {
     pub fn set_shape(&mut self, handle: BodyHandle, new_shape: TypedIndex) {
         let location = *self.handle_to_location.get(handle.0);
         if location.set_index > 0 {
-            // TODO: awakener.awaken_body(handle)
+            unsafe { (*self.awakener).awaken_body(handle); }
         }
         let location = *self.handle_to_location.get(handle.0);
         debug_assert!(location.set_index == 0, "We should be working with an active shape.");
         let set = self.sets.get_mut(0);
         let collidable = set.collidables.get_mut(location.index);
-        let _old_shape = collidable.shape;
+        let old_shape = collidable.shape;
         collidable.shape = new_shape;
-        // TODO: update_for_shape_change + update_bounds — requires BroadPhase
+        self.update_for_shape_change(handle, location.index, old_shape, new_shape);
+        self.update_bounds(handle);
     }
 
     /// Applies a description to a body. Handles transitions between dynamic/kinematic and shapeless/shapeful.
@@ -546,16 +564,17 @@ impl Bodies {
         self.validate_existing_handle(handle);
         let location = *self.handle_to_location.get(handle.0);
         if location.set_index > 0 {
-            // TODO: awakener.awaken_body(handle)
+            unsafe { (*self.awakener).awaken_body(handle); }
         }
         let location = *self.handle_to_location.get(handle.0);
         let set = self.sets.get_mut(location.set_index);
-        let _old_shape = set.collidables.get(location.index).shape;
-        let _now_kinematic = Self::is_kinematic(&description.local_inertia);
-        let _previously_kinematic = Self::is_kinematic(&set.dynamics_state.get(location.index).inertia.local);
+        let old_shape = set.collidables.get(location.index).shape;
+        let now_kinematic = Self::is_kinematic(&description.local_inertia);
+        let previously_kinematic = Self::is_kinematic(&set.dynamics_state.get(location.index).inertia.local);
         set.apply_description_by_index(location.index, description);
-        // TODO: update_for_shape_change + update_for_kinematic_state_change + update_bounds
-        // Requires BroadPhase and Solver implementations.
+        self.update_for_shape_change(handle, location.index, old_shape, description.collidable.shape);
+        self.update_for_kinematic_state_change(handle, &location, previously_kinematic, now_kinematic);
+        self.update_bounds(handle);
     }
 
     /// Gets a BodyReference for the given handle.
@@ -569,9 +588,9 @@ impl Bodies {
         // Remove constraints first.
         let constraints_count = self.sets.get(0).constraints.get(active_body_index).count;
         for i in (0..constraints_count).rev() {
-            let _constraint_handle =
+            let constraint_handle =
                 self.sets.get(0).constraints.get(active_body_index).span.get(i).connecting_constraint_handle;
-            // TODO: solver.remove(constraint_handle) — requires Solver implementation
+            unsafe { (*self.solver).remove(constraint_handle); }
         }
         let pool_ptr = self.pool;
         let pool = unsafe { &mut *pool_ptr };
@@ -594,7 +613,7 @@ impl Bodies {
         self.validate_existing_handle(*self.sets.get(0).index_to_handle.get(active_body_index));
         let collidable = *self.sets.get(0).collidables.get(active_body_index);
         if collidable.shape.exists() {
-            // TODO: Remove collidable from broad phase
+            self.remove_collidable_from_broad_phase(active_body_index);
         }
         let mut handle = BodyHandle(-1);
         let mut moved_body_index = -1i32;
@@ -606,7 +625,7 @@ impl Bodies {
             &mut moved_body_handle,
         );
         if body_moved {
-            // TODO: solver.update_for_body_memory_move(moved_body_index, active_body_index)
+            unsafe { (*self.solver).update_for_body_memory_move(moved_body_index, active_body_index); }
             self.handle_to_location.get_mut(moved_body_handle.0).index = active_body_index;
         }
         handle
@@ -615,19 +634,44 @@ impl Bodies {
     /// Removes a body from the simulation by its handle.
     pub fn remove(&mut self, handle: BodyHandle) {
         self.validate_existing_handle(handle);
-        // TODO: awakener.awaken_body(handle)
+        unsafe { (*self.awakener).awaken_body(handle); }
         let index = self.handle_to_location.get(handle.0).index;
         self.remove_at(index);
     }
 
     fn add_collidable_to_broad_phase(
         &mut self,
-        _handle: BodyHandle,
-        _pose: &RigidPose,
-        _local_inertia: &BodyInertia,
-        _collidable: &mut Collidable,
+        handle: BodyHandle,
+        pose: &RigidPose,
+        local_inertia: &BodyInertia,
+        collidable: &mut Collidable,
     ) {
-        // TODO: Requires BroadPhase and Shapes implementations.
+        debug_assert!(collidable.shape.exists());
+        // Compute initial bounding box for broad phase insertion.
+        let shapes = unsafe { &*self.shapes };
+        let mut body_bounds = BoundingBox::default();
+        shapes.update_bounds(pose, &collidable.shape, &mut body_bounds);
+        // New body collidables are always assumed to be active.
+        let mobility = if Self::is_kinematic(local_inertia) {
+            CollidableMobility::Kinematic
+        } else {
+            CollidableMobility::Dynamic
+        };
+        let broad_phase = unsafe { &mut *self.broad_phase };
+        collidable.broad_phase_index =
+            broad_phase.add_active(CollidableReference::from_body(mobility, handle), &body_bounds.min, &body_bounds.max);
+    }
+
+    fn remove_collidable_from_broad_phase(&mut self, active_body_index: i32) {
+        let collidable = self.sets.get(0).collidables.get(active_body_index);
+        let removed_broad_phase_index = collidable.broad_phase_index;
+        let broad_phase = unsafe { &mut *self.broad_phase };
+        let mut moved_leaf = CollidableReference::default();
+        if broad_phase.remove_active_at(removed_broad_phase_index, &mut moved_leaf) {
+            // Whatever takes the body's place in the broad phase is also an active body.
+            debug_assert!(moved_leaf.mobility() != CollidableMobility::Static);
+            self.update_collidable_broad_phase_index(moved_leaf.body_handle(), removed_broad_phase_index);
+        }
     }
 
     /// Updates the broad phase index stored on a body's collidable.

@@ -1,5 +1,6 @@
 use glam::{Quat, Vec3};
 use std::simd::prelude::*;
+use std::simd::StdFloat;
 
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
@@ -11,6 +12,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
 use super::ray::RayWide;
 
@@ -262,11 +264,102 @@ impl IShapeWide<Capsule> for CapsuleWide {
         t: &mut Vector<f32>,
         normal: &mut Vector3Wide,
     ) {
-        // TODO: Wide ray test implementation for capsule
-        // This is complex and will be filled in when collision detection is fully wired up.
-        *intersected = Vector::<i32>::splat(0);
-        *t = Vector::<f32>::splat(0.0);
-        *normal = Vector3Wide::default();
+        // Work in local space: pull the ray into the capsule's local frame.
+        let mut orientation = Matrix3x3Wide::default();
+        Matrix3x3Wide::create_from_quaternion(&pose.orientation, &mut orientation);
+        let mut o_world = Vector3Wide::default();
+        Vector3Wide::subtract(&ray.origin, &pose.position, &mut o_world);
+        let mut o = Vector3Wide::default();
+        Matrix3x3Wide::transform_by_transposed_without_overlap(&o_world, &orientation, &mut o);
+        let mut d = Vector3Wide::default();
+        Matrix3x3Wide::transform_by_transposed_without_overlap(&ray.direction, &orientation, &mut d);
+
+        // Normalize direction
+        let d_length = d.length();
+        let inverse_d_length = Vector::<f32>::splat(1.0) / d_length;
+        let mut d_normalized = Vector3Wide::default();
+        Vector3Wide::scale_to(&d, &inverse_d_length, &mut d_normalized);
+        d = d_normalized;
+
+        // Move origin up to earliest possible impact time
+        let mut od = Vector::<f32>::splat(0.0);
+        Vector3Wide::dot(&o, &d, &mut od);
+        let zero_f = Vector::<f32>::splat(0.0);
+        let t_offset = (-od - (self.half_length + self.radius)).simd_max(zero_f);
+        let mut o_offset = Vector3Wide::default();
+        Vector3Wide::scale_to(&d, &t_offset, &mut o_offset);
+        let mut o_shifted = Vector3Wide::default();
+        Vector3Wide::add(&o, &o_offset, &mut o_shifted);
+        o = o_shifted;
+
+        // Cylinder intersection
+        let a = d.x * d.x + d.z * d.z;
+        let b_val = o.x * d.x + o.z * d.z;
+        let radius_squared = self.radius * self.radius;
+        let c = (o.x * o.x + o.z * o.z) - radius_squared;
+
+        let ray_isnt_parallel = a.simd_gt(Vector::<f32>::splat(1e-8));
+        let discriminant = b_val * b_val - a * c;
+        let cylinder_intersected_mask = (b_val.simd_le(zero_f)
+            | c.simd_le(zero_f))
+            & discriminant.simd_ge(zero_f);
+
+        let cylinder_t = ((-b_val - discriminant.abs().sqrt()) / a).simd_max(-t_offset);
+        Vector3Wide::scale_to(&d, &cylinder_t, &mut o_offset);
+        let mut cylinder_hit = Vector3Wide::default();
+        Vector3Wide::add(&o, &o_offset, &mut cylinder_hit);
+        let inverse_radius = Vector::<f32>::splat(1.0) / self.radius;
+        let cylinder_normal_x = cylinder_hit.x * inverse_radius;
+        let cylinder_normal_z = cylinder_hit.z * inverse_radius;
+        let use_cylinder = cylinder_hit.y.simd_ge(-self.half_length)
+            & cylinder_hit.y.simd_le(self.half_length);
+
+        // Sphere cap intersection for lanes not using the cylinder
+        let negated_half_length = -self.half_length;
+        let parallel_sphere_y = d.y.simd_lt(zero_f).select(
+            negated_half_length.simd_max(o.y.simd_min(self.half_length)),
+            self.half_length.simd_min(o.y.simd_max(negated_half_length)),
+        );
+        let non_parallel_sphere_y = cylinder_hit.y.simd_gt(self.half_length)
+            .select(self.half_length, negated_half_length);
+        let sphere_y = ray_isnt_parallel.select(non_parallel_sphere_y, parallel_sphere_y);
+
+        o.y = o.y - sphere_y;
+        let mut cap_b = Vector::<f32>::splat(0.0);
+        Vector3Wide::dot(&o, &d, &mut cap_b);
+        let mut cap_c = Vector::<f32>::splat(0.0);
+        Vector3Wide::dot(&o, &o, &mut cap_c);
+        cap_c = cap_c - radius_squared;
+
+        let cap_discriminant = cap_b * cap_b - cap_c;
+        let cap_intersected_mask = (cap_b.simd_le(zero_f)
+            | cap_c.simd_le(zero_f))
+            & cap_discriminant.simd_ge(zero_f);
+
+        let cap_t = (-cap_b - cap_discriminant.abs().sqrt()).simd_max(-t_offset);
+        Vector3Wide::scale_to(&d, &cap_t, &mut o_offset);
+        let mut cap_hit = Vector3Wide::default();
+        Vector3Wide::add(&o, &o_offset, &mut cap_hit);
+        let mut cap_normal = Vector3Wide::default();
+        Vector3Wide::scale_to(&cap_hit, &inverse_radius, &mut cap_normal);
+
+        // Merge cylinder and cap results. use_cylinder is a Mask<i32, N>.
+        // Convert to i32 mask for conditional selection on f32 values.
+        let use_cyl_i32 = use_cylinder.to_int();
+        // For f32 conditional select, reinterpret the i32 mask
+        let use_cyl_f32_mask: Mask<i32, { Vector::<f32>::LEN }> = Simd::simd_lt(use_cyl_i32, Vector::<i32>::splat(0));
+        normal.x = use_cyl_f32_mask.select(cylinder_normal_x, cap_normal.x);
+        normal.y = use_cyl_f32_mask.select(zero_f, cap_normal.y);
+        normal.z = use_cyl_f32_mask.select(cylinder_normal_z, cap_normal.z);
+        *t = (use_cyl_f32_mask.select(cylinder_t, cap_t) + t_offset) * inverse_d_length;
+
+        let cyl_int_vals = cylinder_intersected_mask.to_int();
+        let cap_int_vals = cap_intersected_mask.to_int();
+        *intersected = use_cyl_f32_mask.select(cyl_int_vals, cap_int_vals);
+
+        let mut rotated_normal = Vector3Wide::default();
+        Matrix3x3Wide::transform(&*normal, &orientation, &mut rotated_normal);
+        *normal = rotated_normal;
     }
 }
 
@@ -314,5 +407,47 @@ impl ISupportFinder<Capsule, CapsuleWide> for CapsuleSupportFinder {
         support.x = zero;
         support.y = direction.y.simd_lt(zero).select(-shape.half_length, shape.half_length);
         support.z = zero;
+    }
+}
+
+impl DepthRefinerSupportFinder<CapsuleWide> for CapsuleSupportFinder {
+    fn has_margin() -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn get_margin(shape: &CapsuleWide, margin: &mut Vector<f32>) {
+        *margin = shape.radius;
+    }
+
+    #[inline(always)]
+    fn compute_local_support(
+        shape: &CapsuleWide,
+        direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let zero = Vector::<f32>::splat(0.0);
+        support.x = zero;
+        support.y = direction.y.simd_lt(zero).select(-shape.half_length, shape.half_length);
+        support.z = zero;
+    }
+
+    #[inline(always)]
+    fn compute_support(
+        shape: &CapsuleWide,
+        orientation: &Matrix3x3Wide,
+        direction: &Vector3Wide,
+        _terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        Vector3Wide::scale_to(&orientation.y, &shape.half_length, support);
+        let mut negated = Vector3Wide::default();
+        Vector3Wide::negate(support, &mut negated);
+        let mut dot = Vector::<f32>::splat(0.0);
+        Vector3Wide::dot(&orientation.y, direction, &mut dot);
+        let zero = Vector::<f32>::splat(0.0);
+        let should_negate = dot.simd_lt(zero).to_int();
+        *support = Vector3Wide::conditional_select(&should_negate, &negated, support);
     }
 }

@@ -4,12 +4,39 @@
 // processor for TypeBatch data. It holds no constraint state itself.
 // In Rust, we model this as a trait + a concrete struct holding cached metadata.
 
+use crate::physics::bodies::Bodies;
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::handles::ConstraintHandle;
 use crate::utilities::collections::index_set::IndexSet;
+use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+
+/// Collects body references from active constraints and converts them into properly flagged body handles.
+/// Used by the convenience `transfer_constraint_auto_collect` to gather dynamic body handles
+/// and encoded body indices before calling the full `transfer_constraint`.
+struct ActiveKinematicFlaggedBodyHandleCollector<'a> {
+    bodies: &'a Bodies,
+    dynamic_body_handles: *mut i32,
+    dynamic_count: *mut usize,
+    encoded_body_indices: *mut i32,
+    index_count: usize,
+}
+
+impl<'a> IForEach<i32> for ActiveKinematicFlaggedBodyHandleCollector<'a> {
+    fn loop_body(&mut self, encoded_body_index: i32) {
+        unsafe {
+            if Bodies::is_encoded_dynamic_reference(encoded_body_index) {
+                let count = *self.dynamic_count;
+                *self.dynamic_body_handles.add(count) = self.bodies.active_set().index_to_handle.get(encoded_body_index).0;
+                *self.dynamic_count = count + 1;
+            }
+            *self.encoded_body_indices.add(self.index_count) = encoded_body_index;
+            self.index_count += 1;
+        }
+    }
+}
 
 /// Superclass of constraint type batch processors. Responsible for interpreting raw type batches
 /// for the purposes of bookkeeping and solving.
@@ -93,17 +120,83 @@ pub trait ITypeProcessor {
         // Default: no-op stub. Concrete implementations will override.
     }
 
-    /// Transfers a constraint from one batch to another.
+    /// Adds constraints from a sleeping fallback type batch into the active set's fallback type batch.
+    /// Unlike bulk copy, this goes through per-constraint allocation to maintain the fallback batch invariant
+    /// (no duplicate bodies per bundle).
+    fn add_sleeping_to_active_for_fallback(
+        &self,
+        _source_set: i32,
+        _source_type_batch_index: i32,
+        _target_type_batch_index: i32,
+        _bodies: &crate::physics::bodies::Bodies,
+        _solver: &crate::physics::solver::Solver,
+    ) {
+        // Default: no-op stub. Concrete implementations will override.
+    }
+
+    /// Transfers a constraint from one batch's type batch to another batch's type batch of the same type.
+    /// Uses pre-computed dynamic body handles and encoded body indices.
     fn transfer_constraint(
         &self,
-        _source_batch: &mut TypeBatch,
-        _target_batch: &mut TypeBatch,
-        _source_index: i32,
-        _target_index: i32,
-        _handle_to_constraint: &mut Buffer<ConstraintLocation>,
-        _constraint_handle: i32,
+        _source_type_batch: &mut TypeBatch,
+        _source_batch_index: i32,
+        _index_in_type_batch: i32,
+        _solver: *mut crate::physics::solver::Solver,
+        _bodies: *mut crate::physics::bodies::Bodies,
+        _target_batch_index: i32,
+        _dynamic_body_handles: &[crate::physics::handles::BodyHandle],
+        _encoded_body_indices: &[i32],
     ) {
-        // Default: no-op stub.
+        // Default: no-op stub. Concrete type processors will override with lane-copy logic.
+    }
+
+    /// Convenience wrapper that auto-collects dynamic body handles and encoded body indices,
+    /// then calls the full `transfer_constraint`.
+    fn transfer_constraint_auto_collect(
+        &self,
+        source_type_batch: &mut TypeBatch,
+        source_batch_index: i32,
+        index_in_type_batch: i32,
+        solver: *mut crate::physics::solver::Solver,
+        bodies: *mut crate::physics::bodies::Bodies,
+        target_batch_index: i32,
+    ) {
+        unsafe {
+            let bodies_per_constraint = self.bodies_per_constraint() as usize;
+            let mut dynamic_body_handles = vec![0i32; bodies_per_constraint];
+            let mut encoded_body_indices = vec![0i32; bodies_per_constraint];
+            let mut dynamic_count = 0usize;
+            let bodies_ref = &*bodies;
+
+            // Enumerate raw body references to collect handles and indices
+            (*solver).enumerate_connected_raw_body_references_from_type_batch(
+                &*source_type_batch,
+                index_in_type_batch,
+                &mut ActiveKinematicFlaggedBodyHandleCollector {
+                    bodies: bodies_ref,
+                    dynamic_body_handles: dynamic_body_handles.as_mut_ptr(),
+                    dynamic_count: &mut dynamic_count,
+                    encoded_body_indices: encoded_body_indices.as_mut_ptr(),
+                    index_count: 0,
+                },
+            );
+
+            let dynamic_handles: Vec<crate::physics::handles::BodyHandle> = dynamic_body_handles[..dynamic_count]
+                .iter()
+                .map(|&v| crate::physics::handles::BodyHandle(v))
+                .collect();
+
+            self.transfer_constraint(
+                source_type_batch,
+                source_batch_index,
+                index_in_type_batch,
+                solver,
+                bodies,
+                target_batch_index,
+                &dynamic_handles,
+                &encoded_body_indices,
+            );
+        }
     }
 
     /// Updates body references within a constraint when a body is moved in memory.

@@ -19,6 +19,36 @@ pub struct Weld {
     pub spring_settings: SpringSettings,
 }
 
+impl Weld {
+    pub fn apply_description(
+        &self,
+        prestep_data: &mut WeldPrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+    ) {
+        let target = unsafe {
+            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
+        };
+        Vector3Wide::write_first(self.local_offset, &mut target.local_offset);
+        QuaternionWide::write_first(self.local_orientation, &mut target.local_orientation);
+        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
+    }
+
+    pub fn build_description(
+        prestep_data: &WeldPrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+        description: &mut Weld,
+    ) {
+        let source = unsafe {
+            GatherScatter::get_offset_instance(prestep_data, inner_index)
+        };
+        Vector3Wide::read_first(&source.local_offset, &mut description.local_offset);
+        QuaternionWide::read_first(&source.local_orientation, &mut description.local_orientation);
+        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct WeldPrestepData {
@@ -28,8 +58,9 @@ pub struct WeldPrestepData {
 }
 
 impl WeldPrestepData {
+    /// Legacy build_description on PrestepData (prefer Weld::build_description).
     #[inline(always)]
-    pub fn build_description(&self, description: &mut Weld, _bundle_index: usize) {
+    pub fn build_description_from_prestep(&self, description: &mut Weld, _bundle_index: usize) {
         Vector3Wide::read_first(&self.local_offset, &mut description.local_offset);
         QuaternionWide::read_first(&self.local_orientation, &mut description.local_orientation);
         SpringSettingsWide::read_first(&self.spring_settings, &mut description.spring_settings);

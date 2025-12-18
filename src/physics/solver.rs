@@ -3,7 +3,8 @@
 use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::BodyInertia;
 use crate::physics::body_set::BodyConstraintReference;
-use crate::physics::collidables::collidable_reference::CollidableReference;
+use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
+use crate::physics::collision_detection::pair_cache::CollidablePair;
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraint_reference::ConstraintReference;
@@ -43,7 +44,7 @@ pub struct Solver {
 
     /// Pool to retrieve constraint handles from when creating new constraints.
     pub handle_pool: IdPool,
-    pool: *mut BufferPool,
+    pub(crate) pool: *mut BufferPool,
 
     /// Mapping from constraint handle (via its internal integer value) to the location of a constraint in memory.
     pub handle_to_constraint: Buffer<ConstraintLocation>,
@@ -72,23 +73,8 @@ pub struct Solver {
     pub substep_ended: Option<Box<dyn Fn(i32)>>,
 }
 
-// Forward-declared type for island awakener.
-// TODO: replace with real implementation in island_awakener.rs
-pub struct IslandAwakener {
-    _opaque: [u8; 0],
-}
-
-impl IslandAwakener {
-    /// Stub: awakens all bodies connected to a constraint, moving them to the active set if sleeping.
-    pub unsafe fn awaken_constraint(&self, _handle: ConstraintHandle) {
-        // TODO: implement
-    }
-
-    /// Stub: awakens a body, moving it to the active set if sleeping.
-    pub unsafe fn awaken_body(&self, _handle: BodyHandle) {
-        // TODO: implement
-    }
-}
+// Re-export IslandAwakener from its real module for use here.
+pub use crate::physics::island_awakener::IslandAwakener;
 
 /// Simple primitive comparer for use with QuickSet<i32>.
 #[derive(Clone, Copy, Default)]
@@ -389,6 +375,30 @@ impl Solver {
             }
         }
         sync_count
+    }
+
+    /// Finds a candidate batch for a constraint associated with a collidable pair.
+    /// Extracts dynamic body handles from the pair's collidable references and delegates
+    /// to find_candidate_batch_with_handles.
+    pub(crate) fn find_candidate_batch(&self, pair: &CollidablePair) -> i32 {
+        let a_is_dynamic = pair.a.mobility() == CollidableMobility::Dynamic;
+        if a_is_dynamic && pair.b.mobility() == CollidableMobility::Dynamic {
+            // Both collidables are dynamic.
+            let handles = [pair.a.body_handle().0, pair.b.body_handle().0];
+            self.find_candidate_batch_with_handles(&handles)
+        } else {
+            // Only one collidable is dynamic. Statics and kinematics will not block batch containment.
+            debug_assert!(
+                a_is_dynamic || pair.b.mobility() == CollidableMobility::Dynamic,
+                "Constraints can only be created when at least one body in the pair is dynamic."
+            );
+            let dynamic_handle = if a_is_dynamic {
+                pair.a.body_handle().0
+            } else {
+                pair.b.body_handle().0
+            };
+            self.find_candidate_batch_with_handles(&[dynamic_handle])
+        }
     }
 
     pub(crate) unsafe fn allocate_in_batch(
@@ -811,6 +821,231 @@ impl Solver {
             "There cannot be more than FallbackBatchThreshold + 1 constraint batches."
         );
         (synchronized, fallback_exists)
+    }
+
+    /// Updates constraint body references when a body transitions from dynamic to kinematic.
+    /// Any constraints that connect only kinematic bodies together will be removed.
+    pub(crate) unsafe fn update_references_for_body_becoming_kinematic(&mut self, body_handle: BodyHandle, body_index: i32) {
+        let self_ptr = self as *mut Self;
+        let bodies = &*(*self_ptr).bodies;
+        // bodies[bodyHandle].Kinematic in C#
+        debug_assert!({
+            let loc = *bodies.handle_to_location.get(body_handle.0);
+            Bodies::is_kinematic(unsafe { &(*bodies.active_set().dynamics_state.get(loc.index)).inertia.local })
+        });
+
+        // DynamicToKinematicEnumerator: simply counts dynamic body references.
+        struct DynamicToKinematicEnumerator {
+            dynamic_count: i32,
+        }
+        impl IForEach<i32> for DynamicToKinematicEnumerator {
+            fn loop_body(&mut self, _encoded_body_reference: i32) {
+                self.dynamic_count += 1;
+            }
+        }
+
+        let constraints = &bodies.active_set().constraints.get(body_index);
+        let mut present_in_fallback = false;
+
+        // Note reverse iteration: if the solver removes a constraint for being between two kinematics,
+        // we don't want to break enumeration.
+        for i in (0..constraints.count).rev() {
+            let constraint = *constraints.get(i);
+            let constraint_handle = constraint.connecting_constraint_handle;
+            let mut enumerator = DynamicToKinematicEnumerator { dynamic_count: 0 };
+            (*self_ptr).enumerate_connected_dynamic_bodies(constraint_handle, &mut enumerator);
+
+            if enumerator.dynamic_count == 1 {
+                // This body was the only dynamic. The constraint now connects only kinematics — remove it.
+                (*self_ptr).remove(constraint_handle);
+            } else {
+                // The constraint survived. Update the kinematic flag for this body's reference.
+                let location = *(*self_ptr).handle_to_constraint.get(constraint_handle.0);
+                let batch = (*self_ptr).sets.get_mut(location.set_index).batches.get_mut(location.batch_index);
+                let type_batch = batch.get_type_batch_mut(location.type_id);
+                let bodies_per_constraint = (&(*self_ptr).type_processors)[location.type_id as usize]
+                    .as_ref()
+                    .unwrap()
+                    .bodies_per_constraint;
+                let ints_per_bundle = Vector::<i32>::LEN as i32 * bodies_per_constraint;
+                let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+                BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+                let first_body_reference = type_batch.body_references.as_ptr() as *mut u32;
+                let body_ref_slot = first_body_reference.add(
+                    (ints_per_bundle as usize * bundle_index)
+                        + inner_index
+                        + (constraint.body_index_in_constraint as usize * Vector::<i32>::LEN),
+                );
+                let old_dynamic_index = *body_ref_slot;
+                *body_ref_slot = old_dynamic_index | Bodies::KINEMATIC_MASK;
+
+                if location.batch_index < (*self_ptr).fallback_batch_threshold {
+                    // Non-fallback batch: remove the former dynamic's handle reference.
+                    (*self_ptr)
+                        .batch_referenced_handles
+                        .get_mut(location.batch_index)
+                        .remove(body_handle.0);
+                } else {
+                    present_in_fallback = true;
+                }
+            }
+        }
+
+        if present_in_fallback {
+            // Body is now kinematic — remove it from fallback tracking entirely.
+            let mut ids_buf = [0i32; 3];
+            let ids_buffer = Buffer::new(ids_buf.as_mut_ptr(), 3, -1);
+            let mut allocation_ids_to_free = QuickList::<i32>::new(ids_buffer);
+            (*self_ptr).try_remove_dynamic_body_from_fallback(body_handle, body_index, &mut allocation_ids_to_free);
+            let pool = &mut *(*self_ptr).pool;
+            for i in 0..allocation_ids_to_free.count {
+                pool.return_unsafely(*allocation_ids_to_free.get(i));
+            }
+        }
+
+        let constraints = &(*(*self_ptr).bodies).active_set().constraints.get(body_index);
+        if constraints.count > 0 {
+            // This body is now kinematic and constrained — add to constrained kinematics set.
+            let pool = &mut *(*self_ptr).pool;
+            (*self_ptr).constrained_kinematic_handles.add(&body_handle.0, pool);
+        }
+    }
+
+    /// Tries to remove a dynamic body from the fallback batch tracking.
+    unsafe fn try_remove_dynamic_body_from_fallback(
+        &mut self,
+        body_handle: BodyHandle,
+        body_index: i32,
+        allocation_ids_to_free: &mut QuickList<i32>,
+    ) {
+        if self
+            .active_set_mut()
+            .sequential_fallback
+            .try_remove_dynamic_body_from_tracking(body_index, allocation_ids_to_free)
+        {
+            self.batch_referenced_handles
+                .get_mut(self.fallback_batch_threshold)
+                .unset(body_handle.0);
+        }
+    }
+
+    /// Updates constraint body references when a body transitions from kinematic to dynamic.
+    /// Ensures constraints belong to appropriate batches for the new dynamic status.
+    pub(crate) unsafe fn update_references_for_body_becoming_dynamic(&mut self, body_handle: BodyHandle, body_index: i32) {
+        let self_ptr = self as *mut Self;
+        let bodies = &*(*self_ptr).bodies;
+
+        // KinematicToDynamicEnumerator: collects dynamic body handles and encoded body indices.
+        const MAXIMUM_BODIES_PER_CONSTRAINT: usize = 4;
+
+        struct KinematicToDynamicEnumerator<'a> {
+            index_to_handle: &'a Buffer<BodyHandle>,
+            dynamic_body_handles: *mut i32,
+            dynamic_count: i32,
+            encoded_body_indices: *mut i32,
+            encoded_count: i32,
+        }
+        impl<'a> IForEach<i32> for KinematicToDynamicEnumerator<'a> {
+            fn loop_body(&mut self, encoded_body_reference: i32) {
+                unsafe {
+                    debug_assert!(
+                        (self.encoded_count as usize) < MAXIMUM_BODIES_PER_CONSTRAINT,
+                        "Assumed max bodies per constraint exceeded"
+                    );
+                    if Bodies::is_encoded_dynamic_reference(encoded_body_reference) {
+                        *self.dynamic_body_handles.add(self.dynamic_count as usize) =
+                            self.index_to_handle.get(encoded_body_reference).0;
+                        self.dynamic_count += 1;
+                    }
+                    *self.encoded_body_indices.add(self.encoded_count as usize) = encoded_body_reference;
+                    self.encoded_count += 1;
+                }
+            }
+        }
+
+        let mut dynamic_body_handles_buf = [0i32; MAXIMUM_BODIES_PER_CONSTRAINT];
+        let mut encoded_body_indices_buf = [0i32; MAXIMUM_BODIES_PER_CONSTRAINT];
+        let index_to_handle = &bodies.active_set().index_to_handle;
+        let constraints = &bodies.active_set().constraints.get(body_index);
+
+        for constraint_index in 0..constraints.count {
+            let constraint = *constraints.get(constraint_index);
+            let mut enumerator = KinematicToDynamicEnumerator {
+                index_to_handle,
+                dynamic_body_handles: dynamic_body_handles_buf.as_mut_ptr(),
+                dynamic_count: 0,
+                encoded_body_indices: encoded_body_indices_buf.as_mut_ptr(),
+                encoded_count: 0,
+            };
+            (*self_ptr).enumerate_connected_raw_body_references(constraint.connecting_constraint_handle, &mut enumerator);
+
+            // Since we haven't updated the constraint reference to this body's kinematicity yet,
+            // it was not included in the dynamicBodyHandles. Include it here.
+            dynamic_body_handles_buf[enumerator.dynamic_count as usize] = body_handle.0;
+            enumerator.dynamic_count += 1;
+
+            // Remove the kinematic flag from the body's encoded index.
+            encoded_body_indices_buf[constraint.body_index_in_constraint as usize] &= Bodies::BODY_REFERENCE_MASK;
+
+            let dynamic_handles_slice: Vec<BodyHandle> = dynamic_body_handles_buf[..enumerator.dynamic_count as usize]
+                .iter()
+                .map(|&v| BodyHandle(v))
+                .collect();
+            let encoded_slice = &encoded_body_indices_buf[..enumerator.encoded_count as usize];
+
+            let (synchronized_batch_count, fallback_exists) = (*self_ptr).get_synchronized_batch_count();
+            let constraint_location = *(*self_ptr).handle_to_constraint.get(constraint.connecting_constraint_handle.0);
+
+            let mut target_batch_index = -1i32;
+            for batch_index in 0..synchronized_batch_count {
+                let dynamic_handle_ints: Vec<i32> = dynamic_handles_slice.iter().map(|h| h.0).collect();
+                if (*self_ptr).batch_referenced_handles.get(batch_index).can_fit(&dynamic_handle_ints) {
+                    debug_assert!(
+                        batch_index != constraint_location.batch_index,
+                        "It should not be possible for a newly dynamic reference to insert itself into the same batch."
+                    );
+                    target_batch_index = batch_index;
+                    break;
+                }
+            }
+            if target_batch_index == -1 {
+                if fallback_exists {
+                    target_batch_index = (*self_ptr).fallback_batch_threshold;
+                } else {
+                    target_batch_index = (*self_ptr).allocate_new_constraint_batch();
+                }
+            }
+
+            // Perform the transfer.
+            let batch = (*self_ptr).sets.get(0).batches.get(constraint_location.batch_index);
+            let type_batch_index = *batch.type_index_to_type_batch_index.get(constraint_location.type_id);
+            let type_batch = (*self_ptr)
+                .sets
+                .get_mut(0)
+                .batches
+                .get_mut(constraint_location.batch_index)
+                .type_batches
+                .get_mut(type_batch_index);
+
+            let type_proc = (&(*self_ptr).type_processors)[constraint_location.type_id as usize]
+                .as_ref()
+                .unwrap();
+            type_proc.inner().transfer_constraint(
+                type_batch,
+                constraint_location.batch_index,
+                constraint_location.index_in_type_batch,
+                self_ptr,
+                (*self_ptr).bodies,
+                target_batch_index,
+                &dynamic_handles_slice,
+                encoded_slice,
+            );
+        }
+
+        let constraints = &(*(*self_ptr).bodies).active_set().constraints.get(body_index);
+        if constraints.count > 0 {
+            (*self_ptr).constrained_kinematic_handles.fast_remove(&body_handle.0);
+        }
     }
 
     /// Changes the body references of all constraints associated with a body in response to its movement into a new slot.

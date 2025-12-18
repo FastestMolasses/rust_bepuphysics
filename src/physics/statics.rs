@@ -1,6 +1,8 @@
 // Translated from BepuPhysics/Statics.cs
 
-use crate::physics::bodies::{Bodies, BroadPhase, IslandAwakener};
+use crate::physics::bodies::Bodies;
+use crate::physics::collision_detection::broad_phase::BroadPhase;
+use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::collidable::ContinuousDetection;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
@@ -8,6 +10,7 @@ use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::handles::StaticHandle;
 use crate::physics::static_description::StaticDescription;
+use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
@@ -256,8 +259,14 @@ impl Statics {
         *self.handle_to_index.get_mut(handle.0) = index;
         *self.index_to_handle.get_mut(index) = handle;
         self.apply_description_by_index_without_broad_phase(index, description);
-        // TODO: broad_phase.add_static + set broad_phase_index — requires BroadPhase implementation
-        self.statics_buffer.get_mut(index).broad_phase_index = -1;
+        // Compute bounds and add to broad phase.
+        let shapes = unsafe { &*self.shapes };
+        let s = self.statics_buffer.get(index);
+        let mut bounds = BoundingBox::default();
+        shapes.update_bounds(&s.pose, &s.shape, &mut bounds);
+        let broad_phase = unsafe { &mut *self.broad_phase };
+        self.statics_buffer.get_mut(index).broad_phase_index =
+            broad_phase.add_static(CollidableReference::from_static(handle), &bounds.min, &bounds.max);
         handle
     }
 
@@ -273,7 +282,24 @@ impl Statics {
             "Static collidables cannot lack a shape."
         );
 
-        // TODO: Remove from broad phase and awaken nearby bodies.
+        // Remove from broad phase. Awaken nearby sleeping bodies.
+        // Note: Full awakening logic requires tree overlap queries (AwakenBodiesInExistingBounds).
+        // For now, just remove from the broad phase; sleeping body awakening is deferred until
+        // tree overlap queries are implemented.
+        let removed_broad_phase_index = collidable.broad_phase_index;
+        let broad_phase = unsafe { &mut *self.broad_phase };
+        let mut moved_leaf = CollidableReference::default();
+        if broad_phase.remove_static_at(removed_broad_phase_index, &mut moved_leaf) {
+            // Update the collidable->leaf index pointer for the leaf that was moved.
+            if moved_leaf.mobility() == CollidableMobility::Static {
+                // This is a static collidable.
+                self.get_direct_reference_mut(moved_leaf.static_handle()).broad_phase_index = removed_broad_phase_index;
+            } else {
+                // This is a sleeping body.
+                let bodies = unsafe { &mut *self.bodies };
+                bodies.update_collidable_broad_phase_index(moved_leaf.body_handle(), removed_broad_phase_index);
+            }
+        }
 
         // Move the last static into the removed slot.
         self.count -= 1;
@@ -300,8 +326,13 @@ impl Statics {
 
     /// Updates the bounds of a static in the broad phase for its current state.
     pub fn update_bounds(&mut self, handle: StaticHandle) {
-        let _index = *self.handle_to_index.get(handle.0);
-        // TODO: shapes.update_bounds + broadPhase.update_static_bounds
+        let index = *self.handle_to_index.get(handle.0);
+        let s = self.statics_buffer.get(index);
+        let shapes = unsafe { &*self.shapes };
+        let mut bounds = BoundingBox::default();
+        shapes.update_bounds(&s.pose, &s.shape, &mut bounds);
+        let broad_phase = unsafe { &mut *self.broad_phase };
+        broad_phase.update_static_bounds(s.broad_phase_index, bounds.min, bounds.max);
     }
 
     /// Changes the shape of a static and updates its bounds in the broad phase.
@@ -322,7 +353,13 @@ impl Statics {
         );
         let index = *self.handle_to_index.get(handle.0);
         self.apply_description_by_index_without_broad_phase(index, description);
-        // TODO: Update broad phase bounds.
+        // Update broad phase bounds.
+        let s = self.statics_buffer.get(index);
+        let shapes = unsafe { &*self.shapes };
+        let mut bounds = BoundingBox::default();
+        shapes.update_bounds(&s.pose, &s.shape, &mut bounds);
+        let broad_phase = unsafe { &mut *self.broad_phase };
+        broad_phase.update_static_bounds(s.broad_phase_index, bounds.min, bounds.max);
     }
 
     /// Gets the current description of the static referred to by a given handle.

@@ -7,11 +7,13 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::math_helper;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use super::mesh_inertia_helper::MeshInertiaHelper;
 use super::shape::{IShape, IConvexShape, IShapeWide, ISupportFinder};
 use super::ray::RayWide;
 
@@ -141,23 +143,16 @@ impl IConvexShape for Triangle {
     }
 
     fn compute_inertia(&self, mass: f32) -> BodyInertia {
-        // TODO: Requires MeshInertiaHelper.ComputeTriangleContribution + Symmetric3x3::invert
-        // For now, return a placeholder inertia.
-        let mut inertia = BodyInertia::default();
-        inertia.inverse_mass = 1.0 / mass;
-        // Approximate triangle as a thin disc with radius = max vertex distance
-        let max_r2 = self
-            .a
-            .length_squared()
-            .max(self.b.length_squared().max(self.c.length_squared()));
-        let inv = inertia.inverse_mass / (0.25 * max_r2);
-        inertia.inverse_inertia_tensor.xx = inv;
-        inertia.inverse_inertia_tensor.yx = 0.0;
-        inertia.inverse_inertia_tensor.yy = inv * 2.0;
-        inertia.inverse_inertia_tensor.zx = 0.0;
-        inertia.inverse_inertia_tensor.zy = 0.0;
-        inertia.inverse_inertia_tensor.zz = inv;
-        inertia
+        // Use MeshInertiaHelper to compute the exact triangle inertia tensor.
+        let inertia_tensor = MeshInertiaHelper::compute_triangle_contribution(
+            self.a, self.b, self.c, mass,
+        );
+        let mut inverse_inertia = Symmetric3x3::default();
+        Symmetric3x3::invert(&inertia_tensor, &mut inverse_inertia);
+        let mut result = BodyInertia::default();
+        result.inverse_mass = 1.0 / mass;
+        result.inverse_inertia_tensor = inverse_inertia;
+        result
     }
 }
 

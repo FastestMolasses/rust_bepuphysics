@@ -116,19 +116,31 @@ impl Simulation {
     /// Updates the broad phase, finds potentially colliding pairs, and executes the narrow phase.
     pub unsafe fn collision_detection(
         &mut self,
-        _dt: f32,
-        _thread_dispatcher: Option<&dyn IThreadDispatcher>,
+        dt: f32,
+        thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
+        // Cast opaque pointers to their actual types.
+        type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
+        type RealOverlapFinder =
+            crate::physics::collision_detection::collidable_overlap_finder::CollidableOverlapFinder;
+        type RealNarrowPhase = crate::physics::collision_detection::narrow_phase::NarrowPhase;
+
         // profiler.start(broad_phase);
-        // broad_phase.update2(thread_dispatcher);
+        let broad_phase = &mut *(self.broad_phase as *mut RealBroadPhase);
+        broad_phase.update2(None, self.deterministic); // MT dispatcher TODO
         // profiler.end(broad_phase);
 
         // profiler.start(broad_phase_overlap_finder);
-        // broad_phase_overlap_finder.dispatch_overlaps(dt, thread_dispatcher);
+        let overlap_finder = &mut *(self.broad_phase_overlap_finder as *mut RealOverlapFinder);
+        overlap_finder.dispatch_overlaps(dt, thread_dispatcher);
         // profiler.end(broad_phase_overlap_finder);
 
         // profiler.start(narrow_phase);
-        // narrow_phase.flush(thread_dispatcher);
+        // NarrowPhaseGeneric<T>::flush_with_preflush() is the full C# Flush,
+        // but Simulation doesn't know TCallbacks. Call base NarrowPhase::flush()
+        // for constraint removal pipeline. Preflush/postflush need type-erased dispatch (TODO).
+        let narrow_phase = &mut *(self.narrow_phase as *mut RealNarrowPhase);
+        narrow_phase.flush(thread_dispatcher);
         // profiler.end(narrow_phase);
     }
 

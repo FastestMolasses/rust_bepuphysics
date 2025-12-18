@@ -9,6 +9,7 @@ use std::simd::num::SimdFloat;
 pub const BATCH_TYPE_ID: i32 = 36;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct AreaConstraint {
     pub target_scaled_area: f32,
     pub spring_settings: SpringSettings,
@@ -21,9 +22,38 @@ pub struct AreaConstraintPrestepData {
     pub spring_settings: SpringSettingsWide,
 }
 
+impl AreaConstraint {
+    pub fn apply_description(
+        &self,
+        prestep_data: &mut AreaConstraintPrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+    ) {
+        let target = unsafe {
+            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
+        };
+        unsafe { *GatherScatter::get_first_mut(&mut target.target_scaled_area) = self.target_scaled_area; }
+        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
+    }
+
+    pub fn build_description(
+        prestep_data: &AreaConstraintPrestepData,
+        _bundle_index: usize,
+        inner_index: usize,
+        description: &mut AreaConstraint,
+    ) {
+        let source = unsafe {
+            GatherScatter::get_offset_instance(prestep_data, inner_index)
+        };
+        description.target_scaled_area = unsafe { *GatherScatter::get_first(&source.target_scaled_area) };
+        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+    }
+}
+
 impl AreaConstraintPrestepData {
+    /// Legacy build_description on PrestepData (prefer AreaConstraint::build_description).
     #[inline(always)]
-    pub fn build_description(&self, description: &mut AreaConstraint, _bundle_index: usize) {
+    pub fn build_description_from_prestep(&self, description: &mut AreaConstraint, _bundle_index: usize) {
         description.target_scaled_area = unsafe { *GatherScatter::get_first(&self.target_scaled_area) };
         SpringSettingsWide::read_first(&self.spring_settings, &mut description.spring_settings);
     }

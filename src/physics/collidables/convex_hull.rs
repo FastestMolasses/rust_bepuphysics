@@ -7,12 +7,15 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
+use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use super::mesh_inertia_helper::{MeshInertiaHelper, ITriangleSource};
 use super::shape::{IShape, IConvexShape, IDisposableShape, IShapeWide, ISupportFinder};
 use super::ray::RayWide;
 
@@ -120,6 +123,63 @@ impl ConvexHull {
             let max_candidate = Vec3::new(max_wide.x[i], max_wide.y[i], max_wide.z[i]);
             *min = min.min(min_candidate);
             *max = max.max(max_candidate);
+        }
+    }
+}
+
+/// Triangle source for iterating over all triangles of a convex hull's surface.
+/// Performs fan triangulation of each face.
+pub struct ConvexHullTriangleSource<'a> {
+    hull: &'a ConvexHull,
+    face_index: usize,
+    subtriangle_index: usize,
+}
+
+impl<'a> ConvexHullTriangleSource<'a> {
+    pub fn new(hull: &'a ConvexHull) -> Self {
+        Self {
+            hull,
+            face_index: 0,
+            subtriangle_index: 2,
+        }
+    }
+}
+
+impl<'a> ITriangleSource for ConvexHullTriangleSource<'a> {
+    fn get_next_triangle(&mut self) -> Option<(Vec3, Vec3, Vec3)> {
+        if (self.face_index as i32) < self.hull.face_to_vertex_indices_start.len() {
+            let mut start = 0usize;
+            let mut count = 0usize;
+            self.hull
+                .get_vertex_indices_for_face(self.face_index, &mut start, &mut count);
+
+            let mut a = Vec3::ZERO;
+            let mut b = Vec3::ZERO;
+            let mut c = Vec3::ZERO;
+
+            self.hull
+                .get_point_by_vertex_index(&self.hull.face_vertex_indices[start], &mut a);
+            // Note: b and c are swapped compared to face winding.
+            // ConvexHull uses clockwise winding but MeshInertiaHelper expects counterclockwise
+            // externally visible triangles in right handed coordinates.
+            self.hull.get_point_by_vertex_index(
+                &self.hull.face_vertex_indices[start + self.subtriangle_index - 1],
+                &mut c,
+            );
+            self.hull.get_point_by_vertex_index(
+                &self.hull.face_vertex_indices[start + self.subtriangle_index],
+                &mut b,
+            );
+
+            self.subtriangle_index += 1;
+            if self.subtriangle_index == count {
+                self.subtriangle_index = 2;
+                self.face_index += 1;
+            }
+
+            Some((a, b, c))
+        } else {
+            None
         }
     }
 }
@@ -278,29 +338,26 @@ impl IConvexShape for ConvexHull {
     }
 
     fn compute_inertia(&self, mass: f32) -> BodyInertia {
-        // TODO: Requires ConvexHullTriangleSource + MeshInertiaHelper.ComputeClosedInertia
-        // Placeholder: approximate as uniform density sphere with max radius
-        let mut max_r2 = 0.0f32;
-        for i in 0..self.points.len() as usize {
-            let mut ls = Vector::<f32>::splat(0.0);
-            Vector3Wide::length_squared_to(&self.points[i], &mut ls);
-            let lanes = Vector::<f32>::LEN;
-            for j in 0..lanes {
-                if ls[j] > max_r2 {
-                    max_r2 = ls[j];
-                }
-            }
-        }
-        let mut inertia = BodyInertia::default();
-        inertia.inverse_mass = 1.0 / mass;
-        let inv = inertia.inverse_mass / (0.4 * max_r2);
-        inertia.inverse_inertia_tensor.xx = inv;
-        inertia.inverse_inertia_tensor.yx = 0.0;
-        inertia.inverse_inertia_tensor.yy = inv;
-        inertia.inverse_inertia_tensor.zx = 0.0;
-        inertia.inverse_inertia_tensor.zy = 0.0;
-        inertia.inverse_inertia_tensor.zz = inv;
-        inertia
+        let mut triangle_source = ConvexHullTriangleSource::new(self);
+        let (_volume, inertia_tensor) =
+            MeshInertiaHelper::compute_closed_inertia(&mut triangle_source, mass);
+        debug_assert!(
+            self.face_to_vertex_indices_start.len() > 2
+                && _volume > 0.0
+                && !inertia_tensor.xx.is_nan()
+                && !inertia_tensor.yx.is_nan()
+                && !inertia_tensor.yy.is_nan()
+                && !inertia_tensor.zx.is_nan()
+                && !inertia_tensor.zy.is_nan()
+                && !inertia_tensor.zz.is_nan(),
+            "Convex hull must have volume."
+        );
+        let mut inverse_inertia = Symmetric3x3::default();
+        Symmetric3x3::invert(&inertia_tensor, &mut inverse_inertia);
+        let mut result = BodyInertia::default();
+        result.inverse_mass = 1.0 / mass;
+        result.inverse_inertia_tensor = inverse_inertia;
+        result
     }
 }
 
@@ -318,6 +375,28 @@ impl IDisposableShape for ConvexHull {
 /// The "wide" variant is simply a collection of convex hull instances.
 pub struct ConvexHullWide {
     pub hulls: Buffer<ConvexHull>,
+}
+
+impl ConvexHullWide {
+    /// Estimates an epsilon scale for the convex hull by sampling the first point of each hull.
+    #[inline(always)]
+    pub fn estimate_epsilon_scale(
+        &self,
+        terminated_lanes: &Vector<i32>,
+        epsilon_scale: &mut Vector<f32>,
+    ) {
+        let mut bundle = Vector3Wide::default();
+        let lanes = Vector::<f32>::LEN;
+        for i in 0..lanes {
+            if terminated_lanes.as_array()[i] < 0 {
+                continue;
+            }
+            debug_assert!((self.hulls.len() as usize) > i);
+            Vector3Wide::copy_slot(&self.hulls[i].points[0], 0, &mut bundle, i);
+        }
+        *epsilon_scale = (bundle.x.abs() + bundle.y.abs() + bundle.z.abs())
+            * Vector::<f32>::splat(1.0 / 3.0);
+    }
 }
 
 impl IShapeWide<ConvexHull> for ConvexHullWide {
@@ -555,6 +634,95 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
         );
         let mut local_support = Vector3Wide::default();
         self.compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
+    }
+}
+
+impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
+    fn has_margin() -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn get_margin(_shape: &ConvexHullWide, margin: &mut Vector<f32>) {
+        *margin = Vector::<f32>::default();
+    }
+
+    fn compute_local_support(
+        shape: &ConvexHullWide,
+        direction: &Vector3Wide,
+        terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let index_offsets =
+            Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
+        let lanes = Vector::<f32>::LEN;
+        for slot_index in 0..lanes {
+            if terminated_lanes[slot_index] < 0 {
+                continue;
+            }
+            let hull = &shape.hulls[slot_index];
+            debug_assert!(hull.points.allocated(), "If the lane isn't terminated, then the hull should actually exist.");
+            let rebroadcast_dir = Vector3Wide {
+                x: Vector::<f32>::splat(direction.x[slot_index]),
+                y: Vector::<f32>::splat(direction.y[slot_index]),
+                z: Vector::<f32>::splat(direction.z[slot_index]),
+            };
+
+            let mut best_indices = index_offsets;
+            let mut dot = Vector::<f32>::splat(0.0);
+            Vector3Wide::dot(&rebroadcast_dir, &hull.points[0], &mut dot);
+            for j in 1..hull.points.len() as usize {
+                let candidate = &hull.points[j];
+                let mut dot_candidate = Vector::<f32>::splat(0.0);
+                Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
+                let use_candidate = dot_candidate.simd_gt(dot);
+                best_indices = use_candidate.to_int().simd_eq(Vector::<i32>::splat(-1)).select(
+                    index_offsets + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
+                    best_indices,
+                );
+                dot = use_candidate.select(dot_candidate, dot);
+            }
+            let mut best_slot_index = 0usize;
+            let mut best_slot_dot = dot[0];
+            for j in 1..lanes {
+                let candidate_dot = dot[j];
+                if candidate_dot > best_slot_dot {
+                    best_slot_dot = candidate_dot;
+                    best_slot_index = j;
+                }
+            }
+            let support_index = best_indices[best_slot_index] as usize;
+            let mut bundle_index = 0usize;
+            let mut inner_index = 0usize;
+            BundleIndexing::get_bundle_indices(support_index, &mut bundle_index, &mut inner_index);
+            Vector3Wide::copy_slot(
+                &hull.points[bundle_index],
+                inner_index,
+                support,
+                slot_index,
+            );
+        }
+    }
+
+    #[inline(always)]
+    fn compute_support(
+        shape: &ConvexHullWide,
+        orientation: &Matrix3x3Wide,
+        direction: &Vector3Wide,
+        terminated_lanes: &Vector<i32>,
+        support: &mut Vector3Wide,
+    ) {
+        let mut local_direction = Vector3Wide::default();
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            direction,
+            orientation,
+            &mut local_direction,
+        );
+        let mut local_support = Vector3Wide::default();
+        <Self as DepthRefinerSupportFinder<ConvexHullWide>>::compute_local_support(
+            shape, &local_direction, terminated_lanes, &mut local_support,
+        );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }

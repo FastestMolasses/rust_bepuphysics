@@ -1,6 +1,7 @@
 // Translated from BepuPhysics/DefaultTypes.cs
 
 use crate::physics::solver::Solver;
+use crate::physics::collision_detection::narrow_phase::NarrowPhase;
 
 // Re-import all the constraint description types.
 use crate::physics::constraints::ball_socket::BallSocket;
@@ -31,18 +32,33 @@ use crate::physics::constraints::ball_socket_motor::BallSocketMotor;
 use crate::physics::constraints::ball_socket_servo::BallSocketServo;
 use crate::physics::constraints::angular_axis_gear_motor::AngularAxisGearMotor;
 use crate::physics::constraints::center_distance_limit::CenterDistanceLimit;
+use crate::physics::constraints::volume_constraint::VolumeConstraint;
+use crate::physics::constraints::area_constraint::AreaConstraint;
+
+// Contact constraint description types (for solver registration).
+use crate::physics::constraints::contact::contact_convex_descriptions::{
+    Contact1OneBody, Contact2OneBody, Contact3OneBody, Contact4OneBody,
+    Contact1TwoBody, Contact2TwoBody, Contact3TwoBody, Contact4TwoBody,
+};
+use crate::physics::constraints::contact::contact_nonconvex_descriptions::{
+    Contact2NonconvexOneBody, Contact3NonconvexOneBody, Contact4NonconvexOneBody,
+    Contact2Nonconvex, Contact3Nonconvex, Contact4Nonconvex,
+};
+
+// Contact constraint accessor types (for narrow phase registration).
+use crate::physics::collision_detection::contact_constraint_accessor::{
+    Contact1OneBodyAccessor, Contact2OneBodyAccessor, Contact3OneBodyAccessor, Contact4OneBodyAccessor,
+    Contact1TwoBodyAccessor, Contact2TwoBodyAccessor, Contact3TwoBodyAccessor, Contact4TwoBodyAccessor,
+    Contact2NonconvexOneBodyAccessor, Contact3NonconvexOneBodyAccessor, Contact4NonconvexOneBodyAccessor,
+    Contact2NonconvexTwoBodyAccessor, Contact3NonconvexTwoBodyAccessor, Contact4NonconvexTwoBodyAccessor,
+};
 
 /// Helper to register the default types within a simulation instance.
 pub struct DefaultTypes;
 
 impl DefaultTypes {
     /// Registers the set of constraints that are packaged in the engine.
-    ///
-    /// Note: Contact constraints (Contact1–Contact4, Contact*OneBody, Contact*Nonconvex) and
-    /// NarrowPhase constraint accessors are not yet registered because the collision detection
-    /// module has not been translated. VolumeConstraint (4-body) and AreaConstraint (3-body) are
-    /// also deferred until their respective type processor impls are added.
-    pub fn register_defaults(solver: &mut Solver, _narrow_phase: &mut ()) {
+    pub fn register_defaults(solver: &mut Solver, narrow_phase: &mut NarrowPhase) {
         solver.register::<BallSocket>();
         solver.register::<AngularHinge>();
         solver.register::<AngularSwivelHinge>();
@@ -53,11 +69,11 @@ impl DefaultTypes {
         solver.register::<AngularServo>();
         solver.register::<AngularMotor>();
         solver.register::<Weld>();
-        // solver.register::<VolumeConstraint>();  // TODO: 4-body type processor
+        solver.register::<VolumeConstraint>();
         solver.register::<DistanceServo>();
         solver.register::<DistanceLimit>();
         solver.register::<CenterDistanceConstraint>();
-        // solver.register::<AreaConstraint>();     // TODO: 3-body type processor
+        solver.register::<AreaConstraint>();
         solver.register::<PointOnLineServo>();
         solver.register::<LinearAxisServo>();
         solver.register::<LinearAxisMotor>();
@@ -74,26 +90,43 @@ impl DefaultTypes {
         solver.register::<AngularAxisGearMotor>();
         solver.register::<CenterDistanceLimit>();
 
-        // Contact constraint registrations (collision detection module not yet translated):
-        // solver.register::<Contact1OneBody>();
-        // solver.register::<Contact2OneBody>();
-        // solver.register::<Contact3OneBody>();
-        // solver.register::<Contact4OneBody>();
-        // solver.register::<Contact1>();
-        // solver.register::<Contact2>();
-        // solver.register::<Contact3>();
-        // solver.register::<Contact4>();
-        // solver.register::<Contact2NonconvexOneBody>();
-        // solver.register::<Contact3NonconvexOneBody>();
-        // solver.register::<Contact4NonconvexOneBody>();
-        // solver.register::<Contact2Nonconvex>();
-        // solver.register::<Contact3Nonconvex>();
-        // solver.register::<Contact4Nonconvex>();
-        //
-        // narrow_phase.register_contact_constraint_accessor(...)
+        // Contact constraint types.
+        solver.register::<Contact1OneBody>();
+        solver.register::<Contact2OneBody>();
+        solver.register::<Contact3OneBody>();
+        solver.register::<Contact4OneBody>();
+        solver.register::<Contact1TwoBody>();
+        solver.register::<Contact2TwoBody>();
+        solver.register::<Contact3TwoBody>();
+        solver.register::<Contact4TwoBody>();
+        solver.register::<Contact2NonconvexOneBody>();
+        solver.register::<Contact3NonconvexOneBody>();
+        solver.register::<Contact4NonconvexOneBody>();
+        solver.register::<Contact2Nonconvex>();
+        solver.register::<Contact3Nonconvex>();
+        solver.register::<Contact4Nonconvex>();
+
+        // Contact constraint accessors — wire NarrowPhase to dispatch each
+        // contact manifold type through the correct type-erased path.
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact4NonconvexTwoBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact3NonconvexTwoBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact2NonconvexTwoBodyAccessor));
+
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact4NonconvexOneBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact3NonconvexOneBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact2NonconvexOneBodyAccessor));
+
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact4TwoBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact3TwoBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact2TwoBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact1TwoBodyAccessor));
+
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact4OneBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact3OneBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact2OneBodyAccessor));
+        narrow_phase.register_contact_constraint_accessor(Box::new(Contact1OneBodyAccessor));
     }
 
     // TODO: CreateDefaultCollisionTaskRegistry
     // TODO: CreateDefaultSweepTaskRegistry
 }
-
