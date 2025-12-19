@@ -149,10 +149,10 @@ pub fn slerp_into(start: Quat, mut end: Quat, interpolation_amount: f32, result:
     let b_fraction = (interpolation_amount as f64 * half_theta).sin() / sin_half_theta;
 
     // Blend the two quaternions to get the result!
-    result.x = start.x * a_fraction as f32 + end.x * b_fraction as f32;
-    result.y = start.y * a_fraction as f32 + end.y * b_fraction as f32;
-    result.z = start.z * a_fraction as f32 + end.z * b_fraction as f32;
-    result.w = start.w * a_fraction as f32 + end.w * b_fraction as f32;
+    result.x = (start.x as f64 * a_fraction + end.x as f64 * b_fraction) as f32;
+    result.y = (start.y as f64 * a_fraction + end.y as f64 * b_fraction) as f32;
+    result.z = (start.z as f64 * a_fraction + end.z as f64 * b_fraction) as f32;
+    result.w = (start.w as f64 * a_fraction + end.w as f64 * b_fraction) as f32;
 }
 
 /// Blends two quaternions together to get an intermediate state.
@@ -315,10 +315,10 @@ pub fn create_from_axis_angle(axis: Vec3, angle: f32) -> Quat {
     let half_angle: f64 = angle as f64 * 0.5;
     let s: f64 = half_angle.sin();
     Quat {
-        x: axis.x * s as f32,
-        y: axis.y * s as f32,
-        z: axis.z * s as f32,
-        w: (half_angle as f32).cos(),
+        x: (axis.x as f64 * s) as f32,
+        y: (axis.y as f64 * s) as f32,
+        z: (axis.z as f64 * s) as f32,
+        w: half_angle.cos() as f32,
     }
 }
 
@@ -327,10 +327,10 @@ pub fn create_from_axis_angle(axis: Vec3, angle: f32) -> Quat {
 pub fn create_from_axis_angle_into(axis: Vec3, angle: f32, q: &mut Quat) {
     let half_angle: f64 = angle as f64 * 0.5;
     let s: f64 = half_angle.sin();
-    q.x = axis.x * s as f32;
-    q.y = axis.y * s as f32;
-    q.z = axis.z * s as f32;
-    q.w = (half_angle as f32).cos();
+    q.x = (axis.x as f64 * s) as f32;
+    q.y = (axis.y as f64 * s) as f32;
+    q.z = (axis.z as f64 * s) as f32;
+    q.w = half_angle.cos() as f32;
 }
 
 /// Constructs a quaternion from yaw, pitch, and roll.
@@ -413,9 +413,9 @@ pub fn quaternion_between_normalized_vectors(v1: Vec3, v2: Vec3, q: &mut Quat) {
         // The solution is to pick an arbitrary perpendicular axis.
         // Project onto the plane which has the lowest component magnitude.
         // On that 2d plane, perform a 90 degree rotation.
-        let abs_x = v1.x;
-        let abs_y = v1.y;
-        let abs_z = v1.z;
+        let abs_x = v1.x.abs();
+        let abs_y = v1.y.abs();
+        let abs_z = v1.z.abs();
         if abs_x < abs_y && abs_x < abs_z {
             *q = Quat {
                 x: 0.0,
@@ -447,7 +447,7 @@ pub fn quaternion_between_normalized_vectors(v1: Vec3, v2: Vec3, q: &mut Quat) {
             w: dot + 1.0,
         };
     }
-    self::normalize(*q);
+    self::normalize_into(q);
 }
 
 // The following two functions are highly similar, but it's a bit of a brain teaser to phrase one in terms of the other.

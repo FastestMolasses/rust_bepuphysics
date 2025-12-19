@@ -186,7 +186,7 @@ impl BroadPhase {
         pool: &mut BufferPool,
         leaves: &mut Buffer<CollidableReference>,
     ) -> i32 {
-        let bounds = BoundingBox { min: *min, max: *max };
+        let bounds = BoundingBox { min: *min, _pad0: 0.0, max: *max, _pad1: 0.0 };
         let leaf_index = tree.add(bounds, pool);
         if leaf_index >= leaves.len() {
             pool.resize_to_at_least(leaves, tree.leaf_count + 1, leaves.len());

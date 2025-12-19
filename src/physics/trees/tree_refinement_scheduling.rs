@@ -119,7 +119,9 @@ impl Tree {
             let mut child_change = 0.0f32;
             let mut merged = BoundingBox {
                 min: glam::Vec3::splat(f32::MAX),
+                _pad0: 0.0,
                 max: glam::Vec3::splat(f32::MIN),
+                _pad1: 0.0,
             };
             for i in 0..2 {
                 let child = &mut *children.add(i);

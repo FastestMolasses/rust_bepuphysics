@@ -189,8 +189,9 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     }
 
     /// Adds a pair to the dictionary without checking capacity.
+    /// Returns true if the pair was added, false if the key was already present.
     #[inline(always)]
-    pub fn add_unsafely(&mut self, key: TKey, value: TValue) {
+    pub fn add_unsafely(&mut self, key: TKey, value: TValue) -> bool {
         debug_assert!(
             self.count < self.keys.len(),
             "Adding would exceed capacity"
@@ -199,8 +200,17 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
         let hash_code = self.equality_comparer.hash(&key);
         let mut table_index = HashHelper::rehash(hash_code) & self.table_mask;
 
-        // Find an empty slot
-        while self.table[table_index] != 0 {
+        // Probe for existing key or empty slot
+        loop {
+            let element_index = self.table[table_index] - 1;
+            if element_index < 0 {
+                // Empty slot — insert here.
+                break;
+            }
+            if self.equality_comparer.equals(&self.keys[element_index], &key) {
+                // Already present!
+                return false;
+            }
             table_index = (table_index + 1) & self.table_mask;
         }
 
@@ -208,27 +218,20 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
         self.values[self.count] = value;
         self.table[table_index] = self.count + 1;
         self.count += 1;
+        true
     }
 
     /// Adds a pair to the dictionary if it is not already present.
     #[inline(always)]
     pub fn add(&mut self, key: TKey, value: TValue, pool: &mut impl UnmanagedMemoryPool) -> bool {
-        if self.contains_key(&key) {
-            return false;
-        }
         self.ensure_capacity(self.count + 1, pool);
-        self.add_unsafely(key, value);
-        true
+        self.add_unsafely(key, value)
     }
 
     /// Tries to add a pair to the dictionary without checking capacity.
     #[inline(always)]
     pub fn try_add_unsafely(&mut self, key: TKey, value: TValue) -> bool {
-        if self.contains_key(&key) {
-            return false;
-        }
-        self.add_unsafely(key, value);
-        true
+        self.add_unsafely(key, value)
     }
 
     /// Adds or updates a pair in the dictionary.
@@ -244,7 +247,7 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
         }
     }
 
-    /// Removes a key from the dictionary.
+    /// Removes a pair associated with a key from the dictionary if it belongs to the dictionary.
     /// Does not preserve the order of elements in the dictionary.
     #[inline(always)]
     pub fn fast_remove(&mut self, key: &TKey) -> bool {
@@ -254,55 +257,64 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
             return false;
         }
 
-        // Clear the table entry
-        self.table[table_index] = 0;
-        self.count -= 1;
-
-        // If this wasn't the last element, move the last element to this position
-        if element_index < self.count {
-            let last_key = self.keys[self.count];
-            let last_value = self.values[self.count];
-
-            // Update the table entry for the moved element
-            let last_hash = self.equality_comparer.hash(&last_key);
-            let mut last_table_index = HashHelper::rehash(last_hash) & self.table_mask;
-            while self.table[last_table_index] != self.count + 1 {
-                last_table_index = (last_table_index + 1) & self.table_mask;
-            }
-            self.table[last_table_index] = element_index + 1;
-
-            // Move the element
-            self.keys[element_index] = last_key;
-            self.values[element_index] = last_value;
-        }
-
+        self.fast_remove_at(table_index, element_index);
         true
     }
 
-    /// Removes a key from the dictionary using pre-computed table and element indices.
+    /// Removes an element from the dictionary according to its table and element index.
+    /// Can only be used if the table and element index are valid.
     /// Does not preserve the order of elements in the dictionary.
     #[inline(always)]
-    pub fn fast_remove_at(&mut self, table_index: i32, element_index: i32) {
-        // Clear the table entry
-        self.table[table_index] = 0;
-        self.count -= 1;
+    pub fn fast_remove_at(&mut self, mut table_index: i32, element_index: i32) {
+        // Add and remove must both maintain a property:
+        // All items are either at their desired index (as defined by the hash), or they are contained
+        // in a contiguous block clockwise from the desired index.
+        // Removals seek to fill the gap they create by searching clockwise to find items which can be moved backward.
+        let mut gap_index = table_index;
 
-        // If this wasn't the last element, move the last element to this position
-        if element_index < self.count {
-            let last_key = self.keys[self.count];
-            let last_value = self.values[self.count];
-
-            // Update the table entry for the moved element
-            let last_hash = self.equality_comparer.hash(&last_key);
-            let mut last_table_index = HashHelper::rehash(last_hash) & self.table_mask;
-            while self.table[last_table_index] != self.count + 1 {
-                last_table_index = (last_table_index + 1) & self.table_mask;
+        // Search clockwise for an item to fill this slot. The search must continue until a gap is found.
+        loop {
+            table_index = (table_index + 1) & self.table_mask;
+            let move_candidate_index = self.table[table_index];
+            if move_candidate_index <= 0 {
+                break;
             }
-            self.table[last_table_index] = element_index + 1;
+            // This slot contains something. What is its actual index?
+            let candidate_element_index = move_candidate_index - 1;
+            let desired_index = HashHelper::rehash(
+                self.equality_comparer.hash(&self.keys[candidate_element_index]),
+            ) & self.table_mask;
 
-            // Move the element
-            self.keys[element_index] = last_key;
-            self.values[element_index] = last_value;
+            // Would this element be closer to its actual index if it was moved to the gap?
+            let distance_from_gap = (table_index - gap_index) & self.table_mask;
+            let distance_from_ideal = (table_index - desired_index) & self.table_mask;
+            if distance_from_gap <= distance_from_ideal {
+                // The distance to the gap is less than or equal the distance to the ideal location,
+                // so just move to the gap.
+                self.table[gap_index] = self.table[table_index];
+                gap_index = table_index;
+            }
+        }
+
+        // Clear the table gap left by the removal.
+        self.table[gap_index] = 0;
+
+        // Swap the final element into the removed object's element array index,
+        // if the removed object wasn't the last object.
+        self.count -= 1;
+        if element_index < self.count {
+            self.keys[element_index] = self.keys[self.count];
+            self.values[element_index] = self.values[self.count];
+            // Locate the swapped object in the table and update its index.
+            // The swapped element was previously at array index `self.count` (before decrement),
+            // so its table entry has value `self.count + 1` (1-indexed encoding).
+            let swapped_key = self.keys[element_index]; // Copy key to avoid borrow issues
+            let mut swap_table_index =
+                HashHelper::rehash(self.equality_comparer.hash(&swapped_key)) & self.table_mask;
+            while self.table[swap_table_index] != self.count + 1 {
+                swap_table_index = (swap_table_index + 1) & self.table_mask;
+            }
+            self.table[swap_table_index] = element_index + 1; // Remember the encoding! all indices offset by 1.
         }
     }
 

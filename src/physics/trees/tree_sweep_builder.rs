@@ -78,7 +78,9 @@ impl Tree {
         // Sweep from high to low.
         let mut b_merged = BoundingBox {
             min: Vec3::splat(f32::MAX),
+            _pad0: 0.0,
             max: Vec3::splat(f32::MIN),
+            _pad1: 0.0,
         };
         *cost = f32::MAX;
         *split_index = 0;
@@ -256,10 +258,7 @@ impl Tree {
 
         if leaf_count_a > 1 {
             node.a.index =
-                self.create_sweep_builder_node(-1, 0, leaves, start, leaf_count_a);
-            // Fix up after recursive call may have moved node
-            let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
-            node.a.index = self.nodes.len() - 1; // This will be set correctly by create_sweep_builder_node
+                self.create_sweep_builder_node(node_index, 0, leaves, start, leaf_count_a);
         } else {
             debug_assert_eq!(leaf_count_a, 1);
             let leaf_index = *leaves.index_map.add(start as usize);
@@ -315,11 +314,6 @@ impl Tree {
         }
 
         self.split_leaves_into_children(leaves, start, count, node_index);
-
-        // Fix parent linkage after recursive construction
-        let metanode = self.metanodes.get_mut(node_index);
-        metanode.parent = parent_index;
-        metanode.index_in_parent = index_in_parent;
 
         node_index
     }

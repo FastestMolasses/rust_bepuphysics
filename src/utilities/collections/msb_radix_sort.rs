@@ -209,7 +209,7 @@ pub unsafe fn sort_u32_simple<T: Copy>(
 
     // Recursive sort
     if shift > 0 {
-        let new_shift = shift - 7; // 7 bits per level for 128 buckets
+        let new_shift = (shift - 7).max(0); // 7 bits per level for 128 buckets; clamp to 0
 
         let mut previous_end = 0usize;
         for i in 0..BUCKET_COUNT {

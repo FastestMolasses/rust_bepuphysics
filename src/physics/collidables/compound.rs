@@ -287,7 +287,6 @@ impl Compound {
 
                 // Get the child shape batch and perform a ray test
                 if let Some(batch) = shape_batches.get_batch(child.shape_index.type_id() as usize) {
-                    // Build the child's world-space-relative pose (pose in compound local space)
                     let child_pose = RigidPose {
                         position: child.local_position,
                         orientation: child.local_orientation,
@@ -297,17 +296,51 @@ impl Compound {
                     let mut local_ray = RayData::default();
                     local_ray.origin = local_origin;
                     local_ray.direction = local_direction;
-                    local_ray.id = ray.id;
+                    local_ray.id = 0;
 
-                    // Delegate to the child's shape batch ray test
+                    // Use a child shape tester to capture the hit, then rotate normal to world space
+                    struct CompoundChildShapeTester {
+                        t: f32,
+                        normal: Vec3,
+                    }
+
+                    impl IShapeRayHitHandler for CompoundChildShapeTester {
+                        fn allow_test(&self, _child_index: i32) -> bool {
+                            true
+                        }
+                        fn on_ray_hit(
+                            &mut self,
+                            _ray: &RayData,
+                            _maximum_t: &mut f32,
+                            t: f32,
+                            normal: Vec3,
+                            _child_index: i32,
+                        ) {
+                            self.t = t;
+                            self.normal = normal;
+                        }
+                    }
+
+                    let mut tester = CompoundChildShapeTester {
+                        t: -1.0,
+                        normal: Vec3::ZERO,
+                    };
+
                     unsafe {
                         batch.ray_test(
                             child.shape_index.index() as usize,
                             &child_pose,
                             &local_ray,
                             maximum_t,
-                            hit_handler,
+                            &mut tester,
                         );
+                    }
+
+                    if tester.t >= 0.0 {
+                        // Rotate the normal from compound-local space to world space
+                        let mut rotated_normal = Vec3::ZERO;
+                        Matrix3x3::transform(&tester.normal, &orientation, &mut rotated_normal);
+                        hit_handler.on_ray_hit(ray, maximum_t, tester.t, rotated_normal, i as i32);
                     }
                 }
             }

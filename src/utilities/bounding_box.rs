@@ -26,20 +26,48 @@ impl BoundingBox4 {
 }
 
 /// Provides simple axis-aligned bounding box functionality.
-#[repr(C, align(32))]
-#[derive(Clone, Copy, Debug, Default)]
+/// Layout matches C# `[StructLayout(LayoutKind.Explicit, Size = 32)]` with
+/// `[FieldOffset(0)] Min` and `[FieldOffset(16)] Max`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct BoundingBox {
     /// Location with the lowest X, Y, and Z coordinates in the axis-aligned bounding box.
     pub min: Vec3,
+    /// Padding to place `max` at byte offset 16 (matching C# `[FieldOffset(16)]`).
+    pub _pad0: f32,
     /// Location with the highest X, Y, and Z coordinates in the axis-aligned bounding box.
     pub max: Vec3,
+    /// Padding to bring total struct size to 32 bytes (matching C# `[StructLayout(Size = 32)]`).
+    pub _pad1: f32,
+}
+
+const _: () = {
+    assert!(std::mem::offset_of!(BoundingBox, min) == 0);
+    assert!(std::mem::offset_of!(BoundingBox, max) == 16);
+    assert!(std::mem::size_of::<BoundingBox>() == 32);
+};
+
+impl Default for BoundingBox {
+    fn default() -> Self {
+        Self {
+            min: Vec3::ZERO,
+            _pad0: 0.0,
+            max: Vec3::ZERO,
+            _pad1: 0.0,
+        }
+    }
 }
 
 impl BoundingBox {
     /// Constructs a bounding box from the specified minimum and maximum.
     #[inline(always)]
     pub fn new(min: Vec3, max: Vec3) -> Self {
-        Self { min, max }
+        Self {
+            min,
+            _pad0: 0.0,
+            max,
+            _pad1: 0.0,
+        }
     }
 
     /// Checks if two structures with memory layouts equivalent to the `BoundingBox` intersect.
@@ -311,7 +339,9 @@ impl BoundingBox {
         }
         let mut aabb = BoundingBox {
             min: points[0],
+            _pad0: 0.0,
             max: points[0],
+            _pad1: 0.0,
         };
         for point in points.iter().skip(1) {
             aabb.min = Vec3::min(*point, aabb.min);

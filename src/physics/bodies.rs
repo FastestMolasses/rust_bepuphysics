@@ -70,8 +70,7 @@ impl Bodies {
     /// Checks whether a constraint encoded body reference value refers to a kinematic body.
     #[inline(always)]
     pub fn is_encoded_kinematic_reference(encoded_body_reference_value: i32) -> bool {
-        let unsigned = encoded_body_reference_value as u32;
-        unsigned >= Self::DYNAMIC_LIMIT && unsigned < (1u32 << 31)
+        (encoded_body_reference_value as u32) >= Self::DYNAMIC_LIMIT
     }
 }
 

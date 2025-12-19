@@ -66,8 +66,10 @@ impl ManagedIdPool {
     /// Ensures that the underlying id queue can hold at least a certain number of ids.
     #[inline(always)]
     pub fn ensure_capacity(&mut self, count: i32) {
-        if (self.available_ids.capacity() as i32) < count {
-            self.available_ids.reserve((count as usize) - self.available_ids.capacity());
+        if (self.available_ids.len() as i32) < count {
+            // C# uses Array.Resize which gives exactly `count` capacity.
+            // Vec::reserve(additional) guarantees capacity >= len + additional.
+            self.available_ids.reserve((count as usize) - self.available_ids.len());
         }
     }
 

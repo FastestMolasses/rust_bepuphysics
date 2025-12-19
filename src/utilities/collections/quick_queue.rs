@@ -357,9 +357,10 @@ impl<T: Copy> QuickQueue<T> {
     }
 
     /// Ensures the queue has enough capacity to hold the specified number of elements.
+    /// Uses C#'s conservative threshold: resizes when count >= capacity_mask (span.len() - 1).
     #[inline(always)]
     pub fn ensure_capacity(&mut self, count: i32, pool: &mut impl UnmanagedMemoryPool) {
-        if !self.span.allocated() || count > self.span.len() {
+        if !self.span.allocated() || count >= self.capacity_mask {
             self.resize(count, pool);
         }
     }

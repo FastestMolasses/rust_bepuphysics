@@ -35,47 +35,34 @@ impl GatherScatter {
         let source_base = (source_bundle as *const T as *const i32).add(source_inner_index);
         let target_base = (target_bundle as *mut T as *mut i32).add(target_inner_index);
 
-        ptr::copy_nonoverlapping(source_base, target_base, Vector::<i32>::LEN);
+        // Copy a single int (one lane per vector). Stride by Vector<int>::LEN to reach the next vector's same lane.
+        *target_base = *source_base;
 
-        // NOTE: CHECK IF THIS MANUAL UNROLL IS NEEDED, OR IF THE COMPILER CAN DO IT
-        let mut offset = Vector::<i32>::LEN;
-        // 8-wide unroll for maximum throughput
-        while offset + Vector::<i32>::LEN * 8 <= size_in_ints {
-            for _ in 0..8 {
-                ptr::copy_nonoverlapping(
-                    source_base.add(offset),
-                    target_base.add(offset),
-                    Vector::<i32>::LEN,
-                );
-                offset += Vector::<i32>::LEN;
-            }
+        let count = Vector::<i32>::LEN;
+        let mut offset = count;
+        // 8-wide unroll empirically chosen to match C#.
+        while offset + count * 8 <= size_in_ints {
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
         }
-        if offset + 4 * Vector::<i32>::LEN <= size_in_ints {
-            for _ in 0..4 {
-                ptr::copy_nonoverlapping(
-                    source_base.add(offset),
-                    target_base.add(offset),
-                    Vector::<i32>::LEN,
-                );
-                offset += Vector::<i32>::LEN;
-            }
+        if offset + 4 * count <= size_in_ints {
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
         }
-        if offset + 2 * Vector::<i32>::LEN <= size_in_ints {
-            for _ in 0..2 {
-                ptr::copy_nonoverlapping(
-                    source_base.add(offset),
-                    target_base.add(offset),
-                    Vector::<i32>::LEN,
-                );
-                offset += Vector::<i32>::LEN;
-            }
+        if offset + 2 * count <= size_in_ints {
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset); offset += count;
         }
-        if offset + Vector::<i32>::LEN <= size_in_ints {
-            ptr::copy_nonoverlapping(
-                source_base.add(offset),
-                target_base.add(offset),
-                Vector::<i32>::LEN,
-            );
+        if offset + count <= size_in_ints {
+            *target_base.add(offset) = *source_base.add(offset);
         }
     }
 

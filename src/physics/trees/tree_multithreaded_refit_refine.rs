@@ -315,7 +315,9 @@ impl RefitAndRefineMultithreadedContext {
                     // We reached the root.
                     let mut merged = BoundingBox {
                         min: Vec3::splat(f32::MAX),
+                        _pad0: 0.0,
                         max: Vec3::splat(f32::MIN),
+                        _pad1: 0.0,
                     };
                     for j in 0..2 {
                         let child = &*children.add(j);

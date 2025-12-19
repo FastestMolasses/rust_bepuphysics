@@ -257,7 +257,9 @@ impl Tree {
 
         let mut centroid_bounding_box = BoundingBox {
             min: *resources.centroids.add(*local_index_map as usize),
+            _pad0: 0.0,
             max: Vec3::ZERO,
+            _pad1: 0.0,
         };
         centroid_bounding_box.max = centroid_bounding_box.min;
 
@@ -269,7 +271,9 @@ impl Tree {
 
         let null_bounding_box = BoundingBox {
             min: Vec3::splat(f32::MAX),
+            _pad0: 0.0,
             max: Vec3::splat(f32::MIN),
+            _pad1: 0.0,
         };
         let span = centroid_bounding_box.max - centroid_bounding_box.min;
         const EPSILON: f32 = 1e-12;

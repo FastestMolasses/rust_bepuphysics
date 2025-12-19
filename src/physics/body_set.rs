@@ -148,6 +148,8 @@ impl BodySet {
         activity.sleep_threshold = description.activity.sleep_threshold;
         activity.minimum_timesteps_under_threshold =
             description.activity.minimum_timestep_count_under_threshold;
+        activity.timesteps_under_threshold_count = 0;
+        activity.sleep_candidate = false;
     }
 
     /// Reads out a full body description from the set.
