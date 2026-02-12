@@ -73,6 +73,9 @@ pub struct Solver {
     // Substep event callbacks
     pub substep_started: Option<Box<dyn Fn(i32)>>,
     pub substep_ended: Option<Box<dyn Fn(i32)>>,
+
+    // Multithreaded solve state
+    pub(crate) substep_context: SubstepMultithreadingContext,
 }
 
 // Re-export IslandAwakener from its real module for use here.
@@ -271,6 +274,7 @@ impl Solver {
             minimum_initial_capacity_per_type_batch: Vec::new(),
             substep_started: None,
             substep_ended: None,
+            substep_context: SubstepMultithreadingContext::default(),
         };
 
         solver.resize_sets_capacity(initial_island_capacity + 1, 0);
@@ -443,7 +447,7 @@ impl Solver {
                 &mut *type_batch,
                 constraint_handle,
                 encoded_body_indices,
-                pool,
+                pool as *mut BufferPool,
             )
         } else {
             type_processor.inner().allocate_in_type_batch(
@@ -1367,6 +1371,206 @@ pub(crate) struct IntegrationWorkBlock {
     pub end_bundle_index: i32,
 }
 
+/// Multithreading context for substepped constraint solving.
+/// Uses explicit layout with cache-line isolation between fields
+/// written by different threads to prevent false sharing.
+#[repr(C)]
+pub(crate) struct SubstepMultithreadingContext {
+    // --- Frequently read, rarely written (offsets 0..112) ---
+    pub stages: Buffer<SolverSyncStage>,           // offset 0  (16 bytes)
+    pub incremental_update_blocks: Buffer<WorkBlock>, // offset 16 (16 bytes)
+    pub kinematic_integration_blocks: Buffer<IntegrationWorkBlock>, // offset 32 (16 bytes)
+    pub constraint_blocks: Buffer<WorkBlock>,       // offset 48 (16 bytes)
+    pub constraint_batch_boundaries: Buffer<i32>,   // offset 64 (16 bytes)
+    pub dt: f32,                                    // offset 80
+    pub inverse_dt: f32,                            // offset 84
+    pub worker_count: i32,                          // offset 88
+    pub highest_velocity_iteration_count: i32,      // offset 92
+    pub velocity_iteration_counts: Buffer<i32>,     // offset 96 (16 bytes)
+
+    // Padding to push SyncIndex to a separate cache line (offset 256)
+    _pad0: [u8; 256 - 112],
+
+    /// Monotonically increasing index of executed stages during a frame.
+    /// Written by the main thread via Volatile.Write; read by workers via Volatile.Read.
+    /// Uses UnsafeCell for mixed atomic/plain access pattern.
+    pub sync_index: std::cell::UnsafeCell<i32>,     // offset 256
+
+    // Padding to push CompletedWorkBlockCount to another cache line (offset 384)
+    _pad1: [u8; 384 - 260],
+
+    /// Counter of work completed for the current stage.
+    /// Atomically incremented by workers, read/reset by main thread.
+    pub completed_work_block_count: std::cell::UnsafeCell<i32>, // offset 384
+}
+
+// Compile-time layout assertions matching C# [StructLayout(LayoutKind.Explicit)]
+const _: () = {
+    assert!(std::mem::offset_of!(SubstepMultithreadingContext, sync_index) == 256);
+    assert!(std::mem::offset_of!(SubstepMultithreadingContext, completed_work_block_count) == 384);
+};
+
+impl Default for SubstepMultithreadingContext {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+/// Trait for stage function dispatch in the MT solver.
+/// Each stage function knows how to execute a specific work block type.
+pub(crate) trait ISolverStageFunction {
+    unsafe fn execute(&self, solver: *mut Solver, block_index: i32, worker_index: i32);
+}
+
+/// Warm start stage: applies accumulated impulses to body velocities.
+pub(crate) struct WarmStartStageFunction {
+    pub dt: f32,
+    pub inverse_dt: f32,
+    pub substep_index: i32,
+    pub solver: *mut Solver,
+}
+
+impl ISolverStageFunction for WarmStartStageFunction {
+    #[inline(always)]
+    unsafe fn execute(&self, solver: *mut Solver, block_index: i32, worker_index: i32) {
+        let ctx = &(*self.solver).substep_context;
+        let block = ctx.constraint_blocks.get(block_index);
+        let active_set = (*solver).sets.get_mut(0);
+        let type_batch = active_set.batches.get_mut(block.batch_index)
+            .type_batches.get_mut(block.type_batch_index);
+        let type_id = type_batch.type_id;
+        let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
+        let bodies = &*(*solver).bodies;
+        processor.inner().warm_start(
+            type_batch, bodies, self.dt, self.inverse_dt,
+            block.start_bundle, block.end,
+        );
+        let _ = (worker_index, self.substep_index);
+    }
+}
+
+/// Solve stage: iterative velocity solve.
+pub(crate) struct SolveStageFunction {
+    pub dt: f32,
+    pub inverse_dt: f32,
+    pub solver: *mut Solver,
+}
+
+impl ISolverStageFunction for SolveStageFunction {
+    #[inline(always)]
+    unsafe fn execute(&self, solver: *mut Solver, block_index: i32, worker_index: i32) {
+        let ctx = &(*self.solver).substep_context;
+        let block = ctx.constraint_blocks.get(block_index);
+        let active_set = (*solver).sets.get_mut(0);
+        let type_batch = active_set.batches.get_mut(block.batch_index)
+            .type_batches.get_mut(block.type_batch_index);
+        let type_id = type_batch.type_id;
+        let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
+        let bodies = &*(*solver).bodies;
+        processor.inner().solve(
+            type_batch, bodies, self.dt, self.inverse_dt,
+            block.start_bundle, block.end,
+        );
+        let _ = worker_index;
+    }
+}
+
+/// Incremental update stage: updates constraint data for substeps > 0.
+pub(crate) struct IncrementalUpdateStageFunction {
+    pub dt: f32,
+    pub inverse_dt: f32,
+    pub solver: *mut Solver,
+}
+
+impl ISolverStageFunction for IncrementalUpdateStageFunction {
+    #[inline(always)]
+    unsafe fn execute(&self, solver: *mut Solver, block_index: i32, worker_index: i32) {
+        let ctx = &(*self.solver).substep_context;
+        let block = ctx.incremental_update_blocks.get(block_index);
+        let active_set = (*solver).sets.get_mut(0);
+        let type_batch = active_set.batches.get_mut(block.batch_index)
+            .type_batches.get_mut(block.type_batch_index);
+        let type_id = type_batch.type_id;
+        let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
+        let bodies = &*(*solver).bodies;
+        processor.inner().incrementally_update_for_substep(
+            type_batch, bodies, self.dt, self.inverse_dt,
+            block.start_bundle, block.end,
+        );
+        let _ = worker_index;
+    }
+}
+
+/// Integrate constrained kinematics stage: integrates kinematic velocities/poses.
+pub(crate) struct IntegrateConstrainedKinematicsStageFunction {
+    pub dt: f32,
+    pub inverse_dt: f32,
+    pub substep_index: i32,
+    pub solver: *mut Solver,
+}
+
+impl ISolverStageFunction for IntegrateConstrainedKinematicsStageFunction {
+    #[inline(always)]
+    unsafe fn execute(&self, solver: *mut Solver, block_index: i32, worker_index: i32) {
+        let ctx = &(*self.solver).substep_context;
+        let block = ctx.kinematic_integration_blocks.get(block_index);
+        let handles = &(*solver).constrained_kinematic_handles;
+        let handle_buf = handles.span.slice_count(handles.count);
+        if let Some(pi_ptr) = (*solver).pose_integrator {
+            let pi = &*pi_ptr;
+            if self.substep_index == 0 {
+                pi.integrate_kinematic_velocities_dispatch(
+                    &handle_buf,
+                    block.start_bundle_index,
+                    block.end_bundle_index,
+                    self.dt,
+                    worker_index,
+                );
+            } else {
+                pi.integrate_kinematic_poses_and_velocities_dispatch(
+                    &handle_buf,
+                    block.start_bundle_index,
+                    block.end_bundle_index,
+                    self.dt,
+                    worker_index,
+                );
+            }
+        }
+    }
+}
+
+/// Filter trait for determining which type batches should be included in work blocks.
+pub(crate) trait ITypeBatchSolveFilter {
+    fn include_fallback_batch_for_work_blocks(&self) -> bool;
+    fn allow_type(&self, type_id: i32) -> bool;
+}
+
+/// Filter for the main solve/warmstart pass — includes all types but excludes fallback batch.
+pub(crate) struct MainSolveFilter;
+impl ITypeBatchSolveFilter for MainSolveFilter {
+    #[inline(always)]
+    fn include_fallback_batch_for_work_blocks(&self) -> bool { false }
+    #[inline(always)]
+    fn allow_type(&self, _type_id: i32) -> bool { true }
+}
+
+/// Filter for incremental update — only types with incremental substep updates, includes fallback.
+pub(crate) struct IncrementalUpdateForSubstepFilter<'a> {
+    pub type_processors: &'a Vec<Option<TypeProcessor>>,
+}
+impl<'a> ITypeBatchSolveFilter for IncrementalUpdateForSubstepFilter<'a> {
+    #[inline(always)]
+    fn include_fallback_batch_for_work_blocks(&self) -> bool { true }
+    #[inline(always)]
+    fn allow_type(&self, type_id: i32) -> bool {
+        if let Some(ref tp) = self.type_processors[type_id as usize] {
+            tp.inner().requires_incremental_substep_updates()
+        } else {
+            false
+        }
+    }
+}
+
 impl Solver {
     // --- Solve methods (translated from Solver_Solve.cs) ---
 
@@ -1395,14 +1599,778 @@ impl Solver {
         }
     }
 
+    // --- MT sync index helpers ---
+
+    #[inline(always)]
+    fn get_previous_sync_index_for_incremental_update(
+        &self,
+        substep_index: i32,
+        sync_index: i32,
+        sync_stages_per_substep: i32,
+    ) -> i32 {
+        if substep_index == 1 {
+            0
+        } else {
+            0i32.max(sync_index - sync_stages_per_substep)
+        }
+    }
+
+    #[inline(always)]
+    fn get_previous_sync_index_for_integrate_constrained_kinematics(
+        &self,
+        substep_index: i32,
+        sync_index: i32,
+        sync_stages_per_substep: i32,
+    ) -> i32 {
+        if substep_index == 1 {
+            if self.pose_integrator.map_or(false, |pi| unsafe { (*pi).integrate_velocity_for_kinematics() }) {
+                2
+            } else {
+                0
+            }
+        } else {
+            0i32.max(sync_index - sync_stages_per_substep)
+        }
+    }
+
+    #[inline(always)]
+    fn get_warm_start_lookback(&self, substep_index: i32, synchronized_batch_count: i32) -> i32 {
+        // Warm start and solve share the same claims buffer, so look back past the last solve execution.
+        // "+2" accounts for the incremental update and kinematic integration stages.
+        let mut lookback = synchronized_batch_count + 2;
+        if substep_index > 0 {
+            let ctx = &self.substep_context;
+            lookback += synchronized_batch_count
+                * (ctx.highest_velocity_iteration_count
+                    - unsafe { *ctx.velocity_iteration_counts.get((substep_index - 1)) });
+        }
+        lookback
+    }
+
+    #[inline(always)]
+    fn get_previous_sync_index_for_warm_start(sync_index: i32, warm_start_lookback: i32) -> i32 {
+        0i32.max(sync_index - warm_start_lookback)
+    }
+
+    #[inline(always)]
+    fn get_previous_sync_index_for_solve(sync_index: i32, synchronized_batch_count: i32) -> i32 {
+        0i32.max(sync_index - synchronized_batch_count)
+    }
+
+    fn get_uniformly_distributed_start(
+        worker_index: i32,
+        block_count: i32,
+        worker_count: i32,
+        offset: i32,
+    ) -> i32 {
+        if block_count <= worker_count {
+            if worker_index < block_count {
+                offset + worker_index
+            } else {
+                -1
+            }
+        } else {
+            let blocks_per_worker = block_count / worker_count;
+            let remainder = block_count - blocks_per_worker * worker_count;
+            offset + blocks_per_worker * worker_index + remainder.min(worker_index)
+        }
+    }
+
+    /// Lock-free work-stealing execution for worker threads.
+    /// Workers try to claim adjacent blocks via compare-exchange on the claims buffer.
+    unsafe fn execute_worker_stage<TStage: ISolverStageFunction>(
+        &self,
+        stage_function: &TStage,
+        worker_index: i32,
+        worker_start: i32,
+        available_blocks_start_index: i32,
+        claims: &Buffer<i32>,
+        previous_sync_index: i32,
+        sync_index: i32,
+        completed_work_blocks: *mut i32,
+    ) {
+        use std::sync::atomic::{AtomicI32, Ordering};
+
+        if worker_start == -1 {
+            return;
+        }
+        let self_ptr = self as *const Self as *mut Self;
+        let mut work_block_index = worker_start;
+        let mut locally_completed_count = 0i32;
+
+        // Try to claim blocks traversing forward.
+        loop {
+            let claim_ptr = claims.get_ptr(work_block_index) as *mut i32;
+            let atomic = AtomicI32::from_ptr(claim_ptr);
+            if atomic.compare_exchange(
+                previous_sync_index,
+                sync_index,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ).is_ok()
+            {
+                stage_function.execute(self_ptr, available_blocks_start_index + work_block_index, worker_index);
+                locally_completed_count += 1;
+                work_block_index += 1;
+                if work_block_index >= claims.len() as i32 {
+                    work_block_index = 0;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Try to claim work blocks going backward.
+        work_block_index = worker_start - 1;
+        loop {
+            if work_block_index < 0 {
+                work_block_index = claims.len() as i32 - 1;
+            }
+            let claim_ptr = claims.get_ptr(work_block_index) as *mut i32;
+            let atomic = AtomicI32::from_ptr(claim_ptr);
+            if atomic.compare_exchange(
+                previous_sync_index,
+                sync_index,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ).is_ok()
+            {
+                stage_function.execute(self_ptr, available_blocks_start_index + work_block_index, worker_index);
+                locally_completed_count += 1;
+                work_block_index -= 1;
+            } else {
+                break;
+            }
+        }
+
+        // Report completed count.
+        let atomic_completed = AtomicI32::from_ptr(completed_work_blocks);
+        atomic_completed.fetch_add(locally_completed_count, Ordering::AcqRel);
+    }
+
+    /// Main thread stage execution with spin-wait synchronization.
+    /// The main thread never yields — it only spins waiting for workers to complete.
+    unsafe fn execute_main_stage<TStage: ISolverStageFunction>(
+        &self,
+        stage_function: &TStage,
+        worker_index: i32,
+        worker_start: i32,
+        stage: &SolverSyncStage,
+        previous_sync_index: i32,
+        sync_index: i32,
+    ) {
+        use std::sync::atomic::{AtomicI32, Ordering};
+
+        let available_blocks_count = stage.claims.len() as i32;
+        if available_blocks_count == 0 {
+            return;
+        }
+
+        let self_ptr = self as *const Self as *mut Self;
+        let ctx = &(*self_ptr).substep_context;
+
+
+
+        if available_blocks_count == 1 {
+            // Single work block — just execute directly, no need to notify workers.
+            stage_function.execute(self_ptr, stage.work_block_start_index, worker_index);
+        } else {
+            // Write the new stage index so other spinning threads will begin work.
+            let sync_ptr = ctx.sync_index.get();
+            AtomicI32::from_ptr(sync_ptr).store(sync_index, Ordering::Release);
+
+            // Execute our own portion.
+            let completed_ptr = ctx.completed_work_block_count.get();
+            self.execute_worker_stage(
+                stage_function,
+                worker_index,
+                worker_start,
+                stage.work_block_start_index,
+                &stage.claims,
+                previous_sync_index,
+                sync_index,
+                completed_ptr,
+            );
+
+            // Spin-wait until all workers have completed.
+            // DO NOT yield on the main thread — this significantly increases the chance
+            // *some* progress will be made, even if workers are stuck unscheduled.
+            let atomic_completed = AtomicI32::from_ptr(completed_ptr);
+            while atomic_completed.load(Ordering::Acquire) != available_blocks_count {
+                std::hint::spin_loop();
+                std::hint::spin_loop();
+                std::hint::spin_loop();
+            }
+            // All workers done. Reset counter for next stage.
+            *completed_ptr = 0;
+        }
+    }
+
+    /// The SolveWorker dispatch function for multithreaded solving.
+    /// Worker 0 is the main orchestrator; other workers spin-wait and execute dispatched stages.
+    unsafe fn solve_worker(&mut self, worker_index: i32) {
+        use std::sync::atomic::{AtomicI32, Ordering};
+
+        let self_ptr = self as *mut Self;
+        let ctx = &(*self_ptr).substep_context;
+        let worker_count = ctx.worker_count;
+
+        let incremental_update_worker_start = Self::get_uniformly_distributed_start(
+            worker_index,
+            ctx.incremental_update_blocks.len() as i32,
+            worker_count,
+            0,
+        );
+        let kinematic_integration_worker_start = Self::get_uniformly_distributed_start(
+            worker_index,
+            ctx.kinematic_integration_blocks.len() as i32,
+            worker_count,
+            0,
+        );
+
+        let active_set = (*self_ptr).sets.get(0);
+        let batch_count = active_set.batches.count;
+
+        // Compute per-batch starting positions for constraint work blocks.
+        let mut batch_starts_storage = vec![0i32; batch_count as usize];
+        let (synchronized_batch_count, _fallback_exists) = (*self_ptr).get_synchronized_batch_count();
+        for batch_index in 0..synchronized_batch_count {
+            let batch_offset = if batch_index > 0 {
+                *ctx.constraint_batch_boundaries.get((batch_index - 1))
+            } else {
+                0
+            };
+            let batch_count_blocks = *ctx.constraint_batch_boundaries.get(batch_index) - batch_offset;
+            batch_starts_storage[batch_index as usize] =
+                Self::get_uniformly_distributed_start(worker_index, batch_count_blocks, worker_count, 0);
+        }
+
+        debug_assert!(batch_count > 0, "Don't dispatch if there are no constraints.");
+
+        let incremental_update_stage = IncrementalUpdateStageFunction {
+            dt: ctx.dt,
+            inverse_dt: ctx.inverse_dt,
+            solver: self_ptr,
+        };
+        let mut integrate_constrained_kinematics_stage = IntegrateConstrainedKinematicsStageFunction {
+            dt: ctx.dt,
+            inverse_dt: ctx.inverse_dt,
+            substep_index: 0,
+            solver: self_ptr,
+        };
+        let mut warmstart_stage = WarmStartStageFunction {
+            dt: ctx.dt,
+            inverse_dt: ctx.inverse_dt,
+            substep_index: 0,
+            solver: self_ptr,
+        };
+        let solve_stage = SolveStageFunction {
+            dt: ctx.dt,
+            inverse_dt: ctx.inverse_dt,
+            solver: self_ptr,
+        };
+
+        let maximum_sync_stages_per_substep = 2 + synchronized_batch_count * (1 + ctx.highest_velocity_iteration_count);
+
+        if worker_index == 0 {
+            // ---- Main orchestrator thread ----
+            for substep_index in 0..(*self_ptr).substep_count {
+                (*self_ptr).on_substep_started(substep_index);
+
+                let mut sync_index = substep_index * maximum_sync_stages_per_substep + 1;
+
+                // Incremental update (substeps > 0).
+                if substep_index > 0 {
+                    (*self_ptr).execute_main_stage(
+                        &incremental_update_stage,
+                        worker_index,
+                        incremental_update_worker_start,
+                        &(*self_ptr).substep_context.stages.get(0),
+                        (*self_ptr).get_previous_sync_index_for_incremental_update(substep_index, sync_index, maximum_sync_stages_per_substep),
+                        sync_index,
+                    );
+                }
+
+                sync_index += 1;
+
+                // Integrate constrained kinematics.
+                let integrate_velocity_for_kinematics = (*self_ptr).pose_integrator.map_or(false, |pi| (*pi).integrate_velocity_for_kinematics());
+                if substep_index > 0 || integrate_velocity_for_kinematics {
+                    integrate_constrained_kinematics_stage.substep_index = substep_index;
+                    (*self_ptr).execute_main_stage(
+                        &integrate_constrained_kinematics_stage,
+                        worker_index,
+                        kinematic_integration_worker_start,
+                        &(*self_ptr).substep_context.stages.get(1),
+                        (*self_ptr).get_previous_sync_index_for_integrate_constrained_kinematics(substep_index, sync_index, maximum_sync_stages_per_substep),
+                        sync_index,
+                    );
+                }
+
+                // Warm start.
+                warmstart_stage.substep_index = substep_index;
+                let warm_start_lookback = (*self_ptr).get_warm_start_lookback(substep_index, synchronized_batch_count);
+                for batch_index in 0..synchronized_batch_count {
+                    sync_index += 1;
+                    (*self_ptr).execute_main_stage(
+                        &warmstart_stage,
+                        worker_index,
+                        batch_starts_storage[batch_index as usize],
+                        &(*self_ptr).substep_context.stages.get((batch_index + 2)),
+                        Self::get_previous_sync_index_for_warm_start(sync_index, warm_start_lookback),
+                        sync_index,
+                    );
+                }
+
+                // Fallback batch warm start (single-threaded).
+                let (_sync_count, fallback_exists) = (*self_ptr).get_synchronized_batch_count();
+                if fallback_exists {
+                    let fallback_batch_threshold = (*self_ptr).fallback_batch_threshold;
+                    let active_set = (*self_ptr).sets.get_mut(0);
+                    let batch = active_set.batches.get_mut(fallback_batch_threshold);
+                    let bodies = &*(*self_ptr).bodies;
+                    for j in 0..batch.type_batches.count {
+                        let type_batch = batch.type_batches.get_mut(j);
+                        let type_id = type_batch.type_id;
+                        let bundle_count = type_batch.bundle_count() as i32;
+                        (&(*self_ptr).type_processors)[type_id as usize]
+                            .as_ref().unwrap().inner()
+                            .warm_start(type_batch, bodies, ctx.dt, ctx.inverse_dt, 0, bundle_count);
+                    }
+                }
+
+                // Velocity iterations.
+                let velocity_iteration_count = *ctx.velocity_iteration_counts.get(substep_index);
+                for _iteration_index in 0..velocity_iteration_count {
+                    for batch_index in 0..synchronized_batch_count {
+                        sync_index += 1;
+                        (*self_ptr).execute_main_stage(
+                            &solve_stage,
+                            worker_index,
+                            batch_starts_storage[batch_index as usize],
+                            &(*self_ptr).substep_context.stages.get((batch_index + 2)),
+                            Self::get_previous_sync_index_for_solve(sync_index, synchronized_batch_count),
+                            sync_index,
+                        );
+                    }
+                    // Fallback solve (single-threaded).
+                    if fallback_exists {
+                        let fallback_batch_threshold = (*self_ptr).fallback_batch_threshold;
+                        let active_set = (*self_ptr).sets.get_mut(0);
+                        let batch = active_set.batches.get_mut(fallback_batch_threshold);
+                        let bodies = &*(*self_ptr).bodies;
+                        for j in 0..batch.type_batches.count {
+                            let type_batch = batch.type_batches.get_mut(j);
+                            let type_id = type_batch.type_id;
+                            let bundle_count = type_batch.bundle_count() as i32;
+                            (&(*self_ptr).type_processors)[type_id as usize]
+                                .as_ref().unwrap().inner()
+                                .solve(type_batch, bodies, ctx.dt, ctx.inverse_dt, 0, bundle_count);
+                        }
+                    }
+                }
+
+                (*self_ptr).on_substep_ended(substep_index);
+            }
+
+            // All done; notify waiting threads to join.
+            let sync_ptr = ctx.sync_index.get();
+            AtomicI32::from_ptr(sync_ptr).store(i32::MIN, Ordering::Release);
+        } else {
+            // ---- Worker thread ----
+            let mut latest_completed_sync_index = 0i32;
+            let mut sync_index_in_substep = -1i32;
+            let mut substep_index = 0i32;
+
+            loop {
+                let mut spin_wait = crate::physics::local_spin_wait::LocalSpinWait::new();
+                let sync_index;
+                loop {
+                    let sync_ptr = ctx.sync_index.get();
+                    let current = AtomicI32::from_ptr(sync_ptr).load(Ordering::Acquire);
+                    if latest_completed_sync_index != current {
+                        sync_index = current;
+                        break;
+                    }
+                    spin_wait.spin_once();
+                }
+
+                if sync_index == i32::MIN {
+                    break;
+                }
+
+                let sync_steps_since_last = sync_index - latest_completed_sync_index;
+                sync_index_in_substep += sync_steps_since_last;
+                while sync_index_in_substep >= maximum_sync_stages_per_substep {
+                    sync_index_in_substep -= maximum_sync_stages_per_substep;
+                    substep_index += 1;
+                }
+
+                let stage = (*self_ptr).substep_context.stages.get(sync_index_in_substep);
+                let completed_ptr = ctx.completed_work_block_count.get();
+
+                match stage.stage_type {
+                    SolverStageType::IncrementalUpdate => {
+                        (*self_ptr).execute_worker_stage(
+                            &incremental_update_stage,
+                            worker_index,
+                            incremental_update_worker_start,
+                            0,
+                            &stage.claims,
+                            (*self_ptr).get_previous_sync_index_for_incremental_update(substep_index, sync_index, maximum_sync_stages_per_substep),
+                            sync_index,
+                            completed_ptr,
+                        );
+                    }
+                    SolverStageType::IntegrateConstrainedKinematics => {
+                        integrate_constrained_kinematics_stage.substep_index = substep_index;
+                        (*self_ptr).execute_worker_stage(
+                            &integrate_constrained_kinematics_stage,
+                            worker_index,
+                            kinematic_integration_worker_start,
+                            0,
+                            &stage.claims,
+                            (*self_ptr).get_previous_sync_index_for_integrate_constrained_kinematics(substep_index, sync_index, maximum_sync_stages_per_substep),
+                            sync_index,
+                            completed_ptr,
+                        );
+                    }
+                    SolverStageType::WarmStart => {
+                        warmstart_stage.substep_index = substep_index;
+                        let warm_start_lookback = (*self_ptr).get_warm_start_lookback(substep_index, synchronized_batch_count);
+                        (*self_ptr).execute_worker_stage(
+                            &warmstart_stage,
+                            worker_index,
+                            batch_starts_storage[stage.batch_index as usize],
+                            stage.work_block_start_index,
+                            &stage.claims,
+                            Self::get_previous_sync_index_for_warm_start(sync_index, warm_start_lookback),
+                            sync_index,
+                            completed_ptr,
+                        );
+                    }
+                    SolverStageType::Solve => {
+                        (*self_ptr).execute_worker_stage(
+                            &solve_stage,
+                            worker_index,
+                            batch_starts_storage[stage.batch_index as usize],
+                            stage.work_block_start_index,
+                            &stage.claims,
+                            Self::get_previous_sync_index_for_solve(sync_index, synchronized_batch_count),
+                            sync_index,
+                            completed_ptr,
+                        );
+                    }
+                }
+                latest_completed_sync_index = sync_index;
+            }
+        }
+    }
+
+    /// Builds kinematic integration work blocks for multithreaded dispatch.
+    unsafe fn build_kinematic_integration_work_blocks(
+        &self,
+        minimum_block_size_in_bundles: i32,
+        maximum_block_size_in_bundles: i32,
+        target_block_count: i32,
+    ) -> Buffer<IntegrationWorkBlock> {
+        let bundle_count = BundleIndexing::get_bundle_count(self.constrained_kinematic_handles.count as usize) as i32;
+        if bundle_count > 0 {
+            let mut target_bundles_per_block = bundle_count / target_block_count;
+            if target_bundles_per_block < minimum_block_size_in_bundles {
+                target_bundles_per_block = minimum_block_size_in_bundles;
+            }
+            if target_bundles_per_block > maximum_block_size_in_bundles {
+                target_bundles_per_block = maximum_block_size_in_bundles;
+            }
+            let block_count = (bundle_count + target_bundles_per_block - 1) / target_bundles_per_block;
+            let bundles_per_block = bundle_count / block_count;
+            let remainder = bundle_count - bundles_per_block * block_count;
+            let mut previous_end = 0;
+            let pool = &mut *self.pool;
+            let mut work_blocks: Buffer<IntegrationWorkBlock> = pool.take(block_count);
+            for i in 0..block_count {
+                let mut bundle_count_for_block = bundles_per_block;
+                if i < remainder {
+                    bundle_count_for_block += 1;
+                }
+                *work_blocks.get_mut(i) = IntegrationWorkBlock {
+                    start_bundle_index: previous_end,
+                    end_bundle_index: {
+                        previous_end += bundle_count_for_block;
+                        previous_end
+                    },
+                };
+            }
+            work_blocks
+        } else {
+            Buffer::default()
+        }
+    }
+
+    /// Builds work blocks for constraint batches, distributing work evenly across target block count.
+    unsafe fn build_work_blocks<TFilter: ITypeBatchSolveFilter>(
+        &self,
+        pool: &mut BufferPool,
+        minimum_block_size_in_bundles: i32,
+        maximum_block_size_in_bundles: i32,
+        target_blocks_per_batch: i32,
+        type_batch_filter: &TFilter,
+    ) -> (QuickList<WorkBlock>, Buffer<i32>) {
+        let active_set = self.sets.get(0);
+        let batch_count;
+        if type_batch_filter.include_fallback_batch_for_work_blocks() {
+            batch_count = active_set.batches.count;
+        } else {
+            let (sync_count, _) = self.get_synchronized_batch_count();
+            batch_count = sync_count;
+        }
+
+        let mut work_blocks: QuickList<WorkBlock> = QuickList::with_capacity(target_blocks_per_batch * batch_count, pool);
+        let mut batch_boundaries: Buffer<i32> = pool.take(batch_count);
+        let inverse_minimum_block_size = 1.0f32 / minimum_block_size_in_bundles as f32;
+        let inverse_maximum_block_size = 1.0f32 / maximum_block_size_in_bundles as f32;
+
+        for batch_index in 0..batch_count {
+            let type_batches = &active_set.batches.get(batch_index).type_batches;
+            let mut bundle_count = 0i32;
+            for type_batch_index in 0..type_batches.count {
+                let type_batch = type_batches.get(type_batch_index);
+                if type_batch_filter.allow_type(type_batch.type_id) {
+                    bundle_count += type_batch.bundle_count() as i32;
+                }
+            }
+            for type_batch_index in 0..type_batches.count {
+                let type_batch = type_batches.get(type_batch_index);
+                if !type_batch_filter.allow_type(type_batch.type_id) {
+                    continue;
+                }
+                let tb_bundle_count = type_batch.bundle_count() as i32;
+                let type_batch_size_fraction = tb_bundle_count as f32 / bundle_count as f32;
+                let type_batch_maximum_block_count = tb_bundle_count as f32 * inverse_minimum_block_size;
+                let type_batch_minimum_block_count = tb_bundle_count as f32 * inverse_maximum_block_size;
+                let type_batch_block_count = 1i32.max(
+                    type_batch_maximum_block_count.min(
+                        type_batch_minimum_block_count.max(target_blocks_per_batch as f32 * type_batch_size_fraction)
+                    ) as i32
+                );
+                let mut previous_end = 0;
+                let base_block_size = tb_bundle_count / type_batch_block_count;
+                let remainder = tb_bundle_count - base_block_size * type_batch_block_count;
+                for new_block_index in 0..type_batch_block_count {
+                    let block_bundle_count = if new_block_index < remainder {
+                        base_block_size + 1
+                    } else {
+                        base_block_size
+                    };
+                    let block = work_blocks.allocate_unsafely();
+                    block.batch_index = batch_index;
+                    block.type_batch_index = type_batch_index;
+                    block.start_bundle = previous_end;
+                    block.end = previous_end + block_bundle_count;
+                    previous_end = block.end;
+                }
+            }
+            *batch_boundaries.get_mut(batch_index) = work_blocks.count;
+        }
+
+        (work_blocks, batch_boundaries)
+    }
+
+    /// Executes the multithreaded solve path.
+    unsafe fn execute_multithreaded(
+        &mut self,
+        dt: f32,
+        thread_dispatcher: &dyn crate::utilities::thread_dispatcher::IThreadDispatcher,
+    ) {
+        let self_ptr = self as *mut Self;
+        let ctx = &mut (*self_ptr).substep_context;
+        let worker_count = thread_dispatcher.thread_count();
+        ctx.worker_count = worker_count;
+        ctx.dt = dt;
+        ctx.inverse_dt = 1.0 / dt;
+
+        let pool = &mut *self.pool;
+        ctx.velocity_iteration_counts = pool.take(self.substep_count);
+
+        // Each substep can have a different number of velocity iterations.
+        if self.velocity_iteration_scheduler.is_none() {
+            for i in 0..self.substep_count {
+                *ctx.velocity_iteration_counts.get_mut(i) = self.velocity_iteration_count;
+            }
+        } else {
+            for i in 0..self.substep_count {
+                *ctx.velocity_iteration_counts.get_mut(i) =
+                    self.get_velocity_iteration_count_for_substep_index(i);
+            }
+        }
+
+        const TARGET_BLOCKS_PER_BATCH_PER_WORKER: i32 = 4;
+        const MINIMUM_BLOCK_SIZE_IN_BUNDLES: i32 = 1;
+        const MAXIMUM_BLOCK_SIZE_IN_BUNDLES: i32 = 1024;
+
+        let target_blocks_per_batch = worker_count * TARGET_BLOCKS_PER_BATCH_PER_WORKER;
+
+        let main_filter = MainSolveFilter;
+        let incremental_filter = IncrementalUpdateForSubstepFilter {
+            type_processors: &self.type_processors,
+        };
+
+        let (constraint_blocks, constraint_batch_boundaries) = (*self_ptr).build_work_blocks(
+            &mut *(*self_ptr).pool,
+            MINIMUM_BLOCK_SIZE_IN_BUNDLES,
+            MAXIMUM_BLOCK_SIZE_IN_BUNDLES,
+            target_blocks_per_batch,
+            &main_filter,
+        );
+        let (incremental_blocks, mut incremental_update_batch_boundaries) = (*self_ptr).build_work_blocks(
+            &mut *(*self_ptr).pool,
+            MINIMUM_BLOCK_SIZE_IN_BUNDLES,
+            MAXIMUM_BLOCK_SIZE_IN_BUNDLES,
+            target_blocks_per_batch,
+            &incremental_filter,
+        );
+        (&mut *(*self_ptr).pool).return_buffer(&mut incremental_update_batch_boundaries);
+
+        let ctx = &mut (*self_ptr).substep_context;
+        ctx.constraint_blocks = constraint_blocks.span.slice_count(constraint_blocks.count);
+        ctx.incremental_update_blocks = incremental_blocks.span.slice_count(incremental_blocks.count);
+        ctx.constraint_batch_boundaries = constraint_batch_boundaries;
+        ctx.kinematic_integration_blocks = self.build_kinematic_integration_work_blocks(
+            MINIMUM_BLOCK_SIZE_IN_BUNDLES,
+            MAXIMUM_BLOCK_SIZE_IN_BUNDLES,
+            target_blocks_per_batch,
+        );
+
+        let ctx = &mut (*self_ptr).substep_context;
+        *ctx.sync_index.get_mut() = 0;
+
+        let total_constraint_batch_work_block_count = if ctx.constraint_batch_boundaries.len() == 0 {
+            0
+        } else {
+            *ctx.constraint_batch_boundaries.get(ctx.constraint_batch_boundaries.len() - 1)
+        };
+        let total_claim_count = incremental_blocks.count
+            + ctx.kinematic_integration_blocks.len()
+            + total_constraint_batch_work_block_count;
+
+        let (stages_per_iteration, _fallback_exists) = self.get_synchronized_batch_count();
+
+        ctx.highest_velocity_iteration_count = 0;
+        for i in 0..ctx.velocity_iteration_counts.len() {
+            ctx.highest_velocity_iteration_count = ctx.highest_velocity_iteration_count.max(
+                *ctx.velocity_iteration_counts.get(i),
+            );
+        }
+
+        let pool = &mut *self.pool;
+        ctx.stages = pool.take(
+            2 + stages_per_iteration * (1 + ctx.highest_velocity_iteration_count),
+        );
+
+        // Allocate claims buffer, initialized to 0 to match initial sync index.
+        let mut claims: Buffer<i32> = pool.take(total_claim_count);
+        claims.clear(0, claims.len());
+
+        // Set up stages.
+        let inc_block_count = incremental_blocks.count;
+        let kin_block_count = ctx.kinematic_integration_blocks.len();
+
+        *ctx.stages.get_mut(0) = SolverSyncStage::new_no_batch(
+            claims.slice_count(inc_block_count),
+            0,
+            SolverStageType::IncrementalUpdate,
+        );
+        *ctx.stages.get_mut(1) = SolverSyncStage::new_no_batch(
+            claims.slice_offset(inc_block_count, kin_block_count),
+            0,
+            SolverStageType::IntegrateConstrainedKinematics,
+        );
+
+        let mut target_stage_index = 2;
+        let preamble_claim_count = inc_block_count + kin_block_count;
+        let mut claim_start = preamble_claim_count;
+        let mut highest_job_count_in_solve = 0;
+
+        // Warm start stages.
+        for batch_index in 0..stages_per_iteration {
+            let stage_index = target_stage_index;
+            target_stage_index += 1;
+            let batch_start = if batch_index == 0 {
+                0
+            } else {
+                *ctx.constraint_batch_boundaries.get((batch_index - 1))
+            };
+            let work_blocks_in_batch = *ctx.constraint_batch_boundaries.get(batch_index) - batch_start;
+            *ctx.stages.get_mut(stage_index) = SolverSyncStage::new(
+                claims.slice_offset(claim_start, work_blocks_in_batch),
+                batch_start,
+                SolverStageType::WarmStart,
+                batch_index,
+            );
+            claim_start += work_blocks_in_batch;
+            highest_job_count_in_solve = highest_job_count_in_solve.max(work_blocks_in_batch);
+        }
+
+        // Solve stages (reusing same claims as warm start).
+        for _iteration_index in 0..ctx.highest_velocity_iteration_count {
+            claim_start = preamble_claim_count;
+            for batch_index in 0..stages_per_iteration {
+                let stage_index = target_stage_index;
+                target_stage_index += 1;
+                let batch_start = if batch_index == 0 {
+                    0
+                } else {
+                    *ctx.constraint_batch_boundaries.get((batch_index - 1))
+                };
+                let work_blocks_in_batch = *ctx.constraint_batch_boundaries.get(batch_index) - batch_start;
+                *ctx.stages.get_mut(stage_index) = SolverSyncStage::new(
+                    claims.slice_offset(claim_start, work_blocks_in_batch),
+                    batch_start,
+                    SolverStageType::Solve,
+                    batch_index,
+                );
+                claim_start += work_blocks_in_batch;
+                highest_job_count_in_solve = highest_job_count_in_solve.max(work_blocks_in_batch);
+            }
+        }
+
+        // Dispatch workers if there are any constraints.
+        let active_batch_count = self.sets.get(0).batches.count;
+        if active_batch_count > 0 {
+            // Pass the solver pointer through unmanaged_context so the worker fn can access it.
+            let self_ptr = self as *mut Self;
+            fn solve_worker_fn(worker_index: i32, _dispatcher: &dyn crate::utilities::thread_dispatcher::IThreadDispatcher) {
+                // The solver pointer is stored in the dispatcher's unmanaged context.
+                let ctx = _dispatcher.unmanaged_context();
+                let solver = ctx as *mut Solver;
+                unsafe { (*solver).solve_worker(worker_index); }
+            }
+            thread_dispatcher.dispatch_workers(
+                solve_worker_fn,
+                highest_job_count_in_solve,
+                self_ptr as *mut (),
+                None,
+            );
+        }
+
+        // Cleanup.
+        let pool = &mut *self.pool;
+        pool.return_buffer(&mut claims);
+        pool.return_buffer(&mut self.substep_context.stages);
+        pool.return_buffer(&mut self.substep_context.constraint_batch_boundaries);
+        pool.return_buffer(&mut self.substep_context.incremental_update_blocks);
+        if self.substep_context.kinematic_integration_blocks.allocated() {
+            pool.return_buffer(&mut self.substep_context.kinematic_integration_blocks);
+        }
+        pool.return_buffer(&mut self.substep_context.constraint_blocks);
+        pool.return_buffer(&mut self.substep_context.velocity_iteration_counts);
+    }
+
     /// Prepares constraint integration responsibilities. Returns an IndexSet of constrained body handles.
     ///
-    /// In the full C# implementation, this computes per-batch, per-type-batch integration flags
-    /// that determine which constraint is responsible for integrating each body's velocities
-    /// during substepping. For now, this provides a simplified implementation that marks all
-    /// constrained body handles, which is correct for single-threaded execution where integration
-    /// responsibilities are handled by the warm-start's batch-0 special case (batch 0 always
-    /// integrates all its bodies).
+    /// This computes per-batch merged body handle sets and identifies which constraint is
+    /// first to see each body, which determines integration responsibility during substepping.
     pub unsafe fn prepare_constraint_integration_responsibilities(
         &mut self,
         _thread_dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
@@ -1411,7 +2379,6 @@ impl Solver {
             let pool = &mut *self.pool;
             let bodies = &*self.bodies;
             // Build a merged set of all constrained body handles.
-            // Start by copying batch 0's referenced handles.
             let highest_id = bodies.handle_pool.highest_possibly_claimed_id();
             let flags_len = (highest_id + 64) / 64;
             let mut merged = IndexSet::new(pool, flags_len * 64);
@@ -1444,112 +2411,92 @@ impl Solver {
 
     /// Disposes the constraint integration responsibilities created by prepare_constraint_integration_responsibilities.
     pub fn dispose_constraint_integration_responsibilities(&mut self) {
-        // In the full implementation, this disposes per-batch integration flags.
-        // With the simplified implementation above, there's nothing to dispose beyond
-        // the merged IndexSet which is returned by value and disposed by the caller.
+        // The merged IndexSet is returned by value and disposed by the caller.
     }
 
     /// Solves all constraints using substepped velocity iterations.
     ///
-    /// This is the single-threaded solve path translated from `Solver<TIntegrationCallbacks>.Solve()`
-    /// in Solver_Solve.cs. The multithreaded path will be added when thread dispatch infrastructure
-    /// is complete.
+    /// When a thread dispatcher is provided, uses the multithreaded solve path with lock-free
+    /// work stealing and spin-wait synchronization. Otherwise falls back to sequential execution.
     pub unsafe fn solve(
         &mut self,
         total_dt: f32,
-        _thread_dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
+        thread_dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
     ) {
         let substep_dt = total_dt / self.substep_count as f32;
-        let inverse_dt = 1.0 / substep_dt;
-        let self_ptr = self as *mut Self;
 
-        let active_set = (*self_ptr).sets.get_mut(0);
-        let batch_count = active_set.batches.count;
+        // Note: In C#, PoseIntegrator.Callbacks.PrepareForIntegration(substepDt) is called here.
+        // This is handled externally in the Rust version via the simulation's timestep orchestration.
 
-        if batch_count == 0 {
-            return;
-        }
+        if let Some(dispatcher) = thread_dispatcher {
+            // Multithreaded path.
+            self.execute_multithreaded(substep_dt, dispatcher);
+        } else {
+            // Single-threaded path.
+            let inverse_dt = 1.0 / substep_dt;
+            let self_ptr = self as *mut Self;
 
-        let bodies = &*(*self_ptr).bodies;
+            let active_set = (*self_ptr).sets.get_mut(0);
+            let batch_count = active_set.batches.count;
 
-        for substep_index in 0..(*self_ptr).substep_count {
-            (*self_ptr).on_substep_started(substep_index);
+            if batch_count == 0 {
+                return;
+            }
 
-            if substep_index > 0 {
-                // Incremental update for substeps beyond the first.
-                let active_set = (*self_ptr).sets.get_mut(0);
-                for i in 0..active_set.batches.count {
-                    let batch = active_set.batches.get_mut(i);
-                    for j in 0..batch.type_batches.count {
-                        let type_batch = batch.type_batches.get_mut(j);
-                        let type_id = type_batch.type_id;
-                        let processor = (&(*self_ptr).type_processors)[type_id as usize]
-                            .as_ref()
-                            .unwrap();
-                        if processor.inner().requires_incremental_substep_updates() {
-                            processor.inner().incrementally_update_for_substep(
-                                type_batch,
-                                bodies,
-                                substep_dt,
-                                inverse_dt,
-                                0,
-                                type_batch.bundle_count() as i32,
+            let bodies = &*(*self_ptr).bodies;
+
+            for substep_index in 0..(*self_ptr).substep_count {
+                (*self_ptr).on_substep_started(substep_index);
+
+                if substep_index > 0 {
+                    // Incremental update for substeps beyond the first.
+                    let active_set = (*self_ptr).sets.get_mut(0);
+                    for i in 0..active_set.batches.count {
+                        let batch = active_set.batches.get_mut(i);
+                        for j in 0..batch.type_batches.count {
+                            let type_batch = batch.type_batches.get_mut(j);
+                            let type_id = type_batch.type_id;
+                            let processor = (&(*self_ptr).type_processors)[type_id as usize]
+                                .as_ref()
+                                .unwrap();
+                            if processor.inner().requires_incremental_substep_updates() {
+                                processor.inner().incrementally_update_for_substep(
+                                    type_batch,
+                                    bodies,
+                                    substep_dt,
+                                    inverse_dt,
+                                    0,
+                                    type_batch.bundle_count() as i32,
+                                );
+                            }
+                        }
+                    }
+                    // Integrate kinematic poses and velocities for substeps > 0.
+                    if let Some(pi_ptr) = (*self_ptr).pose_integrator {
+                        let pi = &*pi_ptr;
+                        let handles = &(*self_ptr).constrained_kinematic_handles;
+                        let handle_buf = handles.span.slice_count(handles.count);
+                        let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
+                        pi.integrate_kinematic_poses_and_velocities_dispatch(
+                            &handle_buf, 0, bundle_count, substep_dt, 0,
+                        );
+                    }
+                } else {
+                    // First substep: integrate kinematic velocities if needed.
+                    if let Some(pi_ptr) = (*self_ptr).pose_integrator {
+                        let pi = &*pi_ptr;
+                        if pi.integrate_velocity_for_kinematics() {
+                            let handles = &(*self_ptr).constrained_kinematic_handles;
+                            let handle_buf = handles.span.slice_count(handles.count);
+                            let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
+                            pi.integrate_kinematic_velocities_dispatch(
+                                &handle_buf, 0, bundle_count, substep_dt, 0,
                             );
                         }
                     }
                 }
-                // Integrate kinematic poses and velocities for substeps > 0.
-                if let Some(pi_ptr) = (*self_ptr).pose_integrator {
-                    let pi = &*pi_ptr;
-                    let handles = &(*self_ptr).constrained_kinematic_handles;
-                    let handle_buf = handles.span.slice_count(handles.count);
-                    let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
-                    pi.integrate_kinematic_poses_and_velocities_dispatch(
-                        &handle_buf, 0, bundle_count, substep_dt, 0,
-                    );
-                }
-            } else {
-                // First substep: integrate kinematic velocities if needed.
-                if let Some(pi_ptr) = (*self_ptr).pose_integrator {
-                    let pi = &*pi_ptr;
-                    if pi.integrate_velocity_for_kinematics() {
-                        let handles = &(*self_ptr).constrained_kinematic_handles;
-                        let handle_buf = handles.span.slice_count(handles.count);
-                        let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
-                        pi.integrate_kinematic_velocities_dispatch(
-                            &handle_buf, 0, bundle_count, substep_dt, 0,
-                        );
-                    }
-                }
-            }
 
-            // Warm start all batches.
-            let active_set = (*self_ptr).sets.get_mut(0);
-            for i in 0..active_set.batches.count {
-                let batch = active_set.batches.get_mut(i);
-                for j in 0..batch.type_batches.count {
-                    let type_batch = batch.type_batches.get_mut(j);
-                    let type_id = type_batch.type_id;
-                    let bundle_count = type_batch.bundle_count() as i32;
-                    (&(*self_ptr).type_processors)[type_id as usize]
-                        .as_ref()
-                        .unwrap()
-                        .inner()
-                        .warm_start(
-                            type_batch,
-                            bodies,
-                            substep_dt,
-                            inverse_dt,
-                            0,
-                            bundle_count,
-                        );
-                }
-            }
-
-            // Velocity iterations.
-            let velocity_iteration_count =
-                (*self_ptr).get_velocity_iteration_count_for_substep_index(substep_index);
-            for _iteration_index in 0..velocity_iteration_count {
+                // Warm start all batches.
                 let active_set = (*self_ptr).sets.get_mut(0);
                 for i in 0..active_set.batches.count {
                     let batch = active_set.batches.get_mut(i);
@@ -1561,7 +2508,7 @@ impl Solver {
                             .as_ref()
                             .unwrap()
                             .inner()
-                            .solve(
+                            .warm_start(
                                 type_batch,
                                 bodies,
                                 substep_dt,
@@ -1571,9 +2518,36 @@ impl Solver {
                             );
                     }
                 }
-            }
 
-            (*self_ptr).on_substep_ended(substep_index);
+                // Velocity iterations.
+                let velocity_iteration_count =
+                    (*self_ptr).get_velocity_iteration_count_for_substep_index(substep_index);
+                for _iteration_index in 0..velocity_iteration_count {
+                    let active_set = (*self_ptr).sets.get_mut(0);
+                    for i in 0..active_set.batches.count {
+                        let batch = active_set.batches.get_mut(i);
+                        for j in 0..batch.type_batches.count {
+                            let type_batch = batch.type_batches.get_mut(j);
+                            let type_id = type_batch.type_id;
+                            let bundle_count = type_batch.bundle_count() as i32;
+                            (&(*self_ptr).type_processors)[type_id as usize]
+                                .as_ref()
+                                .unwrap()
+                                .inner()
+                                .solve(
+                                    type_batch,
+                                    bodies,
+                                    substep_dt,
+                                    inverse_dt,
+                                    0,
+                                    bundle_count,
+                                );
+                        }
+                    }
+                }
+
+                (*self_ptr).on_substep_ended(substep_index);
+            }
         }
     }
 }

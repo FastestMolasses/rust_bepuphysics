@@ -235,14 +235,37 @@ impl IslandAwakener {
         // Use raw pointer to self to avoid borrow conflicts between execute/dispose
         let self_ptr = self as *mut Self;
 
-        // Execute phase one jobs
-        for i in 0..phase_one_job_count {
-            (*self_ptr).execute_phase_one_job(i);
-        }
+        if thread_count > 1 {
+            let dispatcher = thread_dispatcher.unwrap();
+            // Phase one: MT dispatch
+            *(*self_ptr).job_index.get() = -1;
+            (*self_ptr).job_count = phase_one_job_count;
+            dispatcher.dispatch_workers(
+                Self::phase_one_worker_fn,
+                phase_one_job_count,
+                self_ptr as *mut (),
+                None,
+            );
 
-        // Execute phase two jobs
-        for i in 0..phase_two_job_count {
-            (*self_ptr).execute_phase_two_job(i);
+            // Phase two: MT dispatch
+            *(*self_ptr).job_index.get() = -1;
+            (*self_ptr).job_count = phase_two_job_count;
+            dispatcher.dispatch_workers(
+                Self::phase_two_worker_fn,
+                phase_two_job_count,
+                self_ptr as *mut (),
+                None,
+            );
+        } else {
+            // Execute phase one jobs
+            for i in 0..phase_one_job_count {
+                (*self_ptr).execute_phase_one_job(i);
+            }
+
+            // Execute phase two jobs
+            for i in 0..phase_two_job_count {
+                (*self_ptr).execute_phase_two_job(i);
+            }
         }
 
         (*self_ptr).dispose_for_completed_awakenings(&mut unique_set_indices);
@@ -273,6 +296,36 @@ impl IslandAwakener {
                 )
             };
             slice.sort_unstable();
+        }
+    }
+
+    /// Worker function for MT phase one dispatch.
+    fn phase_one_worker_fn(_worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let awakener = &mut *(dispatcher.unmanaged_context() as *mut IslandAwakener);
+            loop {
+                let index = AtomicI32::from_ptr(awakener.job_index.get())
+                    .fetch_add(1, Ordering::AcqRel);
+                if index >= awakener.job_count {
+                    break;
+                }
+                awakener.execute_phase_one_job(index);
+            }
+        }
+    }
+
+    /// Worker function for MT phase two dispatch.
+    fn phase_two_worker_fn(_worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let awakener = &mut *(dispatcher.unmanaged_context() as *mut IslandAwakener);
+            loop {
+                let index = AtomicI32::from_ptr(awakener.job_index.get())
+                    .fetch_add(1, Ordering::AcqRel);
+                if index >= awakener.job_count {
+                    break;
+                }
+                awakener.execute_phase_two_job(index);
+            }
         }
     }
 

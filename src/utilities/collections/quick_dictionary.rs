@@ -165,6 +165,22 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     }
 
     /// Tries to retrieve the value associated with a key if it exists.
+    /// Returns true if found, with the value written to the out parameter.
+    /// This matches C#'s TryGetValue(ref TKey, out TValue) signature.
+    #[inline(always)]
+    pub fn try_get_value(&self, key: &TKey, value: &mut TValue) -> bool {
+        let mut table_index = 0;
+        let mut element_index = 0;
+        if self.get_table_indices(key, &mut table_index, &mut element_index) {
+            *value = self.values[element_index];
+            true
+        } else {
+            unsafe { std::ptr::write_bytes(value as *mut TValue, 0, 1); }
+            false
+        }
+    }
+
+    /// Tries to retrieve the value associated with a key if it exists.
     #[inline(always)]
     pub fn get(&self, key: &TKey) -> Option<&TValue> {
         let mut table_index = 0;
@@ -232,6 +248,73 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     #[inline(always)]
     pub fn try_add_unsafely(&mut self, key: TKey, value: TValue) -> bool {
         self.add_unsafely(key, value)
+    }
+
+    /// Adds or updates a pair in the dictionary.
+    /// If the key already exists, both key and value are replaced.
+    /// Returns true if a new pair was added, false if existing pair was replaced.
+    #[inline(always)]
+    pub fn add_and_replace_unsafely(&mut self, key: TKey, value: TValue) -> bool {
+        debug_assert!(self.count < self.keys.len(), "Capacity exceeded");
+        let mut table_index = 0;
+        let mut element_index = 0;
+        if self.get_table_indices(&key, &mut table_index, &mut element_index) {
+            // Already present — replace both key and value (C# replaces both)
+            self.keys[element_index] = key;
+            self.values[element_index] = value;
+            false
+        } else {
+            // Not found — add new entry
+            self.keys[self.count] = key;
+            self.values[self.count] = value;
+            self.count += 1;
+            self.table[table_index] = self.count; // 1-indexed encoding
+            true
+        }
+    }
+
+    /// Adds or updates a pair. Resizes if necessary.
+    /// Returns true if added, false if replaced.
+    #[inline(always)]
+    pub fn add_and_replace(&mut self, key: TKey, value: TValue, pool: &mut impl UnmanagedMemoryPool) -> bool {
+        self.ensure_capacity(self.count + 1, pool);
+        self.add_and_replace_unsafely(key, value)
+    }
+
+    /// Attempts to find the index of the given key. If present, returns true with index.
+    /// If not present, allocates a slot and returns false. Value at slot is undefined.
+    /// Does NOT check capacity — caller must ensure space exists.
+    #[inline(always)]
+    pub fn find_or_allocate_slot_unsafely(&mut self, key: &TKey, slot_index: &mut i32) -> bool {
+        let mut table_index = 0;
+        if self.get_table_indices(key, &mut table_index, slot_index) {
+            return true;
+        }
+        // Not found — allocate
+        *slot_index = self.count;
+        self.keys[self.count] = *key;
+        self.count += 1;
+        self.table[table_index] = self.count; // 1-indexed encoding
+        false
+    }
+
+    /// Attempts to find the index of the given key. If present, returns true with index.
+    /// If not present, allocates a slot and returns false. Resizes if needed.
+    #[inline(always)]
+    pub fn find_or_allocate_slot(&mut self, key: &TKey, pool: &mut impl UnmanagedMemoryPool, slot_index: &mut i32) -> bool {
+        if self.count == self.keys.len() {
+            self.resize((self.count * 2).max(1), pool);
+        }
+        let mut table_index = 0;
+        if self.get_table_indices(key, &mut table_index, slot_index) {
+            return true;
+        }
+        // Not found — allocate
+        *slot_index = self.count;
+        self.keys[self.count] = *key;
+        self.count += 1;
+        self.table[table_index] = self.count; // 1-indexed encoding
+        false
     }
 
     /// Adds or updates a pair in the dictionary.
@@ -316,40 +399,27 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
             }
             self.table[swap_table_index] = element_index + 1; // Remember the encoding! all indices offset by 1.
         }
-    }
 
-    /// Finds the existing slot for a key, or allocates a new one if it doesn't exist.
-    /// Returns true if the key already existed, false if a new slot was allocated.
-    /// In either case, slot_index is set to the element index.
-    #[inline(always)]
-    pub fn find_or_allocate_slot_unsafely(&mut self, key: &TKey, slot_index: &mut i32) -> bool {
-        let hash_code = self.equality_comparer.hash(key);
-        let mut table_index = HashHelper::rehash(hash_code) & self.table_mask;
-
-        loop {
-            let element_index = self.table[table_index] - 1;
-
-            if element_index < 0 {
-                // Empty slot — allocate new entry.
-                *slot_index = self.count;
-                self.keys[self.count] = *key;
-                self.table[table_index] = self.count + 1;
-                self.count += 1;
-                return false;
-            }
-
-            if self.equality_comparer.equals(&self.keys[element_index], key) {
-                *slot_index = element_index;
-                return true;
-            }
-
-            table_index = (table_index + 1) & self.table_mask;
+        // Clear the vacated final slots (matches C# `Keys[Count] = default; Values[Count] = default`)
+        unsafe {
+            std::ptr::write_bytes(self.keys.as_mut_ptr().add(self.count as usize), 0, 1);
+            std::ptr::write_bytes(self.values.as_mut_ptr().add(self.count as usize), 0, 1);
         }
     }
 
     /// Removes all elements from the dictionary.
+    /// Zeros keys, values and table.
     #[inline(always)]
     pub fn clear(&mut self) {
+        self.table.clear(0, self.table.len());
+        self.keys.clear(0, self.count);
+        self.values.clear(0, self.count);
+        self.count = 0;
+    }
+
+    /// Removes all elements from the dictionary without modifying the contents of the keys or values arrays.
+    #[inline(always)]
+    pub fn fast_clear(&mut self) {
         self.table.clear(0, self.table.len());
         self.count = 0;
     }
@@ -437,7 +507,59 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
         debug_assert!(index >= 0 && index < self.count);
         &mut self.values[index]
     }
+
+    /// Gets the keys and values as slices.
+    #[inline(always)]
+    pub fn as_slices(&self) -> (&[TKey], &[TValue]) {
+        unsafe {
+            (
+                std::slice::from_raw_parts(self.keys.as_ptr(), self.count as usize),
+                std::slice::from_raw_parts(self.values.as_ptr(), self.count as usize),
+            )
+        }
+    }
+
+    /// Returns an iterator over key-value pairs.
+    pub fn iter(&self) -> QuickDictionaryIterator<'_, TKey, TValue> {
+        QuickDictionaryIterator {
+            keys: &self.keys,
+            values: &self.values,
+            count: self.count,
+            index: 0,
+        }
+    }
 }
+
+/// Iterator over QuickDictionary key-value pairs.
+pub struct QuickDictionaryIterator<'a, TKey: Copy, TValue: Copy> {
+    keys: &'a Buffer<TKey>,
+    values: &'a Buffer<TValue>,
+    count: i32,
+    index: i32,
+}
+
+impl<'a, TKey: Copy, TValue: Copy> Iterator for QuickDictionaryIterator<'a, TKey, TValue> {
+    type Item = (TKey, TValue);
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.count {
+            let key = self.keys[self.index];
+            let value = self.values[self.index];
+            self.index += 1;
+            Some((key, value))
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = (self.count - self.index) as usize;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, TKey: Copy, TValue: Copy> ExactSizeIterator for QuickDictionaryIterator<'a, TKey, TValue> {}
 
 impl<TKey: Copy, TValue: Copy, TEqualityComparer: Default> Default
     for QuickDictionary<TKey, TValue, TEqualityComparer>

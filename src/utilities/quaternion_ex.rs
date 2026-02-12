@@ -472,3 +472,21 @@ pub fn local_rotation_without_overlap(
     let basis_inverse = self::conjugate(target_basis);
     self::concatenate_without_overlap(rotation, basis_inverse, local_rotation);
 }
+
+/// Returns the identity quaternion (0, 0, 0, 1).
+#[inline(always)]
+pub fn identity() -> Quat {
+    Quat::from_xyzw(0.0, 0.0, 0.0, 1.0)
+}
+
+/// Computes the squared length of a quaternion (treating it as a Vec4).
+#[inline(always)]
+pub fn length_squared(q: &Quat) -> f32 {
+    q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w
+}
+
+/// Computes the length of a quaternion (treating it as a Vec4).
+#[inline(always)]
+pub fn length(q: &Quat) -> f32 {
+    length_squared(q).sqrt()
+}

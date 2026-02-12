@@ -49,17 +49,18 @@ where
     }
 }
 
-/// A filter that wraps a function pointer for maximum performance.
+/// A filter that wraps an unsafe function pointer for maximum performance.
+/// Matches C# `delegate*<ulong, bool>`.
 #[derive(Clone, Copy)]
 pub struct FunctionPointerJobFilter {
-    /// Function pointer to use as the filter.
-    pub filter: fn(u64) -> bool,
+    /// Unsafe function pointer to use as the filter.
+    pub filter: unsafe fn(u64) -> bool,
 }
 
 impl FunctionPointerJobFilter {
-    /// Creates a job filter from a function pointer.
+    /// Creates a job filter from an unsafe function pointer.
     #[inline(always)]
-    pub fn new(filter: fn(u64) -> bool) -> Self {
+    pub fn new(filter: unsafe fn(u64) -> bool) -> Self {
         Self { filter }
     }
 }
@@ -67,7 +68,7 @@ impl FunctionPointerJobFilter {
 impl IJobFilter for FunctionPointerJobFilter {
     #[inline(always)]
     fn allow_job(&self, job_tag: u64) -> bool {
-        (self.filter)(job_tag)
+        unsafe { (self.filter)(job_tag) }
     }
 }
 

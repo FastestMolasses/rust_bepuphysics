@@ -742,6 +742,11 @@ pub struct NarrowPhase {
     /// Per-worker pending constraint caches.
     /// Set by NarrowPhaseGeneric::prepare to allow type-erased constraint addition.
     pub(crate) worker_pending_constraints: Vec<*mut PendingConstraintAddCache>,
+
+    /// Atomic index for MT flush job dispatch.
+    pub(crate) flush_job_index: UnsafeCell<i32>,
+    /// Flush jobs stored for MT dispatch (valid only during flush).
+    pub(crate) flush_jobs: Vec<NarrowPhaseFlushJob>,
 }
 
 impl NarrowPhase {
@@ -783,6 +788,8 @@ impl NarrowPhase {
             contact_constraint_accessors: Vec::new(),
             worker_awakening_ptrs: Vec::new(),
             worker_pending_constraints: Vec::new(),
+            flush_job_index: UnsafeCell::new(-1),
+            flush_jobs: Vec::new(),
         }
     }
 
@@ -887,21 +894,21 @@ impl NarrowPhase {
     }
 
     /// Flushes all pending narrow phase work.
-    pub fn flush(&mut self, _thread_dispatcher: Option<&dyn IThreadDispatcher>) {
-        let mut flush_jobs = Vec::with_capacity(128);
+    pub fn flush(&mut self, thread_dispatcher: Option<&dyn IThreadDispatcher>, deterministic: bool) {
+        self.flush_jobs = Vec::with_capacity(128);
 
-        self.pair_cache.prepare_flush_jobs(&mut flush_jobs);
-        let removal_batch_job_count = self.constraint_remover.create_flush_jobs(false);
+        self.pair_cache.prepare_flush_jobs(&mut self.flush_jobs);
+        let removal_batch_job_count = self.constraint_remover.create_flush_jobs(deterministic);
 
-        flush_jobs.push(NarrowPhaseFlushJob {
+        self.flush_jobs.push(NarrowPhaseFlushJob {
             job_type: NarrowPhaseFlushJobType::RemoveConstraintsFromBodyLists,
             index: 0,
         });
-        flush_jobs.push(NarrowPhaseFlushJob {
+        self.flush_jobs.push(NarrowPhaseFlushJob {
             job_type: NarrowPhaseFlushJobType::ReturnConstraintHandles,
             index: 0,
         });
-        flush_jobs.push(NarrowPhaseFlushJob {
+        self.flush_jobs.push(NarrowPhaseFlushJob {
             job_type: NarrowPhaseFlushJobType::RemoveConstraintFromBatchReferencedHandles,
             index: 0,
         });
@@ -910,7 +917,7 @@ impl NarrowPhase {
         unsafe {
             let solver = &*self.solver;
             if solver.active_set().batches.count > solver.fallback_batch_threshold() {
-                flush_jobs.push(NarrowPhaseFlushJob {
+                self.flush_jobs.push(NarrowPhaseFlushJob {
                     job_type: NarrowPhaseFlushJobType::RemoveConstraintsFromFallbackBatch,
                     index: 0,
                 });
@@ -918,22 +925,55 @@ impl NarrowPhase {
         }
 
         for i in 0..removal_batch_job_count {
-            flush_jobs.push(NarrowPhaseFlushJob {
+            self.flush_jobs.push(NarrowPhaseFlushJob {
                 job_type: NarrowPhaseFlushJobType::RemoveConstraintFromTypeBatch,
                 index: i,
             });
         }
 
-        // Execute all jobs sequentially (TODO: parallel dispatch)
-        for i in 0..flush_jobs.len() {
-            let job = flush_jobs[i];
-            self.execute_flush_job(&job);
+        if let Some(dispatcher) = thread_dispatcher {
+            // Multithreaded: use atomic job index for work stealing.
+            unsafe { *self.flush_job_index.get() = -1; }
+            let self_ptr = self as *mut NarrowPhase as *mut ();
+            unsafe {
+                dispatcher.dispatch_workers(
+                    Self::flush_worker_loop_fn,
+                    self.flush_jobs.len() as i32,
+                    self_ptr,
+                    None,
+                );
+            }
+        } else {
+            // Single-threaded: execute all jobs sequentially.
+            for i in 0..self.flush_jobs.len() {
+                let job = self.flush_jobs[i];
+                self.execute_flush_job(&job);
+            }
         }
 
+        self.flush_jobs.clear();
         self.pair_cache.postflush();
         self.constraint_remover
             .mark_affected_constraints_as_removed_from_solver();
         self.constraint_remover.postflush();
+    }
+
+    /// Worker loop function for multithreaded flush dispatch.
+    /// Passed as a function pointer to `dispatch_workers`.
+    fn flush_worker_loop_fn(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        let _ = worker_index;
+        unsafe {
+            let narrow_phase = &mut *(dispatcher.unmanaged_context() as *mut NarrowPhase);
+            loop {
+                let job_index = AtomicI32::from_ptr(narrow_phase.flush_job_index.get())
+                    .fetch_add(1, Ordering::AcqRel);
+                if job_index >= narrow_phase.flush_jobs.len() as i32 {
+                    break;
+                }
+                let job = narrow_phase.flush_jobs[job_index as usize];
+                narrow_phase.execute_flush_job(&job);
+            }
+        }
     }
 
     /// Clears all narrow phase data.
@@ -1791,6 +1831,15 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         }
     }
 
+    /// Static function pointer for preflush worker dispatch.
+    /// Retrieves `*mut NarrowPhaseGeneric<TCallbacks>` from `dispatcher.unmanaged_context()`.
+    fn preflush_worker_loop_fn(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let narrow_phase = &mut *(dispatcher.unmanaged_context() as *mut NarrowPhaseGeneric<TCallbacks>);
+            narrow_phase.preflush_worker_loop(worker_index);
+        }
+    }
+
     // ========================================================================
     // Preflush (from NarrowPhasePreflush.cs) — single-threaded path
     // ========================================================================
@@ -1976,9 +2025,16 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             let original_pair_cache_mapping_count = self.base.pair_cache.mapping.count;
             // Dispatch phase 1
             unsafe { *self.preflush_job_index.get() = -1; }
-            // NOTE: thread_dispatcher.dispatch_workers(preflush_worker_loop, preflush_jobs.count) not yet implemented.
-            // For now, single-threaded fallback:
-            self.preflush_worker_loop(0);
+            let dispatcher = thread_dispatcher.unwrap();
+            let self_ptr = self as *mut NarrowPhaseGeneric<TCallbacks> as *mut ();
+            unsafe {
+                dispatcher.dispatch_workers(
+                    Self::preflush_worker_loop_fn,
+                    self.preflush_jobs.count,
+                    self_ptr,
+                    None,
+                );
+            }
 
             // SECOND PHASE: awakener phase two
             self.preflush_jobs.clear();
@@ -1991,8 +2047,14 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                 }, pool);
             }
             unsafe { *self.preflush_job_index.get() = -1; }
-            // NOTE: thread_dispatcher.dispatch_workers(preflush_worker_loop, preflush_jobs.count) not yet implemented.
-            self.preflush_worker_loop(0);
+            unsafe {
+                dispatcher.dispatch_workers(
+                    Self::preflush_worker_loop_fn,
+                    self.preflush_jobs.count,
+                    self_ptr,
+                    None,
+                );
+            }
 
             // THIRD PHASE: constraint adds + freshness checker
             self.preflush_jobs.clear();
@@ -2049,8 +2111,14 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                 }
             }
             unsafe { *self.preflush_job_index.get() = -1; }
-            // NOTE: thread_dispatcher.dispatch_workers(preflush_worker_loop, preflush_jobs.count) not yet implemented.
-            self.preflush_worker_loop(0);
+            unsafe {
+                dispatcher.dispatch_workers(
+                    Self::preflush_worker_loop_fn,
+                    self.preflush_jobs.count,
+                    self_ptr,
+                    None,
+                );
+            }
 
             // Cleanup
             for i in 0..thread_count {
@@ -2100,7 +2168,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         deterministic: bool,
     ) {
         self.preflush(thread_dispatcher, deterministic);
-        self.base.flush(thread_dispatcher);
+        self.base.flush(thread_dispatcher, deterministic);
         self.postflush(thread_dispatcher);
     }
 }

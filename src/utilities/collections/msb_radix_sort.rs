@@ -1,6 +1,18 @@
 //! MSB (Most Significant Byte) radix sort implementation.
 
+use crate::utilities::collections::comparer_ref::RefComparer;
+use crate::utilities::collections::quicksort::Quicksort;
+use std::cmp::Ordering;
 use std::ptr;
+
+/// Comparer for i32 keys (used by quicksort fallback in sort_u32_simple).
+struct I32Comparer;
+impl RefComparer<i32> for I32Comparer {
+    #[inline(always)]
+    fn compare(&self, a: &i32, b: &i32) -> Ordering {
+        a.cmp(b)
+    }
+}
 
 /// Swaps two values in memory.
 #[inline(always)]
@@ -140,18 +152,10 @@ pub unsafe fn sort_u32_simple<T: Copy>(
     shift: i32,
 ) {
     if key_count < 256 {
-        // Use insertion sort for small arrays
-        for i in 1..key_count as usize {
-            let original_key = keys[i];
-            let original_value = values[i];
-            let mut j = i;
-            while j > 0 && keys[j - 1] > original_key {
-                keys[j] = keys[j - 1];
-                values[j] = values[j - 1];
-                j -= 1;
-            }
-            keys[j] = original_key;
-            values[j] = original_value;
+        // Use quicksort for small arrays (matches C#'s QuickSort.Sort with PrimitiveComparer<int>)
+        if key_count > 1 {
+            let comparer = I32Comparer;
+            Quicksort::sort(keys, values, 0, key_count - 1, &comparer);
         }
         return;
     }

@@ -166,6 +166,63 @@ impl<T: Copy> QuickList<T> {
         self.add_range_unsafely(span, start, count);
     }
 
+    /// Adds all elements from a buffer to the list without checking capacity.
+    #[inline(always)]
+    pub fn add_range_unsafely_from_buffer(&mut self, span: &Buffer<T>) {
+        self.add_range_unsafely(span, 0, span.len());
+    }
+
+    /// Adds all elements from a buffer to the list, resizing if necessary.
+    #[inline(always)]
+    pub fn add_range_from_buffer(&mut self, span: &Buffer<T>, pool: &mut impl UnmanagedMemoryPool) {
+        self.add_range(span, 0, span.len(), pool);
+    }
+
+    /// Adds a range of elements from a slice to the list without checking capacity.
+    #[inline(always)]
+    pub fn add_range_unsafely_from_slice(&mut self, slice: &[T], start: usize, count: usize) {
+        debug_assert!(
+            self.count as usize + count <= self.span.len() as usize,
+            "Adding would exceed capacity"
+        );
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                slice.as_ptr().add(start),
+                self.span.as_mut_ptr().add(self.count as usize),
+                count,
+            );
+        }
+        self.count += count as i32;
+    }
+
+    /// Adds elements from a slice to the list, resizing if necessary.
+    #[inline(always)]
+    pub fn add_range_from_slice(&mut self, slice: &[T], pool: &mut impl UnmanagedMemoryPool) {
+        self.ensure_capacity(self.count + slice.len() as i32, pool);
+        self.add_range_unsafely_from_slice(slice, 0, slice.len());
+    }
+
+    /// Allocates space for `count` elements without initializing them.
+    /// Returns a pointer to the first allocated slot.
+    #[inline(always)]
+    pub fn allocate_unsafely_count(&mut self, count: i32) -> *mut T {
+        debug_assert!(
+            self.count + count <= self.span.len(),
+            "Allocating would exceed capacity"
+        );
+        let start = self.count;
+        self.count += count;
+        unsafe { self.span.as_mut_ptr().add(start as usize) }
+    }
+
+    /// Allocates space for `count` elements, resizing if necessary.
+    /// Returns a pointer to the first allocated slot.
+    #[inline(always)]
+    pub fn allocate_count(&mut self, count: i32, pool: &mut impl UnmanagedMemoryPool) -> *mut T {
+        self.ensure_capacity(self.count + count, pool);
+        self.allocate_unsafely_count(count)
+    }
+
     /// Removes an element at a specific index by shifting subsequent elements.
     #[inline(always)]
     pub fn remove_at(&mut self, index: i32) {
@@ -182,6 +239,10 @@ impl<T: Copy> QuickList<T> {
                 );
             }
         }
+        // Clear the vacated final slot (matches C# `Span[Count] = default`)
+        unsafe {
+            ptr::write_bytes(self.span.as_mut_ptr().add(self.count as usize), 0, 1);
+        }
     }
 
     /// Removes an element at a specific index by swapping with the last element (faster).
@@ -191,6 +252,10 @@ impl<T: Copy> QuickList<T> {
         self.count -= 1;
         if index < self.count {
             self.span[index] = self.span[self.count];
+        }
+        // Clear the vacated final slot (matches C# `Span[Count] = default`)
+        unsafe {
+            ptr::write_bytes(self.span.as_mut_ptr().add(self.count as usize), 0, 1);
         }
     }
 
@@ -245,9 +310,16 @@ impl<T: Copy> QuickList<T> {
         self.index_of(element).is_some()
     }
 
-    /// Clears the list.
+    /// Clears the list by setting the count to zero and explicitly zeroing all relevant elements.
     #[inline(always)]
     pub fn clear(&mut self) {
+        self.span.clear(0, self.count);
+        self.count = 0;
+    }
+
+    /// Clears the list without zeroing the element span. Just resets the count.
+    #[inline(always)]
+    pub fn fast_clear(&mut self) {
         self.count = 0;
     }
 
@@ -328,7 +400,105 @@ impl<T: Copy> QuickList<T> {
             None
         }
     }
+
+    /// Gets the index of the first element matching a predicate.
+    #[inline(always)]
+    pub fn index_of_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+        &self,
+        predicate: &TPredicate,
+    ) -> i32 {
+        self.span.index_of_predicate(predicate, 0, self.count)
+    }
+
+    /// Removes the first element matching a predicate. Preserves order.
+    #[inline(always)]
+    pub fn remove_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+        &mut self,
+        predicate: &TPredicate,
+    ) -> bool {
+        let index = self.span.index_of_predicate(predicate, 0, self.count);
+        if index >= 0 {
+            self.remove_at(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Removes the first element matching a predicate. Does not preserve order.
+    #[inline(always)]
+    pub fn fast_remove_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+        &mut self,
+        predicate: &TPredicate,
+    ) -> bool {
+        let index = self.span.index_of_predicate(predicate, 0, self.count);
+        if index >= 0 {
+            self.fast_remove_at(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Checks if any element matches a predicate.
+    #[inline(always)]
+    pub fn contains_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+        &self,
+        predicate: &TPredicate,
+    ) -> bool {
+        self.span.index_of_predicate(predicate, 0, self.count) >= 0
+    }
+
+    /// Returns a slice over the valid elements.
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.span.as_ptr(), self.count as usize) }
+    }
+
+    /// Returns a mutable slice over the valid elements.
+    #[inline(always)]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe { std::slice::from_raw_parts_mut(self.span.as_mut_ptr(), self.count as usize) }
+    }
+
+    /// Returns an iterator over the list elements.
+    pub fn iter(&self) -> QuickListIterator<'_, T> {
+        QuickListIterator {
+            span: &self.span,
+            count: self.count,
+            index: 0,
+        }
+    }
 }
+
+/// Iterator over QuickList elements.
+pub struct QuickListIterator<'a, T: Copy> {
+    span: &'a Buffer<T>,
+    count: i32,
+    index: i32,
+}
+
+impl<'a, T: Copy> Iterator for QuickListIterator<'a, T> {
+    type Item = T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.count {
+            let value = self.span[self.index];
+            self.index += 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = (self.count - self.index) as usize;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, T: Copy> ExactSizeIterator for QuickListIterator<'a, T> {}
 
 impl<T: Copy> Index<i32> for QuickList<T> {
     type Output = T;

@@ -7,8 +7,6 @@ use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering};
 
-use crossbeam_utils::Backoff;
-
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
@@ -341,8 +339,8 @@ impl TaskStack {
                 (*job).previous = AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire);
 
                 // C#: if ((nuint)job->Previous == Interlocked.CompareExchange(ref head, (nuint)job, (nuint)job->Previous))
-                // CompareExchange returns the original value; if it matches Previous, the swap succeeded.
-                match AtomicPtr::<Job>::from_ptr(self.head.get()).compare_exchange_weak(
+                // CompareExchange is a strong CAS in C#.
+                match AtomicPtr::<Job>::from_ptr(self.head.get()).compare_exchange(
                     (*job).previous,
                     job,
                     Ordering::AcqRel,
@@ -394,6 +392,25 @@ impl TaskStack {
         continuation_handle
     }
 
+    /// Allocates a continuation for a single task and pushes it.
+    /// Convenience overload matching C# `AllocateContinuationAndPush(Task task, ...)`.
+    pub fn allocate_continuation_and_push_single(
+        &self,
+        mut task: Task,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+        tag: u64,
+        on_complete: Task,
+    ) -> ContinuationHandle {
+        self.allocate_continuation_and_push(
+            std::slice::from_mut(&mut task),
+            worker_index,
+            dispatcher,
+            tag,
+            on_complete,
+        )
+    }
+
     /// Waits for a continuation to complete, executing other tasks while waiting.
     ///
     /// Instead of spinning the entire time, this may pop and execute pending tasks to fill the gap.
@@ -404,7 +421,7 @@ impl TaskStack {
         worker_index: i32,
         dispatcher: &dyn IThreadDispatcher,
     ) {
-        let backoff = Backoff::new();
+        let mut spin_count: u32 = 0;
         debug_assert!(
             continuation.initialized(),
             "This codepath should only run if the continuation was allocated earlier."
@@ -420,10 +437,16 @@ impl TaskStack {
                     unsafe {
                         task.run(worker_index, dispatcher);
                     }
-                    backoff.reset();
+                    spin_count = 0;
                 }
                 PopTaskResult::Empty => {
-                    backoff.snooze();
+                    // C# SpinWait.SpinOnce(-1): spin then yield, never sleep.
+                    if spin_count < 10 {
+                        std::hint::spin_loop();
+                    } else {
+                        std::thread::yield_now();
+                    }
+                    spin_count += 1;
                 }
             }
         }
@@ -679,11 +702,11 @@ impl TaskStack {
 
     /// Worker function that pops tasks from the stack and executes them.
     ///
-    /// Uses `crossbeam_utils::Backoff` for adaptive spinning that matches C#'s `SpinWait`
-    /// behavior with `-1` parameter (spin-then-yield, no sleep).
+    /// Uses spin-then-yield loop matching C#'s `SpinWait.SpinOnce(-1)` behavior
+    /// (never sleeps, only spins and yields).
     pub fn dispatch_worker_function(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
         let task_stack = unsafe { &*(dispatcher.unmanaged_context() as *const TaskStack) };
-        let backoff = Backoff::new();
+        let mut spin_count: u32 = 0;
 
         loop {
             match task_stack.try_pop_and_run_unfiltered(worker_index, dispatcher) {
@@ -692,13 +715,18 @@ impl TaskStack {
                     return;
                 }
                 PopTaskResult::Success => {
-                    // If we ran a task, reset the backoff because more work may be
+                    // If we ran a task, reset spin count because more work may be
                     // immediately available.
-                    backoff.reset();
+                    spin_count = 0;
                 }
                 PopTaskResult::Empty => {
-                    // No work available, but we should keep going.
-                    backoff.snooze();
+                    // C# SpinWait.SpinOnce(-1): spin then yield, never sleep.
+                    if spin_count < 10 {
+                        std::hint::spin_loop();
+                    } else {
+                        std::thread::yield_now();
+                    }
+                    spin_count += 1;
                 }
             }
         }

@@ -19,6 +19,19 @@ impl GatherScatter {
         &*ptr.add(index)
     }
 
+    /// Gets a mutable reference to an element from a vector without using pointers.
+    /// This performs no bounds testing!
+    #[inline(always)]
+    pub unsafe fn get_mut<T>(vector: &mut Vector<T>, index: usize) -> &mut T
+    where
+        T: Copy,
+        T: std::simd::SimdElement,
+        std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,
+    {
+        let ptr = vector as *mut Vector<T> as *mut T;
+        &mut *ptr.add(index)
+    }
+
     /// Copies from one bundle lane to another. The bundle must be a contiguous block of Vector types.
     #[inline(always)]
     pub unsafe fn copy_lane<T>(

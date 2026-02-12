@@ -184,6 +184,11 @@ impl<T: Copy> QuickQueue<T> {
     fn resize(&mut self, new_size: i32, pool: &mut impl UnmanagedMemoryPool) {
         let mut new_span = pool.take_at_least::<T>(new_size);
 
+        // Truncate count if shrinking (matches C#: Count = Math.Min(Count, newSpan.Length))
+        if self.count > new_span.len() {
+            self.count = new_span.len();
+        }
+
         // Copy elements from old span to new span, handling wrap-around
         if self.last_index >= self.first_index {
             // No wrap-around: elements are contiguous
@@ -273,6 +278,26 @@ impl<T: Copy> QuickQueue<T> {
         } else {
             false
         }
+    }
+
+    /// Dequeues a slot from the start of the queue and returns a pointer to it.
+    /// Does not check count before attempting to dequeue.
+    #[inline(always)]
+    pub fn dequeue_unsafely(&mut self) -> *mut T {
+        debug_assert!(self.count > 0, "Can't dequeue from an empty queue.");
+        let ptr = self.span.get_mut_ptr(self.first_index);
+        self.increment_first();
+        ptr
+    }
+
+    /// Dequeues a slot from the end of the queue and returns a pointer to it.
+    /// Does not check count before attempting to dequeue.
+    #[inline(always)]
+    pub fn dequeue_last_unsafely(&mut self) -> *mut T {
+        debug_assert!(self.count > 0, "Can't dequeue from an empty queue.");
+        let ptr = self.span.get_mut_ptr(self.last_index);
+        self.decrement_last();
+        ptr
     }
 
     /// Removes the element at the given queue index, preserving order.

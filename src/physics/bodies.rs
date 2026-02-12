@@ -687,6 +687,80 @@ impl Bodies {
             .broad_phase_index = new_broad_phase_index;
     }
 
+    /// Enumerates all the bodies connected to a given body by constraints.
+    /// Bodies which are connected by more than one constraint will be reported multiple times.
+    ///
+    /// # Safety
+    /// The body handle must be valid.
+    #[inline(always)]
+    pub unsafe fn enumerate_connected_bodies<E: crate::utilities::for_each_ref::IForEach<BodyHandle>>(
+        &self,
+        body_handle: BodyHandle,
+        enumerator: &mut E,
+    ) {
+        let body_location = self.handle_to_location.get(body_handle.0);
+        let set = self.sets.get(body_location.set_index);
+        let list = set.constraints.get(body_location.index);
+
+        if body_location.set_index == 0 {
+            // Active body: solver stores body indices, must convert to handles.
+            struct ActiveEnumerator<'a, E: crate::utilities::for_each_ref::IForEach<BodyHandle>> {
+                inner: &'a mut E,
+                source_body_index: i32,
+                bodies: &'a Bodies,
+            }
+            impl<E: crate::utilities::for_each_ref::IForEach<BodyHandle>> crate::utilities::for_each_ref::IForEach<i32> for ActiveEnumerator<'_, E> {
+                #[inline(always)]
+                fn loop_body(&mut self, encoded_body_index: i32) {
+                    let body_index = encoded_body_index & Bodies::BODY_REFERENCE_MASK;
+                    if self.source_body_index != body_index {
+                        let handle = unsafe { *self.bodies.active_set().index_to_handle.get(body_index) };
+                        self.inner.loop_body(handle);
+                    }
+                }
+            }
+            let mut constraint_enumerator = ActiveEnumerator {
+                inner: enumerator,
+                source_body_index: body_location.index,
+                bodies: self,
+            };
+            let solver = &*self.solver;
+            for i in (0..list.count).rev() {
+                let constraint_ref = list.get(i);
+                solver.enumerate_connected_raw_body_references(
+                    constraint_ref.connecting_constraint_handle,
+                    &mut constraint_enumerator,
+                );
+            }
+        } else {
+            // Inactive body: solver stores body handles directly.
+            struct InactiveEnumerator<'a, E: crate::utilities::for_each_ref::IForEach<BodyHandle>> {
+                inner: &'a mut E,
+                source_body_handle: BodyHandle,
+            }
+            impl<E: crate::utilities::for_each_ref::IForEach<BodyHandle>> crate::utilities::for_each_ref::IForEach<i32> for InactiveEnumerator<'_, E> {
+                #[inline(always)]
+                fn loop_body(&mut self, connected_body_handle: i32) {
+                    if self.source_body_handle.0 != connected_body_handle {
+                        self.inner.loop_body(BodyHandle(connected_body_handle));
+                    }
+                }
+            }
+            let mut constraint_enumerator = InactiveEnumerator {
+                inner: enumerator,
+                source_body_handle: body_handle,
+            };
+            let solver = &*self.solver;
+            for i in (0..list.count).rev() {
+                let constraint_ref = list.get(i);
+                solver.enumerate_connected_raw_body_references(
+                    constraint_ref.connecting_constraint_handle,
+                    &mut constraint_enumerator,
+                );
+            }
+        }
+    }
+
     /// Clears all bodies from all sets without releasing persistent memory.
     pub fn clear(&mut self) {
         let pool_ptr = self.pool;

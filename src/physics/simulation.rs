@@ -81,6 +81,204 @@ pub struct Simulation {
 }
 
 impl Simulation {
+    /// Constructs a simulation supporting dynamic movement and constraints with the specified callbacks.
+    ///
+    /// # Safety
+    /// The buffer pool must remain valid for the lifetime of the simulation.
+    /// All callback types must be valid for the lifetime of the simulation.
+    pub unsafe fn create<TNarrowPhaseCallbacks, TPoseIntegratorCallbacks>(
+        buffer_pool: *mut BufferPool,
+        narrow_phase_callbacks: TNarrowPhaseCallbacks,
+        pose_integrator_callbacks: TPoseIntegratorCallbacks,
+        solve_description: SolveDescription,
+        timestepper: Option<Box<dyn ITimestepper>>,
+        initial_allocation_sizes: Option<SimulationAllocationSizes>,
+        shapes: Option<*mut crate::physics::collidables::shapes::Shapes>,
+    ) -> Box<Simulation>
+    where
+        TNarrowPhaseCallbacks: crate::physics::collision_detection::narrow_phase_callbacks::INarrowPhaseCallbacks + 'static,
+        TPoseIntegratorCallbacks: crate::physics::pose_integration::IPoseIntegratorCallbacks + 'static,
+    {
+        use crate::physics::batch_compressor::BatchCompressor;
+        use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
+        use crate::physics::collision_detection::collidable_overlap_finder::CollidableOverlapFinder as RealOverlapFinder;
+        use crate::physics::collision_detection::constraint_remover::ConstraintRemover as RealConstraintRemover;
+        use crate::physics::collision_detection::narrow_phase::{
+            NarrowPhase as RealNarrowPhase,
+            NarrowPhaseGeneric,
+        };
+        use crate::physics::collidables::shapes::Shapes as RealShapes;
+        use crate::physics::default_timestepper::DefaultTimestepper;
+        use crate::physics::default_types::DefaultTypes;
+        use crate::physics::island_awakener::IslandAwakener;
+        use crate::physics::island_sleeper::IslandSleeper;
+        use crate::physics::pose_integrator::PoseIntegrator;
+
+        let sizes = initial_allocation_sizes.unwrap_or(SimulationAllocationSizes {
+            bodies: 4096,
+            statics: 4096,
+            shapes_per_type: 128,
+            constraint_count_per_body_estimate: 8,
+            constraints: 16384,
+            constraints_per_type_batch: 256,
+            islands: 16,
+        });
+
+        let pool = &mut *buffer_pool;
+
+        // Create shapes collection.
+        let shapes_ptr = if let Some(s) = shapes {
+            s
+        } else {
+            Box::into_raw(Box::new(RealShapes::new(pool, sizes.shapes_per_type as usize)))
+        };
+
+        // Create broad phase.
+        let broad_phase = Box::into_raw(Box::new(RealBroadPhase::new(
+            buffer_pool,
+            sizes.bodies,
+            sizes.bodies + sizes.statics,
+        )));
+
+        // Create bodies.
+        let bodies = Box::into_raw(Box::new(Bodies::new(
+            buffer_pool,
+            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            sizes.bodies,
+            sizes.islands,
+            sizes.constraint_count_per_body_estimate,
+        )));
+
+        // Create statics.
+        let statics = Box::into_raw(Box::new(Statics::new(
+            buffer_pool,
+            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
+            bodies,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            sizes.statics,
+        )));
+
+        // Create pose integrator.
+        let pose_integrator = Box::into_raw(Box::new(PoseIntegrator::new(
+            bodies,
+            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            pose_integrator_callbacks,
+        )));
+
+        // Create solver.
+        let solver = Box::into_raw(Box::new(Solver::new(
+            bodies,
+            buffer_pool,
+            solve_description,
+            sizes.constraints,
+            sizes.islands,
+            sizes.constraints_per_type_batch,
+        )));
+        (*solver).pose_integrator = Some(pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator);
+
+        // Create constraint remover.
+        let constraint_remover = RealConstraintRemover::with_defaults(buffer_pool, bodies, solver);
+
+        // Create island sleeper.
+        let sleeper = Box::into_raw(Box::new(IslandSleeper::new(
+            bodies,
+            solver,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            // The constraint_remover is moved into NarrowPhase; sleeper needs its own pointer.
+            // For now, use a null pointer; it will be wired later.
+            std::ptr::null_mut(),
+            buffer_pool,
+        )));
+
+        // Create island awakener.
+        let awakener = Box::into_raw(Box::new(IslandAwakener::new(
+            bodies,
+            statics,
+            solver,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            sleeper,
+            std::ptr::null_mut(), // pair_cache, wired later
+            buffer_pool,
+        )));
+
+        // Wire deferred pointers.
+        (*statics).awakener = awakener;
+        (*solver).awakener = awakener;
+        (*bodies).initialize(solver, awakener, sleeper);
+
+        // Create batch compressor.
+        let batch_compressor = Box::into_raw(Box::new(BatchCompressor::with_defaults(solver, bodies)));
+
+        // Create timestepper.
+        let timestepper: Box<dyn ITimestepper> = timestepper.unwrap_or_else(|| Box::new(DefaultTimestepper::default()));
+
+        // Create collision task registries.
+        let collision_task_registry = Box::into_raw(Box::new(DefaultTypes::create_default_collision_task_registry()));
+        let sweep_task_registry = Box::into_raw(Box::new(DefaultTypes::create_default_sweep_task_registry()));
+
+        // Create narrow phase.
+        let narrow_phase = Box::into_raw(Box::new(NarrowPhaseGeneric::new(
+            buffer_pool,
+            bodies,
+            statics,
+            solver,
+            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
+            collision_task_registry,
+            sweep_task_registry,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            constraint_remover,
+            narrow_phase_callbacks,
+            sizes.islands + 1,
+            1024,
+            512,
+        )));
+
+        // Register default constraint types.
+        DefaultTypes::register_defaults(&mut *solver, &mut (*narrow_phase).base);
+
+        // Wire pair cache into sleeper, awakener, solver.
+        let pair_cache_ptr = &mut (*narrow_phase).base.pair_cache as *mut crate::physics::collision_detection::pair_cache::PairCache;
+        (*sleeper).pair_cache = pair_cache_ptr;
+        (*awakener).pair_cache = pair_cache_ptr;
+        (*solver).pair_cache = pair_cache_ptr;
+
+        // Wire constraint_remover into sleeper (the NarrowPhase owns the ConstraintRemover so we use its address).
+        (*sleeper).constraint_remover = &mut (*narrow_phase).base.constraint_remover as *mut RealConstraintRemover;
+
+        // Create broad phase overlap finder.
+        let overlap_finder = Box::into_raw(Box::new(RealOverlapFinder::new(
+            narrow_phase,
+            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+        )));
+
+        // Initialize callbacks (deferred until after all simulation bits are constructed).
+        // Callback initialization is type-specific and happens through the narrow phase / pose integrator.
+
+        // Build the simulation struct.
+        let simulation = Box::new(Simulation {
+            awakener,
+            sleeper,
+            bodies,
+            statics,
+            shapes: shapes_ptr as *mut Shapes,
+            solver_batch_compressor: batch_compressor,
+            solver,
+            pose_integrator: pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator,
+            broad_phase: broad_phase as *mut BroadPhase,
+            broad_phase_overlap_finder: overlap_finder as *mut CollidableOverlapFinder,
+            narrow_phase: narrow_phase as *mut NarrowPhase,
+            profiler: SimulationProfiler::new(16),
+            constraint_remover: &mut (*narrow_phase).base.constraint_remover as *mut RealConstraintRemover as *mut ConstraintRemover,
+            buffer_pool: buffer_pool,
+            timestepper,
+            deterministic: false,
+        });
+
+        simulation
+    }
+
     /// Performs one timestep of the given length.
     pub fn timestep(&mut self, dt: f32, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         assert!(dt > 0.0, "Timestep duration must be positive.");
@@ -130,7 +328,8 @@ impl Simulation {
 
         // profiler.start(broad_phase);
         let broad_phase = &mut *(self.broad_phase as *mut RealBroadPhase);
-        broad_phase.update2(None, self.deterministic); // MT dispatcher TODO
+        let dispatcher_ptr = thread_dispatcher.map(|d| d as *const dyn IThreadDispatcher as *mut dyn IThreadDispatcher);
+        broad_phase.update2(dispatcher_ptr, self.deterministic);
         // profiler.end(broad_phase);
 
         // profiler.start(broad_phase_overlap_finder);
@@ -143,7 +342,8 @@ impl Simulation {
         // but Simulation doesn't know TCallbacks. Call base NarrowPhase::flush()
         // for constraint removal pipeline. Preflush/postflush need type-erased dispatch (TODO).
         let narrow_phase = &mut *(self.narrow_phase as *mut RealNarrowPhase);
-        narrow_phase.flush(thread_dispatcher);
+        let deterministic = thread_dispatcher.is_some() && self.deterministic;
+        narrow_phase.flush(thread_dispatcher, deterministic);
         // profiler.end(narrow_phase);
     }
 

@@ -74,7 +74,7 @@ pub trait ITypeProcessor {
         type_batch: &mut TypeBatch,
         handle: ConstraintHandle,
         encoded_body_indices: &[i32],
-        pool: &mut BufferPool,
+        pool: *mut BufferPool,
     ) -> i32;
 
     /// Removes a constraint at the given index.
@@ -231,6 +231,65 @@ pub trait ITypeProcessor {
     /// Returns the capacity of the given type batch.
     fn capacity(&self, _type_batch: &TypeBatch) -> i32 {
         // Default stub
+        0
+    }
+
+    /// Gets the size in bytes of the body references, prestep, and accumulated impulse bundle types.
+    fn get_bundle_type_sizes(
+        &self,
+        body_references_bundle_size: &mut i32,
+        prestep_bundle_size: &mut i32,
+        accumulated_impulse_bundle_size: &mut i32,
+    );
+
+    /// Generates sort keys for constraints in the given range and copies body references to a cache buffer.
+    /// Used by constraint layout optimization (batch compressor).
+    fn generate_sort_keys_and_copy_references(
+        &self,
+        type_batch: &mut TypeBatch,
+        bundle_start: i32,
+        local_bundle_start: i32,
+        bundle_count: i32,
+        constraint_start: i32,
+        local_constraint_start: i32,
+        constraint_count: i32,
+        first_sort_key: *mut i32,
+        first_source_index: *mut i32,
+        body_references_cache: &mut Buffer<u8>,
+    );
+
+    /// Copies index-to-handle mappings, prestep data, and accumulated impulses to cache buffers.
+    fn copy_to_cache(
+        &self,
+        type_batch: &mut TypeBatch,
+        bundle_start: i32,
+        local_bundle_start: i32,
+        bundle_count: i32,
+        constraint_start: i32,
+        local_constraint_start: i32,
+        constraint_count: i32,
+        index_to_handle_cache: &mut Buffer<ConstraintHandle>,
+        prestep_cache: &mut Buffer<u8>,
+        accumulated_impulses_cache: &mut Buffer<u8>,
+    );
+
+    /// After sorting, regathers constraints from cache buffers back into the type batch in sorted order.
+    fn regather(
+        &self,
+        type_batch: &mut TypeBatch,
+        constraint_start: i32,
+        constraint_count: i32,
+        first_source_index: *mut i32,
+        index_to_handle_cache: &mut Buffer<ConstraintHandle>,
+        body_references_cache: &mut Buffer<u8>,
+        prestep_cache: &mut Buffer<u8>,
+        accumulated_impulses_cache: &mut Buffer<u8>,
+        handles_to_constraints: &mut Buffer<ConstraintLocation>,
+    );
+
+    /// Gets the count of body references in the type batch matching the given body index.
+    /// Debug-only function. Performance does not matter.
+    fn get_body_reference_count(&self, _type_batch: &TypeBatch, _body: i32) -> i32 {
         0
     }
 

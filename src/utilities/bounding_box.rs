@@ -8,7 +8,7 @@ use std::simd::Simd;
 use super::containment_type::ContainmentType;
 
 /// Represents a bounding box as two `Vec4` values to avoid complexity associated with a `Vec3`'s empty SIMD lane.
-#[repr(C, align(32))]
+#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct BoundingBox4 {
     /// Location with the lowest X, Y, and Z coordinates in the axis-aligned bounding box. W lane is undefined.

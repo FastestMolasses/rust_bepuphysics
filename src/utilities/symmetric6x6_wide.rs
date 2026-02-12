@@ -52,7 +52,7 @@ impl Symmetric6x6Wide {
         result.d = out!(Symmetric3x3Wide::add(&result.d, &inv_d));
     }
 
-    #[inline(always)]
+    // NOTE: C# intentionally does NOT force-inline this large method.
     pub fn invert_without_overlap(m: &Self, result: &mut Self) {
         Self::invert(&m.a, &m.b, &m.d, result);
     }

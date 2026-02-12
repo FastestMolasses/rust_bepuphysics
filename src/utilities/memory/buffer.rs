@@ -322,3 +322,52 @@ impl<T> IndexMut<usize> for Buffer<T> {
         self.get_mut(index as i32)
     }
 }
+
+impl<T: Copy + PartialEq> Buffer<T> {
+    /// Searches for the first occurrence of element in the buffer within [start, start+count).
+    /// Returns the index if found, or -1 if not found.
+    #[inline(always)]
+    pub fn index_of(&self, element: &T, start: i32, count: i32) -> i32 {
+        debug_assert!(start >= 0 && start + count <= self.length);
+        for i in start..(start + count) {
+            if self[i] == *element {
+                return i;
+            }
+        }
+        -1
+    }
+}
+
+impl<T: Copy> Buffer<T> {
+    /// Searches for the first element matching a predicate in the buffer within [start, start+count).
+    /// Returns the index if found, or -1 if not found.
+    #[inline(always)]
+    pub fn index_of_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+        &self,
+        predicate: &TPredicate,
+        start: i32,
+        count: i32,
+    ) -> i32 {
+        debug_assert!(start >= 0 && start + count <= self.length);
+        for i in start..(start + count) {
+            if predicate.matches(&self[i]) {
+                return i;
+            }
+        }
+        -1
+    }
+
+    /// Returns a buffer to a pool. This should only be used if the specified pool is the same as the one used to allocate the buffer.
+    #[inline(always)]
+    pub fn dispose(&mut self, pool: &mut impl crate::utilities::memory::unmanaged_mempool::UnmanagedMemoryPool) {
+        pool.return_buffer(self);
+    }
+
+    /// Reinterprets this buffer as a buffer of a different type.
+    #[inline(always)]
+    pub fn as_buffer<U: Copy>(&self) -> Buffer<U> {
+        let byte_count = self.length as usize * std::mem::size_of::<T>();
+        let new_length = byte_count / std::mem::size_of::<U>();
+        Buffer::new(self.as_ptr() as *mut U, new_length as i32, self.id)
+    }
+}

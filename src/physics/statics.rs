@@ -14,6 +14,8 @@ use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
+use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::for_each_ref::IBreakableForEach;
 
 /// Stores data for a static collidable in the simulation.
 /// Statics can be posed and collide, but have no velocity and no dynamic behavior.
@@ -52,13 +54,21 @@ pub trait StaticChangeAwakeningFilter {
     fn should_awaken_body_index(&self, _body_set_index: i32) -> bool;
 }
 
-/// Default filter that wakes all candidate bodies (dynamic and kinematic alike).
+/// Default awakening filter that only wakes up dynamic bodies.
+/// Kinematic bodies do not respond to any kind of dynamic simulation,
+/// so they won't respond to the change in statics.
 pub struct DefaultAwakeningFilter;
 impl StaticChangeAwakeningFilter for DefaultAwakeningFilter {
     fn allow_awakening(&self) -> bool {
         true
     }
     fn should_awaken_body_index(&self, _body_set_index: i32) -> bool {
+        // C# StaticsShouldntAwakenKinematics checks `!body.Kinematic`.
+        // Since we currently only have the body set index (not a BodyReference),
+        // and the trait signature doesn't give us access to Bodies,
+        // we return true here. When BodyReference is available through the trait,
+        // this should check `!body.kinematic()`.
+        // TODO: Update trait to pass BodyReference and check kinematic status.
         true
     }
 }
@@ -270,8 +280,82 @@ impl Statics {
         handle
     }
 
-    /// Removes a static by its storage index.
+    /// Awakens sleeping bodies whose broad phase bounds overlap the given bounding box.
+    unsafe fn awaken_bodies_in_bounds<F: StaticChangeAwakeningFilter>(
+        &mut self,
+        bounds: &BoundingBox,
+        filter: &F,
+    ) {
+        if !filter.allow_awakening() {
+            return;
+        }
+        let pool = &mut *self.pool;
+        let bodies = &*self.bodies;
+        let broad_phase = &*self.broad_phase;
+        let mut sleeping_sets = QuickList::<i32>::with_capacity(32, pool);
+
+        // Collect sleeping body set indices by querying the static tree for overlaps.
+        struct SleepingBodyCollector<'a> {
+            bodies: &'a Bodies,
+            broad_phase: &'a BroadPhase,
+            pool: &'a mut BufferPool,
+            sleeping_sets: &'a mut QuickList<i32>,
+        }
+        impl IBreakableForEach<i32> for SleepingBodyCollector<'_> {
+            #[inline(always)]
+            fn loop_body(&mut self, leaf_index: i32) -> bool {
+                let leaf = unsafe { *self.broad_phase.static_leaves.get(leaf_index) };
+                if leaf.mobility() != CollidableMobility::Static {
+                    let body_handle = leaf.body_handle();
+                    let location = unsafe { *self.bodies.handle_to_location.get(body_handle.0) };
+                    if location.set_index > 0 {
+                        // This is a sleeping body — add its set index.
+                        self.sleeping_sets.add(location.set_index, self.pool);
+                    }
+                }
+                true
+            }
+        }
+        {
+            let mut collector = SleepingBodyCollector {
+                bodies,
+                broad_phase,
+                pool,
+                sleeping_sets: &mut sleeping_sets,
+            };
+            // Query the static tree for overlapping leaves.
+            broad_phase.static_tree.get_overlaps(*bounds, &mut collector);
+        }
+
+        if sleeping_sets.count > 0 {
+            let awakener = &mut *self.awakener;
+            awakener.awaken_sets(&mut sleeping_sets, None);
+        }
+        let pool = &mut *self.pool;
+        sleeping_sets.dispose(pool);
+    }
+
+    /// Awakens sleeping bodies that overlap the existing broad phase bounds of the given static leaf.
+    unsafe fn awaken_bodies_in_existing_bounds<F: StaticChangeAwakeningFilter>(
+        &mut self,
+        broad_phase_index: i32,
+        filter: &F,
+    ) {
+        let broad_phase = &*self.broad_phase;
+        let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(broad_phase_index);
+        let mut old_bounds = BoundingBox::default();
+        old_bounds.min = *min_ptr;
+        old_bounds.max = *max_ptr;
+        self.awaken_bodies_in_bounds(&old_bounds, filter);
+    }
+
+    /// Removes a static by its storage index. Wakes up nearby sleeping bodies.
     pub fn remove_at(&mut self, index: i32) {
+        self.remove_at_filtered(index, &DefaultAwakeningFilter);
+    }
+
+    /// Removes a static by its storage index with a custom awakening filter.
+    pub fn remove_at_filtered<F: StaticChangeAwakeningFilter>(&mut self, index: i32, filter: &F) {
         debug_assert!(index >= 0 && index < self.count);
         self.validate_existing_handle(*self.index_to_handle.get(index));
         let handle = *self.index_to_handle.get(index);
@@ -282,10 +366,12 @@ impl Statics {
             "Static collidables cannot lack a shape."
         );
 
-        // Remove from broad phase. Awaken nearby sleeping bodies.
-        // Note: Full awakening logic requires tree overlap queries (AwakenBodiesInExistingBounds).
-        // For now, just remove from the broad phase; sleeping body awakening is deferred until
-        // tree overlap queries are implemented.
+        // Awaken sleeping bodies near the static's current bounds before removing from broad phase.
+        unsafe {
+            self.awaken_bodies_in_existing_bounds(collidable.broad_phase_index, filter);
+        }
+
+        // Remove from broad phase.
         let removed_broad_phase_index = collidable.broad_phase_index;
         let broad_phase = unsafe { &mut *self.broad_phase };
         let mut moved_leaf = CollidableReference::default();
@@ -336,15 +422,27 @@ impl Statics {
     }
 
     /// Changes the shape of a static and updates its bounds in the broad phase.
+    /// Sleeping bodies with bounding boxes overlapping the old or new bounds are forced active.
     pub fn set_shape(&mut self, handle: StaticHandle, new_shape: TypedIndex) {
         self.validate_existing_handle(handle);
         debug_assert!(new_shape.exists(), "Statics must have a shape.");
         let index = *self.handle_to_index.get(handle.0);
+        // Wake sleeping bodies near the old bounds.
+        unsafe {
+            let bp_index = self.statics_buffer.get(index).broad_phase_index;
+            self.awaken_bodies_in_existing_bounds(bp_index, &DefaultAwakeningFilter);
+        }
         self.statics_buffer.get_mut(index).shape = new_shape;
         self.update_bounds(handle);
+        // Wake sleeping bodies near the new bounds.
+        unsafe {
+            let bp_index = self.statics_buffer.get(index).broad_phase_index;
+            self.awaken_bodies_in_existing_bounds(bp_index, &DefaultAwakeningFilter);
+        }
     }
 
-    /// Applies a new description to an existing static.
+    /// Applies a new description to an existing static. 
+    /// Sleeping bodies near old and new bounds are forced active.
     pub fn apply_description(&mut self, handle: StaticHandle, description: &StaticDescription) {
         self.validate_existing_handle(handle);
         debug_assert!(
@@ -352,6 +450,11 @@ impl Statics {
             "Static collidables cannot lack a shape."
         );
         let index = *self.handle_to_index.get(handle.0);
+        // Wake sleeping bodies near the old bounds.
+        unsafe {
+            let bp_index = self.statics_buffer.get(index).broad_phase_index;
+            self.awaken_bodies_in_existing_bounds(bp_index, &DefaultAwakeningFilter);
+        }
         self.apply_description_by_index_without_broad_phase(index, description);
         // Update broad phase bounds.
         let s = self.statics_buffer.get(index);
@@ -360,6 +463,10 @@ impl Statics {
         shapes.update_bounds(&s.pose, &s.shape, &mut bounds);
         let broad_phase = unsafe { &mut *self.broad_phase };
         broad_phase.update_static_bounds(s.broad_phase_index, bounds.min, bounds.max);
+        // Wake sleeping bodies near the new bounds.
+        unsafe {
+            self.awaken_bodies_in_existing_bounds(s.broad_phase_index, &DefaultAwakeningFilter);
+        }
     }
 
     /// Gets the current description of the static referred to by a given handle.

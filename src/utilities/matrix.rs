@@ -101,7 +101,7 @@ impl Matrix {
         Self::transpose_m_to(m as *const MatrixM, transposed as *mut MatrixM);
     }
 
-    pub unsafe fn transpose_to(m: &Self, transposed: &mut Self) {
+    pub fn transpose_to(m: &Self, transposed: &mut Self) {
         // Not an ideal implementation. Shuffles would be handy.
         let xy = m.x.y;
         let xz = m.x.z;
@@ -117,7 +117,9 @@ impl Matrix {
 
     #[inline(always)]
     pub fn transpose(m: Self) -> Self {
-        out_unsafe!(Self::transpose_to(&m))
+        let mut result = unsafe { std::mem::zeroed() };
+        Self::transpose_to(&m, &mut result);
+        result
     }
 
     /// Transforms a vector with a transposed matrix.

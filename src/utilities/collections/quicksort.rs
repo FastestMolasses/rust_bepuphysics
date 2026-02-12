@@ -25,6 +25,7 @@ impl Quicksort {
     }
 
     /// Finds the index of the median-of-3 pivot for better partitioning.
+    /// Uses `<=` comparisons matching C# to ensure stable pivot selection for equal elements.
     #[inline(always)]
     fn find_mo3_index<TKey: Copy, TComparer: RefComparer<TKey>>(
         keys: &[TKey],
@@ -37,22 +38,126 @@ impl Quicksort {
         let m_key = &keys[m as usize];
         let r_key = &keys[r as usize];
 
-        // Find median of l, m, r
-        if comparer.compare(l_key, m_key) == Ordering::Less {
-            if comparer.compare(m_key, r_key) == Ordering::Less {
+        // Find median of l, m, r using <= (matching C#'s `Compare(...) <= 0`)
+        if comparer.compare(l_key, m_key) != Ordering::Greater
+            && comparer.compare(l_key, r_key) != Ordering::Greater
+        {
+            // l is lowest
+            if comparer.compare(m_key, r_key) != Ordering::Greater {
                 m
-            } else if comparer.compare(l_key, r_key) == Ordering::Less {
-                r
             } else {
-                l
+                r
             }
-        } else if comparer.compare(l_key, r_key) == Ordering::Less {
-            l
-        } else if comparer.compare(m_key, r_key) == Ordering::Less {
-            r
+        } else if comparer.compare(m_key, r_key) != Ordering::Greater {
+            // m is lowest
+            if comparer.compare(l_key, r_key) != Ordering::Greater {
+                l
+            } else {
+                r
+            }
         } else {
-            m
+            // r is lowest
+            if comparer.compare(l_key, m_key) != Ordering::Greater {
+                l
+            } else {
+                m
+            }
         }
+    }
+
+    /// Sorts keys and values using Bentley-McIlroy 3-way partitioning.
+    /// This avoids performance drops in corner cases with many duplicate keys.
+    pub fn sort_with_three_way_partitioning<TKey: Copy, TValue: Copy, TComparer: RefComparer<TKey>>(
+        keys: &mut [TKey],
+        values: &mut [TValue],
+        l: i32,
+        r: i32,
+        comparer: &TComparer,
+    ) {
+        if r - l <= Self::INSERTION_SORT_THRESHOLD {
+            unsafe {
+                insertion_sort::sort(keys, values, l as usize, r as usize, comparer);
+            }
+            return;
+        }
+
+        let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
+        let pivot = keys[pivot_index as usize];
+        let pivot_value = values[pivot_index as usize];
+
+        // Move pivot to position r
+        keys[pivot_index as usize] = keys[r as usize];
+        values[pivot_index as usize] = values[r as usize];
+
+        let mut i = l - 1;
+        let mut j = r;
+        let mut p = l - 1;
+        let mut q = r;
+
+        if r <= l {
+            return;
+        }
+
+        loop {
+            // Claim from left: find first >= pivot
+            loop {
+                i += 1;
+                if comparer.compare(&keys[i as usize], &pivot) != Ordering::Less {
+                    break;
+                }
+            }
+            // Claim from right: find first <= pivot
+            loop {
+                j -= 1;
+                if comparer.compare(&pivot, &keys[j as usize]) != Ordering::Less || j == l {
+                    break;
+                }
+            }
+
+            if i >= j {
+                break;
+            }
+
+            // Swap elements on wrong sides
+            Self::swap(keys, values, i, j);
+
+            // Track equal elements at edges for later consolidation
+            if comparer.compare(&keys[i as usize], &pivot) == Ordering::Equal {
+                p += 1;
+                Self::swap(keys, values, p, i);
+            }
+            if comparer.compare(&pivot, &keys[j as usize]) == Ordering::Equal {
+                q -= 1;
+                Self::swap(keys, values, j, q);
+            }
+        }
+
+        // Reintroduce pivot
+        keys[r as usize] = keys[i as usize];
+        values[r as usize] = values[i as usize];
+        keys[i as usize] = pivot;
+        values[i as usize] = pivot_value;
+
+        j = i - 1;
+        i = i + 1;
+
+        // Move equal elements from edges to center
+        let mut k = l;
+        while k < p {
+            Self::swap(keys, values, k, j);
+            k += 1;
+            j -= 1;
+        }
+        k = r - 1;
+        while k > q {
+            Self::swap(keys, values, i, k);
+            i += 1;
+            k -= 1;
+        }
+
+        // Recurse on partitions excluding equal-to-pivot elements
+        Self::sort_with_three_way_partitioning(keys, values, l, j, comparer);
+        Self::sort_with_three_way_partitioning(keys, values, i, r, comparer);
     }
 
     /// Sorts keys and values together.

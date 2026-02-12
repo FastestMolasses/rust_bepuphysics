@@ -134,14 +134,14 @@ impl<
         type_batch: &mut TypeBatch,
         handle: ConstraintHandle,
         encoded_body_indices: &[i32],
-        pool: &mut BufferPool,
+        pool: *mut BufferPool,
     ) -> i32 {
         unsafe {
             type_batch_alloc::allocate_in_type_batch_for_fallback(
                 type_batch,
                 handle,
                 encoded_body_indices,
-                pool,
+                &mut *pool,
                 1, // bodies_per_constraint
                 std::mem::size_of::<Vector<i32>>(),
                 std::mem::size_of::<TPrestepData>(),
@@ -197,18 +197,147 @@ impl<
         );
     }
 
+    fn get_bundle_type_sizes(
+        &self,
+        body_references_bundle_size: &mut i32,
+        prestep_bundle_size: &mut i32,
+        accumulated_impulse_bundle_size: &mut i32,
+    ) {
+        *body_references_bundle_size = std::mem::size_of::<Vector<i32>>() as i32;
+        *prestep_bundle_size = std::mem::size_of::<TPrestepData>() as i32;
+        *accumulated_impulse_bundle_size = std::mem::size_of::<TAccumulatedImpulse>() as i32;
+    }
+
+    fn generate_sort_keys_and_copy_references(
+        &self,
+        type_batch: &mut TypeBatch,
+        bundle_start: i32,
+        local_bundle_start: i32,
+        bundle_count: i32,
+        constraint_start: i32,
+        local_constraint_start: i32,
+        constraint_count: i32,
+        first_sort_key: *mut i32,
+        first_source_index: *mut i32,
+        body_references_cache: &mut Buffer<u8>,
+    ) {
+        unsafe {
+            let body_references = type_batch.body_references.as_ptr() as *const Vector<i32>;
+            for i in 0..constraint_count {
+                *first_source_index.add(i as usize) = local_constraint_start + i;
+                let constraint_index = constraint_start + i;
+                let bundle_index = (constraint_index as usize) >> crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
+                let inner_index = (constraint_index as usize) & crate::utilities::bundle_indexing::VECTOR_MASK;
+                let refs = &*body_references.add(bundle_index);
+                *first_sort_key.add(i as usize) = refs[inner_index];
+            }
+            // Copy body references to cache
+            let ref_size = std::mem::size_of::<Vector<i32>>();
+            let src = type_batch.body_references.as_ptr().add(bundle_start as usize * ref_size);
+            let dst = body_references_cache.as_mut_ptr().add(local_bundle_start as usize * ref_size);
+            std::ptr::copy_nonoverlapping(src, dst, bundle_count as usize * ref_size);
+        }
+    }
+
+    fn copy_to_cache(
+        &self,
+        type_batch: &mut TypeBatch,
+        bundle_start: i32,
+        local_bundle_start: i32,
+        bundle_count: i32,
+        constraint_start: i32,
+        local_constraint_start: i32,
+        constraint_count: i32,
+        index_to_handle_cache: &mut Buffer<ConstraintHandle>,
+        prestep_cache: &mut Buffer<u8>,
+        accumulated_impulses_cache: &mut Buffer<u8>,
+    ) {
+        unsafe {
+            let src_handles = type_batch.index_to_handle.as_ptr().add(constraint_start as usize);
+            let dst_handles = index_to_handle_cache.as_mut_ptr().add(local_constraint_start as usize);
+            std::ptr::copy_nonoverlapping(src_handles, dst_handles, constraint_count as usize);
+            let prestep_size = std::mem::size_of::<TPrestepData>();
+            let src_prestep = type_batch.prestep_data.as_ptr().add(prestep_size * bundle_start as usize);
+            let dst_prestep = prestep_cache.as_mut_ptr().add(prestep_size * local_bundle_start as usize);
+            std::ptr::copy_nonoverlapping(src_prestep, dst_prestep, prestep_size * bundle_count as usize);
+            let impulse_size = std::mem::size_of::<TAccumulatedImpulse>();
+            let src_impulse = type_batch.accumulated_impulses.as_ptr().add(impulse_size * bundle_start as usize);
+            let dst_impulse = accumulated_impulses_cache.as_mut_ptr().add(impulse_size * local_bundle_start as usize);
+            std::ptr::copy_nonoverlapping(src_impulse, dst_impulse, impulse_size * bundle_count as usize);
+        }
+    }
+
+    fn regather(
+        &self,
+        type_batch: &mut TypeBatch,
+        constraint_start: i32,
+        constraint_count: i32,
+        first_source_index: *mut i32,
+        index_to_handle_cache: &mut Buffer<ConstraintHandle>,
+        body_references_cache: &mut Buffer<u8>,
+        prestep_cache: &mut Buffer<u8>,
+        accumulated_impulses_cache: &mut Buffer<u8>,
+        handles_to_constraints: &mut Buffer<ConstraintLocation>,
+    ) {
+        unsafe {
+            let body_ref_cache = body_references_cache.as_ptr() as *const Vector<i32>;
+            let prestep_cache_typed = prestep_cache.as_ptr() as *const TPrestepData;
+            let impulse_cache_typed = accumulated_impulses_cache.as_ptr() as *const TAccumulatedImpulse;
+
+            let body_ref_target = type_batch.body_references.as_mut_ptr() as *mut Vector<i32>;
+            let prestep_target = type_batch.prestep_data.as_mut_ptr() as *mut TPrestepData;
+            let impulse_target = type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
+
+            let vector_shift = crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
+            let vector_mask = crate::utilities::bundle_indexing::VECTOR_MASK;
+
+            for i in 0..constraint_count {
+                let source_index = *first_source_index.add(i as usize) as usize;
+                let target_index = (constraint_start + i) as usize;
+
+                let source_bundle = source_index >> vector_shift;
+                let source_inner = source_index & vector_mask;
+                let target_bundle = target_index >> vector_shift;
+                let target_inner = target_index & vector_mask;
+
+                // Copy body reference lane
+                let src_ref = &*body_ref_cache.add(source_bundle);
+                let dst_ref = &mut *body_ref_target.add(target_bundle);
+                dst_ref[target_inner] = src_ref[source_inner];
+
+                // Copy prestep data lane
+                crate::utilities::gather_scatter::GatherScatter::copy_lane::<TPrestepData>(
+                    &*prestep_cache_typed.add(source_bundle), source_inner,
+                    &mut *prestep_target.add(target_bundle), target_inner,
+                );
+
+                // Copy accumulated impulses lane
+                crate::utilities::gather_scatter::GatherScatter::copy_lane::<TAccumulatedImpulse>(
+                    &*impulse_cache_typed.add(source_bundle), source_inner,
+                    &mut *impulse_target.add(target_bundle), target_inner,
+                );
+
+                // Update index to handle and handle-to-constraint mapping
+                let handle = *index_to_handle_cache.get(source_index as i32);
+                *type_batch.index_to_handle.get_mut(target_index as i32) = handle;
+                let location = handles_to_constraints.get_mut(handle.0);
+                location.index_in_type_batch = target_index as i32;
+            }
+        }
+    }
+
     fn scale_accumulated_impulses(&self, type_batch: &mut TypeBatch, scale: f32) {
-        let byte_count = type_batch.accumulated_impulses.len() as usize;
-        let float_count = byte_count / std::mem::size_of::<f32>();
-        if float_count > 0 {
-            let floats = unsafe {
-                std::slice::from_raw_parts_mut(
-                    type_batch.accumulated_impulses.as_mut_ptr() as *mut f32,
-                    float_count,
-                )
-            };
-            for f in floats.iter_mut() {
-                *f *= scale;
+        // C#: var dofCount = Unsafe.SizeOf<TAccumulatedImpulse>() / Unsafe.SizeOf<Vector<float>>();
+        //     var broadcastedScale = new Vector<float>(scale);
+        //     for (int i = 0; i < dofCount; ++i) Unsafe.Add(ref impulsesBase, i) *= broadcastedScale;
+        let dof_count = std::mem::size_of::<TAccumulatedImpulse>()
+            / std::mem::size_of::<crate::utilities::vector::Vector<f32>>();
+        let broadcasted_scale = crate::utilities::vector::Vector::<f32>::splat(scale);
+        unsafe {
+            let impulses_base =
+                type_batch.accumulated_impulses.as_mut_ptr() as *mut crate::utilities::vector::Vector<f32>;
+            for i in 0..dof_count {
+                *impulses_base.add(i) *= broadcasted_scale;
             }
         }
     }

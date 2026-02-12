@@ -31,7 +31,7 @@ pub struct IslandSleeper {
     solver: *mut Solver,
     broad_phase: *mut BroadPhase,
     pub(crate) pair_cache: *mut PairCache,
-    constraint_remover: *mut ConstraintRemover,
+    pub(crate) constraint_remover: *mut ConstraintRemover,
     pool: *mut BufferPool,
 
     /// Initial capacity for island body lists during traversal.

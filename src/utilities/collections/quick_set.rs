@@ -284,8 +284,10 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
             self.table[swap_table_index] = element_index + 1; // +1 encoding
         }
 
-        // Clear the final slot (optional, for clean memory)
-        // self.span[self.count] = T::default(); // Would require Default bound
+        // Clear the final slot (matches C# `Span[Count] = default`)
+        unsafe {
+            std::ptr::write_bytes(self.span.as_mut_ptr().add(self.count as usize), 0, 1);
+        }
     }
 
     /// Removes an element from the set if it exists.
@@ -338,7 +340,40 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
             self.resize(self.count, pool);
         }
     }
+    /// Adds an element by value. If already present, replaces it. Does not resize.
+    #[inline(always)]
+    pub fn add_and_replace_unsafely_val(&mut self, element: T) -> bool {
+        let mut e = element;
+        self.add_and_replace_unsafely(&mut e)
+    }
 
+    /// Adds an element by value if not already present. Does not resize.
+    #[inline(always)]
+    pub fn add_unsafely_val(&mut self, element: T) -> bool {
+        let mut e = element;
+        self.add_unsafely(&mut e)
+    }
+
+    /// Adds an element by value. If already present, replaces it.
+    #[inline(always)]
+    pub fn add_and_replace_val(&mut self, element: T, pool: &mut impl UnmanagedMemoryPool) -> bool {
+        let mut e = element;
+        self.add_and_replace(&mut e, pool)
+    }
+
+    /// Adds an element by value if not already present.
+    #[inline(always)]
+    pub fn add_val(&mut self, element: T, pool: &mut impl UnmanagedMemoryPool) -> bool {
+        let mut e = element;
+        self.add(&mut e, pool)
+    }
+
+    /// Removes an element by value if it belongs to the set.
+    #[inline(always)]
+    pub fn fast_remove_val(&mut self, element: T) -> bool {
+        let mut e = element;
+        self.fast_remove(&mut e)
+    }
     /// Returns an iterator over the set elements.
     pub fn iter(&self) -> QuickSetIterator<'_, T> {
         QuickSetIterator {
