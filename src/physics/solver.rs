@@ -922,7 +922,7 @@ impl Solver {
     }
 
     /// Tries to remove a dynamic body from the fallback batch tracking.
-    unsafe fn try_remove_dynamic_body_from_fallback(
+    pub(crate) unsafe fn try_remove_dynamic_body_from_fallback(
         &mut self,
         body_handle: BodyHandle,
         body_index: i32,

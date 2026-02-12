@@ -4,14 +4,19 @@ use crate::physics::collidables::collidable_reference::CollidableReference;
 use crate::physics::collision_detection::ray_batchers::{IBroadPhaseRayTester, IBroadPhaseSweepTester, RayData};
 use crate::physics::trees::ray_batcher::{RayData as TreeRayData, TreeRay};
 use crate::physics::trees::tree::Tree;
+use crate::physics::trees::tree_multithreaded_refit_refine::RefitAndRefineMultithreadedContext;
 use crate::physics::trees::tree_ray_cast::IRayLeafTester;
 use crate::physics::trees::tree_sweep::ISweepLeafTester;
 use crate::utilities::for_each_ref::IBreakableForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use crate::utilities::task_scheduling::{Task, TaskStack};
 use crate::utilities::bounding_box::BoundingBox;
 use glam::Vec3;
+use std::cell::UnsafeCell;
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Returns the size and number of refinements to execute during the broad phase.
 pub type RefinementScheduler = fn(
@@ -148,6 +153,89 @@ pub struct BroadPhase {
     pub active_refinement_schedule: RefinementScheduler,
     /// Refinement schedule used for the static tree.
     pub static_refinement_schedule: RefinementScheduler,
+
+    // MT refit/refine contexts for the old Update() path.
+    active_refine_context: RefitAndRefineMultithreadedContext,
+    static_refine_context: RefitAndRefineMultithreadedContext,
+    remaining_job_count: UnsafeCell<i32>,
+}
+
+use crate::physics::trees::node::Node;
+
+/// Context for MT broad phase refinement/refit tasks.
+#[repr(C)]
+struct BroadPhaseRefinementContext {
+    task_stack: *mut TaskStack,
+    tree: Tree,
+    target_task_count: i32,
+    target_total_task_count: i32,
+    root_refinement_size: i32,
+    subtree_refinement_count: i32,
+    subtree_refinement_size: i32,
+    subtree_refinement_start_index: i32,
+    deterministic: bool,
+    use_priority_queue: bool,
+    /// Used for active tree to hold depth-first refit output nodes.
+    target_nodes: Buffer<Node>,
+}
+
+/// Active entrypoint task: refine2 + refit2_with_cache_optimization.
+unsafe fn active_entrypoint_task(
+    _task_id: i64,
+    untyped_context: *mut c_void,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) {
+    let context = &mut *(untyped_context as *mut BroadPhaseRefinementContext);
+    let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+    context.tree.refine2_mt_with_task_stack(
+        context.root_refinement_size,
+        &mut context.subtree_refinement_start_index,
+        context.subtree_refinement_count,
+        context.subtree_refinement_size,
+        pool,
+        dispatcher,
+        context.task_stack,
+        worker_index,
+        context.target_task_count,
+        context.deterministic,
+        context.use_priority_queue,
+    );
+    // Now refit with cache optimization.
+    let source_nodes = context.tree.nodes;
+    context.tree.nodes = context.target_nodes;
+    context.tree.refit2_with_cache_optimization_from_source_mt(
+        source_nodes,
+        pool,
+        dispatcher,
+        context.task_stack,
+        worker_index,
+        context.target_total_task_count,
+    );
+}
+
+/// Static entrypoint task: refine2 only (no refit for static tree).
+unsafe fn static_entrypoint_task(
+    _task_id: i64,
+    untyped_context: *mut c_void,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) {
+    let context = &mut *(untyped_context as *mut BroadPhaseRefinementContext);
+    let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+    context.tree.refine2_mt_with_task_stack(
+        context.root_refinement_size,
+        &mut context.subtree_refinement_start_index,
+        context.subtree_refinement_count,
+        context.subtree_refinement_size,
+        pool,
+        dispatcher,
+        context.task_stack,
+        worker_index,
+        context.target_task_count,
+        context.deterministic,
+        context.use_priority_queue,
+    );
 }
 
 impl BroadPhase {
@@ -174,6 +262,9 @@ impl BroadPhase {
             active_subtree_refinement_start_index: 0,
             active_refinement_schedule: default_active_refinement_scheduler,
             static_refinement_schedule: default_static_refinement_scheduler,
+            active_refine_context: RefitAndRefineMultithreadedContext::new(),
+            static_refine_context: RefitAndRefineMultithreadedContext::new(),
+            remaining_job_count: UnsafeCell::new(0),
         }
     }
 
@@ -299,24 +390,115 @@ impl BroadPhase {
         self.static_tree.update_bounds(broad_phase_index, min, max);
     }
 
-    /// Updates the broad phase trees (single-threaded path).
-    pub fn update(&mut self, _thread_dispatcher: Option<*mut dyn IThreadDispatcher>) {
+    /// Worker function for multi-threaded refit-and-mark phase.
+    fn execute_refit_and_mark_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let bp = &mut *(dispatcher.unmanaged_context() as *mut BroadPhase);
+            let thread_pool = dispatcher.worker_pool_ptr(worker_index);
+            loop {
+                let job_index = AtomicI32::from_ptr(bp.remaining_job_count.get()).fetch_sub(1, Ordering::AcqRel) - 1;
+                if job_index < 0 {
+                    break;
+                }
+                let active_count = bp.active_refine_context.refit_nodes.count;
+                if job_index < active_count {
+                    bp.active_refine_context.execute_refit_and_mark_job(&mut *thread_pool, worker_index, job_index);
+                } else {
+                    let static_index = job_index - active_count;
+                    bp.static_refine_context.execute_refit_and_mark_job(&mut *thread_pool, worker_index, static_index);
+                }
+            }
+        }
+    }
+
+    /// Worker function for multi-threaded refine phase.
+    fn execute_refine_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let bp = &mut *(dispatcher.unmanaged_context() as *mut BroadPhase);
+            let thread_pool = dispatcher.worker_pool_ptr(worker_index);
+            let max_subtrees = bp.active_refine_context.maximum_subtrees.max(bp.static_refine_context.maximum_subtrees);
+            let mut subtree_references = crate::utilities::collections::quicklist::QuickList::with_capacity(max_subtrees, &mut *thread_pool);
+            let mut treelet_internal_nodes = crate::utilities::collections::quicklist::QuickList::with_capacity(max_subtrees, &mut *thread_pool);
+            // Create binned resources using the active tree (both contexts share the same max_subtrees).
+            let (mut buffer, mut resources) = bp.active_tree.create_binned_resources(&mut *thread_pool, max_subtrees);
+            loop {
+                let job_index = AtomicI32::from_ptr(bp.remaining_job_count.get()).fetch_sub(1, Ordering::AcqRel) - 1;
+                if job_index < 0 {
+                    break;
+                }
+                let active_count = bp.active_refine_context.refinement_targets.count;
+                if job_index < active_count {
+                    bp.active_refine_context.execute_refine_job(
+                        &mut subtree_references,
+                        &mut treelet_internal_nodes,
+                        &mut resources,
+                        &mut *thread_pool,
+                        job_index,
+                    );
+                } else {
+                    let static_index = job_index - active_count;
+                    bp.static_refine_context.execute_refine_job(
+                        &mut subtree_references,
+                        &mut treelet_internal_nodes,
+                        &mut resources,
+                        &mut *thread_pool,
+                        static_index,
+                    );
+                }
+            }
+            subtree_references.dispose(&mut *thread_pool);
+            treelet_internal_nodes.dispose(&mut *thread_pool);
+            (&mut *thread_pool).return_buffer(&mut buffer);
+        }
+    }
+
+    /// Updates the broad phase trees (supports multi-threaded path via old RefitAndRefine pipeline).
+    pub fn update(&mut self, thread_dispatcher: Option<*mut dyn IThreadDispatcher>) {
         if self.frame_index == i32::MAX {
             self.frame_index = 0;
         }
-        // NOTE: Multi-threaded update path not yet implemented.
-        // For now, single-threaded path only
-        let pool = unsafe { &mut *self.pool };
-        self.active_tree.refit_and_refine(pool, self.frame_index, 1.0);
-        self.static_tree.refit_and_refine(pool, self.frame_index, 1.0);
+        unsafe {
+            let pool = &mut *self.pool;
+            if let Some(td_ptr) = thread_dispatcher {
+                let td = &*td_ptr;
+                self.active_refine_context.create_refit_and_mark_jobs(&mut self.active_tree, pool, td);
+                self.static_refine_context.create_refit_and_mark_jobs(&mut self.static_tree, pool, td);
+                let active_refit = self.active_refine_context.refit_nodes.count;
+                let static_refit = self.static_refine_context.refit_nodes.count;
+                *self.remaining_job_count.get() = active_refit + static_refit;
+                let self_ptr = self as *mut BroadPhase as *mut ();
+                td.dispatch_workers(
+                    Self::execute_refit_and_mark_worker,
+                    active_refit + static_refit,
+                    self_ptr,
+                    None,
+                );
+                self.active_refine_context.create_refinement_jobs(pool, self.frame_index, 1.0);
+                self.static_refine_context.create_refinement_jobs(pool, self.frame_index, 1.0);
+                let active_refine = self.active_refine_context.refinement_targets.count;
+                let static_refine = self.static_refine_context.refinement_targets.count;
+                *self.remaining_job_count.get() = active_refine + static_refine;
+                td.dispatch_workers(
+                    Self::execute_refine_worker,
+                    active_refine + static_refine,
+                    self_ptr,
+                    None,
+                );
+                self.active_refine_context.clean_up_for_refit_and_refine(pool);
+                self.static_refine_context.clean_up_for_refit_and_refine(pool);
+            } else {
+                self.active_tree.refit_and_refine(pool, self.frame_index, 1.0);
+                self.static_tree.refit_and_refine(pool, self.frame_index, 1.0);
+            }
+        }
         self.frame_index += 1;
     }
 
     /// Updates the broad phase trees using the Refine2/Refit2 pipeline with incremental refinement scheduling.
-    pub fn update2(
+    pub unsafe fn update2(
         &mut self,
-        _thread_dispatcher: Option<*mut dyn IThreadDispatcher>,
-        _deterministic: bool,
+        thread_dispatcher: Option<&dyn IThreadDispatcher>,
+        deterministic: bool,
     ) {
         let active_schedule = self.active_refinement_schedule;
         let static_schedule = self.static_refinement_schedule;
@@ -347,23 +529,154 @@ impl BroadPhase {
             &mut use_priority_queue_static,
         );
 
-        // NOTE: Multi-threaded path using TaskStack when dispatcher available and tree large enough.
-        // Requires multi-threaded overloads of Tree::refine2 and Tree::refit2_with_cache_optimization
-        // (currently omitted in tree_refine2.rs/tree_refit2.rs).
-        // The MT path would:
-        // 1. Distribute refine tasks proportional to cost (active vs static)
-        // 2. Create RefinementContext for active + static trees
-        // 3. Use TaskStack with ActiveEntrypointTask + StaticEntrypointTask
-        // 4. Active: refine2 + refit2_with_cache_optimization from source nodes
-        // 5. Static: refine2 only
-        // 6. Copy back modified trees and start indices
-        // const MINIMUM_LEAF_COUNT_FOR_THREADING: i32 = 256;
+        const MINIMUM_LEAF_COUNT_FOR_THREADING: i32 = 256;
+        let pool = &mut *self.pool;
 
-        // Single-threaded path.
+        if let Some(dispatcher) = thread_dispatcher {
+            let thread_count = dispatcher.thread_count();
+            if thread_count > 1
+                && (self.active_tree.leaf_count >= MINIMUM_LEAF_COUNT_FOR_THREADING
+                    || self.static_tree.leaf_count >= MINIMUM_LEAF_COUNT_FOR_THREADING)
+            {
+                // Distribute tasks proportional to cost.
+                let active_cost = (active_root_refinement_size as f32 + 1.0).log2()
+                    * active_root_refinement_size as f32
+                    + (active_subtree_refinement_size as f32 + 1.0).log2()
+                        * active_subtree_refinement_size as f32
+                        * active_subtree_refinement_count as f32;
+                let static_cost = (static_root_refinement_size as f32 + 1.0).log2()
+                    * static_root_refinement_size as f32
+                    + (static_subtree_refinement_size as f32 + 1.0).log2()
+                        * static_subtree_refinement_size as f32
+                        * static_subtree_refinement_count as f32;
+                let active_task_fraction = active_cost / (active_cost + static_cost);
+                let target_total_task_count = thread_count;
+                let target_active_task_count =
+                    (active_task_fraction * target_total_task_count as f32).ceil() as i32;
+
+                let mut task_stack = TaskStack::new(pool, dispatcher, thread_count, 128, 128);
+
+                let mut active_refine_context = BroadPhaseRefinementContext {
+                    task_stack: &mut task_stack,
+                    tree: self.active_tree,
+                    target_total_task_count,
+                    target_task_count: target_active_task_count,
+                    root_refinement_size: active_root_refinement_size,
+                    subtree_refinement_count: active_subtree_refinement_count,
+                    subtree_refinement_size: active_subtree_refinement_size,
+                    subtree_refinement_start_index: self.active_subtree_refinement_start_index,
+                    deterministic,
+                    use_priority_queue: use_priority_queue_active,
+                    target_nodes: if self.active_tree.leaf_count > 2 {
+                        pool.take_at_least::<Node>(self.active_tree.nodes.len())
+                    } else {
+                        Buffer::default()
+                    },
+                };
+                let mut static_refine_context = BroadPhaseRefinementContext {
+                    task_stack: &mut task_stack,
+                    tree: self.static_tree,
+                    target_total_task_count,
+                    target_task_count: target_total_task_count - target_active_task_count,
+                    root_refinement_size: static_root_refinement_size,
+                    subtree_refinement_count: static_subtree_refinement_count,
+                    subtree_refinement_size: static_subtree_refinement_size,
+                    subtree_refinement_start_index: self.static_subtree_refinement_start_index,
+                    deterministic,
+                    use_priority_queue: use_priority_queue_static,
+                    target_nodes: Buffer::default(),
+                };
+
+                let mut tasks = [
+                    Task::with_context(
+                        active_entrypoint_task,
+                        &mut active_refine_context as *mut BroadPhaseRefinementContext
+                            as *mut c_void,
+                        0,
+                    ),
+                    Task::with_context(
+                        static_entrypoint_task,
+                        &mut static_refine_context as *mut BroadPhaseRefinementContext
+                            as *mut c_void,
+                        1,
+                    ),
+                ];
+                let on_complete = TaskStack::get_request_stop_task(&mut task_stack);
+                task_stack.allocate_continuation_and_push(
+                    &mut tasks,
+                    0,
+                    dispatcher,
+                    0,
+                    on_complete,
+                );
+                TaskStack::dispatch_workers(
+                    dispatcher,
+                    &mut task_stack,
+                    thread_count,
+                );
+                task_stack.dispose(pool, dispatcher);
+
+                if self.active_tree.leaf_count > 2 {
+                    // Cache-optimizing refit modifies the tree copy. Copy back.
+                    pool.return_buffer(&mut self.active_tree.nodes);
+                    self.active_tree.nodes = active_refine_context.target_nodes;
+                }
+                // Copy back start indices.
+                self.active_subtree_refinement_start_index =
+                    active_refine_context.subtree_refinement_start_index;
+                self.static_subtree_refinement_start_index =
+                    static_refine_context.subtree_refinement_start_index;
+            } else {
+                // Thread dispatcher available but trees too small — fall through to ST.
+                self.update2_single_threaded(
+                    pool,
+                    active_root_refinement_size,
+                    active_subtree_refinement_count,
+                    active_subtree_refinement_size,
+                    use_priority_queue_active,
+                    static_root_refinement_size,
+                    static_subtree_refinement_count,
+                    static_subtree_refinement_size,
+                    use_priority_queue_static,
+                );
+            }
+        } else {
+            // Single-threaded path.
+            self.update2_single_threaded(
+                pool,
+                active_root_refinement_size,
+                active_subtree_refinement_count,
+                active_subtree_refinement_size,
+                use_priority_queue_active,
+                static_root_refinement_size,
+                static_subtree_refinement_count,
+                static_subtree_refinement_size,
+                use_priority_queue_static,
+            );
+        }
+
+        if self.frame_index == i32::MAX {
+            self.frame_index = 0;
+        } else {
+            self.frame_index += 1;
+        }
+    }
+
+    fn update2_single_threaded(
+        &mut self,
+        pool: &mut BufferPool,
+        active_root_refinement_size: i32,
+        active_subtree_refinement_count: i32,
+        active_subtree_refinement_size: i32,
+        use_priority_queue_active: bool,
+        static_root_refinement_size: i32,
+        static_subtree_refinement_count: i32,
+        static_subtree_refinement_size: i32,
+        use_priority_queue_static: bool,
+    ) {
         // Note: we refine *before* refitting. Refinement works with slightly out-of-date data,
         // but the point is incremental improvement. Refit with cache optimization *after* refinement
         // ensures the rest of the library sees the optimized layout.
-        let pool = unsafe { &mut *self.pool };
         self.static_tree.refine2(
             static_root_refinement_size,
             &mut self.static_subtree_refinement_start_index,
@@ -381,12 +694,6 @@ impl BroadPhase {
             use_priority_queue_active,
         );
         self.active_tree.refit2_with_cache_optimization(pool, true);
-
-        if self.frame_index == i32::MAX {
-            self.frame_index = 0;
-        } else {
-            self.frame_index += 1;
-        }
     }
 
     /// Clears out the broad phase's structures without releasing any resources.

@@ -285,12 +285,8 @@ impl Simulation {
         self.profiler.clear();
         // profiler.start(self);
         unsafe {
-            let sim_ptr = self as *mut Simulation as *mut u8;
-            let td_ptr = match thread_dispatcher {
-                Some(td) => td as *const dyn IThreadDispatcher as *mut u8,
-                None => std::ptr::null_mut(),
-            };
-            (*self.timestepper).timestep(sim_ptr, dt, td_ptr);
+            let self_ptr = self as *mut Simulation;
+            (*self_ptr).timestepper.timestep(self_ptr, dt, thread_dispatcher);
         }
         // profiler.end(self);
     }
@@ -328,8 +324,7 @@ impl Simulation {
 
         // profiler.start(broad_phase);
         let broad_phase = &mut *(self.broad_phase as *mut RealBroadPhase);
-        let dispatcher_ptr = thread_dispatcher.map(|d| d as *const dyn IThreadDispatcher as *mut dyn IThreadDispatcher);
-        broad_phase.update2(dispatcher_ptr, self.deterministic);
+        broad_phase.update2(thread_dispatcher, self.deterministic);
         // profiler.end(broad_phase);
 
         // profiler.start(broad_phase_overlap_finder);

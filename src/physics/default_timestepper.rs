@@ -37,35 +37,32 @@ impl Default for DefaultTimestepper {
 impl ITimestepper for DefaultTimestepper {
     unsafe fn timestep(
         &mut self,
-        simulation: *mut u8,
+        simulation: *mut Simulation,
         dt: f32,
-        thread_dispatcher: *mut u8,
+        thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
-        let sim = &mut *(simulation as *mut Simulation);
-        // NOTE: thread_dispatcher casting requires a fat pointer (vtable).
-        // For now, the single-threaded path is used regardless of the dispatcher argument.
-        let td: Option<&dyn IThreadDispatcher> = None;
+        let sim = &mut *simulation;
 
-        sim.sleep(td);
+        sim.sleep(thread_dispatcher);
         if let Some(ref handler) = self.slept {
             handler(dt, thread_dispatcher);
         }
 
-        sim.predict_bounding_boxes(dt, td);
+        sim.predict_bounding_boxes(dt, thread_dispatcher);
         if let Some(ref handler) = self.before_collision_detection {
             handler(dt, thread_dispatcher);
         }
 
-        sim.collision_detection(dt, td);
+        sim.collision_detection(dt, thread_dispatcher);
         if let Some(ref handler) = self.collisions_detected {
             handler(dt, thread_dispatcher);
         }
 
-        sim.solve(dt, td);
+        sim.solve(dt, thread_dispatcher);
         if let Some(ref handler) = self.constraints_solved {
             handler(dt, thread_dispatcher);
         }
 
-        sim.incrementally_optimize_data_structures(td);
+        sim.incrementally_optimize_data_structures(thread_dispatcher);
     }
 }

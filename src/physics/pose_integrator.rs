@@ -166,6 +166,52 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
         }
     }
 
+    /// Worker function for multi-threaded predict bounding boxes dispatch.
+    fn predict_bounding_boxes_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let integrator = &*(dispatcher.unmanaged_context() as *const Self);
+            let bodies = &*integrator.bodies;
+            let bundle_count =
+                BundleIndexing::get_bundle_count(bodies.active_set().count as usize) as i32;
+            let worker_pool = dispatcher.worker_pool_ptr(worker_index);
+            let mut bounding_box_batcher =
+                BoundingBoxBatcher::new(integrator.bodies, integrator.shapes, integrator.broad_phase, worker_pool, integrator.cached_dt);
+            while let Some((start, exclusive_end)) = integrator.try_get_job(bundle_count) {
+                integrator.predict_bounding_boxes_inner(
+                    start,
+                    exclusive_end,
+                    integrator.cached_dt,
+                    &mut bounding_box_batcher,
+                    worker_index,
+                );
+            }
+            bounding_box_batcher.flush();
+        }
+    }
+
+    /// Worker function for multi-threaded integrate-after-substepping dispatch.
+    fn integrate_after_substepping_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let integrator = &*(dispatcher.unmanaged_context() as *const Self);
+            let bodies = &*integrator.bodies;
+            let bundle_count =
+                BundleIndexing::get_bundle_count(bodies.active_set().count as usize) as i32;
+            let substep_dt = integrator.cached_dt / integrator.substep_count as f32;
+            let constrained = integrator.constrained_bodies.as_ref().unwrap();
+            while let Some((start, exclusive_end)) = integrator.try_get_job(bundle_count) {
+                integrator.integrate_bundles_after_substepping(
+                    constrained,
+                    start,
+                    exclusive_end,
+                    integrator.cached_dt,
+                    substep_dt,
+                    integrator.substep_count,
+                    worker_index,
+                );
+            }
+        }
+    }
+
     /// Inner per-bundle loop for bounding box prediction.
     /// Integrates velocities (for bounding box prediction only — results are not stored back),
     /// updates sleep candidacy, and feeds collidable bodies into the bounding box batcher.
@@ -676,20 +722,25 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
 
             if let Some(td) = thread_dispatcher {
                 self.prepare_for_multithreaded_execution(bundle_count, dt, td.thread_count(), 1);
-                // NOTE: multi-threaded dispatch via threadDispatcher.DispatchWorkers not yet implemented.
-                // For now, fall through to single-threaded path.
+                let self_ptr = self as *mut Self as *mut ();
+                td.dispatch_workers(
+                    Self::predict_bounding_boxes_worker,
+                    *self.available_job_count.get(),
+                    self_ptr,
+                    None,
+                );
+            } else {
+                let mut bounding_box_batcher =
+                    BoundingBoxBatcher::new(self.bodies, self.shapes, self.broad_phase, pool as *mut BufferPool, dt);
+                self.predict_bounding_boxes_inner(
+                    0,
+                    bundle_count,
+                    dt,
+                    &mut bounding_box_batcher,
+                    0,
+                );
+                bounding_box_batcher.flush();
             }
-
-            let mut bounding_box_batcher =
-                BoundingBoxBatcher::new(self.bodies, self.shapes, self.broad_phase, pool as *mut BufferPool, dt);
-            self.predict_bounding_boxes_inner(
-                0,
-                bundle_count,
-                dt,
-                &mut bounding_box_batcher,
-                0,
-            );
-            bounding_box_batcher.flush();
         }
     }
 
@@ -700,8 +751,6 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
         substep_count: i32,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
-        // The only bodies undergoing *velocity* integration during the post-integration step
-        // are unconstrained.
         let substep_dt = dt / substep_count as f32;
         let velocity_integration_timestep =
             if self.callbacks.allow_substeps_for_unconstrained_bodies() {
@@ -726,8 +775,15 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
                         substep_count,
                     );
                     self.constrained_bodies = Some(*constrained_bodies);
-                    // NOTE: multi-threaded dispatch via threadDispatcher.DispatchWorkers not yet implemented.
+                    let self_ptr = self as *mut Self as *mut ();
+                    td.dispatch_workers(
+                        Self::integrate_after_substepping_worker,
+                        *self.available_job_count.get(),
+                        self_ptr,
+                        None,
+                    );
                     self.constrained_bodies = None;
+                    return;
                 }
             }
 

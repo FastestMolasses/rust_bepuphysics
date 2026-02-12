@@ -13,6 +13,7 @@ use super::node::{Metanode, Node, NodeChild, CostOrFlag};
 ///
 /// Note: In C#, Tree is a partial struct spread across many files.
 /// In Rust, the struct is defined here and extended with `impl Tree` blocks in sibling modules.
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Tree {
     /// Buffer of nodes in the tree.

@@ -1,11 +1,15 @@
 // Translated from BepuPhysics/BatchCompressor.cs
 
+use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicI32, Ordering};
+
 use crate::physics::bodies::Bodies;
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::handles::ConstraintHandle;
 use crate::physics::handy_enumerators::ActiveConstraintDynamicBodyHandleCollector;
 use crate::physics::solver::Solver;
 use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 
@@ -20,6 +24,11 @@ pub struct BatchCompressor {
     /// Index of the constraint batch to optimize.
     next_batch_index: i32,
     next_type_batch_index: i32,
+
+    // MT fields — only valid during `compress`.
+    worker_compressions: Buffer<QuickList<Compression>>,
+    analysis_job_index: UnsafeCell<i32>,
+    analysis_jobs: QuickList<AnalysisRegion>,
 }
 
 #[derive(Clone, Copy)]
@@ -49,6 +58,9 @@ impl BatchCompressor {
             maximum_compression_fraction: maximum_compression_fraction.clamp(0.0, 1.0),
             next_batch_index: 0,
             next_type_batch_index: 0,
+            worker_compressions: Buffer::default(),
+            analysis_job_index: UnsafeCell::new(0),
+            analysis_jobs: QuickList::default(),
         }
     }
 
@@ -122,7 +134,8 @@ impl BatchCompressor {
         }
     }
 
-    unsafe fn do_job(&self, region: &AnalysisRegion, pool: &mut BufferPool, compressions: &mut QuickList<Compression>) {
+    unsafe fn do_job(&self, region: &AnalysisRegion, worker_index: i32, pool: &mut BufferPool) {
+        let compressions = &mut *(self.worker_compressions.as_ptr().add(worker_index as usize) as *mut QuickList<Compression>);
         let solver = self.solver();
         let batch = solver.active_set().batches.get(self.next_batch_index);
         let type_batch = batch.type_batches.get(region.type_batch_index);
@@ -137,6 +150,20 @@ impl BatchCompressor {
         } else {
             for i in region.start_index_in_type_batch..region.end_index_in_type_batch {
                 self.try_to_find_better_batch_for_constraint(pool, compressions, type_batch, i);
+            }
+        }
+    }
+
+    fn analysis_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+        unsafe {
+            let bc = &*(dispatcher.unmanaged_context() as *const BatchCompressor);
+            let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+            loop {
+                let job_index = AtomicI32::from_ptr(bc.analysis_job_index.get()).fetch_add(1, Ordering::AcqRel);
+                if job_index >= bc.analysis_jobs.count {
+                    break;
+                }
+                bc.do_job(bc.analysis_jobs.get(job_index), worker_index, pool);
             }
         }
     }
@@ -184,6 +211,7 @@ impl BatchCompressor {
         deterministic: bool,
     ) {
         let solver = &*self.solver;
+        let worker_count = thread_dispatcher.map_or(1, |td| td.thread_count());
         let constraint_count = solver.active_set().constraint_count();
         if constraint_count == 0 {
             return;
@@ -191,6 +219,17 @@ impl BatchCompressor {
 
         let maximum_compression_count = (1.0f32).max((self.maximum_compression_fraction * constraint_count as f32).round()) as i32;
         let target_candidate_count = (1.0f32).max((self.target_candidate_fraction * constraint_count as f32).round()) as i32;
+
+        // Allocate per-worker compression lists.
+        self.worker_compressions = pool.take::<QuickList<Compression>>(worker_count);
+        for i in 0..worker_count {
+            let worker_pool = if let Some(td) = thread_dispatcher {
+                &mut *td.worker_pool_ptr(i)
+            } else {
+                &mut *pool
+            };
+            *self.worker_compressions.get_mut(i) = QuickList::with_capacity(maximum_compression_count.max(8), worker_pool);
+        }
 
         let batch_count = solver.active_set().batches.count;
         debug_assert!(batch_count > 0);
@@ -209,7 +248,7 @@ impl BatchCompressor {
         }
 
         let batch = solver.active_set().batches.get(self.next_batch_index);
-        let mut analysis_jobs: QuickList<AnalysisRegion> = QuickList::with_capacity(512.min(batch.type_batches.count * 4 + 1), pool);
+        self.analysis_jobs = QuickList::with_capacity(512.min(batch.type_batches.count * 4 + 1), pool);
 
         const TARGET_CONSTRAINTS_PER_JOB: i32 = 64;
         let mut total_constraints_scheduled = 0;
@@ -222,10 +261,10 @@ impl BatchCompressor {
             let remainder = type_batch.constraint_count - base_per_job * job_count;
 
             let mut previous_end = 0;
-            analysis_jobs.ensure_capacity(analysis_jobs.count + job_count, pool);
+            self.analysis_jobs.ensure_capacity(self.analysis_jobs.count + job_count, pool);
             for j in 0..job_count {
                 let constraints_in_job = if j < remainder { base_per_job + 1 } else { base_per_job };
-                let job = analysis_jobs.allocate_unsafely();
+                let job = self.analysis_jobs.allocate_unsafely();
                 job.type_batch_index = tbi;
                 job.start_index_in_type_batch = previous_end;
                 previous_end += constraints_in_job;
@@ -237,21 +276,81 @@ impl BatchCompressor {
         }
         self.next_type_batch_index = tbi;
 
-        // Run analysis (single-threaded for now; multithreaded version needs thread dispatch wiring).
-        let mut compressions = QuickList::with_capacity(maximum_compression_count.max(8), pool);
-        for i in 0..analysis_jobs.count {
-            self.do_job(analysis_jobs.get(i), pool, &mut compressions);
+        // Run analysis.
+        if let Some(td) = thread_dispatcher {
+            *self.analysis_job_index.get() = -1;
+            let self_ptr = self as *mut BatchCompressor as *mut ();
+            td.dispatch_workers(
+                Self::analysis_worker,
+                self.analysis_jobs.count,
+                self_ptr,
+                None,
+            );
+        } else {
+            for i in 0..self.analysis_jobs.count {
+                self.do_job(self.analysis_jobs.get(i), 0, pool);
+            }
         }
-        analysis_jobs.dispose(pool);
+
+        self.analysis_jobs.dispose(pool);
 
         // Apply compressions.
-        let applied_count = compressions.count.min(maximum_compression_count);
-        for i in 0..applied_count {
-            let c = *compressions.get(i);
-            self.apply_compression(self.next_batch_index, &c);
+        let mut compressions_applied = 0;
+        if deterministic {
+            // In deterministic mode, gather and sort all compressions by constraint handle.
+            let mut total_compression_count = 0;
+            for i in 0..worker_count {
+                total_compression_count += self.worker_compressions.get(i).count;
+            }
+            if total_compression_count > 0 {
+                let mut sorted: QuickList<(u16, u16, ConstraintHandle)> = QuickList::with_capacity(total_compression_count, pool);
+                for i in 0..worker_count {
+                    let wc = self.worker_compressions.get(i);
+                    for j in 0..wc.count {
+                        let c = wc.get(j);
+                        *sorted.allocate_unsafely() = (i as u16, j as u16, c.constraint_handle);
+                    }
+                }
+                // Sort by constraint handle for determinism.
+                let slice = std::slice::from_raw_parts_mut(sorted.span.get_mut(0) as *mut (u16, u16, ConstraintHandle), sorted.count as usize);
+                slice.sort_unstable_by_key(|&(_, _, h)| h.0);
+
+                let limit = sorted.count.min(maximum_compression_count);
+                for i in 0..limit {
+                    let (wi, ci, _) = *sorted.get(i);
+                    let c = *self.worker_compressions.get(wi as i32).get(ci as i32);
+                    self.apply_compression(self.next_batch_index, &c);
+                }
+                sorted.dispose(pool);
+            }
+        } else {
+            // In nondeterministic mode, walk worker results in reverse order.
+            for i in (0..worker_count).rev() {
+                let wc = self.worker_compressions.get(i);
+                for j in (0..wc.count).rev() {
+                    if compressions_applied >= maximum_compression_count {
+                        break;
+                    }
+                    let c = *wc.get(j);
+                    self.apply_compression(self.next_batch_index, &c);
+                    compressions_applied += 1;
+                }
+                if compressions_applied >= maximum_compression_count {
+                    break;
+                }
+            }
         }
 
-        compressions.dispose(pool);
+        // Clean up per-worker compression lists.
+        if thread_dispatcher.is_none() {
+            self.worker_compressions.get_mut(0).dispose(pool);
+        } else {
+            let td = thread_dispatcher.unwrap();
+            for i in 0..worker_count {
+                self.worker_compressions.get_mut(i).dispose(&mut *td.worker_pool_ptr(i));
+            }
+        }
+        pool.return_buffer(&mut self.worker_compressions);
     }
 }
 

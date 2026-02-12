@@ -1,5 +1,5 @@
-// Translation of BepuPhysics/Trees/Tree_BinnedBuilder.cs — single-threaded path only.
-// Implements the binned SAH tree builder used by Tree::binned_build.
+// Translation of BepuPhysics/Trees/Tree_BinnedBuilder.cs
+// Implements the binned SAH tree builder used by Tree::binned_build, including MT paths.
 
 use crate::physics::trees::leaf::Leaf;
 use crate::physics::trees::node::{Metanode, Node, NodeChild};
@@ -9,9 +9,13 @@ use crate::utilities::collections::comparer_ref::RefComparer;
 use crate::utilities::collections::quicksort::Quicksort;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::task_scheduling::{ContinuationHandle, EqualTagFilter, IJobFilter, Task, TaskStack};
+use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use glam::Vec4;
 use std::cmp::Ordering;
+use std::ffi::c_void;
 use std::mem;
+use std::sync::atomic::{AtomicI32, Ordering as AtomicOrdering};
 
 // ── BoundingBox4-based SAH metric ──────────────────────────────────────────
 
@@ -91,6 +95,615 @@ impl SingleThreadedBins {
     }
 }
 
+// ── MT structs and constants ───────────────────────────────────────────────
+
+const MINIMUM_SUBTREES_PER_THREAD_FOR_CENTROID_PREPASS: i32 = 1024;
+const MINIMUM_SUBTREES_PER_THREAD_FOR_BINNING: i32 = 1024;
+const MINIMUM_SUBTREES_PER_THREAD_FOR_PARTITIONING: i32 = 1024;
+const MINIMUM_SUBTREES_PER_THREAD_FOR_NODE_JOB: i32 = 256;
+const TARGET_TASK_COUNT_MULTIPLIER_FOR_NODE_PUSH_OVER_INNER_LOOP: i32 = 8;
+/// Random value stored in the upper 32 bits of the job tag for internal multithreading.
+const JOB_FILTER_TAG_HEADER: u64 = 0xB0A1BF32u64 << 32;
+
+/// Per-worker bin storage persisting across the build.
+#[derive(Clone, Copy)]
+struct BinnedBuildWorkerContext {
+    bin_bounding_boxes: Buffer<BoundingBox4>,
+    bin_centroid_bounding_boxes: Buffer<BoundingBox4>,
+    bin_bounding_boxes_scan: Buffer<BoundingBox4>,
+    bin_centroid_bounding_boxes_scan: Buffer<BoundingBox4>,
+    bin_leaf_counts: Buffer<i32>,
+}
+
+impl BinnedBuildWorkerContext {
+    unsafe fn new(bin_allocation_buffer: Buffer<u8>, start: &mut i32, bin_capacity: i32) -> Self {
+        Self {
+            bin_bounding_boxes: suballocate(bin_allocation_buffer, start, bin_capacity),
+            bin_centroid_bounding_boxes: suballocate(bin_allocation_buffer, start, bin_capacity),
+            bin_bounding_boxes_scan: suballocate(bin_allocation_buffer, start, bin_capacity),
+            bin_centroid_bounding_boxes_scan: suballocate(bin_allocation_buffer, start, bin_capacity),
+            bin_leaf_counts: suballocate(bin_allocation_buffer, start, bin_capacity),
+        }
+    }
+}
+
+/// Multithreaded binned build context implementing per-worker bin dispatch.
+struct MultithreadBinnedBuildContext {
+    task_stack: *mut TaskStack,
+    original_subtree_count: i32,
+    top_level_target_task_count: i32,
+    workers: Buffer<BinnedBuildWorkerContext>,
+}
+
+impl MultithreadBinnedBuildContext {
+    #[inline(always)]
+    unsafe fn get_bins(
+        &self,
+        worker_index: i32,
+    ) -> (
+        Buffer<BoundingBox4>,
+        Buffer<BoundingBox4>,
+        Buffer<BoundingBox4>,
+        Buffer<BoundingBox4>,
+        Buffer<i32>,
+    ) {
+        let worker = &*self.workers.get(worker_index);
+        (
+            worker.bin_bounding_boxes,
+            worker.bin_centroid_bounding_boxes,
+            worker.bin_bounding_boxes_scan,
+            worker.bin_centroid_bounding_boxes_scan,
+            worker.bin_leaf_counts,
+        )
+    }
+
+    #[inline(always)]
+    fn get_target_task_count_for_inner_loop(&self, subtree_count: i32) -> i32 {
+        (self.top_level_target_task_count as f32 * subtree_count as f32
+            / self.original_subtree_count as f32)
+            .ceil() as i32
+    }
+
+    #[inline(always)]
+    fn get_target_task_count_for_nodes(&self, subtree_count: i32) -> i32 {
+        (TARGET_TASK_COUNT_MULTIPLIER_FOR_NODE_PUSH_OVER_INNER_LOOP as f32
+            * self.top_level_target_task_count as f32
+            * subtree_count as f32
+            / self.original_subtree_count as f32)
+            .ceil() as i32
+    }
+}
+
+/// Shared data for distributing subtree slots across tasks.
+struct SharedTaskData {
+    worker_count: i32,
+    task_count: i32,
+    subtree_start_index: i32,
+    subtree_count: i32,
+    slots_per_task_base: i32,
+    slot_remainder: i32,
+    task_count_fits_in_worker_count: bool,
+}
+
+impl SharedTaskData {
+    fn new(
+        worker_count: i32,
+        subtree_start_index: i32,
+        slot_count: i32,
+        minimum_slots_per_task: i32,
+        target_task_count: i32,
+    ) -> Self {
+        let task_size = minimum_slots_per_task.max(slot_count / target_task_count);
+        let task_count = (slot_count + task_size - 1) / task_size;
+        let slots_per_task_base = slot_count / task_count;
+        let slot_remainder = slot_count - task_count * slots_per_task_base;
+        Self {
+            worker_count,
+            task_count,
+            subtree_start_index,
+            subtree_count: slot_count,
+            slots_per_task_base,
+            slot_remainder,
+            task_count_fits_in_worker_count: task_count <= worker_count,
+        }
+    }
+
+    #[inline(always)]
+    fn get_slot_interval(&self, task_id: i64) -> (i32, i32) {
+        let remaindered_task_count = self.slot_remainder.min(task_id as i32);
+        let early_slot_count =
+            (self.slots_per_task_base + 1) as i64 * remaindered_task_count as i64;
+        let late_slot_count =
+            self.slots_per_task_base as i64 * (task_id - remaindered_task_count as i64);
+        let start = self.subtree_start_index + (early_slot_count + late_slot_count) as i32;
+        let count = if task_id >= self.slot_remainder as i64 {
+            self.slots_per_task_base
+        } else {
+            self.slots_per_task_base + 1
+        };
+        (start, count)
+    }
+}
+
+/// Context for multithreaded centroid prepass.
+struct CentroidPrepassTaskContext {
+    task_data: SharedTaskData,
+    prepass_workers: Buffer<BoundingBox4>,
+    bounds: Buffer<BoundingBox4>,
+}
+
+/// Per-worker context for bin subtrees MT.
+#[derive(Clone, Copy)]
+struct BinSubtreesWorkerContext {
+    bin_bounding_boxes: Buffer<BoundingBox4>,
+    bin_centroid_bounding_boxes: Buffer<BoundingBox4>,
+    bin_leaf_counts: Buffer<i32>,
+}
+
+/// Context for multithreaded subtree binning.
+struct BinSubtreesTaskContext {
+    task_data: SharedTaskData,
+    bin_subtrees_workers: Buffer<BinSubtreesWorkerContext>,
+    worker_helped_with_binning: Buffer<bool>,
+    subtrees: Buffer<NodeChild>,
+    bin_indices: Buffer<u8>,
+    bin_count: i32,
+    use_x: bool,
+    use_y: bool,
+    axis_index: i32,
+    centroid_bounds_min: Vec4,
+    offset_to_bin_index: Vec4,
+    maximum_bin_index: Vec4,
+}
+
+/// Partition counters with cache-line padding to prevent false sharing.
+#[repr(C)]
+struct PartitionCounters {
+    _pad_a: [u8; 128],
+    subtree_count_a: i32,
+    _pad_mid: [u8; 2], // C# has 6 byte gap (offset 128 for A, 134 for B)
+    subtree_count_b: i32,
+    _pad_b: [u8; 126],
+}
+
+/// Context for multithreaded partition.
+struct PartitionTaskContext {
+    task_data: SharedTaskData,
+    subtrees: Buffer<NodeChild>,
+    subtrees_next: Buffer<NodeChild>,
+    bin_indices: Buffer<u8>,
+    bin_split_index: i32,
+    counters: PartitionCounters,
+}
+
+/// Context for pushing child B node work onto the task stack.
+#[repr(C)]
+struct NodePushTaskContext {
+    context: *mut BinnedBuilderContext,
+    node_index: i32,
+    parent_node_index: i32,
+    centroid_bounds: BoundingBox4,
+}
+
+// ── MT worker functions ────────────────────────────────────────────────────
+
+unsafe fn centroid_prepass_worker(
+    task_id: i64,
+    untyped_context: *mut c_void,
+    worker_index: i32,
+    _dispatcher: &dyn IThreadDispatcher,
+) {
+    let context = &mut *(untyped_context as *mut CentroidPrepassTaskContext);
+    let (start, count) = context.task_data.get_slot_interval(task_id);
+    let bounds_slice_ptr = context.bounds.as_ptr().add(start as usize);
+    let centroid_bounds = compute_centroid_bounds(bounds_slice_ptr, count);
+    if context.task_data.task_count_fits_in_worker_count {
+        *context.prepass_workers.get_mut(task_id as i32) = centroid_bounds;
+    } else {
+        let worker_bounds = context.prepass_workers.get_mut(worker_index);
+        worker_bounds.min = worker_bounds.min.min(centroid_bounds.min);
+        worker_bounds.max = worker_bounds.max.max(centroid_bounds.max);
+    }
+}
+
+unsafe fn multithreaded_centroid_prepass(
+    mt_context: *mut MultithreadBinnedBuildContext,
+    bounds: Buffer<BoundingBox4>,
+    task_data: &SharedTaskData,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) -> BoundingBox4 {
+    let worker_pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+    let prepass_workers: Buffer<BoundingBox4> =
+        worker_pool.take_at_least(task_data.worker_count.min(task_data.task_count));
+    let task_count = task_data.task_count;
+    let active_worker_count = task_data.worker_count.min(task_count);
+
+    let mut task_context = CentroidPrepassTaskContext {
+        task_data: SharedTaskData::new(
+            task_data.worker_count,
+            task_data.subtree_start_index,
+            task_data.subtree_count,
+            MINIMUM_SUBTREES_PER_THREAD_FOR_CENTROID_PREPASS,
+            task_count,
+        ),
+        prepass_workers,
+        bounds,
+    };
+    // Re-share the computed task_count
+    task_context.task_data.task_count = task_count;
+
+    if task_count > task_data.worker_count {
+        for i in 0..active_worker_count {
+            let wb = task_context.prepass_workers.get_mut(i);
+            wb.min = Vec4::splat(f32::MAX);
+            wb.max = Vec4::splat(f32::MIN);
+        }
+    }
+
+    let tag_value = (worker_index as u64) | JOB_FILTER_TAG_HEADER;
+    let job_filter = EqualTagFilter::new(tag_value);
+    (*(*mt_context).task_stack).for_loop(
+        centroid_prepass_worker,
+        &mut task_context as *mut CentroidPrepassTaskContext as *mut c_void,
+        0,
+        task_count,
+        worker_index,
+        dispatcher,
+        &job_filter,
+        tag_value,
+    );
+
+    let mut result = *task_context.prepass_workers.get(0);
+    for i in 1..active_worker_count {
+        let wb = task_context.prepass_workers.get(i);
+        result.min = result.min.min(wb.min);
+        result.max = result.max.max(wb.max);
+    }
+    let mut pw = task_context.prepass_workers;
+    worker_pool.return_buffer(&mut pw);
+    result
+}
+
+unsafe fn bin_subtrees_worker(
+    task_id: i64,
+    untyped_context: *mut c_void,
+    worker_index: i32,
+    _dispatcher: &dyn IThreadDispatcher,
+) {
+    let context = &mut *(untyped_context as *mut BinSubtreesTaskContext);
+    let effective_worker_index = if context.task_data.task_count_fits_in_worker_count {
+        task_id as i32
+    } else {
+        worker_index
+    };
+    let worker = context
+        .bin_subtrees_workers
+        .get_mut(effective_worker_index);
+    *context
+        .worker_helped_with_binning
+        .get_mut(effective_worker_index) = true;
+
+    if context.task_data.task_count_fits_in_worker_count {
+        for i in 0..context.bin_count {
+            let bb = worker.bin_bounding_boxes.get_mut(i);
+            bb.min = Vec4::splat(f32::MAX);
+            bb.max = Vec4::splat(f32::MIN);
+            let cbb = worker.bin_centroid_bounding_boxes.get_mut(i);
+            cbb.min = Vec4::splat(f32::MAX);
+            cbb.max = Vec4::splat(f32::MIN);
+            *worker.bin_leaf_counts.get_mut(i) = 0;
+        }
+    }
+
+    let (start, count) = context.task_data.get_slot_interval(task_id);
+    bin_subtrees(
+        context.centroid_bounds_min,
+        context.use_x,
+        context.use_y,
+        context.axis_index,
+        context.offset_to_bin_index,
+        context.maximum_bin_index,
+        context.subtrees.slice_offset(start, count),
+        worker.bin_bounding_boxes,
+        worker.bin_centroid_bounding_boxes,
+        worker.bin_leaf_counts,
+        context.bin_indices.slice_offset(start, count),
+        true, // Always write bin indices in MT path
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn multithreaded_bin_subtrees(
+    mt_context: *mut MultithreadBinnedBuildContext,
+    centroid_bounds_min: Vec4,
+    use_x: bool,
+    use_y: bool,
+    axis_index: i32,
+    offset_to_bin_index: Vec4,
+    maximum_bin_index: Vec4,
+    subtrees: Buffer<NodeChild>,
+    subtree_bin_indices: Buffer<u8>,
+    bin_count: i32,
+    task_data: &SharedTaskData,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) {
+    let worker_pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+    let effective_worker_count = (*mt_context).workers.len().min(task_data.task_count);
+
+    // Bulk allocation for worker contexts
+    let alloc_size = (mem::size_of::<BinSubtreesWorkerContext>() as i32
+        + (mem::size_of::<BoundingBox4>() as i32 * 2 + mem::size_of::<i32>() as i32) * bin_count
+        + mem::size_of::<bool>() as i32 * task_data.worker_count)
+        * effective_worker_count;
+    let allocation: Buffer<u8> = worker_pool.take_at_least(alloc_size);
+    let mut alloc_start = 0i32;
+    let bin_subtrees_workers: Buffer<BinSubtreesWorkerContext> =
+        suballocate(allocation, &mut alloc_start, effective_worker_count);
+    for i in 0..effective_worker_count {
+        let w = &mut *bin_subtrees_workers.as_ptr().add(i as usize).cast_mut();
+        w.bin_bounding_boxes = suballocate(allocation, &mut alloc_start, bin_count);
+        w.bin_centroid_bounding_boxes = suballocate(allocation, &mut alloc_start, bin_count);
+        w.bin_leaf_counts = suballocate(allocation, &mut alloc_start, bin_count);
+    }
+    let worker_helped: Buffer<bool> =
+        suballocate(allocation, &mut alloc_start, effective_worker_count);
+    for i in 0..effective_worker_count {
+        *worker_helped.as_ptr().add(i as usize).cast_mut() = false;
+    }
+
+    let mut task_context = BinSubtreesTaskContext {
+        task_data: SharedTaskData::new(
+            (*mt_context).workers.len(),
+            0,
+            subtrees.len(),
+            MINIMUM_SUBTREES_PER_THREAD_FOR_BINNING,
+            (*mt_context).get_target_task_count_for_inner_loop(subtrees.len()),
+        ),
+        bin_subtrees_workers,
+        worker_helped_with_binning: worker_helped,
+        subtrees,
+        bin_indices: subtree_bin_indices,
+        bin_count,
+        use_x,
+        use_y,
+        axis_index,
+        centroid_bounds_min,
+        offset_to_bin_index,
+        maximum_bin_index,
+    };
+    task_context.task_data.task_count = task_data.task_count;
+    let active_worker_count = effective_worker_count.min(task_context.task_data.task_count);
+
+    if !task_context.task_data.task_count_fits_in_worker_count {
+        for cache_index in 0..active_worker_count {
+            let cache = task_context.bin_subtrees_workers.get_mut(cache_index);
+            for i in 0..bin_count {
+                let bb = cache.bin_bounding_boxes.get_mut(i);
+                bb.min = Vec4::splat(f32::MAX);
+                bb.max = Vec4::splat(f32::MIN);
+                let cbb = cache.bin_centroid_bounding_boxes.get_mut(i);
+                cbb.min = Vec4::splat(f32::MAX);
+                cbb.max = Vec4::splat(f32::MIN);
+                *cache.bin_leaf_counts.get_mut(i) = 0;
+            }
+        }
+    }
+
+    let tag_value = (worker_index as u64) | JOB_FILTER_TAG_HEADER;
+    let job_filter = EqualTagFilter::new(tag_value);
+    (*(*mt_context).task_stack).for_loop(
+        bin_subtrees_worker,
+        &mut task_context as *mut BinSubtreesTaskContext as *mut c_void,
+        0,
+        task_context.task_data.task_count,
+        worker_index,
+        dispatcher,
+        &job_filter,
+        tag_value,
+    );
+
+    // Merge worker results into the dispatching worker's bins.
+    let main_worker = (*mt_context).workers.get_mut(worker_index);
+    let cache0 = task_context.bin_subtrees_workers.get(0);
+    cache0
+        .bin_bounding_boxes
+        .copy_to(0, &mut main_worker.bin_bounding_boxes, 0, bin_count);
+    cache0
+        .bin_centroid_bounding_boxes
+        .copy_to(0, &mut main_worker.bin_centroid_bounding_boxes, 0, bin_count);
+    cache0
+        .bin_leaf_counts
+        .copy_to(0, &mut main_worker.bin_leaf_counts, 0, bin_count);
+
+    for cache_index in 1..active_worker_count {
+        if *task_context.worker_helped_with_binning.get(cache_index) {
+            let cache = task_context.bin_subtrees_workers.get(cache_index);
+            for bin_index in 0..bin_count {
+                let b0 = main_worker.bin_bounding_boxes.get_mut(bin_index);
+                let bi = cache.bin_bounding_boxes.get(bin_index);
+                b0.min = b0.min.min(bi.min);
+                b0.max = b0.max.max(bi.max);
+                let bc0 = main_worker.bin_centroid_bounding_boxes.get_mut(bin_index);
+                let bci = cache.bin_centroid_bounding_boxes.get(bin_index);
+                bc0.min = bc0.min.min(bci.min);
+                bc0.max = bc0.max.max(bci.max);
+                *main_worker.bin_leaf_counts.get_mut(bin_index) +=
+                    *cache.bin_leaf_counts.get(bin_index);
+            }
+        }
+    }
+
+    let mut alloc_buf = allocation;
+    worker_pool.return_buffer(&mut alloc_buf);
+}
+
+unsafe fn partition_subtrees_worker(
+    task_id: i64,
+    untyped_context: *mut c_void,
+    _worker_index: i32,
+    _dispatcher: &dyn IThreadDispatcher,
+) {
+    let context = &mut *(untyped_context as *mut PartitionTaskContext);
+    let (start, count) = context.task_data.get_slot_interval(task_id);
+
+    const BATCH_SIZE: i32 = 16384;
+    let mut slot_belongs_to_a = vec![0u8; BATCH_SIZE as usize];
+
+    let batch_count = (count + BATCH_SIZE - 1) / BATCH_SIZE;
+    for batch_index in 0..batch_count {
+        let mut local_count_a = 0i32;
+        let batch_start = start + batch_index * BATCH_SIZE;
+        let count_in_batch = (start + count - batch_start).min(BATCH_SIZE);
+
+        for index_in_batch in 0..count_in_batch {
+            let subtree_index = (index_in_batch + batch_start) as usize;
+            let bin_index = *context.bin_indices.as_ptr().add(subtree_index);
+            let belongs_to_a = (bin_index as i32) < context.bin_split_index;
+            slot_belongs_to_a[index_in_batch as usize] = if belongs_to_a { 0xFF } else { 0 };
+            if belongs_to_a {
+                local_count_a += 1;
+            }
+        }
+
+        let local_count_b = count_in_batch - local_count_a;
+        let counter_a_ptr = &context.counters.subtree_count_a as *const i32 as *mut i32;
+        let counter_b_ptr = &context.counters.subtree_count_b as *const i32 as *mut i32;
+        let start_index_a = AtomicI32::from_ptr(counter_a_ptr)
+            .fetch_add(local_count_a, AtomicOrdering::AcqRel);
+        let start_index_b = context.subtrees.len()
+            - AtomicI32::from_ptr(counter_b_ptr)
+                .fetch_add(local_count_b, AtomicOrdering::AcqRel)
+            - local_count_b;
+
+        let mut recount_a = 0;
+        let mut recount_b = 0;
+        for index_in_batch in 0..count_in_batch {
+            let target_index = if slot_belongs_to_a[index_in_batch as usize] != 0 {
+                let t = start_index_a + recount_a;
+                recount_a += 1;
+                t
+            } else {
+                let t = start_index_b + recount_b;
+                recount_b += 1;
+                t
+            };
+            *context
+                .subtrees_next
+                .as_ptr()
+                .add(target_index as usize)
+                .cast_mut() =
+                *context
+                    .subtrees
+                    .as_ptr()
+                    .add((batch_start + index_in_batch) as usize);
+        }
+    }
+}
+
+unsafe fn multithreaded_partition(
+    mt_context: *mut MultithreadBinnedBuildContext,
+    subtrees: Buffer<NodeChild>,
+    subtrees_next: Buffer<NodeChild>,
+    bin_indices: Buffer<u8>,
+    bin_split_index: i32,
+    task_data: &SharedTaskData,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) -> (i32, i32) {
+    let mut task_context = PartitionTaskContext {
+        task_data: SharedTaskData::new(
+            (*mt_context).workers.len(),
+            0,
+            subtrees.len(),
+            MINIMUM_SUBTREES_PER_THREAD_FOR_PARTITIONING,
+            (*mt_context).get_target_task_count_for_inner_loop(subtrees.len()),
+        ),
+        subtrees,
+        subtrees_next,
+        bin_indices,
+        bin_split_index,
+        counters: PartitionCounters {
+            _pad_a: [0; 128],
+            subtree_count_a: 0,
+            _pad_mid: [0; 2],
+            subtree_count_b: 0,
+            _pad_b: [0; 126],
+        },
+    };
+    task_context.task_data.task_count = task_data.task_count;
+
+    let tag_value = (worker_index as u64) | JOB_FILTER_TAG_HEADER;
+    let job_filter = EqualTagFilter::new(tag_value);
+    (*(*mt_context).task_stack).for_loop(
+        partition_subtrees_worker,
+        &mut task_context as *mut PartitionTaskContext as *mut c_void,
+        0,
+        task_context.task_data.task_count,
+        worker_index,
+        dispatcher,
+        &job_filter,
+        tag_value,
+    );
+
+    (
+        task_context.counters.subtree_count_a,
+        task_context.counters.subtree_count_b,
+    )
+}
+
+unsafe fn binned_builder_node_worker(
+    task_id: i64,
+    untyped_context: *mut c_void,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) {
+    let subtree_region_start_index = task_id as i32;
+    let subtree_count = ((task_id >> 32) & 0x7FFF_FFFF) as i32;
+    let use_pong_buffer = (task_id as u64) >= (1u64 << 63);
+    let node_push_context = &*(untyped_context as *const NodePushTaskContext);
+    // Child index is always 1 because we only ever push child B.
+    binned_build_node(
+        use_pong_buffer,
+        subtree_region_start_index,
+        node_push_context.node_index,
+        subtree_count,
+        node_push_context.parent_node_index,
+        1,
+        &node_push_context.centroid_bounds,
+        node_push_context.context,
+        worker_index,
+        Some(dispatcher),
+    );
+}
+
+unsafe fn binned_builder_worker_entry(
+    _task_id: i64,
+    untyped_context: *mut c_void,
+    worker_index: i32,
+    dispatcher: &dyn IThreadDispatcher,
+) {
+    let context = untyped_context as *mut BinnedBuilderContext;
+    binned_build_node(
+        false,
+        0,
+        0,
+        (*context).subtrees_ping.len(),
+        -1,
+        -1,
+        &BoundingBox4 {
+            min: Vec4::ZERO,
+            max: Vec4::ZERO,
+        },
+        context,
+        worker_index,
+        Some(dispatcher),
+    );
+    // Once the entry point returns, all workers should stop.
+    (*(*(*context).mt_threading.unwrap()).task_stack).request_stop();
+}
+
 // ── Context for the recursive builder ──────────────────────────────────────
 
 struct BinnedBuilderContext {
@@ -98,6 +711,7 @@ struct BinnedBuilderContext {
     maximum_bin_count: i32,
     leaf_to_bin_multiplier: f32,
     microsweep_threshold: i32,
+    deterministic: bool,
 
     subtrees_ping: Buffer<NodeChild>,
     subtrees_pong: Buffer<NodeChild>,
@@ -109,6 +723,8 @@ struct BinnedBuilderContext {
     handle_leaves: bool,
 
     bins: SingleThreadedBins,
+    /// If Some, the builder uses multithreaded dispatch.
+    mt_threading: Option<*mut MultithreadBinnedBuildContext>,
 }
 
 // ── Build helpers ──────────────────────────────────────────────────────────
@@ -265,7 +881,7 @@ unsafe fn build_node_for_degeneracy(
     node_index: i32,
     parent_node_index: i32,
     child_index_in_parent: i32,
-    ctx: &mut BinnedBuilderContext,
+    ctx: *mut BinnedBuilderContext,
 ) -> (i32, i32, i32, i32) {
     let subtree_count_a = subtrees.len() / 2;
     let subtree_count_b = subtrees.len() - subtree_count_a;
@@ -306,8 +922,8 @@ unsafe fn build_node_for_degeneracy(
         child_index_in_parent,
         subtree_count_a,
         subtree_count_b,
-        &mut ctx.leaves,
-        ctx.handle_leaves,
+        &mut (*ctx).leaves,
+        (*ctx).handle_leaves,
     );
     (subtree_count_a, subtree_count_b, a_index, b_index)
 }
@@ -324,7 +940,9 @@ unsafe fn handle_degeneracy(
     parent_node_index: i32,
     child_index_in_parent: i32,
     centroid_bounds: &BoundingBox4,
-    ctx: &mut BinnedBuilderContext,
+    ctx: *mut BinnedBuilderContext,
+    worker_index: i32,
+    dispatcher: Option<&dyn IThreadDispatcher>,
 ) {
     let (subtree_count_a, subtree_count_b, a_index, b_index) = build_node_for_degeneracy(
         subtrees,
@@ -345,6 +963,8 @@ unsafe fn handle_degeneracy(
             0,
             centroid_bounds,
             ctx,
+            worker_index,
+            dispatcher,
         );
     }
     if subtree_count_b > 1 {
@@ -357,6 +977,8 @@ unsafe fn handle_degeneracy(
             1,
             centroid_bounds,
             ctx,
+            worker_index,
+            dispatcher,
         );
     }
 }
@@ -371,7 +993,8 @@ unsafe fn handle_microsweep_degeneracy(
     child_index_in_parent: i32,
     centroid_min: Vec4,
     centroid_max: Vec4,
-    ctx: &mut BinnedBuilderContext,
+    ctx: *mut BinnedBuilderContext,
+    worker_index: i32,
 ) {
     let (subtree_count_a, subtree_count_b, a_index, b_index) = build_node_for_degeneracy(
         subtrees,
@@ -397,6 +1020,7 @@ unsafe fn handle_microsweep_degeneracy(
             node_index,
             0,
             ctx,
+            worker_index,
         );
     }
     if subtree_count_b > 1 {
@@ -414,6 +1038,7 @@ unsafe fn handle_microsweep_degeneracy(
             node_index,
             1,
             ctx,
+            worker_index,
         );
     }
 }
@@ -430,7 +1055,8 @@ unsafe fn micro_sweep_for_binned_builder(
     node_index: i32,
     parent_node_index: i32,
     child_index_in_parent: i32,
-    ctx: &mut BinnedBuilderContext,
+    ctx: *mut BinnedBuilderContext,
+    worker_index: i32,
 ) {
     let subtree_count = subtrees.len();
     if subtree_count == 2 {
@@ -449,8 +1075,8 @@ unsafe fn micro_sweep_for_binned_builder(
             child_index_in_parent,
             1,
             1,
-            &mut ctx.leaves,
-            ctx.handle_leaves,
+            &mut (*ctx).leaves,
+            (*ctx).handle_leaves,
         );
         return;
     }
@@ -470,6 +1096,7 @@ unsafe fn micro_sweep_for_binned_builder(
             centroid_min,
             centroid_max,
             ctx,
+            worker_index,
         );
         return;
     }
@@ -503,7 +1130,12 @@ unsafe fn micro_sweep_for_binned_builder(
         );
     }
 
-    let mut bin_bounding_boxes_scan = ctx.bins.bin_bounding_boxes_scan;
+    // Get the scan buffer from the appropriate bins (MT per-worker or ST).
+    let mut bin_bounding_boxes_scan = if let Some(mt_ctx) = (*ctx).mt_threading {
+        (*mt_ctx).get_bins(worker_index).2
+    } else {
+        (*ctx).bins.bin_bounding_boxes_scan
+    };
     let bounding_boxes: Buffer<BoundingBox4> = subtrees.cast();
 
     // Build prefix-merged bounds from left to right.
@@ -562,6 +1194,7 @@ unsafe fn micro_sweep_for_binned_builder(
             centroid_min,
             centroid_max,
             ctx,
+            worker_index,
         );
         return;
     }
@@ -584,8 +1217,8 @@ unsafe fn micro_sweep_for_binned_builder(
         child_index_in_parent,
         subtree_count_a,
         subtree_count_b,
-        &mut ctx.leaves,
-        ctx.handle_leaves,
+        &mut (*ctx).leaves,
+        (*ctx).handle_leaves,
     );
 
     if subtree_count_a > 1 {
@@ -615,6 +1248,7 @@ unsafe fn micro_sweep_for_binned_builder(
             node_index,
             0,
             ctx,
+            worker_index,
         );
     }
     if subtree_count_b > 1 {
@@ -646,6 +1280,7 @@ unsafe fn micro_sweep_for_binned_builder(
             node_index,
             1,
             ctx,
+            worker_index,
         );
     }
 }
@@ -653,25 +1288,28 @@ unsafe fn micro_sweep_for_binned_builder(
 // ── Main recursive build node ──────────────────────────────────────────────
 
 /// Core recursive binned build function.
+#[allow(clippy::too_many_arguments)]
 unsafe fn binned_build_node(
-    use_pong_buffer: bool,
+    mut use_pong_buffer: bool,
     subtree_region_start_index: i32,
     node_index: i32,
     subtree_count: i32,
     parent_node_index: i32,
     child_index_in_parent: i32,
     centroid_bounds: &BoundingBox4,
-    ctx: &mut BinnedBuilderContext,
+    ctx: *mut BinnedBuilderContext,
+    worker_index: i32,
+    dispatcher: Option<&dyn IThreadDispatcher>,
 ) {
     let subtrees = if use_pong_buffer {
-        ctx.subtrees_pong
+        (*ctx).subtrees_pong
     } else {
-        ctx.subtrees_ping
+        (*ctx).subtrees_ping
     }
     .slice_offset(subtree_region_start_index, subtree_count);
 
-    let subtree_bin_indices = if ctx.bin_indices.allocated() {
-        ctx.bin_indices
+    let subtree_bin_indices = if (*ctx).bin_indices.allocated() {
+        (*ctx).bin_indices
             .slice_offset(subtree_region_start_index, subtree_count)
     } else {
         Buffer::default()
@@ -679,11 +1317,11 @@ unsafe fn binned_build_node(
 
     let bounding_boxes: Buffer<BoundingBox4> = subtrees.cast();
     let node_count = subtree_count - 1;
-    let nodes = ctx.nodes.slice_offset(node_index, node_count);
-    let metanodes = if ctx.metanodes.allocated() {
-        ctx.metanodes.slice_offset(node_index, node_count)
+    let nodes = (*ctx).nodes.slice_offset(node_index, node_count);
+    let metanodes = if (*ctx).metanodes.allocated() {
+        (*ctx).metanodes.slice_offset(node_index, node_count)
     } else {
-        ctx.metanodes
+        (*ctx).metanodes
     };
 
     // Leaf pair: trivial case.
@@ -701,15 +1339,50 @@ unsafe fn binned_build_node(
             child_index_in_parent,
             1,
             1,
-            &mut ctx.leaves,
-            ctx.handle_leaves,
+            &mut (*ctx).leaves,
+            (*ctx).handle_leaves,
         );
         return;
     }
 
+    let mt_context_ptr = (*ctx).mt_threading;
+    let target_task_count = if let Some(mt_ctx) = mt_context_ptr {
+        (*mt_ctx).get_target_task_count_for_inner_loop(subtree_count)
+    } else {
+        1
+    };
+
     // For the root node, compute centroid bounds since they aren't provided.
     let centroid_bounds = if node_index == 0 {
-        compute_centroid_bounds(bounding_boxes.as_ptr(), subtrees.len())
+        let mut use_st = true;
+        let mut mt_centroid_bounds = BoundingBox4 {
+            min: Vec4::ZERO,
+            max: Vec4::ZERO,
+        };
+        if let Some(mt_ctx) = mt_context_ptr {
+            let task_data = SharedTaskData::new(
+                (*mt_ctx).workers.len(),
+                0,
+                subtrees.len(),
+                MINIMUM_SUBTREES_PER_THREAD_FOR_CENTROID_PREPASS,
+                (*mt_ctx).get_target_task_count_for_inner_loop(subtree_count),
+            );
+            if task_data.task_count > 1 {
+                mt_centroid_bounds = multithreaded_centroid_prepass(
+                    mt_ctx,
+                    bounding_boxes,
+                    &task_data,
+                    worker_index,
+                    dispatcher.unwrap(),
+                );
+                use_st = false;
+            }
+        }
+        if use_st {
+            compute_centroid_bounds(bounding_boxes.as_ptr(), subtrees.len())
+        } else {
+            mt_centroid_bounds
+        }
     } else {
         *centroid_bounds
     };
@@ -731,12 +1404,14 @@ unsafe fn binned_build_node(
             child_index_in_parent,
             &centroid_bounds,
             ctx,
+            worker_index,
+            dispatcher,
         );
         return;
     }
 
     // Fall back to microsweep for small counts.
-    if subtree_count <= ctx.microsweep_threshold {
+    if subtree_count <= (*ctx).microsweep_threshold {
         micro_sweep_for_binned_builder(
             centroid_bounds.min,
             centroid_bounds.max,
@@ -747,6 +1422,7 @@ unsafe fn binned_build_node(
             parent_node_index,
             child_index_in_parent,
             ctx,
+            worker_index,
         );
         return;
     }
@@ -755,8 +1431,8 @@ unsafe fn binned_build_node(
     let use_y = centroid_span.y > centroid_span.z;
     let axis_index: i32 = if use_x { 0 } else if use_y { 1 } else { 2 };
 
-    let bin_count = (subtree_count as f32 * ctx.leaf_to_bin_multiplier) as i32;
-    let bin_count = bin_count.max(ctx.minimum_bin_count).min(ctx.maximum_bin_count);
+    let bin_count = (subtree_count as f32 * (*ctx).leaf_to_bin_multiplier) as i32;
+    let bin_count = bin_count.max((*ctx).minimum_bin_count).min((*ctx).maximum_bin_count);
 
     let offset_to_bin_index = Vec4::splat(bin_count as f32) / centroid_span;
     // Avoid NaNs for degenerate axes.
@@ -780,11 +1456,19 @@ unsafe fn binned_build_node(
     );
     let maximum_bin_index = Vec4::splat((bin_count - 1) as f32);
 
-    let mut bin_bounding_boxes = ctx.bins.bin_bounding_boxes;
-    let mut bin_centroid_bounding_boxes = ctx.bins.bin_centroid_bounding_boxes;
-    let mut bin_bounding_boxes_scan = ctx.bins.bin_bounding_boxes_scan;
-    let mut bin_centroid_bounding_boxes_scan = ctx.bins.bin_centroid_bounding_boxes_scan;
-    let mut bin_leaf_counts = ctx.bins.bin_leaf_counts;
+    // Get bins from the appropriate source (MT per-worker or ST).
+    let (mut bin_bounding_boxes, mut bin_centroid_bounding_boxes, mut bin_bounding_boxes_scan, mut bin_centroid_bounding_boxes_scan, mut bin_leaf_counts) =
+        if let Some(mt_ctx) = mt_context_ptr {
+            (*mt_ctx).get_bins(worker_index)
+        } else {
+            (
+                (*ctx).bins.bin_bounding_boxes,
+                (*ctx).bins.bin_centroid_bounding_boxes,
+                (*ctx).bins.bin_bounding_boxes_scan,
+                (*ctx).bins.bin_centroid_bounding_boxes_scan,
+                (*ctx).bins.bin_leaf_counts,
+            )
+        };
 
     // Initialise bins.
     for i in 0..bin_count {
@@ -797,22 +1481,52 @@ unsafe fn binned_build_node(
         *bin_leaf_counts.as_mut_ptr().add(i as usize) = 0;
     }
 
-    // Bin subtrees single-threaded.
-    let write_indices = subtree_bin_indices.allocated();
-    bin_subtrees(
-        centroid_bounds.min,
-        use_x,
-        use_y,
-        axis_index,
-        offset_to_bin_index,
-        maximum_bin_index,
-        subtrees,
-        bin_bounding_boxes,
-        bin_centroid_bounding_boxes,
-        bin_leaf_counts,
-        subtree_bin_indices,
-        write_indices,
-    );
+    // Bin subtrees — potentially multithreaded.
+    let mut use_st_for_binning = true;
+    if let Some(mt_ctx) = mt_context_ptr {
+        let task_data = SharedTaskData::new(
+            (*mt_ctx).workers.len(),
+            0,
+            subtrees.len(),
+            MINIMUM_SUBTREES_PER_THREAD_FOR_BINNING,
+            (*mt_ctx).get_target_task_count_for_inner_loop(subtree_count),
+        );
+        if task_data.task_count > 1 {
+            multithreaded_bin_subtrees(
+                mt_ctx,
+                centroid_bounds.min,
+                use_x,
+                use_y,
+                axis_index,
+                offset_to_bin_index,
+                maximum_bin_index,
+                subtrees,
+                subtree_bin_indices,
+                bin_count,
+                &task_data,
+                worker_index,
+                dispatcher.unwrap(),
+            );
+            use_st_for_binning = false;
+        }
+    }
+    if use_st_for_binning {
+        let write_indices = subtree_bin_indices.allocated();
+        bin_subtrees(
+            centroid_bounds.min,
+            use_x,
+            use_y,
+            axis_index,
+            offset_to_bin_index,
+            maximum_bin_index,
+            subtrees,
+            bin_bounding_boxes,
+            bin_centroid_bounding_boxes,
+            bin_leaf_counts,
+            subtree_bin_indices,
+            write_indices,
+        );
+    }
 
     // Build prefix-merged scan (left to right).
     *bin_bounding_boxes_scan.as_mut_ptr().add(0) = *bin_bounding_boxes.as_ptr().add(0);
@@ -887,6 +1601,8 @@ unsafe fn binned_build_node(
             child_index_in_parent,
             &centroid_bounds,
             ctx,
+            worker_index,
+            dispatcher,
         );
         return;
     }
@@ -901,42 +1617,63 @@ unsafe fn binned_build_node(
         .add((split_index - 1) as usize);
 
     // Partition subtrees.
-    let use_pong_buffer_next;
     let partitioned_subtrees;
-    if ctx.subtrees_pong.allocated() {
+    if (*ctx).subtrees_pong.allocated() {
         debug_assert!(subtree_bin_indices.allocated());
         let mut subtrees_next = if use_pong_buffer {
-            ctx.subtrees_ping
+            (*ctx).subtrees_ping
         } else {
-            ctx.subtrees_pong
+            (*ctx).subtrees_pong
         }
         .slice_offset(subtree_region_start_index, subtree_count);
 
-        // Single-threaded partition using precomputed bin indices.
-        for i in 0..subtree_count {
-            let bin_idx = *subtree_bin_indices.as_ptr().add(i as usize);
-            let target_index = if bin_idx as i32 >= split_index {
-                subtree_count - 1 - subtree_count_b
-            } else {
-                let t = subtree_count_a;
-                subtree_count_a += 1;
-                t
-            };
-            if bin_idx as i32 >= split_index {
-                subtree_count_b += 1;
+        let mut use_st_for_partitioning = true;
+        // MT partition is nondeterministic; skip when deterministic mode requested.
+        if let Some(mt_ctx) = mt_context_ptr {
+            if !(*ctx).deterministic {
+                let task_data = SharedTaskData::new(
+                    (*mt_ctx).workers.len(),
+                    0,
+                    subtrees.len(),
+                    MINIMUM_SUBTREES_PER_THREAD_FOR_PARTITIONING,
+                    (*mt_ctx).get_target_task_count_for_inner_loop(subtree_count),
+                );
+                if task_data.task_count > 1 {
+                    let (ca, cb) = multithreaded_partition(
+                        mt_ctx,
+                        subtrees,
+                        subtrees_next,
+                        subtree_bin_indices,
+                        split_index,
+                        &task_data,
+                        worker_index,
+                        dispatcher.unwrap(),
+                    );
+                    subtree_count_a = ca;
+                    subtree_count_b = cb;
+                    use_st_for_partitioning = false;
+                }
             }
-            // Re-calculate the target (we need either subtree_count_a pre-increment or post-increment logic).
-            let target_index = if bin_idx as i32 >= split_index {
-                subtree_count - subtree_count_b
-            } else {
-                subtree_count_a - 1
-            };
-            *subtrees_next.as_mut_ptr().add(target_index as usize) =
-                *subtrees.as_ptr().add(i as usize);
+        }
+        if use_st_for_partitioning {
+            // Single-threaded partition using precomputed bin indices.
+            for i in 0..subtree_count {
+                let bin_idx = *subtree_bin_indices.as_ptr().add(i as usize);
+                let target_index = if bin_idx as i32 >= split_index {
+                    subtree_count_b += 1;
+                    subtree_count - subtree_count_b
+                } else {
+                    let t = subtree_count_a;
+                    subtree_count_a += 1;
+                    t
+                };
+                *subtrees_next.as_mut_ptr().add(target_index as usize) =
+                    *subtrees.as_ptr().add(i as usize);
+            }
         }
 
         partitioned_subtrees = subtrees_next;
-        use_pong_buffer_next = !use_pong_buffer;
+        use_pong_buffer = !use_pong_buffer;
     } else {
         // In-place partition (slower, no pong buffer).
         subtree_count_a = 0;
@@ -964,7 +1701,6 @@ unsafe fn binned_build_node(
             }
         }
         partitioned_subtrees = subtrees;
-        use_pong_buffer_next = use_pong_buffer;
     }
 
     let leaf_count_b = best_leaf_count_b;
@@ -984,14 +1720,55 @@ unsafe fn binned_build_node(
         child_index_in_parent,
         subtree_count_a,
         subtree_count_b,
-        &mut ctx.leaves,
-        ctx.handle_leaves,
+        &mut (*ctx).leaves,
+        (*ctx).handle_leaves,
     );
 
-    // Recurse into children.
+    // Determine whether to push child B onto the MT task stack.
+    let target_node_task_count = if let Some(mt_ctx) = mt_context_ptr {
+        (*mt_ctx).get_target_task_count_for_nodes(subtree_count)
+    } else {
+        1
+    };
+    let should_push_b_onto_mt_queue = target_node_task_count > 1
+        && subtree_count_a >= MINIMUM_SUBTREES_PER_THREAD_FOR_NODE_JOB
+        && subtree_count_b >= MINIMUM_SUBTREES_PER_THREAD_FOR_NODE_JOB;
+
+    let mut node_b_continuation = ContinuationHandle::default();
+    if should_push_b_onto_mt_queue {
+        // Both children are large. Push child B onto the task stack for parallel execution.
+        debug_assert!(MINIMUM_SUBTREES_PER_THREAD_FOR_NODE_JOB > 1);
+        let mt_ctx = mt_context_ptr.unwrap();
+        // Allocate params on the local stack — we must preserve the stack frame until WaitForCompletion.
+        let mut node_push_context = NodePushTaskContext {
+            context: ctx,
+            node_index: node_child_index_b,
+            parent_node_index: node_index,
+            centroid_bounds: best_centroid_bb_b,
+        };
+        // Encode subtree start, count, and pong flag into the task id.
+        debug_assert!((subtree_count_b as u32) < (1u32 << 31));
+        let task_id = (subtree_region_start_index + subtree_count_a) as i64
+            | ((subtree_count_b as i64) << 32)
+            | if use_pong_buffer { 1i64 << 63 } else { 0 };
+        let mut task = Task::with_context(
+            binned_builder_node_worker,
+            &mut node_push_context as *mut NodePushTaskContext as *mut c_void,
+            task_id,
+        );
+        let disp = dispatcher.unwrap();
+        node_b_continuation = (*(*mt_ctx).task_stack).allocate_continuation_and_push(
+            std::slice::from_mut(&mut task),
+            worker_index,
+            disp,
+            0,
+            Task::default(),
+        );
+    }
+
     if subtree_count_a > 1 {
         binned_build_node(
-            use_pong_buffer_next,
+            use_pong_buffer,
             subtree_region_start_index,
             node_child_index_a,
             subtree_count_a,
@@ -999,11 +1776,13 @@ unsafe fn binned_build_node(
             0,
             &best_centroid_bb_a,
             ctx,
+            worker_index,
+            dispatcher,
         );
     }
-    if subtree_count_b > 1 {
+    if !should_push_b_onto_mt_queue && subtree_count_b > 1 {
         binned_build_node(
-            use_pong_buffer_next,
+            use_pong_buffer,
             subtree_region_start_index + subtree_count_a,
             node_child_index_b,
             subtree_count_b,
@@ -1011,6 +1790,18 @@ unsafe fn binned_build_node(
             1,
             &best_centroid_bb_b,
             ctx,
+            worker_index,
+            dispatcher,
+        );
+    }
+    if should_push_b_onto_mt_queue {
+        // Keep the stack alive until the node push task completes. WaitForCompletion processes pending work.
+        debug_assert!(node_b_continuation.initialized());
+        let mt_ctx = mt_context_ptr.unwrap();
+        (*(*mt_ctx).task_stack).wait_for_completion_unfiltered(
+            node_b_continuation,
+            worker_index,
+            dispatcher.unwrap(),
         );
     }
 }
@@ -1018,6 +1809,7 @@ unsafe fn binned_build_node(
 // ── BinnedBuilderInternal ──────────────────────────────────────────────────
 
 /// Internal entry point: validates and prepares context, then delegates to `binned_build_node`.
+#[allow(clippy::too_many_arguments)]
 unsafe fn binned_builder_internal(
     subtrees: Buffer<NodeChild>,
     subtrees_pong: Buffer<NodeChild>,
@@ -1025,10 +1817,17 @@ unsafe fn binned_builder_internal(
     metanodes: Buffer<Metanode>,
     leaves: Buffer<Leaf>,
     bin_indices: Buffer<u8>,
+    dispatcher: Option<&dyn IThreadDispatcher>,
+    task_stack_pointer: Option<*mut TaskStack>,
+    worker_index: i32,
+    worker_count: i32,
+    target_task_count: i32,
+    pool: Option<*mut BufferPool>,
     minimum_bin_count: i32,
     maximum_bin_count: i32,
     leaf_to_bin_multiplier: f32,
     microsweep_threshold: i32,
+    deterministic: bool,
 ) {
     let subtree_count = subtrees.len();
     debug_assert!(
@@ -1054,48 +1853,158 @@ unsafe fn binned_builder_internal(
     let maximum_bin_count = maximum_bin_count.max(2);
     let allocated_bin_count = maximum_bin_count.max(microsweep_threshold);
 
-    // Stack-allocate the bin workspace.
-    let allocated_byte_count = allocated_bin_count as usize
-        * (4 * mem::size_of::<BoundingBox4>() + mem::size_of::<i32>());
-    let mut bin_bounds_allocation = vec![0u8; allocated_byte_count + 32];
-    // Align to 32 bytes.
-    let aligned_ptr = {
-        let ptr = bin_bounds_allocation.as_mut_ptr() as usize;
-        ((ptr + 31) & !31) as *mut u8
-    };
-    let bin_bounds_memory = Buffer::new(aligned_ptr, allocated_byte_count as i32, 0);
+    if dispatcher.is_none() && task_stack_pointer.is_none() {
+        // Single-threaded path.
+        let allocated_byte_count = allocated_bin_count as usize
+            * (4 * mem::size_of::<BoundingBox4>() + mem::size_of::<i32>());
+        let mut bin_bounds_allocation = vec![0u8; allocated_byte_count + 32];
+        let aligned_ptr = {
+            let ptr = bin_bounds_allocation.as_mut_ptr() as usize;
+            ((ptr + 31) & !31) as *mut u8
+        };
+        let bin_bounds_memory = Buffer::new(aligned_ptr, allocated_byte_count as i32, 0);
 
-    let bins = SingleThreadedBins::new(bin_bounds_memory, allocated_bin_count);
-    let handle_leaves = leaves.allocated();
-    let mut context = BinnedBuilderContext {
-        minimum_bin_count,
-        maximum_bin_count,
-        leaf_to_bin_multiplier,
-        microsweep_threshold,
-        subtrees_ping: subtrees,
-        subtrees_pong,
-        nodes,
-        metanodes,
-        bin_indices,
-        leaves,
-        handle_leaves,
-        bins,
-    };
+        let bins = SingleThreadedBins::new(bin_bounds_memory, allocated_bin_count);
+        let handle_leaves = leaves.allocated();
+        let mut context = BinnedBuilderContext {
+            minimum_bin_count,
+            maximum_bin_count,
+            leaf_to_bin_multiplier,
+            microsweep_threshold,
+            deterministic,
+            subtrees_ping: subtrees,
+            subtrees_pong,
+            nodes,
+            metanodes,
+            bin_indices,
+            leaves,
+            handle_leaves,
+            bins,
+            mt_threading: None,
+        };
 
-    binned_build_node(
-        false,
-        0,
-        0,
-        subtree_count,
-        -1,
-        -1,
-        // Centroid bounds will be computed inside binned_build_node for the root.
-        &BoundingBox4 {
-            min: Vec4::ZERO,
-            max: Vec4::ZERO,
-        },
-        &mut context,
-    );
+        binned_build_node(
+            false,
+            0,
+            0,
+            subtree_count,
+            -1,
+            -1,
+            &BoundingBox4 {
+                min: Vec4::ZERO,
+                max: Vec4::ZERO,
+            },
+            &mut context as *mut BinnedBuilderContext,
+            worker_index,
+            None,
+        );
+    } else {
+        // Multithreaded dispatch.
+        let disp = dispatcher.unwrap();
+        let pool_ptr = pool.unwrap();
+
+        // Allocate per-worker bin storage from the pool.
+        let worker_bins_byte_count = allocated_bin_count * worker_count
+            * (mem::size_of::<BoundingBox4>() as i32 * 4 + mem::size_of::<i32>() as i32);
+        let mut worker_bins_allocation: Buffer<u8> =
+            (*pool_ptr).take_at_least(worker_bins_byte_count);
+
+        let mut worker_contexts_vec =
+            vec![std::mem::zeroed::<BinnedBuildWorkerContext>(); worker_count as usize];
+        let mut bin_alloc_start = 0i32;
+        for i in 0..worker_count as usize {
+            worker_contexts_vec[i] = BinnedBuildWorkerContext::new(
+                worker_bins_allocation,
+                &mut bin_alloc_start,
+                allocated_bin_count,
+            );
+        }
+        let worker_contexts = Buffer::new(
+            worker_contexts_vec.as_mut_ptr(),
+            worker_count,
+            0,
+        );
+
+        let mut task_stack_storage: Option<TaskStack> = None;
+        let actual_task_stack_ptr = if let Some(ts_ptr) = task_stack_pointer {
+            ts_ptr
+        } else {
+            task_stack_storage = Some(TaskStack::new(&mut *pool_ptr, disp, worker_count, 128, 128));
+            task_stack_storage.as_mut().unwrap() as *mut TaskStack
+        };
+        let dispatch_internally = task_stack_pointer.is_none();
+
+        let mut threading = MultithreadBinnedBuildContext {
+            top_level_target_task_count: target_task_count,
+            original_subtree_count: subtrees.len(),
+            task_stack: actual_task_stack_ptr,
+            workers: worker_contexts,
+        };
+
+        // Use a dummy ST bins (won't be used since MT threading is active).
+        let dummy_bins = SingleThreadedBins {
+            bin_bounding_boxes: Buffer::default(),
+            bin_centroid_bounding_boxes: Buffer::default(),
+            bin_bounding_boxes_scan: Buffer::default(),
+            bin_centroid_bounding_boxes_scan: Buffer::default(),
+            bin_leaf_counts: Buffer::default(),
+        };
+        let handle_leaves = leaves.allocated();
+        let mut context = BinnedBuilderContext {
+            minimum_bin_count,
+            maximum_bin_count,
+            leaf_to_bin_multiplier,
+            microsweep_threshold,
+            deterministic,
+            subtrees_ping: subtrees,
+            subtrees_pong,
+            nodes,
+            metanodes,
+            bin_indices,
+            leaves,
+            handle_leaves,
+            bins: dummy_bins,
+            mt_threading: Some(&mut threading as *mut MultithreadBinnedBuildContext),
+        };
+
+        if dispatch_internally {
+            debug_assert!(worker_index == 0);
+            (*actual_task_stack_ptr).push_unsafely_single(
+                Task::with_context(
+                    binned_builder_worker_entry,
+                    &mut context as *mut BinnedBuilderContext as *mut c_void,
+                    0,
+                ),
+                0,
+                disp,
+                0,
+            );
+            TaskStack::dispatch_workers(disp, actual_task_stack_ptr, worker_count);
+        } else {
+            binned_build_node(
+                false,
+                0,
+                0,
+                context.subtrees_ping.len(),
+                -1,
+                -1,
+                &BoundingBox4 {
+                    min: Vec4::ZERO,
+                    max: Vec4::ZERO,
+                },
+                &mut context as *mut BinnedBuilderContext,
+                worker_index,
+                Some(disp),
+            );
+        }
+
+        if dispatch_internally {
+            if let Some(ref mut ts) = task_stack_storage {
+                ts.dispose(&mut *pool_ptr, disp);
+            }
+        }
+        (*pool_ptr).return_buffer(&mut worker_bins_allocation);
+    }
 }
 
 // ── Public API on Tree ─────────────────────────────────────────────────────
@@ -1103,18 +2012,28 @@ unsafe fn binned_builder_internal(
 impl Tree {
     /// Runs a binned build across the given subtrees buffer (static version).
     ///
+    /// Supports both single-threaded and multithreaded execution.
+    /// If `dispatcher` is provided, `pool` must also be provided.
+    ///
     /// # Safety
     /// The caller must ensure all buffers are valid and large enough.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn binned_build_static(
         subtrees: Buffer<NodeChild>,
         mut nodes: Buffer<Node>,
         mut metanodes: Buffer<Metanode>,
         leaves: Buffer<Leaf>,
-        pool: Option<&mut BufferPool>,
+        pool: Option<*mut BufferPool>,
+        dispatcher: Option<&dyn IThreadDispatcher>,
+        task_stack_pointer: Option<*mut TaskStack>,
+        worker_index: i32,
+        worker_count: i32,
+        target_task_count: i32,
         minimum_bin_count: i32,
         maximum_bin_count: i32,
         leaf_to_bin_multiplier: f32,
         microsweep_threshold: i32,
+        deterministic: bool,
     ) {
         if subtrees.len() <= 2 {
             let node = &mut *nodes.as_mut_ptr().add(0);
@@ -1136,11 +2055,27 @@ impl Tree {
         let mut bin_indices: Buffer<u8> = Buffer::default();
         let mut requires_return = false;
 
-        if let Some(pool) = pool {
-            subtrees_pong = pool.take_at_least(subtrees.len());
-            bin_indices = pool.take_at_least(subtrees.len());
+        if let Some(pool_ptr) = pool {
+            subtrees_pong = (*pool_ptr).take_at_least(subtrees.len());
+            bin_indices = (*pool_ptr).take_at_least(subtrees.len());
             requires_return = true;
         }
+
+        let effective_worker_count = if dispatcher.is_none() {
+            0
+        } else if worker_count < 0 {
+            dispatcher.unwrap().thread_count()
+        } else {
+            worker_count
+        };
+
+        let effective_target_task_count = if dispatcher.is_none() {
+            0
+        } else if target_task_count < 0 {
+            dispatcher.unwrap().thread_count()
+        } else {
+            target_task_count
+        };
 
         binned_builder_internal(
             subtrees,
@@ -1149,17 +2084,24 @@ impl Tree {
             metanodes,
             leaves,
             bin_indices,
+            dispatcher,
+            task_stack_pointer,
+            worker_index,
+            effective_worker_count,
+            effective_target_task_count,
+            pool,
             minimum_bin_count,
             maximum_bin_count,
             leaf_to_bin_multiplier,
             microsweep_threshold,
+            deterministic,
         );
 
         if requires_return {
-            // Safety: pool is Some if requires_return is true, but we've moved pool above.
-            // In practice this would need the pool reference. We leak it here since pool
-            // lifetimes in the Rust port differ from C# — callers should manage the pong
-            // allocation externally if pool-return is important.
+            if let Some(pool_ptr) = pool {
+                (*pool_ptr).return_buffer(&mut bin_indices);
+                (*pool_ptr).return_buffer(&mut subtrees_pong);
+            }
         }
     }
 
@@ -1167,14 +2109,21 @@ impl Tree {
     ///
     /// # Safety
     /// The caller must ensure the tree's buffers are properly allocated and sized.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn binned_build(
         &mut self,
         subtrees: Buffer<NodeChild>,
-        pool: Option<&mut BufferPool>,
+        pool: Option<*mut BufferPool>,
+        dispatcher: Option<&dyn IThreadDispatcher>,
+        task_stack_pointer: Option<*mut TaskStack>,
+        worker_index: i32,
+        worker_count: i32,
+        target_task_count: i32,
         minimum_bin_count: i32,
         maximum_bin_count: i32,
         leaf_to_bin_multiplier: f32,
         microsweep_threshold: i32,
+        deterministic: bool,
     ) {
         let nodes = self.nodes.slice_offset(self.node_count, subtrees.len() - 1);
         let metanodes = self.metanodes.slice_offset(self.node_count, subtrees.len() - 1);
@@ -1185,10 +2134,16 @@ impl Tree {
             metanodes,
             leaves,
             pool,
+            dispatcher,
+            task_stack_pointer,
+            worker_index,
+            worker_count,
+            target_task_count,
             minimum_bin_count,
             maximum_bin_count,
             leaf_to_bin_multiplier,
             microsweep_threshold,
+            deterministic,
         );
     }
 }

@@ -266,7 +266,7 @@ impl Mesh {
             std::slice::from_raw_parts(mesh.triangles.as_ptr(), tri_len as usize),
             std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), tri_len as usize),
         );
-        mesh.tree.binned_build(subtrees, Some(pool), 16, 64, 1.0 / 16.0, 64);
+        mesh.tree.binned_build(subtrees, Some(pool as *mut BufferPool), None, None, 0, -1, -1, 16, 64, 1.0 / 16.0, 64, false);
         pool.return_buffer(&mut subtrees);
         mesh
     }

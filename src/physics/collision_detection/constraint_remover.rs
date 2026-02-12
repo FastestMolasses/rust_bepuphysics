@@ -494,6 +494,20 @@ impl ConstraintRemover {
         }
     }
 
+    /// Removes a body from constrained kinematics and removes all fallback batch constraints for it.
+    /// Called during sleep transitions. Equivalent to C# ConstraintRemover.TryRemoveBodyFromConstrainedKinematicsAndRemoveAllConstraintsForBodyFromFallbackBatch.
+    pub unsafe fn try_remove_body_from_constrained_kinematics_and_remove_all_constraints_for_body_from_fallback_batch(
+        &mut self,
+        body_handle: BodyHandle,
+        body_index: i32,
+    ) {
+        let solver = &mut *self.solver;
+        let pool = &mut *self.pool;
+        solver.try_remove_dynamic_body_from_fallback(body_handle, body_index, &mut self.allocation_ids_to_free);
+        // Note that we don't check kinematicity here. If it's dynamic, that's fine, this won't do anything.
+        solver.constrained_kinematic_handles.fast_remove(&body_handle.0);
+    }
+
     /// Removes constraints from batch referenced handles (non-fallback batches).
     pub fn remove_constraints_from_batch_referenced_handles(&mut self) {
         if let Some(ref batches) = self.batches {

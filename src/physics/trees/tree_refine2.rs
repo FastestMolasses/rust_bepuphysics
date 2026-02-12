@@ -1,5 +1,4 @@
 // Translated from BepuPhysics/Trees/Tree_Refine2.cs
-// Note: Multithreaded paths are omitted for now; only single-threaded refinement is provided.
 
 use super::leaf::Leaf;
 use super::node::{Node, NodeChild};
@@ -9,8 +8,38 @@ use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::task_scheduling::{Task, TaskStack};
+use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use std::ffi::c_void;
 use std::simd::Simd;
 use std::simd::cmp::SimdPartialEq;
+
+/// Context passed to reify tasks for both root and subtree MT reification.
+#[repr(C)]
+struct ReifyRefinementContext {
+    refinement_node_indices: *mut QuickList<i32>,
+    refinement_nodes: *mut Buffer<Node>,
+    start_index: i32,
+    end_index: i32,
+    tree: *mut Tree,
+}
+
+/// Context for the top-level MT refinement dispatch.
+#[repr(C)]
+struct RefinementContext {
+    root_refinement_size: i32,
+    subtree_refinement_size: i32,
+    total_leaf_count_in_subtrees: i32,
+    target_task_budget: i32,
+    worker_count: i32,
+    subtree_refinement_targets: QuickList<i32>,
+    task_stack: *mut TaskStack,
+    deterministic: bool,
+    use_priority_queue: bool,
+    /// A *copy* of the original tree. Refinements modify memory *pointed to* by the tree,
+    /// not the Tree struct itself.
+    tree: Tree,
+}
 
 const FLAG_FOR_ROOT_REFINEMENT_SUBTREE: i32 = 1 << 30;
 
@@ -238,6 +267,468 @@ impl Tree {
             refinement_node_indices,
             refinement_nodes,
             self,
+        );
+    }
+
+    // ── MT reification via TaskStack ──
+
+    unsafe fn reify_root_refinement_task(
+        _id: i64,
+        untyped_context: *mut c_void,
+        _worker_index: i32,
+        _dispatcher: &dyn IThreadDispatcher,
+    ) {
+        let ctx = &*(untyped_context as *const ReifyRefinementContext);
+        Self::reify_root_refinement_range(
+            ctx.start_index,
+            ctx.end_index,
+            &*ctx.refinement_node_indices,
+            &*ctx.refinement_nodes,
+            &mut *ctx.tree,
+        );
+    }
+
+    unsafe fn reify_root_refinement_mt(
+        &self,
+        refinement_node_indices: *mut QuickList<i32>,
+        refinement_nodes: *mut Buffer<Node>,
+        target_task_count: i32,
+        worker_index: i32,
+        task_stack: *mut TaskStack,
+        dispatcher: &dyn IThreadDispatcher,
+    ) {
+        let count = (*refinement_node_indices).count;
+        let nodes_per_task = count / target_task_count;
+        let remainder = count - target_task_count * nodes_per_task;
+        debug_assert!(
+            target_task_count < 1024,
+            "Excessive task count for reify"
+        );
+        let mut tasks: Vec<Task> = Vec::with_capacity(target_task_count as usize);
+        let mut contexts: Vec<ReifyRefinementContext> =
+            Vec::with_capacity(target_task_count as usize);
+        let tree_ptr = self as *const Tree as *mut Tree;
+
+        let mut previous_end = 0i32;
+        for i in 0..target_task_count {
+            let c = if i < remainder {
+                nodes_per_task + 1
+            } else {
+                nodes_per_task
+            };
+            contexts.push(ReifyRefinementContext {
+                refinement_node_indices,
+                refinement_nodes,
+                tree: tree_ptr,
+                start_index: previous_end,
+                end_index: previous_end + c,
+            });
+            previous_end += c;
+        }
+        for i in 0..target_task_count as usize {
+            tasks.push(Task::with_context(
+                Self::reify_root_refinement_task,
+                &mut contexts[i] as *mut ReifyRefinementContext as *mut c_void,
+                i as i64,
+            ));
+        }
+        (*task_stack).run_tasks_unfiltered(&mut tasks, worker_index, dispatcher, 0);
+    }
+
+    unsafe fn reify_subtree_refinement_task(
+        _id: i64,
+        untyped_context: *mut c_void,
+        _worker_index: i32,
+        _dispatcher: &dyn IThreadDispatcher,
+    ) {
+        let ctx = &*(untyped_context as *const ReifyRefinementContext);
+        Self::reify_subtree_refinement_range(
+            ctx.start_index,
+            ctx.end_index,
+            &*ctx.refinement_node_indices,
+            &*ctx.refinement_nodes,
+            &mut *ctx.tree,
+        );
+    }
+
+    unsafe fn reify_subtree_refinement_mt(
+        &self,
+        refinement_node_indices: *mut QuickList<i32>,
+        refinement_nodes: *mut Buffer<Node>,
+        target_task_count: i32,
+        worker_index: i32,
+        task_stack: *mut TaskStack,
+        dispatcher: &dyn IThreadDispatcher,
+    ) {
+        let count = (*refinement_node_indices).count;
+        let nodes_per_task = count / target_task_count;
+        let remainder = count - target_task_count * nodes_per_task;
+        debug_assert!(
+            target_task_count < 1024,
+            "Excessive task count for reify"
+        );
+        let mut tasks: Vec<Task> = Vec::with_capacity(target_task_count as usize);
+        let mut contexts: Vec<ReifyRefinementContext> =
+            Vec::with_capacity(target_task_count as usize);
+        let tree_ptr = self as *const Tree as *mut Tree;
+
+        let mut previous_end = 0i32;
+        for i in 0..target_task_count {
+            let c = if i < remainder {
+                nodes_per_task + 1
+            } else {
+                nodes_per_task
+            };
+            contexts.push(ReifyRefinementContext {
+                refinement_node_indices,
+                refinement_nodes,
+                tree: tree_ptr,
+                start_index: previous_end,
+                end_index: previous_end + c,
+            });
+            previous_end += c;
+        }
+        for i in 0..target_task_count as usize {
+            tasks.push(Task::with_context(
+                Self::reify_subtree_refinement_task,
+                &mut contexts[i] as *mut ReifyRefinementContext as *mut c_void,
+                i as i64,
+            ));
+        }
+        (*task_stack).run_tasks_unfiltered(&mut tasks, worker_index, dispatcher, 0);
+    }
+
+    // ── MT Refine2 infrastructure ──
+
+    unsafe fn execute_root_refinement_task(
+        _id: i64,
+        untyped_context: *mut c_void,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+    ) {
+        let context = &mut *(untyped_context as *mut RefinementContext);
+        let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+
+        let task_count = ((context.target_task_budget as f32
+            * context.root_refinement_size as f32
+            / (context.root_refinement_size + context.total_leaf_count_in_subtrees) as f32)
+            .ceil() as i32)
+            .max(1);
+
+        let mut root_refinement_subtrees =
+            QuickList::<NodeChild>::with_capacity(context.root_refinement_size, pool);
+        let mut root_refinement_node_indices =
+            QuickList::<i32>::with_capacity(context.root_refinement_size, pool);
+
+        if context.use_priority_queue {
+            context.tree.collect_subtrees_for_root_refinement_with_priority_queue(
+                context.root_refinement_size,
+                context.subtree_refinement_size,
+                pool,
+                &context.subtree_refinement_targets,
+                &mut root_refinement_node_indices,
+                &mut root_refinement_subtrees,
+            );
+        } else {
+            context.tree.collect_subtrees_for_root_refinement(
+                context.root_refinement_size,
+                context.subtree_refinement_size,
+                pool,
+                &context.subtree_refinement_targets,
+                &mut root_refinement_node_indices,
+                &mut root_refinement_subtrees,
+            );
+        }
+
+        debug_assert_eq!(
+            root_refinement_node_indices.count,
+            root_refinement_subtrees.count - 1
+        );
+        let mut root_refinement_nodes: Buffer<Node> = pool.take_at_least(root_refinement_node_indices.count);
+        // Use ST BinnedBuild. MT BinnedBuild would be used here when taskCount > 1,
+        // but requires MT BinnedBuilder which is not yet implemented.
+        Tree::binned_build_static(
+            root_refinement_subtrees.span,
+            root_refinement_nodes,
+            Buffer::default(),
+            Buffer::default(),
+            Some(pool as *mut BufferPool),
+            None,
+            None,
+            0,
+            -1,
+            -1,
+            16,
+            64,
+            1.0 / 16.0,
+            64,
+            false,
+        );
+        if task_count > 1 {
+            context.tree.reify_root_refinement_mt(
+                &mut root_refinement_node_indices,
+                &mut root_refinement_nodes,
+                task_count,
+                worker_index,
+                context.task_stack,
+                dispatcher,
+            );
+        } else {
+            context.tree.reify_root_refinement_st(
+                &root_refinement_node_indices,
+                &root_refinement_nodes,
+            );
+        }
+
+        root_refinement_subtrees.dispose(pool);
+        root_refinement_node_indices.dispose(pool);
+        let mut root_refinement_nodes = root_refinement_nodes;
+        pool.return_buffer(&mut root_refinement_nodes);
+    }
+
+    unsafe fn execute_subtree_refinement_task(
+        subtree_refinement_target: i64,
+        untyped_context: *mut c_void,
+        worker_index: i32,
+        dispatcher: &dyn IThreadDispatcher,
+    ) {
+        let context = &mut *(untyped_context as *mut RefinementContext);
+        let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
+
+        let refinement_root_node = &*context.tree.nodes.as_ptr().add(subtree_refinement_target as usize);
+        let refinement_leaf_count = refinement_root_node.a.leaf_count + refinement_root_node.b.leaf_count;
+        let task_count = ((context.target_task_budget as f32
+            * refinement_leaf_count as f32
+            / (context.root_refinement_size + context.total_leaf_count_in_subtrees) as f32)
+            .ceil() as i32)
+            .max(1);
+
+        let mut subtree_refinement_node_indices =
+            QuickList::<i32>::with_capacity(context.subtree_refinement_size, pool);
+        let mut subtree_refinement_leaves =
+            QuickList::<NodeChild>::with_capacity(context.subtree_refinement_size, pool);
+        let subtree_stack_buffer: Buffer<i32> = pool.take_at_least(context.subtree_refinement_size);
+
+        context.tree.collect_subtrees_for_subtree_refinement(
+            subtree_refinement_target as i32,
+            &subtree_stack_buffer,
+            &mut subtree_refinement_node_indices,
+            &mut subtree_refinement_leaves,
+        );
+
+        let mut refinement_nodes: Buffer<Node> = pool.take_at_least(subtree_refinement_node_indices.count);
+        // Use ST BinnedBuild. MT BinnedBuild would be used here when taskCount > 1.
+        Tree::binned_build_static(
+            subtree_refinement_leaves.span,
+            refinement_nodes,
+            Buffer::default(),
+            Buffer::default(),
+            Some(pool as *mut BufferPool),
+            None,
+            None,
+            0,
+            -1,
+            -1,
+            16,
+            64,
+            1.0 / 16.0,
+            64,
+            false,
+        );
+
+        if task_count > 1 {
+            context.tree.reify_subtree_refinement_mt(
+                &mut subtree_refinement_node_indices,
+                &mut refinement_nodes,
+                task_count,
+                worker_index,
+                context.task_stack,
+                dispatcher,
+            );
+        } else {
+            context.tree.reify_subtree_refinement_st(
+                &subtree_refinement_node_indices,
+                &refinement_nodes,
+            );
+        }
+
+        let mut refinement_nodes = refinement_nodes;
+        pool.return_buffer(&mut refinement_nodes);
+        subtree_refinement_node_indices.dispose(pool);
+        subtree_refinement_leaves.dispose(pool);
+        let mut subtree_stack_buffer = subtree_stack_buffer;
+        pool.return_buffer(&mut subtree_stack_buffer);
+    }
+
+    /// Internal MT Refine2 dispatch.
+    unsafe fn refine2_internal(
+        &mut self,
+        root_refinement_size: i32,
+        subtree_refinement_start_index: &mut i32,
+        subtree_refinement_count: i32,
+        subtree_refinement_size: i32,
+        pool: &mut BufferPool,
+        worker_index: i32,
+        task_stack: *mut TaskStack,
+        thread_dispatcher: &dyn IThreadDispatcher,
+        internally_dispatch: bool,
+        worker_count: i32,
+        target_task_budget: i32,
+        deterministic: bool,
+        use_priority_queue: bool,
+    ) {
+        if self.leaf_count <= 2 {
+            return;
+        }
+        if root_refinement_size <= 0 && (subtree_refinement_count <= 0 || subtree_refinement_size <= 0) {
+            return;
+        }
+        let mut subtree_refinement_count = subtree_refinement_count;
+        let subtree_refinement_size = subtree_refinement_size.min(self.leaf_count);
+        if subtree_refinement_size <= 0 {
+            subtree_refinement_count = 0;
+        }
+        let target_task_budget = if target_task_budget < 0 {
+            thread_dispatcher.thread_count()
+        } else {
+            target_task_budget
+        };
+        let root_refinement_size = root_refinement_size.min(self.leaf_count);
+
+        let subtree_refinement_capacity =
+            BundleIndexing::get_bundle_count(subtree_refinement_count as usize) as i32 * 4;
+        let mut subtree_refinement_targets =
+            QuickList::<i32>::with_capacity(subtree_refinement_capacity, pool);
+        self.find_subtree_refinement_targets(
+            subtree_refinement_size,
+            subtree_refinement_count,
+            subtree_refinement_start_index,
+            &mut subtree_refinement_targets,
+        );
+        // Fill trailing slots with -1 to avoid false matches.
+        for i in subtree_refinement_targets.count..subtree_refinement_capacity {
+            if i < subtree_refinement_targets.span.len() {
+                *subtree_refinement_targets.span.get_mut(i) = -1;
+            }
+        }
+
+        let root_refinement_count = if root_refinement_size > 0 { 1 } else { 0 };
+        let task_count = root_refinement_count + subtree_refinement_targets.count;
+        let mut tasks: Buffer<Task> = pool.take_at_least(task_count);
+
+        let mut total_leaf_count_in_subtrees = 0i32;
+        for i in 0..subtree_refinement_targets.count {
+            let node = &*self.nodes.as_ptr().add(subtree_refinement_targets[i] as usize);
+            total_leaf_count_in_subtrees += node.a.leaf_count + node.b.leaf_count;
+        }
+
+        let mut context = RefinementContext {
+            root_refinement_size,
+            subtree_refinement_size,
+            total_leaf_count_in_subtrees,
+            target_task_budget,
+            subtree_refinement_targets,
+            task_stack,
+            worker_count,
+            deterministic,
+            use_priority_queue,
+            tree: *self, // copy
+        };
+
+        for i in 0..context.subtree_refinement_targets.count {
+            *tasks.get_mut(i) = Task::with_context(
+                Self::execute_subtree_refinement_task,
+                &mut context as *mut RefinementContext as *mut c_void,
+                context.subtree_refinement_targets[i] as i64,
+            );
+        }
+        if root_refinement_size > 0 {
+            *tasks.get_mut(task_count - 1) = Task::with_context(
+                Self::execute_root_refinement_task,
+                &mut context as *mut RefinementContext as *mut c_void,
+                0,
+            );
+        }
+
+        let tasks_slice = std::slice::from_raw_parts_mut(tasks.as_ptr() as *mut Task, task_count as usize);
+        if internally_dispatch {
+            (*task_stack).allocate_continuation_and_push(
+                tasks_slice,
+                worker_index,
+                thread_dispatcher,
+                0,
+                TaskStack::get_request_stop_task(task_stack),
+            );
+            TaskStack::dispatch_workers(thread_dispatcher, task_stack, worker_count);
+        } else {
+            (*task_stack).run_tasks_unfiltered(tasks_slice, worker_index, thread_dispatcher, 0);
+        }
+
+        pool.return_buffer(&mut tasks);
+        context.subtree_refinement_targets.dispose(pool);
+    }
+
+    /// MT Refine2 with internally managed dispatch. Creates its own TaskStack.
+    pub unsafe fn refine2_mt(
+        &mut self,
+        root_refinement_size: i32,
+        subtree_refinement_start_index: &mut i32,
+        subtree_refinement_count: i32,
+        subtree_refinement_size: i32,
+        pool: &mut BufferPool,
+        thread_dispatcher: &dyn IThreadDispatcher,
+        deterministic: bool,
+        use_priority_queue: bool,
+    ) {
+        let thread_count = thread_dispatcher.thread_count();
+        let mut task_stack = TaskStack::new(pool, thread_dispatcher, thread_count, 128, 128);
+        self.refine2_internal(
+            root_refinement_size,
+            subtree_refinement_start_index,
+            subtree_refinement_count,
+            subtree_refinement_size,
+            pool,
+            0,
+            &mut task_stack,
+            thread_dispatcher,
+            true,
+            thread_count,
+            thread_count,
+            deterministic,
+            use_priority_queue,
+        );
+        task_stack.dispose(pool, thread_dispatcher);
+    }
+
+    /// MT Refine2 using a caller-managed TaskStack. Does not dispatch workers internally.
+    pub unsafe fn refine2_mt_with_task_stack(
+        &mut self,
+        root_refinement_size: i32,
+        subtree_refinement_start_index: &mut i32,
+        subtree_refinement_count: i32,
+        subtree_refinement_size: i32,
+        pool: &mut BufferPool,
+        thread_dispatcher: &dyn IThreadDispatcher,
+        task_stack: *mut TaskStack,
+        worker_index: i32,
+        target_task_count: i32,
+        deterministic: bool,
+        use_priority_queue: bool,
+    ) {
+        self.refine2_internal(
+            root_refinement_size,
+            subtree_refinement_start_index,
+            subtree_refinement_count,
+            subtree_refinement_size,
+            pool,
+            worker_index,
+            task_stack,
+            thread_dispatcher,
+            false,
+            thread_dispatcher.thread_count(),
+            target_task_count,
+            deterministic,
+            use_priority_queue,
         );
     }
 
@@ -673,11 +1164,17 @@ impl Tree {
                     root_refinement_nodes,
                     Buffer::default(),
                     Buffer::default(),
-                    Some(pool),
+                    Some(pool as *mut BufferPool),
+                    None,
+                    None,
+                    0,
+                    -1,
+                    -1,
                     16,
                     64,
                     1.0 / 16.0,
                     64,
+                    false,
                 );
             }
             self.reify_root_refinement_st(&root_refinement_node_indices, &root_refinement_nodes);
@@ -710,11 +1207,17 @@ impl Tree {
                     refinement_nodes,
                     Buffer::default(),
                     Buffer::default(),
-                    Some(pool),
+                    Some(pool as *mut BufferPool),
+                    None,
+                    None,
+                    0,
+                    -1,
+                    -1,
                     16,
                     64,
                     1.0 / 16.0,
                     64,
+                    false,
                 );
             }
             self.reify_subtree_refinement_st(

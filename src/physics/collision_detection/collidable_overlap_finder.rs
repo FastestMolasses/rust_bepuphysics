@@ -4,9 +4,13 @@ use crate::physics::collidables::collidable_reference::CollidableReference;
 use crate::physics::collision_detection::broad_phase::BroadPhase;
 use crate::physics::collision_detection::narrow_phase::NarrowPhaseGeneric;
 use crate::physics::collision_detection::narrow_phase_callbacks::INarrowPhaseCallbacks;
+use crate::physics::trees::tree_intertree_queries_mt::MultithreadedIntertreeTest;
+use crate::physics::trees::tree_self_queries_mt::MultithreadedSelfTest;
 use crate::physics::trees::IOverlapHandler;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Trait for types that can dispatch broad phase overlap testing.
 /// Matches C#'s abstract `CollidableOverlapFinder` base class.
@@ -55,26 +59,138 @@ type DispatchFn = unsafe fn(
     narrow_phase: *mut u8,
     broad_phase: *mut BroadPhase,
     dt: f32,
+    thread_dispatcher: Option<&dyn IThreadDispatcher>,
 );
+
+/// Context for the MT overlap worker function.
+struct OverlapWorkerContext {
+    self_test: *mut u8,       // *mut MultithreadedSelfTest<SelfOverlapHandler>
+    intertree_test: *mut u8,  // *mut MultithreadedIntertreeTest<IntertreeOverlapHandler>
+    narrow_phase: *mut u8,
+    self_job_count: i32,
+    total_job_count: i32,
+    next_job_index: UnsafeCell<i32>,
+    // Type-erased function pointers for execute_job calls
+    execute_self_job: unsafe fn(*mut u8, i32, i32),
+    execute_intertree_job: unsafe fn(*mut u8, i32, i32),
+    flush_worker: unsafe fn(*mut u8, i32),
+}
+
+unsafe fn execute_self_job_impl<TCallbacks: INarrowPhaseCallbacks>(ctx: *mut u8, job_index: i32, worker_index: i32) {
+    let test = &mut *(ctx as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>);
+    test.execute_job(job_index, worker_index);
+}
+
+unsafe fn execute_intertree_job_impl<TCallbacks: INarrowPhaseCallbacks>(ctx: *mut u8, job_index: i32, worker_index: i32) {
+    let test = &mut *(ctx as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>);
+    test.execute_job(job_index, worker_index);
+}
+
+unsafe fn flush_worker_impl<TCallbacks: INarrowPhaseCallbacks>(np: *mut u8, worker_index: i32) {
+    let np = &mut *(np as *mut NarrowPhaseGeneric<TCallbacks>);
+    np.overlap_workers[worker_index as usize].batcher.flush();
+}
+
+/// Worker function dispatched by the thread dispatcher.
+fn overlap_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
+    unsafe {
+        let ctx = &*(dispatcher.unmanaged_context() as *const OverlapWorkerContext);
+        loop {
+            let job_index = AtomicI32::from_ptr(ctx.next_job_index.get()).fetch_add(1, Ordering::AcqRel);
+            if job_index < ctx.self_job_count {
+                (ctx.execute_self_job)(ctx.self_test, job_index, worker_index);
+            } else if job_index < ctx.total_job_count {
+                (ctx.execute_intertree_job)(ctx.intertree_test, job_index - ctx.self_job_count, worker_index);
+            } else {
+                break;
+            }
+        }
+        (ctx.flush_worker)(ctx.narrow_phase, worker_index);
+    }
+}
 
 unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
     narrow_phase_ptr: *mut u8,
     broad_phase_ptr: *mut BroadPhase,
     dt: f32,
+    thread_dispatcher: Option<&dyn IThreadDispatcher>,
 ) {
     let np = &mut *(narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>);
     let bp = &mut *broad_phase_ptr;
 
-    // NOTE: Multi-threaded overlap dispatch using MultithreadedSelfTest/MultithreadedIntertreeTest not yet implemented.
-    // These C# types are in the missing multi-threaded tree files (tree_self_queries_mt.rs,
-    // tree_intertree_queries_mt.rs). When available, the thread_dispatcher would be passed
-    // to prepare() and used to create per-worker handlers + dispatch.
+    if let Some(td) = thread_dispatcher {
+        if td.thread_count() > 1 {
+            // Multi-threaded path
+            np.prepare(dt, Some(td));
+            let thread_count = td.thread_count();
 
-    // Single-threaded path: prepare with no dispatcher (creates 1 overlap worker).
+            // Create per-worker overlap handlers
+            let mut self_handlers = Vec::with_capacity(thread_count as usize);
+            let mut intertree_handlers = Vec::with_capacity(thread_count as usize);
+            for i in 0..thread_count {
+                self_handlers.push(SelfOverlapHandler::<TCallbacks> {
+                    narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
+                    leaves: bp.active_leaves,
+                    worker_index: i,
+                });
+                intertree_handlers.push(IntertreeOverlapHandler::<TCallbacks> {
+                    narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
+                    leaves_a: bp.active_leaves,
+                    leaves_b: bp.static_leaves,
+                    worker_index: i,
+                });
+            }
+
+            // Prepare MT overlap testing jobs
+            let pool = np.base.pool;
+            let mut self_test = MultithreadedSelfTest::new(pool);
+            self_test.prepare_jobs(&bp.active_tree, self_handlers, thread_count);
+            let mut intertree_test = MultithreadedIntertreeTest::new(pool);
+            intertree_test.prepare_jobs(&bp.active_tree, &bp.static_tree, intertree_handlers, thread_count);
+
+            let self_job_count = self_test.job_count();
+            let intertree_job_count = intertree_test.job_count();
+            let total_job_count = self_job_count + intertree_job_count;
+
+            let mut ctx = OverlapWorkerContext {
+                self_test: &mut self_test as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>> as *mut u8,
+                intertree_test: &mut intertree_test as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>> as *mut u8,
+                narrow_phase: narrow_phase_ptr,
+                self_job_count,
+                total_job_count,
+                next_job_index: UnsafeCell::new(-1),
+                execute_self_job: execute_self_job_impl::<TCallbacks>,
+                execute_intertree_job: execute_intertree_job_impl::<TCallbacks>,
+                flush_worker: flush_worker_impl::<TCallbacks>,
+            };
+
+            td.dispatch_workers(
+                overlap_worker,
+                total_job_count,
+                &mut ctx as *mut OverlapWorkerContext as *mut (),
+                None,
+            );
+
+            // If total job count was zero, flush worker 0 (tree was tiny)
+            if total_job_count == 0 {
+                let np = &mut *(narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>);
+                np.overlap_workers[0].batcher.flush();
+            }
+            // Flush any workers that were allocated but not used due to lack of jobs
+            for i in (1.max(total_job_count))..thread_count {
+                let np = &mut *(narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>);
+                np.overlap_workers[i as usize].batcher.flush();
+            }
+
+            self_test.complete_self_test();
+            intertree_test.complete_test();
+            return;
+        }
+    }
+
+    // Single-threaded path
     np.prepare(dt, None);
 
-    // Single-threaded path:
-    // 1) Self-test the active tree for body-body overlaps
     {
         let mut self_handler = SelfOverlapHandler::<TCallbacks> {
             narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
@@ -84,7 +200,6 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
         bp.active_tree.get_self_overlaps(&mut self_handler);
     }
 
-    // 2) Inter-tree test active vs static for body-static overlaps
     {
         let mut intertree_handler = IntertreeOverlapHandler::<TCallbacks> {
             narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
@@ -96,20 +211,15 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
             .get_overlaps_with_tree(&bp.static_tree, &mut intertree_handler);
     }
 
-    // 3) Flush the collision batcher for worker 0
     let np = &mut *(narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>);
     np.overlap_workers[0].batcher.flush();
 }
 
 // ============================================================================
 // CollidableOverlapFinder — type-erased dispatch between broad phase trees.
-// Uses a monomorphized function pointer captured at construction time to
-// perform overlap testing without requiring generic type parameters.
 // ============================================================================
 
 /// Dispatches overlap testing between broad phase trees.
-/// Stores type-erased pointers to NarrowPhaseGeneric and BroadPhase,
-/// with a monomorphized dispatch function that knows the concrete TCallbacks type.
 pub struct CollidableOverlapFinder {
     narrow_phase: *mut u8,
     broad_phase: *mut BroadPhase,
@@ -135,13 +245,10 @@ impl CollidableOverlapFinder {
     pub fn dispatch_overlaps(
         &mut self,
         dt: f32,
-        _thread_dispatcher: Option<&dyn IThreadDispatcher>,
+        thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
-        // NOTE: When multi-threaded overlap dispatch is implemented (requires
-        // MultithreadedSelfTest/MultithreadedIntertreeTest tree types), pass
-        // thread_dispatcher through to prepare and create per-worker handlers.
         unsafe {
-            (self.dispatch_fn)(self.narrow_phase, self.broad_phase, dt);
+            (self.dispatch_fn)(self.narrow_phase, self.broad_phase, dt, thread_dispatcher);
         }
     }
 }

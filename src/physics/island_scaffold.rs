@@ -132,6 +132,7 @@ impl IslandScaffoldConstraintBatch {
 
 /// Represents the constraint batch structure and all references in an island.
 /// Holds everything necessary to create and gather a full island.
+#[derive(Clone, Copy)]
 pub(crate) struct IslandScaffold {
     pub body_indices: QuickList<i32>,
     pub protobatches: QuickList<IslandScaffoldConstraintBatch>,

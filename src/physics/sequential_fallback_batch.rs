@@ -39,6 +39,7 @@ impl IBodyReferenceGetter for InactiveSetGetter {
 /// Contains constraints that could not belong to any lower constraint batch due to their involved
 /// bodies. All of the contained constraints will be solved using a fallback solver that trades
 /// rigidity for parallelism.
+#[derive(Clone, Copy)]
 pub struct SequentialFallbackBatch {
     // In order to maintain the batch referenced handles for the fallback batch (which can have
     // the same body appear more than once), every body must maintain a count of fallback

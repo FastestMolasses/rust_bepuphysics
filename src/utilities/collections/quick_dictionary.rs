@@ -561,6 +561,12 @@ impl<'a, TKey: Copy, TValue: Copy> Iterator for QuickDictionaryIterator<'a, TKey
 
 impl<'a, TKey: Copy, TValue: Copy> ExactSizeIterator for QuickDictionaryIterator<'a, TKey, TValue> {}
 
+impl<TKey: Copy, TValue: Copy, TEqualityComparer: Copy> Clone for QuickDictionary<TKey, TValue, TEqualityComparer> {
+    fn clone(&self) -> Self { *self }
+}
+
+impl<TKey: Copy, TValue: Copy, TEqualityComparer: Copy> Copy for QuickDictionary<TKey, TValue, TEqualityComparer> {}
+
 impl<TKey: Copy, TValue: Copy, TEqualityComparer: Default> Default
     for QuickDictionary<TKey, TValue, TEqualityComparer>
 {
