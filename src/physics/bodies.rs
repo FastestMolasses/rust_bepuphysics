@@ -323,7 +323,7 @@ impl Bodies {
         );
         let sets_capacity = BufferPool::get_capacity_for_count::<BodySet>(sets_capacity);
         if self.sets.len() != sets_capacity {
-            let old_capacity = self.sets.len();
+            let _old_capacity = self.sets.len();
             let pool_ptr = self.pool;
             let pool = unsafe { &mut *pool_ptr };
             // BodySet is not Copy, so we do a raw memory resize.

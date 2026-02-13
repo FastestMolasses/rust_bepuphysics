@@ -96,7 +96,7 @@ impl OneBodyAngularServoFunctions {
         _position_a: &Vector3Wide,
         _orientation_a: &QuaternionWide,
         inertia_a: &BodyInertiaWide,
-        prestep: &OneBodyAngularServoPrestepData,
+        _prestep: &OneBodyAngularServoPrestepData,
         accumulated_impulses: &Vector3Wide,
         wsv_a: &mut BodyVelocityWide,
     ) {

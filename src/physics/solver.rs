@@ -12,7 +12,7 @@ use crate::physics::constraints::constraint_description::{
     IThreeBodyConstraintDescription, ITwoBodyConstraintDescription,
 };
 use crate::physics::constraints::type_batch::TypeBatch;
-use crate::physics::constraints::type_processor::{ITypeProcessor, TypeProcessor};
+use crate::physics::constraints::type_processor::TypeProcessor;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::pose_integrator::IPoseIntegrator;
 use crate::physics::solve_description::{SolveDescription, SubstepVelocityIterationScheduler};
@@ -413,7 +413,7 @@ impl Solver {
     /// Attempts to locate a spot for a new constraint. Does not perform allocation.
     /// Returns the index of the batch that the constraint would fit in.
     pub(crate) fn find_candidate_batch_with_handles(&self, dynamic_handles: &[i32]) -> i32 {
-        let (sync_count, fallback_exists) = self.get_synchronized_batch_count();
+        let (sync_count, _fallback_exists) = self.get_synchronized_batch_count();
         if dynamic_handles.len() == 2 {
             let a = dynamic_handles[0];
             let b = dynamic_handles[1];

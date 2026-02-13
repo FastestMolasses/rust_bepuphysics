@@ -1,6 +1,7 @@
 #![feature(portable_simd)]
 // #![feature(effects)]
 #![feature(generic_const_exprs)]
+#![allow(unused_unsafe)]
 
 mod physics;
 pub mod utilities;

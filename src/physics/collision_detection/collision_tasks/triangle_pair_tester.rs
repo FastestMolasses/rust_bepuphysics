@@ -808,7 +808,7 @@ impl TrianglePairTester {
             );
 
             let edge_threshold = Vector::<f32>::splat(0.2);
-            let use_edge_case_for_a = local_normal_dot_face_normal_a.abs().simd_lt(edge_threshold);
+            let _use_edge_case_for_a = local_normal_dot_face_normal_a.abs().simd_lt(edge_threshold);
             let use_edge_case_for_b = local_normal_dot_face_normal_b.abs().simd_lt(edge_threshold);
             let use_face_case_for_b = !use_edge_case_for_b;
             let use_face_case_for_b =

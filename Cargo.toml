@@ -9,6 +9,5 @@ edition = "2021"
 profile = []
 
 [dependencies]
-glam = { version = "0.27" }
-crossbeam-utils = { version = "0.8" }
+glam = { version = "0.32" }
 num-traits = "0.2"

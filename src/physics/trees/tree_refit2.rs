@@ -54,7 +54,7 @@ impl Tree {
         let mut stub = NodeChild::default();
         // The root node's children are at index 0. We use a stub for the root's parent child.
         unsafe {
-            let node = &mut *(self.nodes.as_ptr() as *mut Node);
+            let _node = &mut *(self.nodes.as_ptr() as *mut Node);
             stub.index = 0;
             self.refit2_recursive(&mut stub);
         }
@@ -264,7 +264,7 @@ impl Tree {
 
     unsafe fn refit2_internal_mt(
         &self,
-        pool: &mut BufferPool,
+        _pool: &mut BufferPool,
         dispatcher: &dyn IThreadDispatcher,
         task_stack: *mut TaskStack,
         worker_index: i32,
@@ -528,7 +528,7 @@ impl Tree {
 
     unsafe fn refit2_with_cache_opt_internal_mt(
         &mut self,
-        pool: &mut BufferPool,
+        _pool: &mut BufferPool,
         dispatcher: &dyn IThreadDispatcher,
         task_stack: *mut TaskStack,
         worker_index: i32,

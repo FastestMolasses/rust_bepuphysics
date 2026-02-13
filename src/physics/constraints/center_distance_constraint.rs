@@ -104,7 +104,7 @@ impl CenterDistanceConstraintFunctions {
         position_b: &Vector3Wide,
         _orientation_b: &crate::utilities::quaternion_wide::QuaternionWide,
         inertia_b: &BodyInertiaWide,
-        prestep: &CenterDistancePrestepData,
+        _prestep: &CenterDistancePrestepData,
         accumulated_impulses: &Vector<f32>,
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,

@@ -81,12 +81,12 @@ impl InvasiveHashDiagnostics {
             instance.hashes.push(run);
         }
         unsafe {
-            INSTANCE = Some(instance);
+            *std::ptr::addr_of_mut!(INSTANCE) = Some(instance);
         }
     }
 
     pub fn instance() -> Option<&'static mut InvasiveHashDiagnostics> {
-        unsafe { INSTANCE.as_mut() }
+        unsafe { (*std::ptr::addr_of_mut!(INSTANCE)).as_mut() }
     }
 
     pub fn type_is_active(&self, hash_type: HashDiagnosticType) -> bool {

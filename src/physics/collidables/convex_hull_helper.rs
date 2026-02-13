@@ -208,14 +208,14 @@ impl ConvexHullHelper {
 
         let mut best_y_narrow = best_y[0];
         let mut best_x_narrow = best_x[0];
-        let mut best_index_narrow = best_indices[0];
+        let mut _best_index_narrow = best_indices[0];
         for i in 1..VECTOR_WIDTH {
             let candidate_numerator = best_y[i];
             let candidate_denominator = best_x[i];
             if candidate_numerator * best_x_narrow > best_y_narrow * candidate_denominator {
                 best_y_narrow = candidate_numerator;
                 best_x_narrow = candidate_denominator;
-                best_index_narrow = best_indices[i];
+                _best_index_narrow = best_indices[i];
             }
         }
 

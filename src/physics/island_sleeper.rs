@@ -658,7 +658,7 @@ impl IslandSleeper {
             }
             RemovalJobType::RemoveBodiesFromActiveSet => {
                 let bodies_ptr = self.bodies;
-                let solver_ptr = self.solver;
+                let _solver_ptr = self.solver;
                 for set_ref_index in 0..self.new_inactive_sets.count {
                     let set_index = self.new_inactive_sets.get(set_ref_index).index;
                     let inactive_body_count = (*bodies_ptr).sets.get(set_index).count;
@@ -748,7 +748,7 @@ impl IslandSleeper {
         }
 
         let pool = &mut *self.pool;
-        let solver = &*self.solver;
+        let _solver = &*self.solver;
         let thread_count = thread_dispatcher.map_or(1, |td| td.thread_count());
         let worker_traversal_thread_count = if deterministic { 1 } else { thread_count };
 
@@ -1073,7 +1073,7 @@ impl IslandSleeper {
     }
 
     /// Single-threaded inline gather (avoids dispatch overhead).
-    unsafe fn gather_worker_inline(sleeper: *mut IslandSleeper, pool: &mut BufferPool) {
+    unsafe fn gather_worker_inline(sleeper: *mut IslandSleeper, _pool: &mut BufferPool) {
         let bodies_ptr = (*sleeper).bodies;
         let solver_ptr = (*sleeper).solver;
         let broad_phase = &*(*sleeper).broad_phase;

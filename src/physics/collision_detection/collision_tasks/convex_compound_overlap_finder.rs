@@ -9,7 +9,6 @@ use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use std::simd::prelude::*;
 
 use super::convex_compound_collision_task::IConvexCompoundOverlapFinder;
 use super::convex_compound_task_overlaps::ConvexCompoundTaskOverlaps;
@@ -86,7 +85,7 @@ impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder
             // Compute local-space transforms.
             let conjugate_orientation_b = pair.orientation_b.conjugate();
             let local_offset_a = conjugate_orientation_b * (-pair.offset_b);
-            let local_orientation_a = conjugate_orientation_b * pair.orientation_a;
+            let _local_orientation_a = conjugate_orientation_b * pair.orientation_a;
             let local_relative_linear_velocity =
                 conjugate_orientation_b * pair.relative_linear_velocity_a;
 

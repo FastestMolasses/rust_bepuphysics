@@ -248,7 +248,7 @@ impl SweepTaskRegistry {
     }
 
     fn resize_matrix(&mut self, new_size: usize) {
-        let old_size = self.top_level_matrix.len();
+        let _old_size = self.top_level_matrix.len();
         self.top_level_matrix.resize_with(new_size, Vec::new);
         for i in 0..new_size {
             self.top_level_matrix[i].resize(new_size, -1);

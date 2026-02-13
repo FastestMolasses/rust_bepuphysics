@@ -784,7 +784,7 @@ impl Tree {
         maximum_subtrees: i32,
         treelet_internal_nodes: &mut QuickList<i32>,
         resources: &mut BinnedResources,
-        pool: &mut BufferPool,
+        _pool: &mut BufferPool,
     ) {
         debug_assert_eq!(
             subtree_references.count, 0,

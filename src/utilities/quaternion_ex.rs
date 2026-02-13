@@ -314,12 +314,12 @@ pub fn transform_unit_z(rotation: Quat, result: &mut Vec3) {
 pub fn create_from_axis_angle(axis: Vec3, angle: f32) -> Quat {
     let half_angle: f64 = angle as f64 * 0.5;
     let s: f64 = half_angle.sin();
-    Quat {
-        x: (axis.x as f64 * s) as f32,
-        y: (axis.y as f64 * s) as f32,
-        z: (axis.z as f64 * s) as f32,
-        w: half_angle.cos() as f32,
-    }
+    Quat::from_xyzw(
+        (axis.x as f64 * s) as f32,
+        (axis.y as f64 * s) as f32,
+        (axis.z as f64 * s) as f32,
+        half_angle.cos() as f32,
+    )
 }
 
 /// Creates a quaternion from an axis and angle.
@@ -417,35 +417,15 @@ pub fn quaternion_between_normalized_vectors(v1: Vec3, v2: Vec3, q: &mut Quat) {
         let abs_y = v1.y.abs();
         let abs_z = v1.z.abs();
         if abs_x < abs_y && abs_x < abs_z {
-            *q = Quat {
-                x: 0.0,
-                y: -v1.z,
-                z: v1.y,
-                w: 0.0,
-            };
+            *q = Quat::from_xyzw(0.0, -v1.z, v1.y, 0.0);
         } else if abs_y < abs_z {
-            *q = Quat {
-                x: v1.z,
-                y: 0.0,
-                z: -v1.x,
-                w: 0.0,
-            };
+            *q = Quat::from_xyzw(v1.z, 0.0, -v1.x, 0.0);
         } else {
-            *q = Quat {
-                x: -v1.y,
-                y: v1.x,
-                z: 0.0,
-                w: 0.0,
-            };
+            *q = Quat::from_xyzw(-v1.y, v1.x, 0.0, 0.0);
         }
     } else {
         let axis = v1.cross(v2);
-        *q = Quat {
-            x: axis.x,
-            y: axis.y,
-            z: axis.z,
-            w: dot + 1.0,
-        };
+        *q = Quat::from_xyzw(axis.x, axis.y, axis.z, dot + 1.0);
     }
     self::normalize_into(q);
 }

@@ -609,7 +609,7 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
                 hull.points.allocated(),
                 "If the lane isn't terminated, then the hull should actually exist."
             );
-            let slot_direction = QuaternionWide::default();
+            let _slot_direction = QuaternionWide::default();
             // Rebroadcast the direction for this slot
             // (access lane slot_index and broadcast across all lanes)
             let dir_as_v3w = direction;

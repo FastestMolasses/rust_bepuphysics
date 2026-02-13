@@ -479,7 +479,7 @@ impl ConstraintRemover {
                             && (target.encoded_body_index & Bodies::KINEMATIC_MASK as i32) != 0
                         {
                             // This is a kinematic with no remaining constraints. Remove from constrained kinematic set.
-                            let pool = &mut *self.pool;
+                            let _pool = &mut *self.pool;
                             solver
                                 .constrained_kinematic_handles
                                 .fast_remove(&target.body_handle.0);
@@ -553,7 +553,7 @@ impl ConstraintRemover {
         body_index: i32,
     ) {
         let solver = &mut *self.solver;
-        let pool = &mut *self.pool;
+        let _pool = &mut *self.pool;
         solver.try_remove_dynamic_body_from_fallback(
             body_handle,
             body_index,

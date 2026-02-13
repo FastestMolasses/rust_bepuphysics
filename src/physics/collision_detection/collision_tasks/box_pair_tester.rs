@@ -820,7 +820,7 @@ impl BoxPairTester {
             let use_ax = max_a_dot.simd_eq(abs_ax_dot).to_int();
             let use_ay = max_a_dot.simd_eq(abs_ay_dot).to_int() & !use_ax;
 
-            let normal_a = Vector3Wide::conditional_select(
+            let _normal_a = Vector3Wide::conditional_select(
                 &use_ay,
                 &Vector3Wide::conditional_select(&use_ax, &world_ra.x, &world_ra.z),
                 &Vector3Wide::conditional_select(&use_ax, &world_ra.x, &world_ra.z),

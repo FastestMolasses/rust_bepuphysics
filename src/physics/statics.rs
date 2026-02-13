@@ -247,7 +247,7 @@ impl Statics {
         }
 
         let pool_ptr = self.pool;
-        let pool = unsafe { &mut *pool_ptr };
+        let _pool = unsafe { &mut *pool_ptr };
         let handle = StaticHandle(self.handle_pool.take());
         let index = self.count;
         self.count += 1;

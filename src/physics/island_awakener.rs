@@ -277,7 +277,7 @@ impl IslandAwakener {
         unique_set: &mut IndexSet,
         unique_set_indices: &mut QuickList<i32>,
     ) {
-        let pool = self.pool();
+        let _pool = self.pool();
         for i in 0..candidate_set_indices.count {
             let candidate = *candidate_set_indices.get(i);
             if !unique_set.contains(candidate) {
@@ -704,7 +704,7 @@ impl IslandAwakener {
             .ensure_capacity(highest_new_batch_count, pool);
         // Create new batches if needed.
         let solver_ptr = solver as *mut Solver;
-        for batch_index in (*solver_ptr).active_set().batches.count..highest_new_batch_count {
+        for _batch_index in (*solver_ptr).active_set().batches.count..highest_new_batch_count {
             *(*solver_ptr).active_set_mut().batches.allocate_unsafely() =
                 ConstraintBatch::new(pool, 16);
             *(*solver_ptr).batch_referenced_handles.allocate_unsafely() = IndexSet::new(

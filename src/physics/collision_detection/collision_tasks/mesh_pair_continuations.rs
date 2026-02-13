@@ -120,7 +120,7 @@ impl<
         child_index_a: i32,
         _child_type_a: i32,
         child_index_b: i32,
-        child_pose_a: &RigidPose,
+        _child_pose_a: &RigidPose,
         child_pose_b: &mut RigidPose,
         child_type_b: &mut i32,
         child_shape_data_b: &mut *const u8,

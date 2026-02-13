@@ -948,7 +948,7 @@ unsafe fn handle_degeneracy(
     use_pong_buffer: bool,
     subtree_region_start_index: i32,
     node_index: i32,
-    subtree_count: i32,
+    _subtree_count: i32,
     parent_node_index: i32,
     child_index_in_parent: i32,
     centroid_bounds: &BoundingBox4,
@@ -1361,7 +1361,7 @@ unsafe fn binned_build_node(
     }
 
     let mt_context_ptr = (*ctx).mt_threading;
-    let target_task_count = if let Some(mt_ctx) = mt_context_ptr {
+    let _target_task_count = if let Some(mt_ctx) = mt_context_ptr {
         (*mt_ctx).get_target_task_count_for_inner_loop(subtree_count)
     } else {
         1

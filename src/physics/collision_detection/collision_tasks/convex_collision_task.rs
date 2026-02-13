@@ -2,7 +2,7 @@
 
 use super::pair_types::{ICollisionPair, ICollisionPairWide};
 use crate::physics::collidables::shape::IShapeWideAllocation;
-use crate::physics::collision_detection::collision_task_registry::{BatcherVtable, CollisionTask};
+use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
 use crate::physics::collision_detection::contact_manifold::ConvexContactManifold;
 use crate::physics::collision_detection::convex_contact_manifold_wide::IContactManifoldWide;
 use crate::physics::collision_detection::untyped_list::UntypedList;

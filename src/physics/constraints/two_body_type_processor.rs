@@ -791,7 +791,7 @@ impl<
 
             let vector_shift = crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
             let vector_mask = crate::utilities::bundle_indexing::VECTOR_MASK;
-            let vector_width = crate::utilities::vector::VECTOR_WIDTH as i32;
+            let _vector_width = crate::utilities::vector::VECTOR_WIDTH as i32;
 
             // Check if aligned bulk copy is possible
             if (source_start as usize & vector_mask) == 0
@@ -1006,7 +1006,7 @@ impl<
         target_batch_referenced_handles: &mut IndexSet,
     ) {
         unsafe {
-            let vector_width = crate::utilities::vector::VECTOR_WIDTH;
+            let _vector_width = crate::utilities::vector::VECTOR_WIDTH;
             let body_refs = type_batch.body_references.as_ptr() as *const TwoBodyReferences;
             for i in 0..type_batch.constraint_count {
                 let bundle_index = (i as usize)

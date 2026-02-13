@@ -288,7 +288,7 @@ impl RefitAndRefineMultithreadedContext {
             should_use_mark = true;
         }
 
-        let node = &mut *(tree.nodes.as_ptr() as *mut Node).add(node_index as usize);
+        let _node = &mut *(tree.nodes.as_ptr() as *mut Node).add(node_index as usize);
         let metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((node_index) as usize);
         debug_assert!(
             metanode.parent >= 0,

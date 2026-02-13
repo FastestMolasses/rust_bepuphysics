@@ -193,7 +193,7 @@ impl BatchCompressor {
         let location = *solver
             .handle_to_constraint
             .get(compression.constraint_handle.0);
-        let type_processor = solver.type_processors[location.type_id as usize]
+        let _type_processor = solver.type_processors[location.type_id as usize]
             .as_ref()
             .unwrap();
 

@@ -574,7 +574,6 @@ impl IBoundsQueryableCompound for Compound {
             child_max = child_max + child.local_position + expansion;
             let mut _t = 0.0f32;
             if Tree::intersects_ray(child_min, child_max, &ray as *const TreeRay, &mut _t) {
-                use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::ICollisionTaskSubpairOverlaps;
                 *overlaps_ref.allocate(pool) = i as i32;
             }
         }

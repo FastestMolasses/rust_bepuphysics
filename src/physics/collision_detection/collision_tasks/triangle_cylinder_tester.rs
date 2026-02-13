@@ -159,7 +159,7 @@ impl TriangleCylinderTester {
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
         let zero_i = Vector::<i32>::splat(0);
-        let neg_one = Vector::<i32>::splat(-1);
+        let _neg_one = Vector::<i32>::splat(-1);
         let one_f = Vector::<f32>::splat(1.0);
 
         let mut world_ra = Matrix3x3Wide::default();
@@ -403,7 +403,7 @@ impl TriangleCylinderTester {
             & face_normal_a_dot_normal
                 .abs()
                 .simd_lt(Vector::<f32>::splat(0.2));
-        let use_triangle_edge_case_i = use_triangle_edge_case.to_int();
+        let _use_triangle_edge_case_i = use_triangle_edge_case.to_int();
 
         let cap_center_by = local_normal
             .y
@@ -1010,7 +1010,7 @@ impl TriangleCylinderTester {
                 let mut exit_ca = exiting_ca.select(edge_t_ca, max_value);
 
                 let ca_is_dominant = (!ab_is_dominant) & (!bc_is_dominant);
-                let ca_is_dominant_i = ca_is_dominant.to_int();
+                let _ca_is_dominant_i = ca_is_dominant.to_int();
                 let unrestrict_weight = one_f - restrict_weight;
                 entry_ab = ab_is_dominant.select(entry_ab * restrict_weight, entry_ab);
                 entry_bc = bc_is_dominant.select(entry_bc * restrict_weight, entry_bc);

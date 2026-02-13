@@ -20,7 +20,7 @@ fn test_box_edge(
     offset_az: &Vector<f32>,
     capsule_axis_x: &Vector<f32>,
     capsule_axis_y: &Vector<f32>,
-    capsule_axis_z: &Vector<f32>,
+    _capsule_axis_z: &Vector<f32>,
     box_half_width: &Vector<f32>,
     box_half_height: &Vector<f32>,
     box_half_length: &Vector<f32>,
@@ -331,8 +331,7 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
         // The choice of which endpoint is actually closer is deferred until now.
         let mut endpoint_choice_dot = Vector::<f32>::default();
         Vector3Wide::dot(&local_capsule_axis, &local_normal, &mut endpoint_choice_dot);
-        let mut local_closest = Vector3Wide::default();
-        local_closest = Vector3Wide::conditional_select(
+        let mut local_closest = Vector3Wide::conditional_select(
             &endpoint_choice_dot
                 .simd_lt(Vector::<f32>::splat(0.0))
                 .to_int(),

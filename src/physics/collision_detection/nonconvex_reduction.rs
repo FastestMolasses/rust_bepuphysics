@@ -317,7 +317,7 @@ impl NonconvexReduction {
 
     /// Flushes accumulated child manifolds into a final nonconvex (or convex) manifold.
     /// Called when all child manifolds have been completed.
-    pub unsafe fn flush(&mut self, pair_id: i32, pool: &mut BufferPool) -> FlushResult {
+    pub unsafe fn flush(&mut self, _pair_id: i32, pool: &mut BufferPool) -> FlushResult {
         debug_assert!(self.child_count > 0);
         debug_assert!(self.completed_child_count == self.child_count);
 

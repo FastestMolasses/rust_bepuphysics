@@ -67,7 +67,7 @@ impl BoxCylinderTester {
         candidate_count: &mut Vector<i32>,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
-        let zero_i = Vector::<i32>::splat(0);
+        let _zero_i = Vector::<i32>::splat(0);
         let mut candidate = ManifoldCandidate::default();
         candidate.feature_id = *edge_id;
         candidate.x = edge_start.x + edge_offset.x * *t_min;
@@ -191,7 +191,7 @@ impl BoxCylinderTester {
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
         let zero_i = Vector::<i32>::splat(0);
-        let neg_one = Vector::<i32>::splat(-1);
+        let _neg_one = Vector::<i32>::splat(-1);
         let one_f = Vector::<f32>::splat(1.0);
 
         let mut world_ra = Matrix3x3Wide::default();

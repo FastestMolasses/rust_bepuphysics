@@ -7,7 +7,6 @@ use crate::physics::collidables::shape::IConvexShape;
 use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::island_sleeper::IslandSleeper;
-use crate::physics::pose_integration::IPoseIntegratorCallbacks;
 use crate::physics::pose_integrator::IPoseIntegrator;
 use crate::physics::simulation_allocation_sizes::SimulationAllocationSizes;
 use crate::physics::simulation_profiler::SimulationProfiler;

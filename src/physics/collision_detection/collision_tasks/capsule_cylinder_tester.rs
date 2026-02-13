@@ -249,7 +249,7 @@ impl CapsuleCylinderTester {
             .any()
         {
             // At least one lane is deeply intersecting; examine other normals.
-            let capsule_axis_dot_y = Vector::<f32>::splat(0.0);
+            let _capsule_axis_dot_y = Vector::<f32>::splat(0.0);
             let _ = capsule_axis.y; // db = (0,1,0)
             let endpoint_vs_cap_depth =
                 b.half_length + (capsule_axis.y * a.half_length).abs() - local_offset_a.y.abs();

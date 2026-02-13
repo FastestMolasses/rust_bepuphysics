@@ -33,7 +33,7 @@ pub trait ShapeBatch {
     fn recursively_remove_and_dispose(
         &mut self,
         index: usize,
-        shapes: &mut Shapes,
+        _shapes: &mut Shapes,
         pool: &mut BufferPool,
     ) {
         // Default: no children, just remove_and_dispose.
@@ -182,7 +182,7 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ConvexShapeBatch<TShape> {
 
     /// Adds a shape and returns the index assigned to it.
     pub fn add(&mut self, shape: TShape) -> usize {
-        let pool = unsafe { &mut *self.pool };
+        let _pool = unsafe { &mut *self.pool };
         let index = self.id_pool.take() as usize;
         if (self.shapes.len() as usize) <= index {
             let old_len = self.shapes.len();
@@ -278,7 +278,7 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
     fn resize(&mut self, shape_capacity: usize) {
         let min_cap = (self.id_pool.highest_possibly_claimed_id() + 1) as usize;
         let target = shape_capacity.max(min_cap);
-        let pool = unsafe { &mut *self.pool };
+        let _pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<TShape>(target as i32);
         if target != self.shapes.len() {
             let old_copy_len =
@@ -587,7 +587,7 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
     fn resize(&mut self, shape_capacity: usize) {
         let min_cap = (self.id_pool.highest_possibly_claimed_id() + 1) as usize;
         let target = shape_capacity.max(min_cap);
-        let pool = unsafe { &mut *self.pool };
+        let _pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<TShape>(target as i32);
         if target != self.shapes.len() {
             let old_copy_len =
@@ -610,7 +610,7 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
 
     unsafe fn add_raw(&mut self, data: *const u8) -> usize {
         let shape = *(data as *const TShape);
-        let pool = unsafe { &mut *self.pool };
+        let _pool = unsafe { &mut *self.pool };
         let index = self.id_pool.take() as usize;
         if (self.shapes.len() as usize) <= index {
             let old_len = self.shapes.len();
@@ -766,7 +766,7 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
     fn resize(&mut self, shape_capacity: usize) {
         let min_cap = (self.id_pool.highest_possibly_claimed_id() + 1) as usize;
         let target = shape_capacity.max(min_cap);
-        let pool = unsafe { &mut *self.pool };
+        let _pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<TShape>(target as i32);
         if target != self.shapes.len() {
             let old_copy_len =
@@ -789,7 +789,7 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
 
     unsafe fn add_raw(&mut self, data: *const u8) -> usize {
         let shape = *(data as *const TShape);
-        let pool = unsafe { &mut *self.pool };
+        let _pool = unsafe { &mut *self.pool };
         let index = self.id_pool.take() as usize;
         if (self.shapes.len() as usize) <= index {
             let old_len = self.shapes.len();
