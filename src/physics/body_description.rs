@@ -1,6 +1,7 @@
 use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose};
 use crate::physics::collidables::collidable_description::CollidableDescription;
 use crate::physics::collidables::shape::IConvexShape;
+use crate::physics::collidables::shapes::Shapes;
 
 /// Describes the thresholds for a body going to sleep.
 #[repr(C)]
@@ -146,5 +147,65 @@ impl BodyDescription {
             activity,
             collidable,
         }
+    }
+
+    /// Creates a dynamic body description from a convex shape, automatically computing inertia,
+    /// activity thresholds, and collidable. Adds the shape to the shapes collection.
+    #[inline(always)]
+    pub fn create_convex_dynamic<TShape: IConvexShape + Copy + Default + 'static>(
+        pose: RigidPose,
+        velocity: BodyVelocity,
+        mass: f32,
+        shapes: &mut Shapes,
+        shape: &TShape,
+    ) -> Self {
+        let shape_index = shapes.add(shape);
+        Self {
+            pose,
+            velocity,
+            activity: Self::get_default_activity(shape),
+            collidable: CollidableDescription::from(shape_index),
+            local_inertia: shape.compute_inertia(mass),
+        }
+    }
+
+    /// Creates a dynamic body description from a convex shape with zero initial velocity.
+    #[inline(always)]
+    pub fn create_convex_dynamic_no_velocity<TShape: IConvexShape + Copy + Default + 'static>(
+        pose: RigidPose,
+        mass: f32,
+        shapes: &mut Shapes,
+        shape: &TShape,
+    ) -> Self {
+        Self::create_convex_dynamic(pose, BodyVelocity::default(), mass, shapes, shape)
+    }
+
+    /// Creates a kinematic body description from a convex shape, automatically computing
+    /// activity thresholds and collidable. Adds the shape to the shapes collection.
+    #[inline(always)]
+    pub fn create_convex_kinematic<TShape: IConvexShape + Copy + Default + 'static>(
+        pose: RigidPose,
+        velocity: BodyVelocity,
+        shapes: &mut Shapes,
+        shape: &TShape,
+    ) -> Self {
+        let shape_index = shapes.add(shape);
+        Self {
+            pose,
+            velocity,
+            activity: Self::get_default_activity(shape),
+            collidable: CollidableDescription::from(shape_index),
+            local_inertia: BodyInertia::default(),
+        }
+    }
+
+    /// Creates a kinematic body description from a convex shape with zero initial velocity.
+    #[inline(always)]
+    pub fn create_convex_kinematic_no_velocity<TShape: IConvexShape + Copy + Default + 'static>(
+        pose: RigidPose,
+        shapes: &mut Shapes,
+        shape: &TShape,
+    ) -> Self {
+        Self::create_convex_kinematic(pose, BodyVelocity::default(), shapes, shape)
     }
 }

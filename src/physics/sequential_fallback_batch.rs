@@ -131,8 +131,9 @@ impl SequentialFallbackBatch {
         let type_processor = solver_ref.type_processors[type_id as usize].as_ref().unwrap();
         let body_count = type_processor.bodies_per_constraint;
 
-        // Collect body indices by enumerating body references.
-        let mut body_indices = vec![0i32; body_count as usize];
+        // Collect body indices by enumerating body references (stack alloc — matches C# stackalloc).
+        let mut body_indices = [0i32; 8]; // max bodies per constraint
+        debug_assert!(body_count <= 8, "Bodies per constraint exceeds stack buffer size");
         let type_batch_index = *batch.type_index_to_type_batch_index.get(type_id);
         let type_batch = batch.type_batches.get(type_batch_index);
 
@@ -153,8 +154,14 @@ impl SequentialFallbackBatch {
             ) as *const i32);
         }
 
+        // Use stack allocation (matches C# stackalloc) — no pool buffer needed.
         let maximum_allocation_ids_to_free = 3 + body_count as usize * 2;
-        let initial_span: Buffer<i32> = pool.take_at_least(maximum_allocation_ids_to_free as i32);
+        let mut allocation_ids_storage = [0i32; 3 + 8 * 2]; // max bodies per constraint = 8
+        let initial_span = Buffer::new(
+            allocation_ids_storage.as_mut_ptr(),
+            maximum_allocation_ids_to_free as i32,
+            -1,
+        );
         let mut allocation_ids_to_free = QuickList::new(initial_span);
 
         for i in 0..body_count {
@@ -172,6 +179,7 @@ impl SequentialFallbackBatch {
         for i in 0..allocation_ids_to_free.count {
             pool.return_unsafely(*allocation_ids_to_free.get(i));
         }
+        // No need to return allocation_ids_storage — it's on the stack (matches C# stackalloc).
     }
 
     /// Removes a constraint from a body in the fallback batch.

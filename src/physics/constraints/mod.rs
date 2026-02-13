@@ -21,6 +21,7 @@ pub mod contact;
 pub mod distance_limit;
 pub mod distance_servo;
 pub mod four_body_type_processor;
+pub mod gather_and_integrate;
 pub mod hinge;
 pub mod inequality_helpers;
 pub mod linear_axis_limit;

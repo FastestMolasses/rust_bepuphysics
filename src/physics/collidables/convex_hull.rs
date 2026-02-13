@@ -45,6 +45,7 @@ impl std::fmt::Display for HullVertexIndex {
 }
 
 /// Collision shape representing a convex hull.
+#[derive(Clone, Copy)]
 pub struct ConvexHull {
     /// Bundled points of the convex hull.
     pub points: Buffer<Vector3Wide>,
@@ -359,6 +360,17 @@ impl IConvexShape for ConvexHull {
         result.inverse_mass = 1.0 / mass;
         result.inverse_inertia_tensor = inverse_inertia;
         result
+    }
+}
+
+impl Default for ConvexHull {
+    fn default() -> Self {
+        Self {
+            points: Buffer::default(),
+            bounding_planes: Buffer::default(),
+            face_vertex_indices: Buffer::default(),
+            face_to_vertex_indices_start: Buffer::default(),
+        }
     }
 }
 

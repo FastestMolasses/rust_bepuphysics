@@ -30,3 +30,25 @@ impl IBatchPoseIntegrationAllowed for AllowPoseIntegration {}
 /// Marks a batch as not integrating poses for any bodies within the constraint batch.
 pub struct DisallowPoseIntegration;
 impl IBatchPoseIntegrationAllowed for DisallowPoseIntegration {}
+
+/// Runtime enum equivalent of the compile-time IBatchIntegrationMode marker types.
+/// Used for dynamic dispatch through trait objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum BatchIntegrationMode {
+    /// Batch 0: all bodies first-seen here, always integrate.
+    Always = 0,
+    /// No constraints in this type batch have integration responsibilities.
+    Never = 1,
+    /// Some constraints have integration responsibilities; check per-bundle flags.
+    Conditional = 2,
+}
+
+/// Result of checking whether a bundle should integrate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum BundleIntegrationMode {
+    None = 0,
+    Partial = 1,
+    All = 2,
+}

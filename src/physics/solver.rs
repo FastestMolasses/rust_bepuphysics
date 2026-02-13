@@ -11,6 +11,10 @@ use crate::physics::constraint_reference::ConstraintReference;
 use crate::physics::constraint_set::ConstraintSet;
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::constraints::type_processor::{ITypeProcessor, TypeProcessor};
+use crate::physics::constraints::constraint_description::{
+    IConstraintDescription, IOneBodyConstraintDescription, ITwoBodyConstraintDescription,
+    IThreeBodyConstraintDescription, IFourBodyConstraintDescription,
+};
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::physics::solve_description::{SolveDescription, SubstepVelocityIterationScheduler};
@@ -74,6 +78,24 @@ pub struct Solver {
     pub substep_started: Option<Box<dyn Fn(i32)>>,
     pub substep_ended: Option<Box<dyn Fn(i32)>>,
 
+    // Integration responsibility tracking
+    // Per-batch, per-type-batch, per-body-in-constraint integration flag IndexSets.
+    // integrationFlags[batchIndex][typeBatchIndex][bodyIndexInConstraint] = IndexSet
+    // Batch 0 is always default (all batch-0 constraints integrate).
+    pub(crate) integration_flags: Buffer<Buffer<Buffer<IndexSet>>>,
+    /// Caches a single bool for whether type batches within batches have constraints with any integration responsibilities.
+    /// Type batches with no integration responsibilities can use a codepath with no integration checks at all.
+    pub(crate) coarse_batch_integration_responsibilities: Buffer<Buffer<bool>>,
+    /// Merged set of all body handles that appear in any constraint batch (including constrained kinematics).
+    pub(crate) merged_constrained_body_handles: IndexSet,
+    /// Per-batch IndexSets tracking which body handles are first observed in that batch.
+    pub(crate) bodies_first_observed_in_batches: Buffer<IndexSet>,
+
+    // Multithreaded integration responsibility computation state
+    pub(crate) next_constraint_integration_responsibility_job_index: std::sync::atomic::AtomicI32,
+    pub(crate) integration_responsibility_prepass_jobs: Vec<(i32, i32, i32, i32)>, // (batch, typeBatch, start, end)
+    pub(crate) job_aligned_integration_responsibilities: Buffer<bool>,
+
     // Multithreaded solve state
     pub(crate) substep_context: SubstepMultithreadingContext,
 }
@@ -122,7 +144,7 @@ impl Solver {
     }
 
     pub fn set_substep_count(&mut self, value: i32) {
-        debug_assert!(value >= 1, "Substep count must be positive.");
+        assert!(value >= 1, "Substep count must be positive.");
         self.substep_count = value;
     }
 
@@ -131,7 +153,7 @@ impl Solver {
     }
 
     pub fn set_velocity_iteration_count(&mut self, value: i32) {
-        debug_assert!(value >= 1, "Iteration count must be positive.");
+        assert!(value >= 1, "Iteration count must be positive.");
         self.velocity_iteration_count = value;
     }
 
@@ -274,6 +296,13 @@ impl Solver {
             minimum_initial_capacity_per_type_batch: Vec::new(),
             substep_started: None,
             substep_ended: None,
+            integration_flags: Buffer::default(),
+            coarse_batch_integration_responsibilities: Buffer::default(),
+            merged_constrained_body_handles: IndexSet::empty(),
+            bodies_first_observed_in_batches: Buffer::default(),
+            next_constraint_integration_responsibility_job_index: std::sync::atomic::AtomicI32::new(0),
+            integration_responsibility_prepass_jobs: Vec::new(),
+            job_aligned_integration_responsibilities: Buffer::default(),
             substep_context: SubstepMultithreadingContext::default(),
         };
 
@@ -594,8 +623,9 @@ impl Solver {
         type_id: i32,
         apply_fn: impl FnOnce(&mut TypeBatch, i32, i32),
     ) -> ConstraintHandle {
-        let mut encoded_body_indices = vec![0i32; body_handles.len()];
-        let blocking = self.get_blocking_body_handles(body_handles, &mut encoded_body_indices);
+        let mut encoded_body_indices = [0i32; 8]; // stack alloc — matches C# stackalloc
+        debug_assert!(body_handles.len() <= 8, "Body handles exceeds stack buffer size");
+        let blocking = self.get_blocking_body_handles(body_handles, &mut encoded_body_indices[..body_handles.len()]);
 
         let batch_count = self.active_set().batches.count;
         for i in 0..=batch_count {
@@ -1138,6 +1168,201 @@ impl Solver {
         );
     }
 
+    /// Enumerates connected decoded (handle-valued) body references from a type batch.
+    pub unsafe fn enumerate_connected_body_references<E: IForEach<i32>>(
+        &self,
+        type_batch: &TypeBatch,
+        index_in_type_batch: i32,
+        enumerator: &mut E,
+    ) {
+        self.enumerate_connected_body_references_from_type_batch(
+            type_batch,
+            index_in_type_batch,
+            type_batch.type_id,
+            enumerator,
+            EnumerateMode::Decoded,
+        );
+    }
+
+    /// Enumerates connected decoded body references for a constraint handle.
+    pub unsafe fn enumerate_connected_body_references_by_handle<E: IForEach<i32>>(
+        &self,
+        constraint_handle: ConstraintHandle,
+        enumerator: &mut E,
+    ) {
+        let location = *self.handle_to_constraint.get(constraint_handle.0);
+        let set = self.sets.get(location.set_index);
+        let batch = set.batches.get(location.batch_index);
+        let type_batch = batch.get_type_batch(location.type_id);
+        self.enumerate_connected_body_references_from_type_batch(type_batch, location.index_in_type_batch, location.type_id, enumerator, EnumerateMode::Decoded);
+    }
+
+    /// Enumerates connected dynamic bodies from a type batch (decoded, dynamic only).
+    pub unsafe fn enumerate_connected_dynamic_bodies_from_type_batch<E: IForEach<i32>>(
+        &self,
+        type_batch: &TypeBatch,
+        index_in_type_batch: i32,
+        enumerator: &mut E,
+    ) {
+        self.enumerate_connected_body_references_from_type_batch(
+            type_batch,
+            index_in_type_batch,
+            type_batch.type_id,
+            enumerator,
+            EnumerateMode::DynamicOnly,
+        );
+    }
+
+    /// Enumerates accumulated impulses for a constraint, collecting each scalar DOF impulse.
+    pub unsafe fn enumerate_accumulated_impulses<E: IForEach<f32>>(
+        &self,
+        constraint_handle: ConstraintHandle,
+        enumerator: &mut E,
+    ) {
+        let location = *self.handle_to_constraint.get(constraint_handle.0);
+        let set = self.sets.get(location.set_index);
+        let type_batch = set.batches.get(location.batch_index).get_type_batch(location.type_id);
+        debug_assert!(location.index_in_type_batch >= 0 && location.index_in_type_batch < type_batch.constraint_count);
+        let type_processor = self.type_processors[location.type_id as usize].as_ref().unwrap();
+        let constrained_dof = type_processor.constrained_degrees_of_freedom;
+        let vector_width = crate::utilities::vector::VECTOR_WIDTH;
+        let bundle_size_in_floats = constrained_dof as usize * vector_width;
+        let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+        BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        let mut impulse_address = (type_batch.accumulated_impulses.as_ptr() as *const f32)
+            .add(bundle_index * bundle_size_in_floats + inner_index);
+        enumerator.loop_body(*impulse_address);
+        for _ in 1..constrained_dof {
+            impulse_address = impulse_address.add(vector_width);
+            enumerator.loop_body(*impulse_address);
+        }
+    }
+
+    /// Computes the squared magnitude of accumulated impulses for a constraint.
+    pub unsafe fn get_accumulated_impulse_magnitude_squared(&self, constraint_handle: ConstraintHandle) -> f32 {
+        let location = *self.handle_to_constraint.get(constraint_handle.0);
+        let type_processor = self.type_processors[location.type_id as usize].as_ref().unwrap();
+        let dof = type_processor.constrained_degrees_of_freedom;
+        debug_assert!(dof <= 16, "Constrained DOF exceeds stack buffer size");
+        let mut impulses = [0.0f32; 16];
+        let mut collector = crate::physics::handy_enumerators::FloatCollector::new(impulses.as_mut_ptr());
+        self.enumerate_accumulated_impulses(constraint_handle, &mut collector);
+        let mut sum_of_squares = 0.0f32;
+        for i in 0..dof as usize {
+            sum_of_squares += impulses[i] * impulses[i];
+        }
+        sum_of_squares
+    }
+
+    /// Computes the magnitude of accumulated impulses for a constraint.
+    pub unsafe fn get_accumulated_impulse_magnitude(&self, constraint_handle: ConstraintHandle) -> f32 {
+        self.get_accumulated_impulse_magnitude_squared(constraint_handle).sqrt()
+    }
+
+    /// Gets the description of a constraint given a constraint reference.
+    pub unsafe fn get_description<TDescription: IConstraintDescription>(
+        &self,
+        reference: &ConstraintReference,
+    ) -> TDescription {
+        let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+        BundleIndexing::get_bundle_indices(reference.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        debug_assert!((*reference.type_batch_pointer).type_id == TDescription::constraint_type_id());
+        TDescription::build_description(&*reference.type_batch_pointer, bundle_index as i32, inner_index as i32)
+    }
+
+    /// Gets the description of a constraint given a constraint handle.
+    pub unsafe fn get_description_by_handle<TDescription: IConstraintDescription>(
+        &self,
+        handle: ConstraintHandle,
+    ) -> TDescription {
+        let location = *self.handle_to_constraint.get(handle.0);
+        debug_assert!(TDescription::constraint_type_id() == location.type_id);
+        let type_batch = self.sets.get(location.set_index)
+            .batches.get(location.batch_index)
+            .get_type_batch(location.type_id);
+        let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+        BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        TDescription::build_description(type_batch, bundle_index as i32, inner_index as i32)
+    }
+
+    /// Applies a description to a constraint without waking, using handle lookup.
+    pub unsafe fn apply_description_without_waking_by_handle<TDescription: IConstraintDescription>(
+        &mut self,
+        handle: ConstraintHandle,
+        description: &TDescription,
+    ) {
+        let reference = self.get_constraint_reference(handle);
+        let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+        BundleIndexing::get_bundle_indices(reference.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        description.apply_description(&mut *reference.type_batch_pointer, bundle_index as i32, inner_index as i32);
+    }
+
+    /// Applies a description to a constraint, waking the affected island first.
+    pub unsafe fn apply_description<TDescription: IConstraintDescription>(
+        &mut self,
+        handle: ConstraintHandle,
+        description: &TDescription,
+    ) {
+        if !self.awakener.is_null() {
+            (*self.awakener).awaken_constraint(handle);
+        }
+        self.apply_description_without_waking_by_handle(handle, description);
+    }
+
+    /// Adds a one-body constraint using a typed description.
+    pub unsafe fn add_one_body<TDescription: IOneBodyConstraintDescription>(
+        &mut self,
+        body_handle: BodyHandle,
+        description: &TDescription,
+    ) -> ConstraintHandle {
+        let body_handles = [body_handle];
+        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
+            description.apply_description(batch, bundle_index, inner_index);
+        })
+    }
+
+    /// Adds a two-body constraint using a typed description.
+    pub unsafe fn add_two_body<TDescription: ITwoBodyConstraintDescription>(
+        &mut self,
+        body_handle_a: BodyHandle,
+        body_handle_b: BodyHandle,
+        description: &TDescription,
+    ) -> ConstraintHandle {
+        let body_handles = [body_handle_a, body_handle_b];
+        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
+            description.apply_description(batch, bundle_index, inner_index);
+        })
+    }
+
+    /// Adds a three-body constraint using a typed description.
+    pub unsafe fn add_three_body<TDescription: IThreeBodyConstraintDescription>(
+        &mut self,
+        body_handle_a: BodyHandle,
+        body_handle_b: BodyHandle,
+        body_handle_c: BodyHandle,
+        description: &TDescription,
+    ) -> ConstraintHandle {
+        let body_handles = [body_handle_a, body_handle_b, body_handle_c];
+        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
+            description.apply_description(batch, bundle_index, inner_index);
+        })
+    }
+
+    /// Adds a four-body constraint using a typed description.
+    pub unsafe fn add_four_body<TDescription: IFourBodyConstraintDescription>(
+        &mut self,
+        body_handle_a: BodyHandle,
+        body_handle_b: BodyHandle,
+        body_handle_c: BodyHandle,
+        body_handle_d: BodyHandle,
+        description: &TDescription,
+    ) -> ConstraintHandle {
+        let body_handles = [body_handle_a, body_handle_b, body_handle_c, body_handle_d];
+        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
+            description.apply_description(batch, bundle_index, inner_index);
+        })
+    }
+
     // --- Capacity management ---
 
     pub fn ensure_solver_capacities(&mut self, body_handle_capacity: i32, constraint_handle_capacity: i32) {
@@ -1440,12 +1665,19 @@ impl ISolverStageFunction for WarmStartStageFunction {
             .type_batches.get_mut(block.type_batch_index);
         let type_id = type_batch.type_id;
         let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
-        let bodies = &*(*solver).bodies;
-        processor.inner().warm_start(
-            type_batch, bodies, self.dt, self.inverse_dt,
-            block.start_bundle, block.end,
+        let allow_pose_integration = self.substep_index > 0;
+        (*self.solver).warm_start_block(
+            worker_index,
+            block.batch_index,
+            block.type_batch_index,
+            block.start_bundle,
+            block.end,
+            type_batch,
+            processor.inner(),
+            allow_pose_integration,
+            self.dt,
+            self.inverse_dt,
         );
-        let _ = (worker_index, self.substep_index);
     }
 }
 
@@ -1583,6 +1815,63 @@ impl Solver {
     fn on_substep_ended(&self, substep_index: i32) {
         if let Some(ref callback) = self.substep_ended {
             callback(substep_index);
+        }
+    }
+
+    /// Dispatches a warm start for a specific batch/type-batch range, choosing the correct
+    /// integration mode (Always for batch 0, Conditional/Never for other batches based on
+    /// coarse integration responsibilities).
+    #[inline(always)]
+    unsafe fn warm_start_block(
+        &self,
+        worker_index: i32,
+        batch_index: i32,
+        type_batch_index: i32,
+        start_bundle: i32,
+        end_bundle: i32,
+        type_batch: &mut crate::physics::constraints::type_batch::TypeBatch,
+        type_processor: &dyn crate::physics::constraints::type_processor::ITypeProcessor,
+        allow_pose_integration: bool,
+        dt: f32,
+        inverse_dt: f32,
+    ) {
+        use crate::physics::constraints::batch_integration_mode::BatchIntegrationMode;
+        let bodies = &*self.bodies;
+        if batch_index == 0 {
+            let no_flags: Buffer<IndexSet> = Buffer::default();
+            type_processor.warm_start(
+                type_batch, bodies, &no_flags,
+                self.pose_integrator.map(|p| &*p),
+                BatchIntegrationMode::Always,
+                allow_pose_integration,
+                dt, inverse_dt,
+                start_bundle, end_bundle,
+                worker_index,
+            );
+        } else {
+            if *self.coarse_batch_integration_responsibilities.get(batch_index).get(type_batch_index) {
+                let flags = self.integration_flags.get(batch_index).get(type_batch_index);
+                type_processor.warm_start(
+                    type_batch, bodies, flags,
+                    self.pose_integrator.map(|p| &*p),
+                    BatchIntegrationMode::Conditional,
+                    allow_pose_integration,
+                    dt, inverse_dt,
+                    start_bundle, end_bundle,
+                    worker_index,
+                );
+            } else {
+                let flags = self.integration_flags.get(batch_index).get(type_batch_index);
+                type_processor.warm_start(
+                    type_batch, bodies, flags,
+                    self.pose_integrator.map(|p| &*p),
+                    BatchIntegrationMode::Never,
+                    allow_pose_integration,
+                    dt, inverse_dt,
+                    start_bundle, end_bundle,
+                    worker_index,
+                );
+            }
         }
     }
 
@@ -1928,14 +2217,20 @@ impl Solver {
                     let fallback_batch_threshold = (*self_ptr).fallback_batch_threshold;
                     let active_set = (*self_ptr).sets.get_mut(0);
                     let batch = active_set.batches.get_mut(fallback_batch_threshold);
-                    let bodies = &*(*self_ptr).bodies;
+                    let allow_pose_integration = substep_index > 0;
                     for j in 0..batch.type_batches.count {
                         let type_batch = batch.type_batches.get_mut(j);
                         let type_id = type_batch.type_id;
                         let bundle_count = type_batch.bundle_count() as i32;
-                        (&(*self_ptr).type_processors)[type_id as usize]
-                            .as_ref().unwrap().inner()
-                            .warm_start(type_batch, bodies, ctx.dt, ctx.inverse_dt, 0, bundle_count);
+                        let processor = (&(*self_ptr).type_processors)[type_id as usize]
+                            .as_ref().unwrap();
+                        (*self_ptr).warm_start_block(
+                            0, fallback_batch_threshold, j,
+                            0, bundle_count,
+                            type_batch, processor.inner(),
+                            allow_pose_integration,
+                            ctx.dt, ctx.inverse_dt,
+                        );
                     }
                 }
 
@@ -2367,6 +2662,102 @@ impl Solver {
         pool.return_buffer(&mut self.substep_context.velocity_iteration_counts);
     }
 
+    /// Computes integration responsibilities for a region of constraints within a type batch.
+    /// Returns true if any constraint in the region has integration responsibility.
+    ///
+    /// For non-fallback batches: a body whose handle is first observed in this batch gets
+    /// integration responsibility assigned to the constraint that references it.
+    /// For fallback batches: additionally checks that this is the earliest constraint slot
+    /// referencing that body (by encoded (typeBatchIndex, indexInTypeBatch) ordering).
+    unsafe fn compute_integration_responsibilities_for_constraint_region(
+        &self,
+        batch_index: i32,
+        type_batch_index: i32,
+        constraint_start: i32,
+        exclusive_constraint_end: i32,
+        is_fallback_batch: bool,
+    ) -> bool {
+        let first_observed_for_batch = &*self.bodies_first_observed_in_batches.get(batch_index);
+        // Use raw pointer to get mutable access to integration flags (safe: we guarantee exclusive access by design)
+        let integration_flags_ptr = self.integration_flags.as_ptr()
+            .add(batch_index as usize) as *mut Buffer<Buffer<IndexSet>>;
+        let integration_flags_for_type_batch = (*integration_flags_ptr)
+            .as_mut_ptr().add(type_batch_index as usize);
+        let active_set = self.sets.get(0);
+        let type_batch = active_set.batches.get(batch_index).type_batches.get(type_batch_index);
+        let type_batch_body_references = type_batch.body_references.as_ptr() as *const i32;
+        let bodies_per_constraint_in_type_batch = self.type_processors[type_batch.type_id as usize]
+            .as_ref().unwrap().bodies_per_constraint;
+        let vector_width = crate::utilities::vector::VECTOR_WIDTH as i32;
+        let ints_per_bundle = vector_width * bodies_per_constraint_in_type_batch;
+        let bundle_start_index = constraint_start / vector_width;
+        let bundle_end_index = (exclusive_constraint_end + vector_width - 1) / vector_width;
+        let bodies = &*self.bodies;
+        let body_active_set = bodies.active_set();
+
+        for bundle_index in bundle_start_index..bundle_end_index {
+            let bundle_start_index_in_constraints = bundle_index * vector_width;
+            let count_in_bundle = (type_batch.constraint_count - bundle_start_index_in_constraints).min(vector_width);
+            let bundle_body_references_start = type_batch_body_references.add((bundle_index * ints_per_bundle) as usize);
+
+            for body_index_in_constraint in 0..bodies_per_constraint_in_type_batch {
+                let integration_flags_for_body = (*integration_flags_for_type_batch).get_mut(body_index_in_constraint);
+                let bundle_start = bundle_body_references_start.add((body_index_in_constraint * vector_width) as usize);
+
+                for bundle_inner_index in 0..count_in_bundle {
+                    let raw_body_index = *bundle_start.add(bundle_inner_index as usize);
+
+                    if is_fallback_batch {
+                        // Fallback batches can contain empty lanes marked with -1.
+                        if raw_body_index == -1 {
+                            continue;
+                        }
+                    }
+
+                    let body_index = raw_body_index & Bodies::BODY_REFERENCE_MASK;
+                    let body_handle = body_active_set.index_to_handle.get(body_index).0;
+
+                    if first_observed_for_batch.contains(body_handle) {
+                        if is_fallback_batch {
+                            // For fallback batch: must also be the *earliest* constraint slot for this body.
+                            let mut earliest_index: u64 = u64::MAX;
+                            let constraints_for_body = body_active_set.constraints.get(body_index);
+                            let fallback_batch = active_set.batches.get(self.fallback_batch_threshold);
+                            for ci in 0..constraints_for_body.count {
+                                let constraint_ref = constraints_for_body.span.get(ci);
+                                let location = self.handle_to_constraint.get(constraint_ref.connecting_constraint_handle.0);
+                                let tbi = *fallback_batch.type_index_to_type_batch_index.get(location.type_id);
+                                let candidate = ((tbi as u64) << 32) | (location.index_in_type_batch as u32 as u64);
+                                if candidate < earliest_index {
+                                    earliest_index = candidate;
+                                }
+                            }
+                            let index_in_type_batch = bundle_start_index_in_constraints + bundle_inner_index;
+                            let current_slot = ((type_batch_index as u64) << 32) | (index_in_type_batch as u32 as u64);
+                            if current_slot == earliest_index {
+                                integration_flags_for_body.add_unsafely(index_in_type_batch);
+                            }
+                        } else {
+                            // Not a fallback: being contained in the observed set is sufficient.
+                            integration_flags_for_body.add_unsafely(bundle_start_index_in_constraints + bundle_inner_index);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Precompute whether this type batch has *any* integration responsibilities.
+        let flag_bundle_count = IndexSet::get_bundle_capacity(type_batch.constraint_count);
+        let mut merged_flag_bundles: u64 = 0;
+        for body_index_in_constraint in 0..bodies_per_constraint_in_type_batch {
+            let flags_for_body = (*integration_flags_for_type_batch).get(body_index_in_constraint);
+            for i in 0..flag_bundle_count {
+                merged_flag_bundles |= *flags_for_body.flags.get(i);
+            }
+        }
+        merged_flag_bundles != 0
+    }
+
     /// Prepares constraint integration responsibilities. Returns an IndexSet of constrained body handles.
     ///
     /// This computes per-batch merged body handle sets and identifies which constraint is
@@ -2378,40 +2769,180 @@ impl Solver {
         if self.active_set().batches.count > 0 {
             let pool = &mut *self.pool;
             let bodies = &*self.bodies;
-            // Build a merged set of all constrained body handles.
-            let highest_id = bodies.handle_pool.highest_possibly_claimed_id();
-            let flags_len = (highest_id + 64) / 64;
-            let mut merged = IndexSet::new(pool, flags_len * 64);
+            let active_set_ptr = self.sets.get(0) as *const ConstraintSet;
+            let batch_count = (*active_set_ptr).batches.count;
 
+            // Allocate integration flags: integrationFlags[batch][typeBatch][bodyInConstraint] = IndexSet
+            self.integration_flags = pool.take(batch_count);
+            *self.integration_flags.get_mut(0) = Buffer::default(); // batch 0 is always-integrate, no flags needed
+
+            // Allocate coarse batch integration responsibilities
+            self.coarse_batch_integration_responsibilities = pool.take(batch_count);
+
+            for batch_index in 1..self.integration_flags.len() {
+                let batch = (*active_set_ptr).batches.get(batch_index);
+                let type_batch_count = batch.type_batches.count;
+                let mut flags_for_batch: Buffer<Buffer<IndexSet>> = pool.take(type_batch_count);
+                let coarse_for_batch: Buffer<bool> = pool.take(type_batch_count);
+
+                for type_batch_index in 0..type_batch_count {
+                    let type_batch = batch.type_batches.get(type_batch_index);
+                    let bodies_per_constraint = self.type_processors[type_batch.type_id as usize]
+                        .as_ref().unwrap().bodies_per_constraint;
+                    let mut flags_for_type_batch: Buffer<IndexSet> = pool.take(bodies_per_constraint);
+                    for body_index_in_constraint in 0..bodies_per_constraint {
+                        *flags_for_type_batch.get_mut(body_index_in_constraint) =
+                            IndexSet::new(pool, type_batch.constraint_count);
+                    }
+                    *flags_for_batch.get_mut(type_batch_index) = flags_for_type_batch;
+                }
+
+                *self.integration_flags.get_mut(batch_index) = flags_for_batch;
+                *self.coarse_batch_integration_responsibilities.get_mut(batch_index) = coarse_for_batch;
+            }
+
+            // Build bodiesFirstObservedInBatches by computing which body handles appear in each batch
+            // but not in any prior batch.
+            let highest_id = bodies.handle_pool.highest_possibly_claimed_id();
+            // Note: "+64" instead of "+63" because highest_possibly_claimed_id is inclusive
+            let merged_flags_len = (highest_id + 64) / 64;
+            self.merged_constrained_body_handles.flags = pool.take(merged_flags_len);
+
+            // Copy batch 0's handles to initialize the merged set
             if self.batch_referenced_handles.count > 0 {
                 let batch0_flags = &self.batch_referenced_handles.get(0).flags;
-                let copy_len = batch0_flags.len().min(merged.flags.len());
-                batch0_flags.copy_to(0, &mut merged.flags, 0, copy_len);
-                if copy_len < merged.flags.len() {
-                    merged.flags.clear(copy_len, merged.flags.len() - copy_len);
-                }
+                let copy_len = batch0_flags.len().min(self.merged_constrained_body_handles.flags.len());
+                batch0_flags.copy_to(0, &mut self.merged_constrained_body_handles.flags, 0, copy_len);
+                self.merged_constrained_body_handles.flags.clear(
+                    copy_len,
+                    self.merged_constrained_body_handles.flags.len() - copy_len,
+                );
             }
-            // Merge remaining batches.
-            for batch_index in 1..self.batch_referenced_handles.count {
+
+            // First slot is unallocated (batch 0 always integrates, no first-observed tracking needed)
+            self.bodies_first_observed_in_batches = pool.take(self.batch_referenced_handles.count);
+            *self.bodies_first_observed_in_batches.get_mut(0) = IndexSet::empty();
+
+            let mut batch_has_any_integration_responsibilities: Buffer<bool> = pool.take(self.batch_referenced_handles.count);
+
+            for batch_index in 1..self.bodies_first_observed_in_batches.len() {
                 let batch_handles = &self.batch_referenced_handles.get(batch_index);
-                let bundle_count = merged.flags.len().min(batch_handles.flags.len());
-                for i in 0..bundle_count {
-                    *merged.flags.get_mut(i) |= *batch_handles.flags.get(i);
+                let bundle_count = self.merged_constrained_body_handles.flags.len().min(batch_handles.flags.len());
+                // Allocate without zeroing — every bundle will be fully assigned
+                let first_observed_flags: Buffer<u64> = pool.take(bundle_count);
+                *self.bodies_first_observed_in_batches.get_mut(batch_index) = IndexSet { flags: first_observed_flags };
+            }
+
+            // Compute firstObserved and merge. No multithreading — typically microseconds.
+            for batch_index in 1..batch_count {
+                let batch_handles = &self.batch_referenced_handles.get(batch_index);
+                let first_observed = self.bodies_first_observed_in_batches.get_mut(batch_index);
+                let flag_bundle_count = self.merged_constrained_body_handles.flags.len().min(batch_handles.flags.len());
+
+                let mut horizontal_merge: u64 = 0;
+                for flag_bundle_index in 0..flag_bundle_count {
+                    let merge_bundle = *self.merged_constrained_body_handles.flags.get(flag_bundle_index);
+                    let batch_bundle = *batch_handles.flags.get(flag_bundle_index);
+                    *self.merged_constrained_body_handles.flags.get_mut(flag_bundle_index) = merge_bundle | batch_bundle;
+                    // If this batch contains a body, and the merged set does not, then it's first observed in this batch
+                    let first_observed_bundle = !merge_bundle & batch_bundle;
+                    horizontal_merge |= first_observed_bundle;
+                    *first_observed.flags.get_mut(flag_bundle_index) = first_observed_bundle;
+                }
+                *batch_has_any_integration_responsibilities.get_mut(batch_index) = horizontal_merge != 0;
+            }
+
+            // Compute per-constraint integration responsibilities (single-threaded path)
+            let (synchronized_batch_count, fallback_exists) = self.get_synchronized_batch_count();
+            for i in 1..synchronized_batch_count {
+                if !*batch_has_any_integration_responsibilities.get(i) {
+                    // Initialize coarse to false for batches with no responsibilities
+                    let batch = (*active_set_ptr).batches.get(i);
+                    for j in 0..batch.type_batches.count {
+                        *self.coarse_batch_integration_responsibilities.get_mut(i).get_mut(j) = false;
+                    }
+                    continue;
+                }
+                let batch = (*active_set_ptr).batches.get(i);
+                for j in 0..batch.type_batches.count {
+                    let type_batch = batch.type_batches.get(j);
+                    let has_responsibilities = self.compute_integration_responsibilities_for_constraint_region(
+                        i, j, 0, type_batch.constraint_count, false,
+                    );
+                    *self.coarse_batch_integration_responsibilities.get_mut(i).get_mut(j) = has_responsibilities;
                 }
             }
-            // Add constrained kinematics.
-            for i in 0..self.constrained_kinematic_handles.count {
-                merged.add_unsafely(*self.constrained_kinematic_handles.span.get(i));
+            if fallback_exists && *batch_has_any_integration_responsibilities.get(self.fallback_batch_threshold) {
+                let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
+                for j in 0..batch.type_batches.count {
+                    let type_batch = batch.type_batches.get(j);
+                    let has_responsibilities = self.compute_integration_responsibilities_for_constraint_region(
+                        self.fallback_batch_threshold, j, 0, type_batch.constraint_count, true,
+                    );
+                    *self.coarse_batch_integration_responsibilities.get_mut(self.fallback_batch_threshold).get_mut(j) = has_responsibilities;
+                }
+            } else if fallback_exists {
+                // Initialize coarse to false for fallback batch with no responsibilities
+                let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
+                for j in 0..batch.type_batches.count {
+                    *self.coarse_batch_integration_responsibilities.get_mut(self.fallback_batch_threshold).get_mut(j) = false;
+                }
             }
-            merged
+
+            pool.return_buffer(&mut batch_has_any_integration_responsibilities);
+
+            // Dispose bodiesFirstObservedInBatches (no longer needed after responsibilities computed)
+            debug_assert!(
+                !self.bodies_first_observed_in_batches.get(0).flags.allocated(),
+                "First batch's slot should be empty"
+            );
+            for batch_index in 1..self.bodies_first_observed_in_batches.len() {
+                self.bodies_first_observed_in_batches.get_mut(batch_index).dispose(pool);
+            }
+            pool.return_buffer(&mut self.bodies_first_observed_in_batches);
+
+            // Add the constrained kinematics to the merged constrained body handles.
+            for i in 0..self.constrained_kinematic_handles.count {
+                self.merged_constrained_body_handles.add_unsafely(
+                    *self.constrained_kinematic_handles.span.get(i),
+                );
+            }
+
+            // Return a copy of the merged handles (caller owns it)
+            let result_len = self.merged_constrained_body_handles.flags.len();
+            let mut result = IndexSet { flags: pool.take(result_len) };
+            self.merged_constrained_body_handles.flags.copy_to(0, &mut result.flags, 0, result_len);
+            result
         } else {
             IndexSet::empty()
         }
     }
 
     /// Disposes the constraint integration responsibilities created by prepare_constraint_integration_responsibilities.
-    pub fn dispose_constraint_integration_responsibilities(&mut self) {
-        // The merged IndexSet is returned by value and disposed by the caller.
+    pub unsafe fn dispose_constraint_integration_responsibilities(&mut self) {
+        if self.active_set().batches.count > 0 && self.integration_flags.allocated() {
+            let pool = &mut *self.pool;
+
+            debug_assert!(
+                !self.integration_flags.get(0).allocated(),
+                "Batch 0's integration flags should be empty"
+            );
+            for batch_index in 1..self.integration_flags.len() {
+                let flags_for_batch = self.integration_flags.get_mut(batch_index);
+                for type_batch_index in 0..flags_for_batch.len() {
+                    let flags_for_type_batch = flags_for_batch.get_mut(type_batch_index);
+                    for body_index_in_constraint in 0..flags_for_type_batch.len() {
+                        flags_for_type_batch.get_mut(body_index_in_constraint).dispose(pool);
+                    }
+                    pool.return_buffer(flags_for_type_batch);
+                }
+                pool.return_buffer(flags_for_batch);
+                pool.return_buffer(self.coarse_batch_integration_responsibilities.get_mut(batch_index));
+            }
+            pool.return_buffer(&mut self.integration_flags);
+            pool.return_buffer(&mut self.coarse_batch_integration_responsibilities);
+            self.merged_constrained_body_handles.dispose(pool);
+        }
     }
 
     /// Solves all constraints using substepped velocity iterations.
@@ -2425,8 +2956,10 @@ impl Solver {
     ) {
         let substep_dt = total_dt / self.substep_count as f32;
 
-        // Note: In C#, PoseIntegrator.Callbacks.PrepareForIntegration(substepDt) is called here.
-        // This is handled externally in the Rust version via the simulation's timestep orchestration.
+        // Prepare integration callbacks for this substep timestep.
+        if let Some(pi_ptr) = self.pose_integrator {
+            (*pi_ptr).prepare_for_integration(substep_dt);
+        }
 
         if let Some(dispatcher) = thread_dispatcher {
             // Multithreaded path.
@@ -2498,24 +3031,23 @@ impl Solver {
 
                 // Warm start all batches.
                 let active_set = (*self_ptr).sets.get_mut(0);
+                let allow_pose_integration = substep_index > 0;
                 for i in 0..active_set.batches.count {
                     let batch = active_set.batches.get_mut(i);
                     for j in 0..batch.type_batches.count {
                         let type_batch = batch.type_batches.get_mut(j);
                         let type_id = type_batch.type_id;
                         let bundle_count = type_batch.bundle_count() as i32;
-                        (&(*self_ptr).type_processors)[type_id as usize]
+                        let processor = (&(*self_ptr).type_processors)[type_id as usize]
                             .as_ref()
-                            .unwrap()
-                            .inner()
-                            .warm_start(
-                                type_batch,
-                                bodies,
-                                substep_dt,
-                                inverse_dt,
-                                0,
-                                bundle_count,
-                            );
+                            .unwrap();
+                        (*self_ptr).warm_start_block(
+                            0, i, j,
+                            0, bundle_count,
+                            type_batch, processor.inner(),
+                            allow_pose_integration,
+                            substep_dt, inverse_dt,
+                        );
                     }
                 }
 

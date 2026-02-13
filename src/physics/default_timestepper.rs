@@ -65,4 +65,12 @@ impl ITimestepper for DefaultTimestepper {
 
         sim.incrementally_optimize_data_structures(thread_dispatcher);
     }
+
+    fn before_collision_detection_mut(&mut self) -> &mut Option<TimestepperStageHandler> {
+        &mut self.before_collision_detection
+    }
+
+    fn collisions_detected_mut(&mut self) -> &mut Option<TimestepperStageHandler> {
+        &mut self.collisions_detected
+    }
 }

@@ -1,9 +1,32 @@
 // Translated from BepuPhysics/ConstraintBatch.cs
 
+use crate::physics::bodies::Bodies;
 use crate::physics::constraints::type_batch::TypeBatch;
+use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+
+/// Used by `RemoveBodyHandlesFromBatchForConstraint` to remove each body's handle
+/// from the batch's referenced handle set.
+struct ActiveBodyHandleRemover {
+    bodies: *const Bodies,
+    handles: *mut IndexSet,
+}
+
+impl IForEach<i32> for ActiveBodyHandleRemover {
+    #[inline(always)]
+    fn loop_body(&mut self, encoded_body_index: i32) {
+        unsafe {
+            if Bodies::is_encoded_dynamic_reference(encoded_body_index) {
+                let body_index = encoded_body_index & Bodies::BODY_REFERENCE_MASK;
+                let handle = (*self.bodies).active_set().index_to_handle.get(body_index).0;
+                (*self.handles).unset(handle);
+            }
+        }
+    }
+}
 
 /// Contains a set of type batches whose constraints share no body references.
 #[derive(Clone, Copy)]
@@ -138,6 +161,102 @@ impl ConstraintBatch {
             *self.type_index_to_type_batch_index.get_mut(type_id) = -1;
         }
         self.type_batches.clear();
+    }
+
+    /// Removes body handles associated with a constraint from the batch's referenced handles set.
+    /// Only used for non-fallback batches.
+    pub unsafe fn remove_body_handles_from_batch_for_constraint(
+        &self,
+        constraint_type_id: i32,
+        index_in_type_batch: i32,
+        batch_index: i32,
+        solver: &mut crate::physics::solver::Solver,
+    ) {
+        debug_assert!(
+            batch_index <= solver.fallback_batch_threshold(),
+            "This should only be used for non-fallback batches"
+        );
+        let index_set = solver.batch_referenced_handles.get_pointer_mut(batch_index);
+        let type_batch_index = *self.type_index_to_type_batch_index.get(constraint_type_id);
+        let type_batch = self.type_batches.get(type_batch_index);
+        let mut handle_remover = ActiveBodyHandleRemover {
+            bodies: solver.bodies,
+            handles: index_set,
+        };
+        solver.enumerate_connected_raw_body_references_from_type_batch(
+            type_batch,
+            index_in_type_batch,
+            &mut handle_remover,
+        );
+    }
+
+    /// Removes a constraint from this batch.
+    pub unsafe fn remove(
+        &mut self,
+        constraint_type_id: i32,
+        index_in_type_batch: i32,
+        is_fallback: bool,
+        solver: &mut crate::physics::solver::Solver,
+    ) {
+        let type_batch_index = *self.type_index_to_type_batch_index.get(constraint_type_id);
+        let type_batch = self.type_batches.get_mut(type_batch_index);
+        debug_assert!(
+            *self.type_index_to_type_batch_index.get(constraint_type_id) >= 0,
+            "Type index must actually exist within this batch."
+        );
+        debug_assert!(type_batch.constraint_count > index_in_type_batch);
+        let type_processor = solver.type_processors[constraint_type_id as usize]
+            .as_ref()
+            .unwrap();
+        type_processor.inner().remove(
+            type_batch,
+            index_in_type_batch,
+            &mut solver.handle_to_constraint,
+            is_fallback,
+        );
+        self.remove_type_batch_if_empty(type_batch_index, &mut *solver.pool);
+    }
+
+    #[inline(always)]
+    fn get_target_capacity(type_batch: &TypeBatch, solver: &crate::physics::solver::Solver) -> i32 {
+        i32::max(
+            type_batch.constraint_count,
+            solver.get_minimum_capacity_for_type(type_batch.type_id),
+        )
+    }
+
+    /// Ensures all type batches have enough capacity for the solver's minimum requirements.
+    pub fn ensure_type_batch_capacities(&mut self, solver: &crate::physics::solver::Solver) {
+        for i in 0..self.type_batches.count {
+            let type_batch = self.type_batches.get(i);
+            let target_capacity = Self::get_target_capacity(type_batch, solver);
+            if target_capacity > type_batch.index_to_handle.len() {
+                let type_id = type_batch.type_id;
+                let type_processor = solver.type_processors[type_id as usize]
+                    .as_ref()
+                    .unwrap();
+                let type_batch_mut = self.type_batches.get_mut(i);
+                type_processor
+                    .inner()
+                    .resize(type_batch_mut, target_capacity, unsafe { &mut *solver.pool });
+            }
+        }
+    }
+
+    /// Resizes all type batches to match the solver's target capacity.
+    pub fn resize_type_batch_capacities(&mut self, solver: &crate::physics::solver::Solver) {
+        for i in 0..self.type_batches.count {
+            let type_batch = self.type_batches.get(i);
+            let target_capacity = Self::get_target_capacity(type_batch, solver);
+            let type_id = type_batch.type_id;
+            let type_processor = solver.type_processors[type_id as usize]
+                .as_ref()
+                .unwrap();
+            let type_batch_mut = self.type_batches.get_mut(i);
+            type_processor
+                .inner()
+                .resize(type_batch_mut, target_capacity, unsafe { &mut *solver.pool });
+        }
     }
 
     /// Releases all memory used by the batch.

@@ -154,6 +154,13 @@ pub trait ISupportFinder<TShape: IConvexShape, TShapeWide: IShapeWide<TShape>> {
 // Forward declarations for compound shape traits.
 use crate::physics::collidables::compound::CompoundChild;
 
+/// Trait for non-convex shapes that can compute their own bounding box from an orientation.
+/// Both compound and homogeneous compound shapes implement this, but the method signature
+/// does not require child type parameters.
+pub trait INonConvexBounds {
+    fn compute_bounds_by_orientation(&self, orientation: glam::Quat, min: &mut glam::Vec3, max: &mut glam::Vec3);
+}
+
 /// Defines a compound shape type that has children of potentially different types.
 pub trait ICompoundShape: IDisposableShape {
     /// Gets the number of children in the compound shape.
@@ -171,6 +178,15 @@ pub trait ICompoundShape: IDisposableShape {
         local_min: &glam::Vec3,
         local_max: &glam::Vec3,
         overlaps: &mut TOverlaps,
+    );
+
+    /// Adds child bounding boxes to the batcher for compound shape bounds computation.
+    fn add_child_bounds_to_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+        pose: &crate::physics::body_properties::RigidPose,
+        velocity: &crate::physics::body_properties::BodyVelocity,
+        body_index: i32,
     );
 }
 

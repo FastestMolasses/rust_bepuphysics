@@ -11,6 +11,7 @@ use crate::physics::collidables::collidable_reference::{CollidableMobility, Coll
 use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::handles::BodyHandle;
 use crate::physics::pose_integration::PoseIntegration;
+use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::symmetric3x3::Symmetric3x3;
 use glam::Vec3;
@@ -66,9 +67,66 @@ impl BodyReference {
         self.memory_location().set_index == 0
     }
 
-    // NOTE: set_awake omitted - requires IslandSleeper and IslandAwakener implementations.
-    // In C#:
-    //   set { if (Awake) { if (!value) sleeper.Sleep(...); } else { if (value) awakener.AwakenBody(...); } }
+    /// Sets whether the body is awake. Setting to true will attempt to wake the body;
+    /// setting to false will force the body and any constraint-connected bodies asleep.
+    pub fn set_awake(&self, value: bool) {
+        if self.awake() {
+            if !value {
+                let loc = self.memory_location();
+                let sleeper = unsafe { &mut *self.bodies().sleeper };
+                unsafe { sleeper.sleep_body(loc.index); }
+            }
+        } else {
+            if value {
+                let awakener = unsafe { &mut *self.bodies().awakener };
+                awakener.awaken_body(self.handle);
+            }
+        }
+    }
+
+    /// Gets direct pointers to the body's bounding box minimum and maximum in the broad phase.
+    /// Returns `(true, min_ptr, max_ptr)` if the body has a shape and bounds, or `(false, null, null)` otherwise.
+    pub unsafe fn get_bounds_references_from_broad_phase(&self) -> (bool, *mut Vec3, *mut Vec3) {
+        let loc = self.memory_location();
+        let set = self.bodies().sets.get(loc.set_index);
+        let collidable = set.collidables.get(loc.index);
+        if collidable.shape.exists() {
+            let broad_phase = &*self.bodies().broad_phase;
+            if loc.set_index == 0 {
+                let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
+                (true, min_ptr, max_ptr)
+            } else {
+                let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(collidable.broad_phase_index);
+                (true, min_ptr, max_ptr)
+            }
+        } else {
+            // There is no shape, so there can be no bounds.
+            (false, std::ptr::null_mut(), std::ptr::null_mut())
+        }
+    }
+
+    /// Gets a copy of the body's bounding box. If the body has no shape,
+    /// the bounding box has a min at f32::MAX and a max at f32::MIN.
+    pub fn bounding_box(&self) -> BoundingBox {
+        unsafe {
+            let (has_bounds, min_ptr, max_ptr) = self.get_bounds_references_from_broad_phase();
+            if has_bounds {
+                BoundingBox {
+                    min: *min_ptr,
+                    _pad0: 0.0,
+                    max: *max_ptr,
+                    _pad1: 0.0,
+                }
+            } else {
+                BoundingBox {
+                    min: Vec3::splat(f32::MAX),
+                    _pad0: 0.0,
+                    max: Vec3::splat(f32::MIN),
+                    _pad1: 0.0,
+                }
+            }
+        }
+    }
 
     /// Gets a reference to the body's velocity.
     #[inline(always)]
@@ -263,8 +321,6 @@ impl BodyReference {
         self.bodies_mut().set_shape(self.handle, new_shape);
     }
 
-    // NOTE: BoundingBox and GetBoundsReferencesFromBroadPhase omitted - require BroadPhase implementation.
-
     /// Updates the body's bounds in the broad phase for its current state.
     pub fn update_bounds(&self) {
         self.bodies_mut().update_bounds(self.handle);
@@ -300,9 +356,9 @@ impl BodyReference {
         impulse: Vec3,
         impulse_offset: Vec3,
     ) {
-        let state = set.dynamics_state.get(index);
-        // Need mutable access — get raw pointers
-        let state_ptr = state as *const BodyDynamics as *mut BodyDynamics;
+        // Use raw pointer access to avoid creating &T then casting to *mut T (UB under Stacked Borrows).
+        // Buffer wraps a raw pointer, so we go through it directly.
+        let state_ptr = unsafe { set.dynamics_state.as_ptr().add(index as usize) as *mut BodyDynamics };
         unsafe {
             Self::apply_impulse_static(
                 impulse,

@@ -170,7 +170,8 @@ impl IslandScaffold {
         let type_id = location.type_id;
         let type_processor = solver.type_processors[type_id as usize].as_ref().unwrap();
         let bodies_per_constraint = type_processor.bodies_per_constraint;
-        let mut body_indices_buf = vec![0i32; bodies_per_constraint as usize];
+        let mut body_indices_buf = [0i32; 8]; // stack alloc — matches C# stackalloc
+        debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
 
         let mut enumerator = ConstraintHandleEnumerator {
             body_indices: body_indices_buf.as_mut_ptr(),

@@ -20,4 +20,12 @@ pub trait ITimestepper {
         dt: f32,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     );
+
+    /// Gets a mutable reference to the before-collision-detection event handler.
+    /// Corresponds to C# `event TimestepperStageHandler BeforeCollisionDetection`.
+    fn before_collision_detection_mut(&mut self) -> &mut Option<TimestepperStageHandler>;
+
+    /// Gets a mutable reference to the collisions-detected event handler.
+    /// Corresponds to C# `event TimestepperStageHandler CollisionsDetected`.
+    fn collisions_detected_mut(&mut self) -> &mut Option<TimestepperStageHandler>;
 }

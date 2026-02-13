@@ -14,7 +14,11 @@ use crate::physics::collision_detection::contact_manifold::{
 };
 use crate::physics::collision_detection::mesh_reduction::MeshReduction;
 use crate::physics::collision_detection::nonconvex_reduction::{FlushResult, NonconvexReduction};
+use crate::physics::collision_detection::collision_tasks::pair_types::{
+    SpherePair, SphereIncludingPair,
+};
 use crate::physics::collision_detection::untyped_list::UntypedList;
+use crate::physics::collidables::sphere::Sphere;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
@@ -276,6 +280,96 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         }
     }
 
+    /// Copies shape data into the batch's shape cache so the shapes outlive the caller.
+    #[inline(always)]
+    unsafe fn cache_shapes(
+        &mut self,
+        reference: &crate::physics::collision_detection::collision_task_registry::CollisionTaskReference,
+        shape_a: *const u8,
+        shape_b: *const u8,
+        shape_size_a: i32,
+        shape_size_b: i32,
+    ) -> (*const u8, *const u8) {
+        let batch = &mut *self.batches.get_mut(reference.task_index);
+        if !batch.shapes.buffer.allocated() {
+            let size = reference.batch_size * (shape_size_a + shape_size_b);
+            let pool = &mut *self.pool;
+            batch.shapes.buffer = pool.take_at_least::<u8>(size);
+            debug_assert!(batch.shapes.byte_count == 0);
+        }
+        let cached_shape_a = batch.shapes.allocate(shape_size_a);
+        let cached_shape_b = batch.shapes.allocate(shape_size_b);
+        std::ptr::copy_nonoverlapping(shape_a, cached_shape_a, shape_size_a as usize);
+        std::ptr::copy_nonoverlapping(shape_b, cached_shape_b, shape_size_b as usize);
+        (cached_shape_a as *const u8, cached_shape_b as *const u8)
+    }
+
+    /// Copies shape B data into the batch's shape cache.
+    #[inline(always)]
+    pub unsafe fn cache_shape_b(
+        &mut self,
+        shape_type_a: i32,
+        shape_type_b: i32,
+        shape_data_b: *const u8,
+        shape_size_b: i32,
+    ) -> *const u8 {
+        let type_matrix = &*self.type_matrix;
+        let reference = type_matrix.get_task_reference(shape_type_a, shape_type_b);
+        let batch = &mut *self.batches.get_mut(reference.task_index);
+        if !batch.shapes.buffer.allocated() {
+            let shapes = &*self.shapes;
+            let shape_data_size_a = shapes
+                .get_batch(shape_type_a as usize)
+                .expect("shape batch A must exist")
+                .shape_data_size();
+            let size = reference.batch_size * (shape_data_size_a as i32 + shape_size_b);
+            let pool = &mut *self.pool;
+            batch.shapes.buffer = pool.take_at_least::<u8>(size);
+            debug_assert!(batch.shapes.byte_count == 0);
+        }
+        let cached_shape_b = batch.shapes.allocate(shape_size_b);
+        std::ptr::copy_nonoverlapping(shape_data_b, cached_shape_b, shape_size_b as usize);
+        cached_shape_b as *const u8
+    }
+
+    /// Adds a collision pair, caching both shapes into the batch's shape blob.
+    #[inline(always)]
+    pub unsafe fn add_with_cached_shapes(
+        &mut self,
+        shape_type_a: i32,
+        shape_type_b: i32,
+        shape_size_a: i32,
+        shape_size_b: i32,
+        shape_a: *const u8,
+        shape_b: *const u8,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        speculative_margin: f32,
+        pair_id: i32,
+    ) {
+        let type_matrix = &*self.type_matrix;
+        let reference = type_matrix.get_task_reference(shape_type_a, shape_type_b);
+        let (cached_shape_a, cached_shape_b) =
+            self.cache_shapes(&reference, shape_a, shape_b, shape_size_a, shape_size_b);
+        let default_velocity = BodyVelocity::default();
+        let continuation = PairContinuation::direct(pair_id);
+        self.add_directly(
+            shape_type_a,
+            shape_type_b,
+            cached_shape_a,
+            cached_shape_b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            &default_velocity,
+            &default_velocity,
+            speculative_margin,
+            0.0,
+            &continuation,
+        );
+    }
+
     unsafe fn add_internal(
         &mut self,
         reference: &crate::physics::collision_detection::collision_task_registry::CollisionTaskReference,
@@ -299,10 +393,13 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             let element_size = match reference.pair_type {
                 CollisionTaskPairType::StandardPair => std::mem::size_of::<CollisionPair>() as i32,
                 CollisionTaskPairType::FliplessPair => std::mem::size_of::<FliplessPair>() as i32,
+                CollisionTaskPairType::SpherePair => std::mem::size_of::<SpherePair>() as i32,
+                CollisionTaskPairType::SphereIncludingPair => {
+                    std::mem::size_of::<SphereIncludingPair>() as i32
+                }
                 CollisionTaskPairType::BoundsTestedPair => {
                     std::mem::size_of::<BoundsTestedPair>() as i32
                 }
-                _ => std::mem::size_of::<CollisionPair>() as i32,
             };
             let pool = &mut *self.pool;
             batch.pairs = UntypedList::new(element_size, reference.batch_size, pool);
@@ -338,6 +435,26 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
                 pair.speculative_margin = speculative_margin;
                 pair.continuation = *continuation;
             }
+            CollisionTaskPairType::SpherePair => {
+                let pair_ptr = batch.pairs.allocate_unsafely::<SpherePair>();
+                let pair = &mut *pair_ptr;
+                pair.a = (*(shape_a as *const Sphere)).radius;
+                pair.b = (*(shape_b as *const Sphere)).radius;
+                pair.offset_b = offset_b;
+                pair.speculative_margin = speculative_margin;
+                pair.continuation = *continuation;
+            }
+            CollisionTaskPairType::SphereIncludingPair => {
+                let pair_ptr = batch.pairs.allocate_unsafely::<SphereIncludingPair>();
+                let pair = &mut *pair_ptr;
+                pair.a = (*(shape_a as *const Sphere)).radius;
+                pair.b = shape_b;
+                pair.flip_mask = flip_mask;
+                pair.offset_b = offset_b;
+                pair.orientation_b = orientation_b;
+                pair.speculative_margin = speculative_margin;
+                pair.continuation = *continuation;
+            }
             CollisionTaskPairType::BoundsTestedPair => {
                 let pair_ptr = batch.pairs.allocate_unsafely::<BoundsTestedPair>();
                 let pair = &mut *pair_ptr;
@@ -354,7 +471,6 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
                 pair.speculative_margin = speculative_margin;
                 pair.continuation = *continuation;
             }
-            _ => {}
         }
 
         // If the batch is full, execute it

@@ -96,7 +96,7 @@ fn overlap_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
     unsafe {
         let ctx = &*(dispatcher.unmanaged_context() as *const OverlapWorkerContext);
         loop {
-            let job_index = AtomicI32::from_ptr(ctx.next_job_index.get()).fetch_add(1, Ordering::AcqRel);
+            let job_index = AtomicI32::from_ptr(ctx.next_job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
             if job_index < ctx.self_job_count {
                 (ctx.execute_self_job)(ctx.self_test, job_index, worker_index);
             } else if job_index < ctx.total_job_count {

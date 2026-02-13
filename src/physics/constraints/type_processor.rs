@@ -44,6 +44,37 @@ impl<'a> IForEach<i32> for ActiveKinematicFlaggedBodyHandleCollector<'a> {
 /// This holds no actual constraint state. A solver creates a unique type processor for each
 /// registered constraint type, and all instances are held in untyped memory.
 /// Conceptually, the solver's array of TypeProcessors are like C function pointers.
+///
+/// Raw lane copy helper for transfer_constraint — copies one lane from source bundle to target bundle.
+/// Works with raw byte pointers since we're type-erased through trait objects.
+/// Equivalent to `GatherScatter.CopyLane<T>` in C#.
+#[inline]
+unsafe fn copy_lane_raw(
+    source_bundle: *const u8,
+    source_inner: usize,
+    target_bundle: *mut u8,
+    target_inner: usize,
+    bundle_size_bytes: usize,
+) {
+    let count = crate::utilities::vector::VECTOR_WIDTH;
+    // size_in_ints = (bundle_size_bytes >> 2) & !vector_mask
+    let size_in_ints = (bundle_size_bytes >> 2) & !crate::utilities::bundle_indexing::BundleIndexing::vector_mask();
+
+    let source_base = (source_bundle as *const i32).add(source_inner);
+    let target_base = (target_bundle as *mut i32).add(target_inner);
+
+    if size_in_ints == 0 {
+        return;
+    }
+    *target_base = *source_base;
+
+    let mut offset = count;
+    while offset < size_in_ints {
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+    }
+}
+
 pub trait ITypeProcessor {
     /// Gets the number of bodies associated with each constraint in this type processor.
     fn bodies_per_constraint(&self) -> i32;
@@ -154,16 +185,71 @@ pub trait ITypeProcessor {
     /// Uses pre-computed dynamic body handles and encoded body indices.
     fn transfer_constraint(
         &self,
-        _source_type_batch: &mut TypeBatch,
+        source_type_batch: &mut TypeBatch,
         _source_batch_index: i32,
-        _index_in_type_batch: i32,
-        _solver: *mut crate::physics::solver::Solver,
+        index_in_type_batch: i32,
+        solver: *mut crate::physics::solver::Solver,
         _bodies: *mut crate::physics::bodies::Bodies,
-        _target_batch_index: i32,
-        _dynamic_body_handles: &[crate::physics::handles::BodyHandle],
-        _encoded_body_indices: &[i32],
+        target_batch_index: i32,
+        dynamic_body_handles: &[crate::physics::handles::BodyHandle],
+        encoded_body_indices: &[i32],
     ) {
-        // Default: no-op stub. Concrete type processors will override with lane-copy logic.
+        unsafe {
+            let constraint_handle = *source_type_batch.index_to_handle.get(index_in_type_batch);
+            let type_id = source_type_batch.type_id;
+
+            // Allocate a spot in the target batch. This sets up body references and batch-referenced handles.
+            let target_reference = (*solver).allocate_in_batch(
+                target_batch_index,
+                constraint_handle,
+                dynamic_body_handles,
+                encoded_body_indices,
+                type_id,
+            );
+
+            // Copy prestep data and accumulated impulses lane-by-lane.
+            let (mut _body_ref_size, mut prestep_size, mut accum_size) = (0i32, 0i32, 0i32);
+            self.get_bundle_type_sizes(&mut _body_ref_size, &mut prestep_size, &mut accum_size);
+
+            let (mut source_bundle, mut source_inner) = (0usize, 0usize);
+            crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
+                index_in_type_batch as usize, &mut source_bundle, &mut source_inner,
+            );
+            let (mut target_bundle, mut target_inner) = (0usize, 0usize);
+            crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
+                target_reference.index_in_type_batch as usize, &mut target_bundle, &mut target_inner,
+            );
+
+            let target_type_batch = &mut *target_reference.type_batch_pointer;
+
+            // Copy prestep data
+            copy_lane_raw(
+                source_type_batch.prestep_data.as_ptr().add(source_bundle as usize * prestep_size as usize),
+                source_inner,
+                target_type_batch.prestep_data.as_mut_ptr().add(target_bundle as usize * prestep_size as usize),
+                target_inner,
+                prestep_size as usize,
+            );
+
+            // Copy accumulated impulses
+            copy_lane_raw(
+                source_type_batch.accumulated_impulses.as_ptr().add(source_bundle as usize * accum_size as usize),
+                source_inner,
+                target_type_batch.accumulated_impulses.as_mut_ptr().add(target_bundle as usize * accum_size as usize),
+                target_inner,
+                accum_size as usize,
+            );
+
+            // Update the solver's handle-to-constraint mapping.
+            let location = (*solver).handle_to_constraint.get_mut(constraint_handle.0);
+            location.batch_index = target_batch_index;
+            location.index_in_type_batch = target_reference.index_in_type_batch;
+            location.type_id = type_id;
+
+            // Remove from the source batch. Use RemoveFromBatch (not Remove) to avoid
+            // returning the constraint handle to the pool.
+            (*solver).remove_from_batch(_source_batch_index, type_id, index_in_type_batch);
+        }
     }
 
     /// Convenience wrapper that auto-collects dynamic body handles and encoded body indices,
@@ -179,8 +265,9 @@ pub trait ITypeProcessor {
     ) {
         unsafe {
             let bodies_per_constraint = self.bodies_per_constraint() as usize;
-            let mut dynamic_body_handles = vec![0i32; bodies_per_constraint];
-            let mut encoded_body_indices = vec![0i32; bodies_per_constraint];
+            let mut dynamic_body_handles = [0i32; 8]; // stack alloc — matches C# stackalloc
+            let mut encoded_body_indices = [0i32; 8];
+            debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
             let mut dynamic_count = 0usize;
             let bodies_ref = &*bodies;
 
@@ -197,10 +284,10 @@ pub trait ITypeProcessor {
                 },
             );
 
-            let dynamic_handles: Vec<crate::physics::handles::BodyHandle> = dynamic_body_handles[..dynamic_count]
-                .iter()
-                .map(|&v| crate::physics::handles::BodyHandle(v))
-                .collect();
+            let dynamic_handles: &[crate::physics::handles::BodyHandle] = std::slice::from_raw_parts(
+                dynamic_body_handles.as_ptr() as *const crate::physics::handles::BodyHandle,
+                dynamic_count,
+            );
 
             self.transfer_constraint(
                 source_type_batch,
@@ -209,8 +296,8 @@ pub trait ITypeProcessor {
                 solver,
                 bodies,
                 target_batch_index,
-                &dynamic_handles,
-                &encoded_body_indices,
+                dynamic_handles,
+                &encoded_body_indices[..bodies_per_constraint],
             );
         }
     }
@@ -219,19 +306,37 @@ pub trait ITypeProcessor {
     /// Returns true if the moved body is kinematic.
     fn update_for_body_memory_move(
         &self,
-        _type_batch: &mut TypeBatch,
-        _index_in_type_batch: i32,
-        _body_index_in_constraint: i32,
-        _new_body_location: i32,
+        type_batch: &mut TypeBatch,
+        index_in_type_batch: i32,
+        body_index_in_constraint: i32,
+        new_body_location: i32,
     ) -> bool {
-        // Default: no-op stub.
-        false
+        unsafe {
+            let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+            crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
+                index_in_type_batch as usize,
+                &mut bundle_index,
+                &mut inner_index,
+            );
+            // Body references are laid out as N consecutive Vector<int> (one per body).
+            // Access the correct lane: innerIndex + bodyIndexInConstraint * Vector<int>::LEN
+            let vector_len = crate::utilities::vector::VECTOR_WIDTH;
+            let body_refs_base = type_batch.body_references.as_mut_ptr() as *mut i32;
+            let vector_size_bytes = vector_len * std::mem::size_of::<i32>();
+            let bundle_offset = bundle_index * self.bodies_per_constraint() as usize * vector_size_bytes;
+            let lane_offset = inner_index + body_index_in_constraint as usize * vector_len;
+            let reference_location = &mut *body_refs_base.add(bundle_offset / std::mem::size_of::<i32>() + lane_offset);
+
+            // Preserve the old kinematic mask so the caller doesn't have to re-query.
+            let is_kinematic = Bodies::is_encoded_kinematic_reference(*reference_location);
+            *reference_location = new_body_location | (*reference_location & Bodies::KINEMATIC_MASK as i32);
+            is_kinematic
+        }
     }
 
     /// Returns the capacity of the given type batch.
-    fn capacity(&self, _type_batch: &TypeBatch) -> i32 {
-        // Default stub
-        0
+    fn capacity(&self, type_batch: &TypeBatch) -> i32 {
+        type_batch.index_to_handle.len()
     }
 
     /// Gets the size in bytes of the body references, prestep, and accumulated impulse bundle types.
@@ -296,19 +401,24 @@ pub trait ITypeProcessor {
     /// Warm-starts the constraints in the given type batch. The warm start applies previously
     /// accumulated impulses to the body velocities to accelerate convergence.
     ///
-    /// The integration flags, callbacks, and integration mode are handled internally by each
-    /// concrete type processor. This simplified signature is for the solver's main dispatch.
+    /// When `batch_integration_mode` is not `Never`, the warm start also integrates body
+    /// state (pose and/or velocity) for bodies whose first constraint appearance is in this batch.
     fn warm_start(
         &self,
         type_batch: &mut TypeBatch,
         bodies: &crate::physics::bodies::Bodies,
+        integration_flags: &crate::utilities::memory::buffer::Buffer<crate::utilities::collections::index_set::IndexSet>,
+        pose_integrator: Option<&dyn crate::physics::pose_integrator::IPoseIntegrator>,
+        batch_integration_mode: crate::physics::constraints::batch_integration_mode::BatchIntegrationMode,
+        allow_pose_integration: bool,
         dt: f32,
         inverse_dt: f32,
         start_bundle: i32,
         exclusive_end_bundle: i32,
+        worker_index: i32,
     ) {
         // Default: no-op. Concrete implementations will override.
-        let _ = (type_batch, bodies, dt, inverse_dt, start_bundle, exclusive_end_bundle);
+        let _ = (type_batch, bodies, integration_flags, pose_integrator, batch_integration_mode, allow_pose_integration, dt, inverse_dt, start_bundle, exclusive_end_bundle, worker_index);
     }
 
     /// Solves the constraint velocity iteration for the given bundle range.

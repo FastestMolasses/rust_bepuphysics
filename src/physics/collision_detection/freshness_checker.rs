@@ -172,8 +172,8 @@ impl FreshnessChecker {
         let pool = if self.cached_dispatcher.is_none() {
             pair_cache.pool
         } else {
-            // NOTE: Use dispatcher.worker_pools[worker_index] when thread dispatcher is fully hooked up
-            pair_cache.pool
+            let dispatcher = &*self.cached_dispatcher.unwrap();
+            dispatcher.worker_pool_ptr(worker_index)
         };
 
         let pending_changes = &mut pair_cache.worker_pending_changes[worker_index as usize];

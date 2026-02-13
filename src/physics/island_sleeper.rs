@@ -413,10 +413,17 @@ impl IslandSleeper {
         let target_slept = (active_count as f32 * self.target_slept_fraction).ceil() as i32;
         let target_traversed = (active_count as f32 * self.target_traversed_fraction).ceil() as i32;
 
+        // If the simulation is too small to generate parallel work, don't bother using threading.
+        // (Passing None forces the single-threaded codepath.)
+        let thread_dispatcher = if active_count < (2.0 / self.tested_fraction_per_frame) as i32 {
+            None
+        } else {
+            thread_dispatcher
+        };
+
         // Use raw pointer to avoid borrow conflict between pool and self
         let self_ptr = self as *mut Self;
 
-        // For now, run single-threaded
         (*self_ptr).sleep(
             &mut traversal_start_body_indices,
             thread_dispatcher,
@@ -462,7 +469,7 @@ impl IslandSleeper {
         while traversed_bodies < self.target_traversed_body_count_per_thread
             && slept_bodies < self.target_slept_body_count_per_thread
         {
-            let target_index = AtomicI32::from_ptr(self.job_index.get()).fetch_add(1, Ordering::AcqRel);
+            let target_index = AtomicI32::from_ptr(self.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
             if target_index >= self.traversal_start_body_indices.count {
                 break;
             }
@@ -502,7 +509,7 @@ impl IslandSleeper {
             let solver_ptr = sleeper.solver;
             let broad_phase = &*sleeper.broad_phase;
             loop {
-                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel);
+                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= sleeper.gathering_jobs.count {
                     break;
                 }
@@ -559,7 +566,7 @@ impl IslandSleeper {
         unsafe {
             let sleeper = &mut *(dispatcher.unmanaged_context() as *mut IslandSleeper);
             loop {
-                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel);
+                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= sleeper.removal_jobs.count {
                     break;
                 }
@@ -573,7 +580,7 @@ impl IslandSleeper {
         unsafe {
             let sleeper = &*(dispatcher.unmanaged_context() as *const IslandSleeper);
             loop {
-                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel);
+                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= sleeper.type_batch_constraint_removal_job_count {
                     break;
                 }

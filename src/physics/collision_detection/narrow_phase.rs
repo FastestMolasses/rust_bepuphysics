@@ -14,7 +14,9 @@ use crate::physics::collision_detection::collision_batcher::{
 use crate::physics::collision_detection::collision_batcher_continuations::PairContinuation;
 use crate::physics::collision_detection::collision_task_registry::CollisionTaskRegistry;
 use crate::physics::collision_detection::constraint_remover::ConstraintRemover;
-use crate::physics::collision_detection::contact_constraint_accessor::ContactConstraintAccessor;
+use crate::physics::collision_detection::contact_constraint_accessor::{
+    ContactConstraintAccessor, ISolverContactDataExtractor, ISolverContactPrestepAndImpulsesExtractor,
+};
 use crate::physics::collision_detection::contact_manifold::{
     Contact, ConvexContact, ConvexContactManifold, IContactManifold, NonconvexContactManifold,
 };
@@ -834,6 +836,40 @@ impl NarrowPhase {
         constraint_type_id < PairCache::COLLISION_CONSTRAINT_TYPE_COUNT
     }
 
+    /// Tries to extract solver contact data from a constraint. Returns true if the constraint
+    /// type is a contact constraint and was successfully extracted.
+    pub fn try_extract_solver_contact_data(
+        &self,
+        constraint_handle: ConstraintHandle,
+        extractor: &mut dyn ISolverContactDataExtractor,
+    ) -> bool {
+        let solver = unsafe { &*self.solver };
+        let constraint_location = solver.handle_to_constraint.get(constraint_handle.0);
+        if let Some(accessor) = self.try_get_contact_constraint_accessor(constraint_location.type_id) {
+            accessor.extract_contact_data(constraint_location, solver, extractor);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Tries to extract solver contact prestep and impulse data from a constraint.
+    /// Returns true if the constraint type is a contact constraint and was successfully extracted.
+    pub fn try_extract_solver_contact_prestep_and_impulses(
+        &self,
+        constraint_handle: ConstraintHandle,
+        extractor: &mut dyn ISolverContactPrestepAndImpulsesExtractor,
+    ) -> bool {
+        let solver = unsafe { &*self.solver };
+        let constraint_location = solver.handle_to_constraint.get(constraint_handle.0);
+        if let Some(accessor) = self.try_get_contact_constraint_accessor(constraint_location.type_id) {
+            accessor.extract_contact_prestep_and_impulses(constraint_location, solver, extractor);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Prepares the narrow phase for a new timestep.
     pub fn prepare(&mut self, dt: f32, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         self.timestep_duration = dt;
@@ -966,7 +1002,7 @@ impl NarrowPhase {
             let narrow_phase = &mut *(dispatcher.unmanaged_context() as *mut NarrowPhase);
             loop {
                 let job_index = AtomicI32::from_ptr(narrow_phase.flush_job_index.get())
-                    .fetch_add(1, Ordering::AcqRel);
+                    .fetch_add(1, Ordering::AcqRel) + 1;
                 if job_index >= narrow_phase.flush_jobs.len() as i32 {
                     break;
                 }
@@ -1821,7 +1857,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         loop {
             let job_index = unsafe {
                 AtomicI32::from_ptr(self.preflush_job_index.get())
-                    .fetch_add(1, Ordering::AcqRel)
+                    .fetch_add(1, Ordering::AcqRel) + 1
             };
             if job_index >= self.preflush_jobs.count {
                 break;

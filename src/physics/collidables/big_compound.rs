@@ -10,7 +10,7 @@ use super::shapes::Shapes;
 use super::mesh::{ShapeTreeOverlapEnumerator, ShapeTreeSweepLeafTester};
 use super::compound_builder::CompoundBuilder;
 
-use crate::physics::body_properties::{BodyInertia, RigidPose};
+use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose};
 use crate::physics::collision_detection::ray_batchers::RayData;
 use crate::physics::trees::tree_ray_cast::IRayLeafTester;
 use crate::utilities::matrix3x3::Matrix3x3;
@@ -28,6 +28,7 @@ use crate::utilities::bounding_box::BoundingBox;
 /// Compound shape containing a bunch of shapes accessible through a tree acceleration structure.
 /// Useful for compounds with lots of children.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct BigCompound {
     /// Acceleration structure for the compound children.
     pub tree: Tree,
@@ -400,6 +401,15 @@ impl BigCompound {
     }
 }
 
+impl Default for BigCompound {
+    fn default() -> Self {
+        Self {
+            tree: Tree::default(),
+            children: Buffer::default(),
+        }
+    }
+}
+
 impl IShape for BigCompound {
     #[inline(always)]
     fn type_id() -> i32 {
@@ -442,6 +452,16 @@ impl ICompoundShape for BigCompound {
         }
         let mut adapter = OverlapAdapter(overlaps);
         self.tree.get_overlaps_minmax(*local_min, *local_max, &mut adapter);
+    }
+
+    fn add_child_bounds_to_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+        pose: &RigidPose,
+        velocity: &BodyVelocity,
+        body_index: i32,
+    ) {
+        Compound::add_child_bounds_to_batcher_static(&self.children, batcher, pose, velocity, body_index);
     }
 }
 

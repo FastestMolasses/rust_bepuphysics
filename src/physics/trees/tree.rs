@@ -32,6 +32,18 @@ pub struct Tree {
 /// Maximum stack depth for iterative tree traversals.
 pub const TRAVERSAL_STACK_CAPACITY: usize = 256;
 
+impl Default for Tree {
+    fn default() -> Self {
+        Self {
+            nodes: Buffer::default(),
+            metanodes: Buffer::default(),
+            leaves: Buffer::default(),
+            node_count: 0,
+            leaf_count: 0,
+        }
+    }
+}
+
 impl Tree {
     /// Encodes a leaf index into the negative-index form used by the tree.
     #[inline(always)]

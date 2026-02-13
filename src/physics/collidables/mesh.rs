@@ -68,6 +68,7 @@ impl<'a, TOverlaps: ICollisionTaskSubpairOverlaps> ISweepLeafTester
 /// Triangle collisions and ray tests are one-sided; only tests which see the triangle as wound
 /// clockwise in right handed coordinates or counterclockwise in left handed coordinates
 /// will generate contacts.
+#[derive(Clone, Copy)]
 pub struct Mesh {
     /// Acceleration structure of the mesh.
     pub tree: Tree,
@@ -587,6 +588,17 @@ impl Mesh {
     }
 }
 
+impl Default for Mesh {
+    fn default() -> Self {
+        Self {
+            tree: Tree::default(),
+            triangles: Buffer::default(),
+            scale: Vec3::ONE,
+            inverse_scale: Vec3::ONE,
+        }
+    }
+}
+
 impl IShape for Mesh {
     #[inline(always)]
     fn type_id() -> i32 {
@@ -597,6 +609,12 @@ impl IShape for Mesh {
 impl IDisposableShape for Mesh {
     fn dispose(&mut self, pool: &mut BufferPool) {
         self.dispose(pool);
+    }
+}
+
+impl super::shape::INonConvexBounds for Mesh {
+    fn compute_bounds_by_orientation(&self, orientation: Quat, min: &mut Vec3, max: &mut Vec3) {
+        self.compute_bounds(orientation, min, max);
     }
 }
 

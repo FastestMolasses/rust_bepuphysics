@@ -305,7 +305,7 @@ impl IslandAwakener {
             let awakener = &mut *(dispatcher.unmanaged_context() as *mut IslandAwakener);
             loop {
                 let index = AtomicI32::from_ptr(awakener.job_index.get())
-                    .fetch_add(1, Ordering::AcqRel);
+                    .fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= awakener.job_count {
                     break;
                 }
@@ -320,7 +320,7 @@ impl IslandAwakener {
             let awakener = &mut *(dispatcher.unmanaged_context() as *mut IslandAwakener);
             loop {
                 let index = AtomicI32::from_ptr(awakener.job_index.get())
-                    .fetch_add(1, Ordering::AcqRel);
+                    .fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= awakener.job_count {
                     break;
                 }
@@ -395,6 +395,39 @@ impl IslandAwakener {
                 (*source_set_ptr).collidables.copy_to(job.source_start, &mut target_set.collidables, job.target_start, job.count);
                 (*source_set_ptr).constraints.copy_to(job.source_start, &mut target_set.constraints, job.target_start, job.count);
                 (*source_set_ptr).dynamics_state.copy_to(job.source_start, &mut target_set.dynamics_state, job.target_start, job.count);
+
+                // This rescans the memory, but it should be still floating in cache ready to access.
+                let source_set = &*source_set_ptr;
+                let solver = &mut *self.solver;
+                for i in 0..job.count {
+                    let source_body_index = i + job.source_start;
+                    if Bodies::is_kinematic_unsafe_gc_hole(
+                        &source_set.dynamics_state.get(source_body_index).inertia.local,
+                    ) && source_set.constraints.get(source_body_index).count > 0
+                    {
+                        // SpinLock: acquire
+                        while solver
+                            .constrained_kinematic_lock
+                            .compare_exchange_weak(
+                                false,
+                                true,
+                                std::sync::atomic::Ordering::Acquire,
+                                std::sync::atomic::Ordering::Relaxed,
+                            )
+                            .is_err()
+                        {
+                            std::hint::spin_loop();
+                        }
+                        solver
+                            .constrained_kinematic_handles
+                            .add_unsafely(&source_set.index_to_handle.get(source_body_index).0);
+                        // SpinLock: release
+                        solver
+                            .constrained_kinematic_lock
+                            .store(false, std::sync::atomic::Ordering::Release);
+                    }
+                }
+
                 (*source_set_ptr).activity.copy_to(job.source_start, &mut target_set.activity, job.target_start, job.count);
                 (*source_set_ptr).index_to_handle.copy_to(job.source_start, &mut target_set.index_to_handle, job.target_start, job.count);
 
@@ -512,6 +545,8 @@ impl IslandAwakener {
         // Count new bodies and determine batch requirements
         let mut new_body_count = 0i32;
         let mut highest_new_batch_count = 0i32;
+        let mut highest_required_type_capacity = 0i32;
+        let mut additional_required_fallback_capacity = 0i32;
         for i in 0..set_indices.count {
             let set_index = *set_indices.get(i);
             new_body_count += bodies.sets.get(set_index).count;
@@ -519,10 +554,131 @@ impl IslandAwakener {
             if highest_new_batch_count < set_batch_count {
                 highest_new_batch_count = set_batch_count;
             }
+            let constraint_set = solver.sets.get(set_index);
+            additional_required_fallback_capacity += constraint_set.sequential_fallback.body_count();
+            for batch_index in 0..constraint_set.batches.count {
+                let batch = constraint_set.batches.get(batch_index);
+                for type_batch_index in 0..batch.type_batches.count {
+                    let type_batch = batch.type_batches.get(type_batch_index);
+                    if highest_required_type_capacity < type_batch.type_id {
+                        highest_required_type_capacity = type_batch.type_id;
+                    }
+                }
+            }
+        }
+        // We accumulated type IDs above; add one to get the capacity requirement.
+        highest_required_type_capacity += 1;
+
+        // Build per-batch per-type constraint counts.
+        // TypeAllocationSizes: Buffer<i32> of per-type counts + highest occupied type index.
+        struct TypeAllocationSizes {
+            type_counts: Buffer<i32>,
+            highest_occupied_type_index: i32,
+        }
+        impl TypeAllocationSizes {
+            unsafe fn new(pool: &mut BufferPool, max_type_count: i32) -> Self {
+                let mut type_counts: Buffer<i32> = pool.take_at_least(max_type_count);
+                type_counts.clear(0, max_type_count);
+                Self { type_counts, highest_occupied_type_index: 0 }
+            }
+            fn add(&mut self, type_id: i32, count: i32) {
+                *self.type_counts.get_mut(type_id) += count;
+                if type_id > self.highest_occupied_type_index {
+                    self.highest_occupied_type_index = type_id;
+                }
+            }
+            fn dispose(&mut self, pool: &mut BufferPool) {
+                pool.return_buffer(&mut self.type_counts);
+            }
         }
 
-        // Ensure capacities
-        // bodies.ensure_capacity(bodies.active_set().count + new_body_count);
+        let mut constraint_count_per_type_per_batch: Buffer<TypeAllocationSizes> =
+            pool.take_at_least(highest_new_batch_count);
+        for batch_index in 0..highest_new_batch_count {
+            *constraint_count_per_type_per_batch.get_mut(batch_index) =
+                TypeAllocationSizes::new(pool, highest_required_type_capacity);
+        }
+
+        let pair_cache = &*self.pair_cache;
+        let mut new_pair_count = 0i32;
+        for i in 0..set_indices.count {
+            let set_index = *set_indices.get(i);
+            let constraint_set = solver.sets.get(set_index);
+            for batch_index in 0..constraint_set.batches.count {
+                let constraint_count_per_type = constraint_count_per_type_per_batch.get_mut(batch_index);
+                let batch = constraint_set.batches.get(batch_index);
+                for type_batch_index in 0..batch.type_batches.count {
+                    let type_batch = batch.type_batches.get(type_batch_index);
+                    constraint_count_per_type.add(type_batch.type_id, type_batch.constraint_count);
+                }
+            }
+            let source_set = pair_cache.sleeping_sets.get(set_index);
+            new_pair_count += source_set.pairs.count;
+        }
+
+        // Ensure capacities on all systems.
+        let bodies_mut = &mut *self.bodies;
+        bodies_mut.ensure_capacity(bodies_mut.active_set().count + new_body_count);
+        solver.constrained_kinematic_handles.ensure_capacity(
+            solver.constrained_kinematic_handles.count + new_body_count, pool);
+        let broad_phase = &mut *self.broad_phase;
+        broad_phase.ensure_capacity(
+            broad_phase.active_tree.leaf_count + new_body_count,
+            broad_phase.static_tree.leaf_count);
+        solver.active_set_mut().batches.ensure_capacity(highest_new_batch_count, pool);
+        if additional_required_fallback_capacity > 0 {
+            let current_body_count = solver.active_set().sequential_fallback.body_count();
+            solver.active_set_mut().sequential_fallback.ensure_capacity(
+                current_body_count + additional_required_fallback_capacity,
+                pool,
+            );
+        }
+        debug_assert!(highest_new_batch_count <= solver.fallback_batch_threshold() + 1,
+            "Shouldn't have any batches beyond the fallback batch.");
+        solver.batch_referenced_handles.ensure_capacity(highest_new_batch_count, pool);
+        // Create new batches if needed.
+        let solver_ptr = solver as *mut Solver;
+        for batch_index in (*solver_ptr).active_set().batches.count..highest_new_batch_count {
+            *(*solver_ptr).active_set_mut().batches.allocate_unsafely() =
+                ConstraintBatch::new(pool, 16);
+            *(*solver_ptr).batch_referenced_handles.allocate_unsafely() =
+                IndexSet::new(pool, bodies_mut.handle_pool.highest_possibly_claimed_id() + 1);
+        }
+        let fallback_threshold = (*solver_ptr).fallback_batch_threshold();
+        for batch_index in 0..highest_new_batch_count {
+            let constraint_count_per_type = constraint_count_per_type_per_batch.get_mut(batch_index);
+            let batch = (*solver_ptr).active_set_mut().batches.get_mut(batch_index);
+            batch.ensure_type_map_size(pool, constraint_count_per_type.highest_occupied_type_index);
+            (*solver_ptr).batch_referenced_handles.get_mut(batch_index).ensure_capacity(
+                bodies_mut.handle_pool.highest_possibly_claimed_id() + 1, pool);
+            for type_id in 0..=constraint_count_per_type.highest_occupied_type_index {
+                let mut count_for_type = *constraint_count_per_type.type_counts.get(type_id);
+                // The fallback batch must allocate worst case: every new constraint needs its own bundle.
+                if batch_index == fallback_threshold {
+                    count_for_type *= crate::utilities::vector::VECTOR_WIDTH as i32;
+                }
+                if count_for_type > 0 {
+                    // Avoid implicit autoref on raw pointer dereference.
+                    let tp_vec = std::ptr::addr_of!((*solver_ptr).type_processors);
+                    let tp_slice = std::slice::from_raw_parts(
+                        (*tp_vec).as_ptr(), (*tp_vec).len());
+                    let type_processor = tp_slice[type_id as usize]
+                        .as_ref().unwrap();
+                    let type_batch = batch.get_or_create_type_batch(
+                        type_id, type_processor.inner(), count_for_type, pool);
+                    let target_capacity = count_for_type + (*type_batch).constraint_count;
+                    if target_capacity > (*type_batch).index_to_handle.len() {
+                        type_processor.inner().resize(&mut *type_batch, target_capacity, pool);
+                    }
+                }
+            }
+            constraint_count_per_type.dispose(pool);
+        }
+        pool.return_buffer(&mut constraint_count_per_type_per_batch);
+        // Ensure pair cache mapping capacity.
+        let pair_cache_mut = &mut *self.pair_cache;
+        pair_cache_mut.mapping.ensure_capacity(
+            pair_cache_mut.mapping.count + new_pair_count, pool);
 
         // Create phase one jobs
         self.phase_one_jobs = QuickList::with_capacity(

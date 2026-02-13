@@ -6,7 +6,7 @@ use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
-use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose, RigidPoseWide};
 use super::typed_index::TypedIndex;
 use super::shape::{IShape, IShapeRayHitHandler, IDisposableShape, ICompoundShape};
 use super::shapes::Shapes;
@@ -66,6 +66,7 @@ impl CompoundChild {
 /// Minimalist compound shape containing a list of child shapes.
 /// Does not make use of any internal acceleration structure;
 /// should be used only with small groups of shapes.
+#[derive(Clone, Copy)]
 pub struct Compound {
     /// Buffer of children within this compound.
     pub children: Buffer<CompoundChild>,
@@ -163,11 +164,55 @@ impl Compound {
         world_pose.position += transform.position;
     }
 
+    /// Adds child bounding boxes to the batcher for compound shape bounds computation.
+    /// Uses piecewise extrapolation of angular velocity to approximate child linear velocities.
+    #[inline(always)]
+    pub fn add_child_bounds_to_batcher_static(
+        children: &Buffer<CompoundChild>,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+        pose: &RigidPose,
+        velocity: &BodyVelocity,
+        body_index: i32,
+    ) {
+        let mut child_velocity = BodyVelocity::new(Vec3::ZERO, velocity.angular);
+        for i in 0..children.len() as usize {
+            let child = &children[i];
+            let mut child_pose = RigidPose::default();
+            Self::get_rotated_child_pose(
+                child.local_position,
+                child.local_orientation,
+                pose.orientation,
+                &mut child_pose.position,
+                &mut child_pose.orientation,
+            );
+            let angular_contribution_to_child_linear = velocity.angular.cross(child_pose.position);
+            let contribution_length_squared = angular_contribution_to_child_linear.length_squared();
+            let local_pose_radius_squared = child_pose.position.length_squared();
+            let mut angular_contribution = angular_contribution_to_child_linear;
+            if contribution_length_squared > local_pose_radius_squared {
+                angular_contribution *= (local_pose_radius_squared.sqrt() / contribution_length_squared.sqrt()) as f32;
+            }
+            child_velocity.linear = velocity.linear + angular_contribution;
+            child_pose.position += pose.position;
+            batcher.add_compound_child(body_index, child.shape_index, &child_pose, &child_velocity);
+        }
+    }
+
     /// Disposes resources.
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         pool.return_buffer(&mut self.children);
     }
+}
 
+impl Default for Compound {
+    fn default() -> Self {
+        Self {
+            children: Buffer::default(),
+        }
+    }
+}
+
+impl Compound {
     /// Validates that a child index points to a valid convex shape.
     pub fn validate_child_index(shape_index: &TypedIndex, shape_batches: &Shapes) -> bool {
         let type_id = shape_index.type_id();
@@ -427,6 +472,16 @@ impl ICompoundShape for Compound {
         for i in 0..self.children.len() {
             overlaps.add(i);
         }
+    }
+
+    fn add_child_bounds_to_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+        pose: &RigidPose,
+        velocity: &BodyVelocity,
+        body_index: i32,
+    ) {
+        Self::add_child_bounds_to_batcher_static(&self.children, batcher, pose, velocity, body_index);
     }
 }
 

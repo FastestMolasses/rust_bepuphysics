@@ -8,7 +8,7 @@ use crate::physics::collidables::collidable::ContinuousDetection;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collidables::typed_index::TypedIndex;
-use crate::physics::handles::StaticHandle;
+use crate::physics::handles::{BodyHandle, StaticHandle};
 use crate::physics::static_description::StaticDescription;
 use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
@@ -51,7 +51,7 @@ pub trait StaticChangeAwakeningFilter {
     /// Whether to allow awakening at all. If false, `should_awaken` is never called.
     fn allow_awakening(&self) -> bool;
     /// Determines whether a specific sleeping body should be forced awake.
-    fn should_awaken_body_index(&self, _body_set_index: i32) -> bool;
+    fn should_awaken(&self, body_handle: BodyHandle, bodies: &Bodies) -> bool;
 }
 
 /// Default awakening filter that only wakes up dynamic bodies.
@@ -62,14 +62,12 @@ impl StaticChangeAwakeningFilter for DefaultAwakeningFilter {
     fn allow_awakening(&self) -> bool {
         true
     }
-    fn should_awaken_body_index(&self, _body_set_index: i32) -> bool {
-        // C# StaticsShouldntAwakenKinematics checks `!body.Kinematic`.
-        // Since we currently only have the body set index (not a BodyReference),
-        // and the trait signature doesn't give us access to Bodies,
-        // we return true here. When BodyReference is available through the trait,
-        // this should check `!body.kinematic()`.
-        // TODO: Update trait to pass BodyReference and check kinematic status.
-        true
+    fn should_awaken(&self, body_handle: BodyHandle, bodies: &Bodies) -> bool {
+        unsafe {
+            let location = *bodies.handle_to_location.get(body_handle.0);
+            let set = bodies.sets.get(location.set_index);
+            !Bodies::is_kinematic_unsafe_gc_hole(&set.dynamics_state.get(location.index).inertia.local)
+        }
     }
 }
 
@@ -79,7 +77,7 @@ impl StaticChangeAwakeningFilter for NoAwakeningFilter {
     fn allow_awakening(&self) -> bool {
         false
     }
-    fn should_awaken_body_index(&self, _body_set_index: i32) -> bool {
+    fn should_awaken(&self, _body_handle: BodyHandle, _bodies: &Bodies) -> bool {
         false
     }
 }
@@ -235,7 +233,8 @@ impl Statics {
         s.shape = description.shape;
     }
 
-    /// Adds a new static body to the simulation.
+    /// Adds a new static body to the simulation. Sleeping dynamic bodies whose bounding boxes
+    /// overlap the new static are forced active.
     pub fn add(&mut self, description: &StaticDescription) -> StaticHandle {
         if self.count == self.handle_to_index.len() {
             debug_assert!(
@@ -277,6 +276,10 @@ impl Statics {
         let broad_phase = unsafe { &mut *self.broad_phase };
         self.statics_buffer.get_mut(index).broad_phase_index =
             broad_phase.add_static(CollidableReference::from_static(handle), &bounds.min, &bounds.max);
+        // Awaken sleeping bodies near the new static's bounds.
+        unsafe {
+            self.awaken_bodies_in_bounds(&bounds, &DefaultAwakeningFilter);
+        }
         handle
     }
 
@@ -295,21 +298,24 @@ impl Statics {
         let mut sleeping_sets = QuickList::<i32>::with_capacity(32, pool);
 
         // Collect sleeping body set indices by querying the static tree for overlaps.
-        struct SleepingBodyCollector<'a> {
+        struct SleepingBodyCollector<'a, F: StaticChangeAwakeningFilter> {
             bodies: &'a Bodies,
             broad_phase: &'a BroadPhase,
             pool: &'a mut BufferPool,
             sleeping_sets: &'a mut QuickList<i32>,
+            filter: &'a F,
         }
-        impl IBreakableForEach<i32> for SleepingBodyCollector<'_> {
+        impl<F: StaticChangeAwakeningFilter> IBreakableForEach<i32> for SleepingBodyCollector<'_, F> {
             #[inline(always)]
             fn loop_body(&mut self, leaf_index: i32) -> bool {
                 let leaf = unsafe { *self.broad_phase.static_leaves.get(leaf_index) };
                 if leaf.mobility() != CollidableMobility::Static {
                     let body_handle = leaf.body_handle();
                     let location = unsafe { *self.bodies.handle_to_location.get(body_handle.0) };
-                    if location.set_index > 0 {
-                        // This is a sleeping body — add its set index.
+                    if location.set_index > 0
+                        && self.filter.should_awaken(body_handle, self.bodies)
+                    {
+                        // This is a sleeping body that passes the filter — add its set index.
                         self.sleeping_sets.add(location.set_index, self.pool);
                     }
                 }
@@ -322,6 +328,7 @@ impl Statics {
                 broad_phase,
                 pool,
                 sleeping_sets: &mut sleeping_sets,
+                filter,
             };
             // Query the static tree for overlapping leaves.
             broad_phase.static_tree.get_overlaps(*bounds, &mut collector);

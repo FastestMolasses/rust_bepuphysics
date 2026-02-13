@@ -67,6 +67,26 @@ pub trait IPoseIntegrator {
         substep_dt: f32,
         worker_index: i32,
     );
+
+    /// Gets the angular integration mode used by the callbacks.
+    fn angular_integration_mode(&self) -> AngularIntegrationMode;
+
+    /// Calls the velocity integration callback on a bundle of bodies.
+    /// This dispatches to `TCallbacks::integrate_velocity`.
+    unsafe fn integrate_velocity_callback(
+        &self,
+        body_indices: Vector<i32>,
+        position: Vector3Wide,
+        orientation: QuaternionWide,
+        local_inertia: BodyInertiaWide,
+        integration_mask: Vector<i32>,
+        worker_index: i32,
+        dt: Vector<f32>,
+        velocity: &mut BodyVelocityWide,
+    );
+
+    /// Prepares the callbacks for integration with the given substep dt.
+    fn prepare_for_integration(&mut self, dt: f32);
 }
 
 // AngularIntegrationMode is imported from pose_integration above.
@@ -835,6 +855,37 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
             substep_dt,
             worker_index,
         );
+    }
+
+    fn angular_integration_mode(&self) -> AngularIntegrationMode {
+        self.callbacks.angular_integration_mode()
+    }
+
+    unsafe fn integrate_velocity_callback(
+        &self,
+        body_indices: Vector<i32>,
+        position: Vector3Wide,
+        orientation: QuaternionWide,
+        local_inertia: BodyInertiaWide,
+        integration_mask: Vector<i32>,
+        worker_index: i32,
+        dt: Vector<f32>,
+        velocity: &mut BodyVelocityWide,
+    ) {
+        self.callbacks.integrate_velocity(
+            body_indices,
+            position,
+            orientation,
+            local_inertia,
+            integration_mask,
+            worker_index,
+            dt,
+            velocity,
+        );
+    }
+
+    fn prepare_for_integration(&mut self, dt: f32) {
+        self.callbacks.prepare_for_integration(dt);
     }
 }
 

@@ -110,8 +110,9 @@ impl BatchCompressor {
         let type_processor = solver.type_processors[type_batch.type_id as usize].as_ref().unwrap();
         let bodies_per_constraint = type_processor.bodies_per_constraint;
 
-        // Collect dynamic body handles for this constraint.
-        let mut handle_buf = vec![0i32; bodies_per_constraint as usize];
+        // Collect dynamic body handles for this constraint (stack alloc — matches C# stackalloc).
+        let mut handle_buf = [0i32; 8]; // max bodies per constraint
+        debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
         let mut collector = ActiveConstraintDynamicBodyHandleCollector::new(bodies, handle_buf.as_mut_ptr());
         solver.enumerate_connected_raw_body_references_from_type_batch(
             type_batch,
@@ -159,7 +160,7 @@ impl BatchCompressor {
             let bc = &*(dispatcher.unmanaged_context() as *const BatchCompressor);
             let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
             loop {
-                let job_index = AtomicI32::from_ptr(bc.analysis_job_index.get()).fetch_add(1, Ordering::AcqRel);
+                let job_index = AtomicI32::from_ptr(bc.analysis_job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if job_index >= bc.analysis_jobs.count {
                     break;
                 }
@@ -176,7 +177,7 @@ impl BatchCompressor {
         if source_batch_index == solver.fallback_batch_threshold() {
             // Fallback batch: check if target batch can still hold the constraint
             // (another compression may have interfered).
-            let mut handle_buf = vec![0i32; type_processor.bodies_per_constraint as usize];
+            let mut handle_buf = [0i32; 8]; // stack alloc — matches C# stackalloc
             let bodies = self.bodies();
             let mut collector = ActiveConstraintDynamicBodyHandleCollector::new(bodies, handle_buf.as_mut_ptr());
             solver.enumerate_connected_raw_body_references(compression.constraint_handle, &mut collector);

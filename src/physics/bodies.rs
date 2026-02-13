@@ -761,6 +761,44 @@ impl Bodies {
         }
     }
 
+    /// Enumerates connected body indices for an active body.
+    /// Reports decoded body indices of all bodies connected via constraints, excluding the source body itself.
+    /// 
+    /// # Safety
+    /// The active_body_index must be a valid index into the active set.
+    pub(crate) unsafe fn enumerate_connected_body_indices<E: crate::utilities::for_each_ref::IForEach<i32>>(
+        &self,
+        active_body_index: i32,
+        enumerator: &mut E,
+    ) {
+        let list = self.active_set().constraints.get(active_body_index);
+
+        struct ActiveConstraintBodyIndicesEnumerator<'a, E: crate::utilities::for_each_ref::IForEach<i32>> {
+            inner: &'a mut E,
+            source_body_index: i32,
+        }
+        impl<E: crate::utilities::for_each_ref::IForEach<i32>> crate::utilities::for_each_ref::IForEach<i32> for ActiveConstraintBodyIndicesEnumerator<'_, E> {
+            #[inline(always)]
+            fn loop_body(&mut self, connected_body_index: i32) {
+                if self.source_body_index != connected_body_index {
+                    self.inner.loop_body(connected_body_index);
+                }
+            }
+        }
+        let mut constraint_enumerator = ActiveConstraintBodyIndicesEnumerator {
+            inner: enumerator,
+            source_body_index: active_body_index,
+        };
+        let solver = &*self.solver;
+        for i in (0..list.count).rev() {
+            let constraint_ref = list.get(i);
+            solver.enumerate_connected_body_references_by_handle(
+                constraint_ref.connecting_constraint_handle,
+                &mut constraint_enumerator,
+            );
+        }
+    }
+
     /// Clears all bodies from all sets without releasing persistent memory.
     pub fn clear(&mut self) {
         let pool_ptr = self.pool;

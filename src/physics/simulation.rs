@@ -253,9 +253,6 @@ impl Simulation {
             broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
         )));
 
-        // Initialize callbacks (deferred until after all simulation bits are constructed).
-        // Callback initialization is type-specific and happens through the narrow phase / pose integrator.
-
         // Build the simulation struct.
         let simulation = Box::new(Simulation {
             awakener,
@@ -276,6 +273,13 @@ impl Simulation {
             deterministic: false,
         });
 
+        // Initialize callbacks (deferred until after all simulation bits are constructed).
+        // C#: poseIntegrator.Callbacks.Initialize(simulation);
+        //     narrowPhase.Callbacks.Initialize(simulation);
+        let sim_ptr = &*simulation as *const Simulation as *mut Simulation;
+        (*pose_integrator).callbacks.initialize(sim_ptr as *mut u8);
+        (*narrow_phase).callbacks.initialize(sim_ptr);
+
         simulation
     }
 
@@ -283,19 +287,19 @@ impl Simulation {
     pub fn timestep(&mut self, dt: f32, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         assert!(dt > 0.0, "Timestep duration must be positive.");
         self.profiler.clear();
-        // profiler.start(self);
+        self.profiler.start("simulation");
         unsafe {
             let self_ptr = self as *mut Simulation;
             (*self_ptr).timestepper.timestep(self_ptr, dt, thread_dispatcher);
         }
-        // profiler.end(self);
+        self.profiler.end("simulation");
     }
 
     /// Executes the sleep stage.
     pub unsafe fn sleep(&mut self, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
-        // profiler.start(sleeper);
+        self.profiler.start("sleeper");
         (&mut *self.sleeper).update(thread_dispatcher, self.deterministic);
-        // profiler.end(sleeper);
+        self.profiler.end("sleeper");
     }
 
     /// Predicts bounding boxes of active bodies by speculatively integrating velocity.
@@ -305,9 +309,9 @@ impl Simulation {
         dt: f32,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
-        // profiler.start(pose_integrator);
+        self.profiler.start("pose_integrator");
         (&mut *self.pose_integrator).predict_bounding_boxes(dt, &mut *self.buffer_pool, thread_dispatcher);
-        // profiler.end(pose_integrator);
+        self.profiler.end("pose_integrator");
     }
 
     /// Updates the broad phase, finds potentially colliding pairs, and executes the narrow phase.
@@ -322,24 +326,25 @@ impl Simulation {
             crate::physics::collision_detection::collidable_overlap_finder::CollidableOverlapFinder;
         type RealNarrowPhase = crate::physics::collision_detection::narrow_phase::NarrowPhase;
 
-        // profiler.start(broad_phase);
+        self.profiler.start("broad_phase");
         let broad_phase = &mut *(self.broad_phase as *mut RealBroadPhase);
-        broad_phase.update2(thread_dispatcher, self.deterministic);
-        // profiler.end(broad_phase);
+        // C# BroadPhase.Update2 uses default deterministic=false; don't pass self.deterministic here.
+        broad_phase.update2(thread_dispatcher, false);
+        self.profiler.end("broad_phase");
 
-        // profiler.start(broad_phase_overlap_finder);
+        self.profiler.start("broad_phase_overlap_finder");
         let overlap_finder = &mut *(self.broad_phase_overlap_finder as *mut RealOverlapFinder);
         overlap_finder.dispatch_overlaps(dt, thread_dispatcher);
-        // profiler.end(broad_phase_overlap_finder);
+        self.profiler.end("broad_phase_overlap_finder");
 
-        // profiler.start(narrow_phase);
+        self.profiler.start("narrow_phase");
         // NarrowPhaseGeneric<T>::flush_with_preflush() is the full C# Flush,
         // but Simulation doesn't know TCallbacks. Call base NarrowPhase::flush()
         // for constraint removal pipeline. Preflush/postflush need type-erased dispatch (TODO).
         let narrow_phase = &mut *(self.narrow_phase as *mut RealNarrowPhase);
         let deterministic = thread_dispatcher.is_some() && self.deterministic;
         narrow_phase.flush(thread_dispatcher, deterministic);
-        // profiler.end(narrow_phase);
+        self.profiler.end("narrow_phase");
     }
 
     /// Solves all constraints, performs substepped integration for constrained bodies,
@@ -352,12 +357,12 @@ impl Simulation {
         let solver = &mut *self.solver;
         // Wire the pose integrator into the solver for kinematic integration during substepping.
         solver.pose_integrator = Some(self.pose_integrator);
-        // profiler.start(solver);
+        self.profiler.start("solver");
         let constrained_body_set = solver.prepare_constraint_integration_responsibilities(thread_dispatcher);
         solver.solve(dt, thread_dispatcher);
-        // profiler.end(solver);
+        self.profiler.end("solver");
 
-        // profiler.start(pose_integrator);
+        self.profiler.start("pose_integrator");
         let substep_count = solver.substep_count();
         (&mut *self.pose_integrator).integrate_after_substepping(
             &constrained_body_set,
@@ -365,7 +370,7 @@ impl Simulation {
             substep_count,
             thread_dispatcher,
         );
-        // profiler.end(pose_integrator);
+        self.profiler.end("pose_integrator");
 
         solver.dispose_constraint_integration_responsibilities();
     }
@@ -375,13 +380,13 @@ impl Simulation {
         &mut self,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
-        // profiler.start(solver_batch_compressor);
+        self.profiler.start("solver_batch_compressor");
         (&mut *self.solver_batch_compressor).compress(
             &mut *self.buffer_pool,
             thread_dispatcher,
             thread_dispatcher.is_some() && self.deterministic,
         );
-        // profiler.end(solver_batch_compressor);
+        self.profiler.end("solver_batch_compressor");
     }
 
     /// Clears the simulation of every object, only returning memory to the pool
@@ -390,9 +395,18 @@ impl Simulation {
         (&mut *self.solver).clear();
         (&mut *self.bodies).clear();
         (&mut *self.statics).clear();
-        // shapes.clear();
-        // broad_phase.clear();
-        // narrow_phase.clear();
+        {
+            use crate::physics::collidables::shapes::Shapes as RealShapes;
+            (&mut *(self.shapes as *mut RealShapes)).clear();
+        }
+        {
+            use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
+            (&mut *(self.broad_phase as *mut RealBroadPhase)).clear();
+        }
+        {
+            use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
+            (&mut *(self.narrow_phase as *mut RealNarrowPhase)).clear();
+        }
         (&mut *self.sleeper).clear();
     }
 
@@ -404,7 +418,11 @@ impl Simulation {
         solver.set_minimum_capacity_per_type_batch(min);
         solver.ensure_type_batch_capacities();
 
-        // narrow_phase.pair_cache.ensure_constraint_to_pair_mapping_capacity(solver, target.constraints);
+        {
+            use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
+            (&mut *(self.narrow_phase as *mut RealNarrowPhase)).pair_cache
+                .ensure_constraint_to_pair_mapping_capacity(solver, target.constraints);
+        }
 
         let bodies = &mut *self.bodies;
         bodies.ensure_capacity(target.bodies);
@@ -413,8 +431,14 @@ impl Simulation {
 
         (&mut *self.sleeper).ensure_sets_capacity(target.islands + 1);
         (&mut *self.statics).ensure_capacity(target.statics);
-        // shapes.ensure_batch_capacities(target.shapes_per_type);
-        // broad_phase.ensure_capacity(target.bodies, target.bodies + target.statics);
+        {
+            use crate::physics::collidables::shapes::Shapes as RealShapes;
+            (&mut *(self.shapes as *mut RealShapes)).ensure_batch_capacities(target.shapes_per_type as usize);
+        }
+        {
+            use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
+            (&mut *(self.broad_phase as *mut RealBroadPhase)).ensure_capacity(target.bodies, target.bodies + target.statics);
+        }
     }
 
     /// Increases/decreases allocation sizes to match the target.
@@ -424,6 +448,12 @@ impl Simulation {
         solver.set_minimum_capacity_per_type_batch(target.constraints_per_type_batch);
         solver.resize_type_batch_capacities();
 
+        {
+            use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
+            (&mut *(self.narrow_phase as *mut RealNarrowPhase)).pair_cache
+                .resize_constraint_to_pair_mapping_capacity(solver, target.constraints);
+        }
+
         let bodies = &mut *self.bodies;
         bodies.resize(target.bodies);
         bodies.minimum_constraint_capacity_per_body = target.constraint_count_per_body_estimate;
@@ -431,6 +461,14 @@ impl Simulation {
 
         (&mut *self.sleeper).resize_sets_capacity(target.islands + 1);
         (&mut *self.statics).resize(target.statics);
+        {
+            use crate::physics::collidables::shapes::Shapes as RealShapes;
+            (&mut *(self.shapes as *mut RealShapes)).resize_batches(target.shapes_per_type as usize);
+        }
+        {
+            use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
+            (&mut *(self.broad_phase as *mut RealBroadPhase)).resize(target.bodies, target.bodies + target.statics);
+        }
     }
 
     /// Clears the simulation and returns all pooled memory to the buffer pool.
@@ -439,11 +477,20 @@ impl Simulation {
         self.clear();
         (&mut *self.sleeper).dispose();
         (&mut *self.solver).dispose();
-        // broad_phase.dispose();
-        // narrow_phase.dispose();
+        {
+            use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
+            (&mut *(self.broad_phase as *mut RealBroadPhase)).dispose();
+        }
+        {
+            use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
+            (&mut *(self.narrow_phase as *mut RealNarrowPhase)).dispose();
+        }
         (&mut *self.bodies).dispose();
         (&mut *self.statics).dispose();
-        // shapes.dispose();
+        {
+            use crate::physics::collidables::shapes::Shapes as RealShapes;
+            (&mut *(self.shapes as *mut RealShapes)).dispose();
+        }
     }
 }
 

@@ -366,17 +366,35 @@ impl<
         &self,
         type_batch: &mut TypeBatch,
         bodies: &Bodies,
+        integration_flags: &crate::utilities::memory::buffer::Buffer<crate::utilities::collections::index_set::IndexSet>,
+        pose_integrator: Option<&dyn crate::physics::pose_integrator::IPoseIntegrator>,
+        batch_integration_mode: crate::physics::constraints::batch_integration_mode::BatchIntegrationMode,
+        allow_pose_integration: bool,
         dt: f32,
         inverse_dt: f32,
         start_bundle: i32,
         exclusive_end_bundle: i32,
+        worker_index: i32,
     ) {
-        let _ = (dt, inverse_dt);
+        let _ = inverse_dt;
 
         unsafe {
             let prestep_bundles = type_batch.prestep_data.as_mut_ptr() as *mut TPrestepData;
             let body_ref_bundles = type_batch.body_references.as_mut_ptr() as *mut ThreeBodyReferences;
             let impulse_bundles = type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
+
+            let angular_mode = pose_integrator.map(|pi| pi.angular_integration_mode())
+                .unwrap_or(crate::physics::pose_integration::AngularIntegrationMode::Nonconserving);
+            let velocity_fn = |body_indices: Vector<i32>, position: Vector3Wide, orientation: QuaternionWide,
+                               local_inertia: BodyInertiaWide, integration_mask: Vector<i32>,
+                               w_index: i32, dt_vec: Vector<f32>, velocity: &mut BodyVelocityWide| {
+                if let Some(pi) = pose_integrator {
+                    pi.integrate_velocity_callback(
+                        body_indices, position, orientation, local_inertia,
+                        integration_mask, w_index, dt_vec, velocity,
+                    );
+                }
+            };
 
             for i in start_bundle..exclusive_end_bundle {
                 let idx = i as usize;
@@ -388,8 +406,10 @@ impl<
                 let mut orientation_a = QuaternionWide::default();
                 let mut wsv_a = BodyVelocityWide::default();
                 let mut inertia_a = BodyInertiaWide::default();
-                bodies.gather_state::<AccessAll>(
-                    &references.index_a, true,
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
+                    bodies, angular_mode, &velocity_fn,
+                    integration_flags, 0, batch_integration_mode, allow_pose_integration,
+                    dt, worker_index, i, &references.index_a,
                     &mut position_a, &mut orientation_a, &mut wsv_a, &mut inertia_a,
                 );
 
@@ -397,8 +417,10 @@ impl<
                 let mut orientation_b = QuaternionWide::default();
                 let mut wsv_b = BodyVelocityWide::default();
                 let mut inertia_b = BodyInertiaWide::default();
-                bodies.gather_state::<AccessAll>(
-                    &references.index_b, true,
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
+                    bodies, angular_mode, &velocity_fn,
+                    integration_flags, 1, batch_integration_mode, allow_pose_integration,
+                    dt, worker_index, i, &references.index_b,
                     &mut position_b, &mut orientation_b, &mut wsv_b, &mut inertia_b,
                 );
 
@@ -406,8 +428,10 @@ impl<
                 let mut orientation_c = QuaternionWide::default();
                 let mut wsv_c = BodyVelocityWide::default();
                 let mut inertia_c = BodyInertiaWide::default();
-                bodies.gather_state::<AccessAll>(
-                    &references.index_c, true,
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
+                    bodies, angular_mode, &velocity_fn,
+                    integration_flags, 2, batch_integration_mode, allow_pose_integration,
+                    dt, worker_index, i, &references.index_c,
                     &mut position_c, &mut orientation_c, &mut wsv_c, &mut inertia_c,
                 );
 
