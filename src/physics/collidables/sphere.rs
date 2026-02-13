@@ -2,17 +2,17 @@ use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
+use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::memory::buffer::Buffer;
 
+use super::ray::RayWide;
+use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
-use super::ray::RayWide;
 
 /// Collision shape representing a sphere.
 #[repr(C)]
@@ -219,8 +219,8 @@ impl IShapeWide<Sphere> for SphereWide {
         // If b > 0 && c > 0, ray is outside and pointing away, no hit.
         // If discriminant < 0, the ray misses.
         let discriminant = b * b - c;
-        *intersected = (b.simd_le(zero) | c.simd_le(zero)).to_int()
-            & discriminant.simd_ge(zero).to_int();
+        *intersected =
+            (b.simd_le(zero) | c.simd_le(zero)).to_int() & discriminant.simd_ge(zero).to_int();
 
         *t = (-t_offset).simd_max(-b - discriminant.simd_max(zero).sqrt());
         Vector3Wide::scale_to(&d, t, &mut o_offset);

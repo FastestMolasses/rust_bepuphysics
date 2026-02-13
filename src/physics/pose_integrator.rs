@@ -6,10 +6,8 @@ use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{
     BodyActivity, BodyInertiaWide, BodyVelocity, BodyVelocityWide, RigidPose,
 };
-use crate::physics::collidables::collidable::Collidable;
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::constraints::body_access_filter::{AccessAll, AccessNoInertia};
-use crate::physics::handles::BodyHandle;
 use crate::physics::helpers::Helpers;
 use crate::physics::pose_integration::{
     AngularIntegrationMode, IPoseIntegratorCallbacks, PoseIntegration,
@@ -194,8 +192,13 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let bundle_count =
                 BundleIndexing::get_bundle_count(bodies.active_set().count as usize) as i32;
             let worker_pool = dispatcher.worker_pool_ptr(worker_index);
-            let mut bounding_box_batcher =
-                BoundingBoxBatcher::new(integrator.bodies, integrator.shapes, integrator.broad_phase, worker_pool, integrator.cached_dt);
+            let mut bounding_box_batcher = BoundingBoxBatcher::new(
+                integrator.bodies,
+                integrator.shapes,
+                integrator.broad_phase,
+                worker_pool,
+                integrator.cached_dt,
+            );
             while let Some((start, exclusive_end)) = integrator.try_get_job(bundle_count) {
                 integrator.predict_bounding_boxes_inner(
                     start,
@@ -289,8 +292,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
 
             // Fill empty lanes with -1 for consistent behavior with solver callbacks.
             let lane_indices = lane_indices | !integration_mask;
-            let sleep_energy =
-                velocity.linear.length_squared() + velocity.angular.length_squared();
+            let sleep_energy = velocity.linear.length_squared() + velocity.angular.length_squared();
 
             // Only call IntegrateVelocity if any lane is active (has a negative mask value).
             if integration_mask.simd_lt(Simd::splat(0i32)).any() {
@@ -358,10 +360,9 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
 
             let mut body_indices_arr = [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
             for i in 0..count_in_bundle as usize {
-                body_indices_arr[i] =
-                    handle_to_location
-                        .get(*body_handles.get(bundle_base_index + i as i32))
-                        .index;
+                body_indices_arr[i] = handle_to_location
+                    .get(*body_handles.get(bundle_base_index + i as i32))
+                    .index;
             }
 
             let existing_mask =
@@ -426,10 +427,9 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
 
             let mut body_indices_arr = [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
             for i in 0..count_in_bundle as usize {
-                body_indices_arr[i] =
-                    handle_to_location
-                        .get(*body_handles.get(bundle_base_index + i as i32))
-                        .index;
+                body_indices_arr[i] = handle_to_location
+                    .get(*body_handles.get(bundle_base_index + i as i32))
+                    .index;
             }
 
             let existing_mask =
@@ -465,7 +465,12 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 &half_dt,
                 &mut orientation,
             );
-            bodies.scatter_pose(&position, &orientation, &body_indices_vector, &existing_mask);
+            bodies.scatter_pose(
+                &position,
+                &orientation,
+                &body_indices_vector,
+                &existing_mask,
+            );
 
             if self.callbacks.integrate_velocity_for_kinematics() {
                 self.callbacks.integrate_velocity(
@@ -515,8 +520,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let mut any_body_in_bundle_is_unconstrained = false;
             let mut unconstrained_mask_arr =
                 [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
-            let mut body_indices_arr =
-                [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
+            let mut body_indices_arr = [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
 
             for inner_index in 0..count_in_bundle as usize {
                 let body_index = bundle_base_index + inner_index as i32;
@@ -715,12 +719,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 position += velocity.linear * bundle_effective_dt;
                 let integrate_pose_mask =
                     BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize);
-                bodies.scatter_pose(
-                    &position,
-                    &orientation,
-                    &body_indices,
-                    &integrate_pose_mask,
-                );
+                bodies.scatter_pose(&position, &orientation, &body_indices, &integrate_pose_mask);
             }
         }
     }
@@ -750,8 +749,13 @@ impl<TCallbacks: IPoseIntegratorCallbacks> IPoseIntegrator for PoseIntegrator<TC
                     None,
                 );
             } else {
-                let mut bounding_box_batcher =
-                    BoundingBoxBatcher::new(self.bodies, self.shapes, self.broad_phase, pool as *mut BufferPool, dt);
+                let mut bounding_box_batcher = BoundingBoxBatcher::new(
+                    self.bodies,
+                    self.shapes,
+                    self.broad_phase,
+                    pool as *mut BufferPool,
+                    dt,
+                );
                 self.predict_bounding_boxes_inner(
                     0,
                     bundle_count,

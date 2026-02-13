@@ -172,18 +172,18 @@ impl Tree {
         }
         let target_node_index = self.compute_cache_optimal_location(node_index);
         let original_node = *self.nodes.get(node_index);
-        let effective_count =
-            (original_node.a.leaf_count + original_node.b.leaf_count - 1).min(node_optimization_count);
-        self.cache_optimized_limited_subtree_internal(node_index, target_node_index, effective_count);
+        let effective_count = (original_node.a.leaf_count + original_node.b.leaf_count - 1)
+            .min(node_optimization_count);
+        self.cache_optimized_limited_subtree_internal(
+            node_index,
+            target_node_index,
+            effective_count,
+        );
     }
 
     /// Puts all nodes starting from the given node index into depth first traversal order.
     /// Returns the number of nodes optimized.
-    pub fn cache_optimize_region(
-        &mut self,
-        starting_node_index: i32,
-        target_count: i32,
-    ) -> i32 {
+    pub fn cache_optimize_region(&mut self, starting_node_index: i32, target_count: i32) -> i32 {
         if self.leaf_count <= 2 {
             return 0;
         }
@@ -194,8 +194,7 @@ impl Tree {
 
         let start_node = *self.nodes.get(target_node_index);
         // Note minus 2: visiting the parent of the last node is sufficient to put the last node into position.
-        let node_count =
-            (start_node.a.leaf_count + start_node.b.leaf_count - 2).min(target_count);
+        let node_count = (start_node.a.leaf_count + start_node.b.leaf_count - 2).min(target_count);
         for i in 0..node_count {
             let parent_index = target_node_index + i;
             let node = *self.nodes.get(parent_index);

@@ -43,14 +43,20 @@ impl SwivelHinge {
     ) {
         #[cfg(debug_assertions)]
         {
-            ConstraintChecker::assert_unit_length_vec3(self.local_swivel_axis_a, "SwivelHinge", "local_swivel_axis_a");
-            ConstraintChecker::assert_unit_length_vec3(self.local_hinge_axis_b, "SwivelHinge", "local_hinge_axis_b");
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_swivel_axis_a,
+                "SwivelHinge",
+                "local_swivel_axis_a",
+            );
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_hinge_axis_b,
+                "SwivelHinge",
+                "local_hinge_axis_b",
+            );
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "SwivelHinge");
         }
 
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
         Vector3Wide::write_first(self.local_swivel_axis_a, &mut target.local_swivel_axis_a);
         Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
@@ -64,13 +70,17 @@ impl SwivelHinge {
         inner_index: usize,
         description: &mut SwivelHinge,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
-        Vector3Wide::read_first(&source.local_swivel_axis_a, &mut description.local_swivel_axis_a);
+        Vector3Wide::read_first(
+            &source.local_swivel_axis_a,
+            &mut description.local_swivel_axis_a,
+        );
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        Vector3Wide::read_first(&source.local_hinge_axis_b, &mut description.local_hinge_axis_b);
+        Vector3Wide::read_first(
+            &source.local_hinge_axis_b,
+            &mut description.local_hinge_axis_b,
+        );
         SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
     }
 }
@@ -100,9 +110,7 @@ impl SwivelHingeFunctions {
         velocity_b: &mut BodyVelocityWide,
     ) {
         // Reinterpret the first 3 components of csi as a Vector3Wide (ball socket impulse).
-        let ball_socket_csi = unsafe {
-            &*(core::ptr::from_ref(&csi.x) as *const Vector3Wide)
-        };
+        let ball_socket_csi = unsafe { &*(core::ptr::from_ref(&csi.x) as *const Vector3Wide) };
 
         // Apply linear impulse to A.
         let linear_change_a = Vector3Wide::scale(ball_socket_csi, &inertia_a.inverse_mass);
@@ -112,12 +120,26 @@ impl SwivelHingeFunctions {
 
         // Compute angular impulse for A: cross(offsetA, ballSocketCSI) + swivelHingeJacobian * csi.W
         let mut ball_socket_angular_impulse_a = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(offset_a, ball_socket_csi, &mut ball_socket_angular_impulse_a); }
+        unsafe {
+            Vector3Wide::cross_without_overlap(
+                offset_a,
+                ball_socket_csi,
+                &mut ball_socket_angular_impulse_a,
+            );
+        }
         let swivel_hinge_angular_impulse_a = *swivel_hinge_jacobian * csi.w;
         let mut angular_impulse_a = Vector3Wide::default();
-        Vector3Wide::add(&ball_socket_angular_impulse_a, &swivel_hinge_angular_impulse_a, &mut angular_impulse_a);
+        Vector3Wide::add(
+            &ball_socket_angular_impulse_a,
+            &swivel_hinge_angular_impulse_a,
+            &mut angular_impulse_a,
+        );
         let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_a, &inertia_a.inverse_inertia_tensor, &mut angular_change_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_change_a,
+        );
         Vector3Wide::add(&velocity_a.angular, &angular_change_a, &mut tmp);
         velocity_a.angular = tmp;
 
@@ -128,11 +150,25 @@ impl SwivelHingeFunctions {
 
         // Angular for B: cross(ballSocketCSI, offsetB) - swivelHingeAngularImpulseA
         let mut ball_socket_angular_impulse_b = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(ball_socket_csi, offset_b, &mut ball_socket_angular_impulse_b); }
+        unsafe {
+            Vector3Wide::cross_without_overlap(
+                ball_socket_csi,
+                offset_b,
+                &mut ball_socket_angular_impulse_b,
+            );
+        }
         let mut angular_impulse_b = Vector3Wide::default();
-        Vector3Wide::subtract(&ball_socket_angular_impulse_b, &swivel_hinge_angular_impulse_a, &mut angular_impulse_b);
+        Vector3Wide::subtract(
+            &ball_socket_angular_impulse_b,
+            &swivel_hinge_angular_impulse_a,
+            &mut angular_impulse_b,
+        );
         let mut angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_b, &inertia_b.inverse_inertia_tensor, &mut angular_change_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_b,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_change_b,
+        );
         Vector3Wide::add(&velocity_b.angular, &angular_change_b, &mut tmp);
         velocity_b.angular = tmp;
     }
@@ -158,9 +194,17 @@ impl SwivelHingeFunctions {
         Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
         Matrix3x3Wide::create_from_quaternion(orientation_b, &mut orientation_matrix_b);
         Matrix3x3Wide::transform_without_overlap(local_offset_a, &orientation_matrix_a, offset_a);
-        Matrix3x3Wide::transform_without_overlap(local_swivel_axis_a, &orientation_matrix_a, swivel_axis);
+        Matrix3x3Wide::transform_without_overlap(
+            local_swivel_axis_a,
+            &orientation_matrix_a,
+            swivel_axis,
+        );
         Matrix3x3Wide::transform_without_overlap(local_offset_b, &orientation_matrix_b, offset_b);
-        Matrix3x3Wide::transform_without_overlap(local_hinge_axis_b, &orientation_matrix_b, hinge_axis);
+        Matrix3x3Wide::transform_without_overlap(
+            local_hinge_axis_b,
+            &orientation_matrix_b,
+            hinge_axis,
+        );
         unsafe {
             Vector3Wide::cross_without_overlap(swivel_axis, hinge_axis, swivel_hinge_jacobian);
         }
@@ -168,7 +212,8 @@ impl SwivelHingeFunctions {
         let length_squared = swivel_hinge_jacobian.length_squared();
         let use_fallback = length_squared.simd_lt(Vector::<f32>::splat(1e-3)).to_int();
         // This causes a discontinuity, but a discontinuity is better than a NaNsplode.
-        *swivel_hinge_jacobian = Vector3Wide::conditional_select(&use_fallback, hinge_axis, swivel_hinge_jacobian);
+        *swivel_hinge_jacobian =
+            Vector3Wide::conditional_select(&use_fallback, hinge_axis, swivel_hinge_jacobian);
     }
 
     pub fn warm_start(
@@ -189,11 +234,28 @@ impl SwivelHingeFunctions {
         let mut offset_b = Vector3Wide::default();
         let mut swivel_hinge_jacobian = Vector3Wide::default();
         Self::compute_jacobian(
-            &prestep.local_offset_a, &prestep.local_swivel_axis_a, &prestep.local_offset_b, &prestep.local_hinge_axis_b,
-            orientation_a, orientation_b,
-            &mut _swivel_axis, &mut _hinge_axis, &mut offset_a, &mut offset_b, &mut swivel_hinge_jacobian,
+            &prestep.local_offset_a,
+            &prestep.local_swivel_axis_a,
+            &prestep.local_offset_b,
+            &prestep.local_hinge_axis_b,
+            orientation_a,
+            orientation_b,
+            &mut _swivel_axis,
+            &mut _hinge_axis,
+            &mut offset_a,
+            &mut offset_b,
+            &mut swivel_hinge_jacobian,
         );
-        Self::apply_impulse(&offset_a, &offset_b, &swivel_hinge_jacobian, inertia_a, inertia_b, accumulated_impulses, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &offset_a,
+            &offset_b,
+            &swivel_hinge_jacobian,
+            inertia_a,
+            inertia_b,
+            accumulated_impulses,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     pub fn solve(
@@ -216,20 +278,41 @@ impl SwivelHingeFunctions {
         let mut offset_b = Vector3Wide::default();
         let mut swivel_hinge_jacobian = Vector3Wide::default();
         Self::compute_jacobian(
-            &prestep.local_offset_a, &prestep.local_swivel_axis_a, &prestep.local_offset_b, &prestep.local_hinge_axis_b,
-            orientation_a, orientation_b,
-            &mut swivel_axis, &mut hinge_axis, &mut offset_a, &mut offset_b, &mut swivel_hinge_jacobian,
+            &prestep.local_offset_a,
+            &prestep.local_swivel_axis_a,
+            &prestep.local_offset_b,
+            &prestep.local_hinge_axis_b,
+            orientation_a,
+            orientation_b,
+            &mut swivel_axis,
+            &mut hinge_axis,
+            &mut offset_a,
+            &mut offset_b,
+            &mut swivel_hinge_jacobian,
         );
 
         // Upper left 3x3 block: ball socket contribution.
         let mut ball_socket_contribution_angular_a = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::skew_sandwich_without_overlap(&offset_a, &inertia_a.inverse_inertia_tensor, &mut ball_socket_contribution_angular_a);
+        Symmetric3x3Wide::skew_sandwich_without_overlap(
+            &offset_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut ball_socket_contribution_angular_a,
+        );
         let mut ball_socket_contribution_angular_b = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::skew_sandwich_without_overlap(&offset_b, &inertia_b.inverse_inertia_tensor, &mut ball_socket_contribution_angular_b);
+        Symmetric3x3Wide::skew_sandwich_without_overlap(
+            &offset_b,
+            &inertia_b.inverse_inertia_tensor,
+            &mut ball_socket_contribution_angular_b,
+        );
         let mut inverse_effective_mass = Symmetric4x4Wide::default();
         {
-            let upper_left = Symmetric4x4Wide::get_upper_left_3x3_block_mut(&mut inverse_effective_mass);
-            Symmetric3x3Wide::add(&ball_socket_contribution_angular_a, &ball_socket_contribution_angular_b, upper_left);
+            let upper_left =
+                Symmetric4x4Wide::get_upper_left_3x3_block_mut(&mut inverse_effective_mass);
+            Symmetric3x3Wide::add(
+                &ball_socket_contribution_angular_a,
+                &ball_socket_contribution_angular_b,
+                upper_left,
+            );
             let linear_contribution = inertia_a.inverse_mass + inertia_b.inverse_mass;
             upper_left.xx += linear_contribution;
             upper_left.yy += linear_contribution;
@@ -238,21 +321,49 @@ impl SwivelHingeFunctions {
 
         // Lower right 1x1 block: AngularSwivelHinge.
         let mut swivel_hinge_inertia_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&swivel_hinge_jacobian, &inertia_a.inverse_inertia_tensor, &mut swivel_hinge_inertia_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &swivel_hinge_jacobian,
+            &inertia_a.inverse_inertia_tensor,
+            &mut swivel_hinge_inertia_a,
+        );
         let mut swivel_hinge_inertia_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&swivel_hinge_jacobian, &inertia_b.inverse_inertia_tensor, &mut swivel_hinge_inertia_b);
-        let swivel_hinge_contribution_angular_a = Vector3Wide::dot_val(&swivel_hinge_inertia_a, &swivel_hinge_jacobian);
-        let swivel_hinge_contribution_angular_b = Vector3Wide::dot_val(&swivel_hinge_inertia_b, &swivel_hinge_jacobian);
-        inverse_effective_mass.ww = swivel_hinge_contribution_angular_a + swivel_hinge_contribution_angular_b;
+        Symmetric3x3Wide::transform_without_overlap(
+            &swivel_hinge_jacobian,
+            &inertia_b.inverse_inertia_tensor,
+            &mut swivel_hinge_inertia_b,
+        );
+        let swivel_hinge_contribution_angular_a =
+            Vector3Wide::dot_val(&swivel_hinge_inertia_a, &swivel_hinge_jacobian);
+        let swivel_hinge_contribution_angular_b =
+            Vector3Wide::dot_val(&swivel_hinge_inertia_b, &swivel_hinge_jacobian);
+        inverse_effective_mass.ww =
+            swivel_hinge_contribution_angular_a + swivel_hinge_contribution_angular_b;
 
         // Off-diagonal: (Ia^-1 * swivelHingeJ) x offsetA + (Ib^-1 * swivelHingeJ) x offsetB
         {
             let mut off_diagonal_contribution_a = Vector3Wide::default();
-            unsafe { Vector3Wide::cross_without_overlap(&swivel_hinge_inertia_a, &offset_a, &mut off_diagonal_contribution_a); }
+            unsafe {
+                Vector3Wide::cross_without_overlap(
+                    &swivel_hinge_inertia_a,
+                    &offset_a,
+                    &mut off_diagonal_contribution_a,
+                );
+            }
             let mut off_diagonal_contribution_b = Vector3Wide::default();
-            unsafe { Vector3Wide::cross_without_overlap(&swivel_hinge_inertia_b, &offset_b, &mut off_diagonal_contribution_b); }
-            let upper_right = Symmetric4x4Wide::get_upper_right_3x1_block_mut(&mut inverse_effective_mass);
-            Vector3Wide::add(&off_diagonal_contribution_a, &off_diagonal_contribution_b, upper_right);
+            unsafe {
+                Vector3Wide::cross_without_overlap(
+                    &swivel_hinge_inertia_b,
+                    &offset_b,
+                    &mut off_diagonal_contribution_b,
+                );
+            }
+            let upper_right =
+                Symmetric4x4Wide::get_upper_right_3x1_block_mut(&mut inverse_effective_mass);
+            Vector3Wide::add(
+                &off_diagonal_contribution_a,
+                &off_diagonal_contribution_b,
+                upper_right,
+            );
         }
 
         let mut effective_mass = Symmetric4x4Wide::default();
@@ -260,7 +371,13 @@ impl SwivelHingeFunctions {
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(&prestep.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+        SpringSettingsWide::compute_springiness(
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
 
         // Compute position error and bias velocities.
         let mut ab = Vector3Wide::default();
@@ -283,14 +400,31 @@ impl SwivelHingeFunctions {
 
         // CSV computation
         let mut ball_socket_angular_csv_a = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(&wsv_a.angular, &offset_a, &mut ball_socket_angular_csv_a); }
+        unsafe {
+            Vector3Wide::cross_without_overlap(
+                &wsv_a.angular,
+                &offset_a,
+                &mut ball_socket_angular_csv_a,
+            );
+        }
         let swivel_hinge_csv_a = Vector3Wide::dot_val(&swivel_hinge_jacobian, &wsv_a.angular);
         let mut ball_socket_angular_csv_b = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(&offset_b, &wsv_b.angular, &mut ball_socket_angular_csv_b); }
-        let negated_swivel_hinge_csv_b = Vector3Wide::dot_val(&swivel_hinge_jacobian, &wsv_b.angular);
+        unsafe {
+            Vector3Wide::cross_without_overlap(
+                &offset_b,
+                &wsv_b.angular,
+                &mut ball_socket_angular_csv_b,
+            );
+        }
+        let negated_swivel_hinge_csv_b =
+            Vector3Wide::dot_val(&swivel_hinge_jacobian, &wsv_b.angular);
 
         let mut ball_socket_angular_csv = Vector3Wide::default();
-        Vector3Wide::add(&ball_socket_angular_csv_a, &ball_socket_angular_csv_b, &mut ball_socket_angular_csv);
+        Vector3Wide::add(
+            &ball_socket_angular_csv_a,
+            &ball_socket_angular_csv_b,
+            &mut ball_socket_angular_csv,
+        );
         let mut ball_socket_linear_csv = Vector3Wide::default();
         Vector3Wide::subtract(&wsv_a.linear, &wsv_b.linear, &mut ball_socket_linear_csv);
 
@@ -309,14 +443,27 @@ impl SwivelHingeFunctions {
         let mut csi_scaled = Vector4Wide::default();
         Vector4Wide::scale(&csi, effective_mass_cfm_scale, &mut csi_scaled);
         let mut softness_contribution = Vector4Wide::default();
-        Vector4Wide::scale(accumulated_impulses, softness_impulse_scale, &mut softness_contribution);
+        Vector4Wide::scale(
+            accumulated_impulses,
+            softness_impulse_scale,
+            &mut softness_contribution,
+        );
         Vector4Wide::subtract_to(&csi_scaled, &softness_contribution, &mut csi);
 
         // accumulatedImpulses += csi
         let new_accumulated = *accumulated_impulses + csi;
         *accumulated_impulses = new_accumulated;
 
-        Self::apply_impulse(&offset_a, &offset_b, &swivel_hinge_jacobian, inertia_a, inertia_b, &mut csi, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &offset_a,
+            &offset_b,
+            &swivel_hinge_jacobian,
+            inertia_a,
+            inertia_b,
+            &mut csi,
+            wsv_a,
+            wsv_b,
+        );
     }
 }
 

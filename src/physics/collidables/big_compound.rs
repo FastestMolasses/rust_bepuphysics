@@ -1,28 +1,26 @@
 use glam::{Quat, Vec3};
 
+use crate::utilities::for_each_ref::IBreakableForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::for_each_ref::IBreakableForEach;
 
 use super::compound::{Compound, CompoundChild, IOverlapCollector};
-use super::shape::{IShape, IShapeRayHitHandler, IDisposableShape, ICompoundShape};
-use super::shapes::Shapes;
-use super::mesh::{ShapeTreeOverlapEnumerator, ShapeTreeSweepLeafTester};
 use super::compound_builder::CompoundBuilder;
+use super::mesh::{ShapeTreeOverlapEnumerator, ShapeTreeSweepLeafTester};
+use super::shape::{ICompoundShape, IDisposableShape, IShape, IShapeRayHitHandler};
+use super::shapes::Shapes;
 
 use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose};
 use crate::physics::collision_detection::ray_batchers::RayData;
 use crate::physics::trees::tree_ray_cast::IRayLeafTester;
 use crate::utilities::matrix3x3::Matrix3x3;
 
-use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
-use crate::physics::collision_detection::collision_tasks::convex_compound_task_overlaps::ConvexCompoundTaskOverlaps;
 use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::{
     ICollisionTaskOverlaps, ICollisionTaskSubpairOverlaps, OverlapQueryForPair,
 };
+use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::physics::trees::node::NodeChild;
 use crate::physics::trees::tree::Tree;
-use crate::physics::trees::tree_sweep::ISweepLeafTester;
 use crate::utilities::bounding_box::BoundingBox;
 
 /// Compound shape containing a bunch of shapes accessible through a tree acceleration structure.
@@ -136,9 +134,20 @@ impl BigCompound {
             shapes,
             std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), child_len as usize),
         );
-        compound
-            .tree
-            .binned_build(subtrees, Some(pool as *mut BufferPool), None, None, 0, -1, -1, 16, 64, 1.0 / 16.0, 64, false);
+        compound.tree.binned_build(
+            subtrees,
+            Some(pool as *mut BufferPool),
+            None,
+            None,
+            0,
+            -1,
+            -1,
+            16,
+            64,
+            1.0 / 16.0,
+            64,
+            false,
+        );
         pool.return_buffer(&mut subtrees);
         compound
     }
@@ -239,7 +248,8 @@ impl BigCompound {
                         normal: &mut hit_normal,
                     };
 
-                    if let Some(batch) = self.shapes.get_batch(child.shape_index.type_id() as usize) {
+                    if let Some(batch) = self.shapes.get_batch(child.shape_index.type_id() as usize)
+                    {
                         let child_pose = RigidPose {
                             position: child.local_position,
                             orientation: child.local_orientation,
@@ -289,12 +299,7 @@ impl BigCompound {
     }
 
     /// Adds a child to the compound.
-    pub fn add(
-        &mut self,
-        child: CompoundChild,
-        pool: &mut BufferPool,
-        shapes: &Shapes,
-    ) {
+    pub fn add(&mut self, child: CompoundChild, pool: &mut BufferPool, shapes: &Shapes) {
         let old_len = self.children.len();
         pool.resize_to_at_least(&mut self.children, old_len + 1, old_len);
         self.children[old_len as usize] = child;
@@ -366,11 +371,7 @@ impl BigCompound {
 
     /// Computes the inertia of this compound using the shapes collection.
     /// Does not recenter children.
-    pub fn compute_inertia(
-        &self,
-        child_masses: &[f32],
-        shapes: &Shapes,
-    ) -> BodyInertia {
+    pub fn compute_inertia(&self, child_masses: &[f32], shapes: &Shapes) -> BodyInertia {
         CompoundBuilder::compute_inertia(&self.children, child_masses, shapes)
     }
 
@@ -451,7 +452,8 @@ impl ICompoundShape for BigCompound {
             }
         }
         let mut adapter = OverlapAdapter(overlaps);
-        self.tree.get_overlaps_minmax(*local_min, *local_max, &mut adapter);
+        self.tree
+            .get_overlaps_minmax(*local_min, *local_max, &mut adapter);
     }
 
     fn add_child_bounds_to_batcher(
@@ -461,7 +463,13 @@ impl ICompoundShape for BigCompound {
         velocity: &BodyVelocity,
         body_index: i32,
     ) {
-        Compound::add_child_bounds_to_batcher_static(&self.children, batcher, pose, velocity, body_index);
+        Compound::add_child_bounds_to_batcher_static(
+            &self.children,
+            batcher,
+            pose,
+            velocity,
+            body_index,
+        );
     }
 }
 
@@ -497,8 +505,13 @@ impl IBoundsQueryableCompound for BigCompound {
                     true
                 }
             }
-            let mut adapter = BigCompoundOverlapAdapter { overlaps: overlaps_for_pair, pool };
-            compound.tree.get_overlaps_minmax(pair.min, pair.max, &mut adapter);
+            let mut adapter = BigCompoundOverlapAdapter {
+                overlaps: overlaps_for_pair,
+                pool,
+            };
+            compound
+                .tree
+                .get_overlaps_minmax(pair.min, pair.max, &mut adapter);
         }
     }
 

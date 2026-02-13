@@ -1,6 +1,5 @@
 // Translated from BepuPhysics/Constraints/Contact/TangentFriction.cs
 
-use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::utilities::matrix2x3_wide::Matrix2x3Wide;
 use crate::utilities::symmetric2x2_wide::Symmetric2x2Wide;
@@ -63,7 +62,11 @@ impl TangentFriction {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut linear_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(corrective_impulse, &jacobians.linear_a, &mut linear_impulse_a);
+        Matrix2x3Wide::transform(
+            corrective_impulse,
+            &jacobians.linear_a,
+            &mut linear_impulse_a,
+        );
         let mut angular_impulse_a = Vector3Wide::default();
         Matrix2x3Wide::transform(
             corrective_impulse,
@@ -102,29 +105,13 @@ impl TangentFriction {
             &mut corrective_velocity_b_angular,
         );
         let temp = wsv_a.linear;
-        Vector3Wide::add(
-            &temp,
-            &corrective_velocity_a_linear,
-            &mut wsv_a.linear,
-        );
+        Vector3Wide::add(&temp, &corrective_velocity_a_linear, &mut wsv_a.linear);
         let temp = wsv_a.angular;
-        Vector3Wide::add(
-            &temp,
-            &corrective_velocity_a_angular,
-            &mut wsv_a.angular,
-        );
+        Vector3Wide::add(&temp, &corrective_velocity_a_angular, &mut wsv_a.angular);
         let temp = wsv_b.linear;
-        Vector3Wide::subtract(
-            &temp,
-            &corrective_velocity_b_linear,
-            &mut wsv_b.linear,
-        ); //note subtract- we based it on the LinearA jacobian.
+        Vector3Wide::subtract(&temp, &corrective_velocity_b_linear, &mut wsv_b.linear); //note subtract- we based it on the LinearA jacobian.
         let temp = wsv_b.angular;
-        Vector3Wide::add(
-            &temp,
-            &corrective_velocity_b_angular,
-            &mut wsv_b.angular,
-        );
+        Vector3Wide::add(&temp, &corrective_velocity_b_angular, &mut wsv_b.angular);
     }
 
     #[inline(always)]
@@ -213,7 +200,14 @@ impl TangentFriction {
         );
         //TODO: If the previous frame and current frame are associated with different time steps, the previous frame's solution won't be a good solution anymore.
         //To compensate for this, the accumulated impulse should be scaled if dt changes.
-        Self::apply_impulse(&jacobians, inertia_a, inertia_b, accumulated_impulse, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &jacobians,
+            inertia_a,
+            inertia_b,
+            accumulated_impulse,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
@@ -288,6 +282,13 @@ impl TangentFriction {
             accumulated_impulse,
             &mut corrective_csi,
         );
-        Self::apply_impulse(&jacobians, inertia_a, inertia_b, &corrective_csi, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &jacobians,
+            inertia_a,
+            inertia_b,
+            &corrective_csi,
+            wsv_a,
+            wsv_b,
+        );
     }
 }

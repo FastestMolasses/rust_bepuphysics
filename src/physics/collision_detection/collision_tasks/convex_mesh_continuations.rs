@@ -31,8 +31,8 @@ impl<TMesh> Default for ConvexMeshContinuations<TMesh> {
     }
 }
 
-impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> IConvexCompoundContinuationHandler<MeshReduction>
-    for ConvexMeshContinuations<TMesh>
+impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
+    IConvexCompoundContinuationHandler<MeshReduction> for ConvexMeshContinuations<TMesh>
 {
     fn collision_continuation_type(&self) -> CollisionContinuationType {
         CollisionContinuationType::MeshReduction
@@ -47,7 +47,8 @@ impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> IConvexCompoundCo
         continuation_index: &mut i32,
     ) -> *mut MeshReduction {
         let pool = &mut *vtable.pool;
-        let (index, continuation) = (&mut *vtable.mesh_reductions).create_continuation(child_count, pool);
+        let (index, continuation) =
+            (&mut *vtable.mesh_reductions).create_continuation(child_count, pool);
         *continuation_index = index;
         // Pass ownership of the triangles buffer to the continuation. It'll dispose of the buffer.
         continuation.triangles = pool.take(child_count);
@@ -76,7 +77,8 @@ impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> IConvexCompoundCo
         // The triangles list persists until the continuation completes,
         // so we can pass a pointer to avoid additional shape copying.
         let cont = &mut *continuation;
-        let triangle_ptr = &mut cont.triangles[continuation_child_index] as *mut crate::physics::collision_detection::mesh_reduction::Triangle;
+        let triangle_ptr = &mut cont.triangles[continuation_child_index]
+            as *mut crate::physics::collision_detection::mesh_reduction::Triangle;
         *child_shape_data_b = triangle_ptr as *const u8;
         *child_type_b = Triangle::ID;
 
@@ -87,8 +89,7 @@ impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> IConvexCompoundCo
         // so we just need the orientation.
         *child_pose_b = RigidPose::new(Vec3::ZERO, pair.orientation_b);
 
-        let continuation_child =
-            &mut cont.inner.children[continuation_child_index];
+        let continuation_child = &mut cont.inner.children[continuation_child_index];
         continuation_child.offset_a = Vec3::ZERO;
         continuation_child.offset_b = Vec3::ZERO;
         if pair.flip_mask < 0 {

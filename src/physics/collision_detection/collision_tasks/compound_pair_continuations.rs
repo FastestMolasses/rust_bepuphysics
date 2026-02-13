@@ -2,8 +2,6 @@
 
 use std::marker::PhantomData;
 
-use glam::Vec3;
-
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::compound::Compound;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
@@ -48,7 +46,8 @@ impl<TCompoundA, TCompoundB> ICompoundPairContinuationHandler<NonconvexReduction
         continuation_index: &mut i32,
     ) -> *mut NonconvexReduction {
         let pool = &mut *vtable.pool;
-        let (index, continuation) = (&mut *vtable.nonconvex_reductions).create_continuation(total_child_count, pool);
+        let (index, continuation) =
+            (&mut *vtable.nonconvex_reductions).create_continuation(total_child_count, pool);
         *continuation_index = index;
         continuation as *mut NonconvexReduction
     }
@@ -76,7 +75,9 @@ impl<TCompoundA, TCompoundB> ICompoundPairContinuationHandler<NonconvexReduction
 
         *child_type_a = compound_child_a.shape_index.type_id();
         let shapes = &*vtable.shapes;
-        let batch = shapes.get_batch(*child_type_a as usize).expect("Shape batch must exist");
+        let batch = shapes
+            .get_batch(*child_type_a as usize)
+            .expect("Shape batch must exist");
         let (shape_data, _) = batch.get_shape_data(compound_child_a.shape_index.index() as usize);
         *child_shape_data_a = shape_data;
     }
@@ -96,15 +97,16 @@ impl<TCompoundA, TCompoundB> ICompoundPairContinuationHandler<NonconvexReduction
         child_shape_data_b: &mut *const u8,
     ) {
         let cont = &mut *continuation;
-        let continuation_child =
-            &mut cont.children[continuation_child_index];
+        let continuation_child = &mut cont.children[continuation_child_index];
 
         let compound_b = &*(pair.b as *const Compound);
         let compound_child_b = &compound_b.children[child_index_b as usize];
 
         *child_type_b = compound_child_b.shape_index.type_id();
         let shapes = &*vtable.shapes;
-        let batch = shapes.get_batch(*child_type_b as usize).expect("Shape batch must exist");
+        let batch = shapes
+            .get_batch(*child_type_b as usize)
+            .expect("Shape batch must exist");
         let (shape_data, _) = batch.get_shape_data(compound_child_b.shape_index.index() as usize);
         *child_shape_data_b = shape_data;
 

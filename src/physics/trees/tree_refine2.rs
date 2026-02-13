@@ -3,7 +3,6 @@
 use super::leaf::Leaf;
 use super::node::{Node, NodeChild};
 use super::tree::Tree;
-use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
@@ -11,8 +10,8 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::task_scheduling::{Task, TaskStack};
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use std::ffi::c_void;
-use std::simd::Simd;
 use std::simd::cmp::SimdPartialEq;
+use std::simd::Simd;
 
 /// Context passed to reify tasks for both root and subtree MT reification.
 #[repr(C)]
@@ -300,10 +299,7 @@ impl Tree {
         let count = (*refinement_node_indices).count;
         let nodes_per_task = count / target_task_count;
         let remainder = count - target_task_count * nodes_per_task;
-        debug_assert!(
-            target_task_count < 1024,
-            "Excessive task count for reify"
-        );
+        debug_assert!(target_task_count < 1024, "Excessive task count for reify");
         let mut tasks: Vec<Task> = Vec::with_capacity(target_task_count as usize);
         let mut contexts: Vec<ReifyRefinementContext> =
             Vec::with_capacity(target_task_count as usize);
@@ -363,10 +359,7 @@ impl Tree {
         let count = (*refinement_node_indices).count;
         let nodes_per_task = count / target_task_count;
         let remainder = count - target_task_count * nodes_per_task;
-        debug_assert!(
-            target_task_count < 1024,
-            "Excessive task count for reify"
-        );
+        debug_assert!(target_task_count < 1024, "Excessive task count for reify");
         let mut tasks: Vec<Task> = Vec::with_capacity(target_task_count as usize);
         let mut contexts: Vec<ReifyRefinementContext> =
             Vec::with_capacity(target_task_count as usize);
@@ -409,8 +402,7 @@ impl Tree {
         let context = &mut *(untyped_context as *mut RefinementContext);
         let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
 
-        let task_count = ((context.target_task_budget as f32
-            * context.root_refinement_size as f32
+        let task_count = ((context.target_task_budget as f32 * context.root_refinement_size as f32
             / (context.root_refinement_size + context.total_leaf_count_in_subtrees) as f32)
             .ceil() as i32)
             .max(1);
@@ -421,14 +413,16 @@ impl Tree {
             QuickList::<i32>::with_capacity(context.root_refinement_size, pool);
 
         if context.use_priority_queue {
-            context.tree.collect_subtrees_for_root_refinement_with_priority_queue(
-                context.root_refinement_size,
-                context.subtree_refinement_size,
-                pool,
-                &context.subtree_refinement_targets,
-                &mut root_refinement_node_indices,
-                &mut root_refinement_subtrees,
-            );
+            context
+                .tree
+                .collect_subtrees_for_root_refinement_with_priority_queue(
+                    context.root_refinement_size,
+                    context.subtree_refinement_size,
+                    pool,
+                    &context.subtree_refinement_targets,
+                    &mut root_refinement_node_indices,
+                    &mut root_refinement_subtrees,
+                );
         } else {
             context.tree.collect_subtrees_for_root_refinement(
                 context.root_refinement_size,
@@ -444,7 +438,8 @@ impl Tree {
             root_refinement_node_indices.count,
             root_refinement_subtrees.count - 1
         );
-        let mut root_refinement_nodes: Buffer<Node> = pool.take_at_least(root_refinement_node_indices.count);
+        let mut root_refinement_nodes: Buffer<Node> =
+            pool.take_at_least(root_refinement_node_indices.count);
         // Use ST BinnedBuild. MT BinnedBuild would be used here when taskCount > 1,
         // but requires MT BinnedBuilder which is not yet implemented.
         Tree::binned_build_static(
@@ -474,10 +469,9 @@ impl Tree {
                 dispatcher,
             );
         } else {
-            context.tree.reify_root_refinement_st(
-                &root_refinement_node_indices,
-                &root_refinement_nodes,
-            );
+            context
+                .tree
+                .reify_root_refinement_st(&root_refinement_node_indices, &root_refinement_nodes);
         }
 
         root_refinement_subtrees.dispose(pool);
@@ -495,10 +489,14 @@ impl Tree {
         let context = &mut *(untyped_context as *mut RefinementContext);
         let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
 
-        let refinement_root_node = &*context.tree.nodes.as_ptr().add(subtree_refinement_target as usize);
-        let refinement_leaf_count = refinement_root_node.a.leaf_count + refinement_root_node.b.leaf_count;
-        let task_count = ((context.target_task_budget as f32
-            * refinement_leaf_count as f32
+        let refinement_root_node = &*context
+            .tree
+            .nodes
+            .as_ptr()
+            .add(subtree_refinement_target as usize);
+        let refinement_leaf_count =
+            refinement_root_node.a.leaf_count + refinement_root_node.b.leaf_count;
+        let task_count = ((context.target_task_budget as f32 * refinement_leaf_count as f32
             / (context.root_refinement_size + context.total_leaf_count_in_subtrees) as f32)
             .ceil() as i32)
             .max(1);
@@ -516,7 +514,8 @@ impl Tree {
             &mut subtree_refinement_leaves,
         );
 
-        let mut refinement_nodes: Buffer<Node> = pool.take_at_least(subtree_refinement_node_indices.count);
+        let mut refinement_nodes: Buffer<Node> =
+            pool.take_at_least(subtree_refinement_node_indices.count);
         // Use ST BinnedBuild. MT BinnedBuild would be used here when taskCount > 1.
         Tree::binned_build_static(
             subtree_refinement_leaves.span,
@@ -546,10 +545,9 @@ impl Tree {
                 dispatcher,
             );
         } else {
-            context.tree.reify_subtree_refinement_st(
-                &subtree_refinement_node_indices,
-                &refinement_nodes,
-            );
+            context
+                .tree
+                .reify_subtree_refinement_st(&subtree_refinement_node_indices, &refinement_nodes);
         }
 
         let mut refinement_nodes = refinement_nodes;
@@ -580,7 +578,9 @@ impl Tree {
         if self.leaf_count <= 2 {
             return;
         }
-        if root_refinement_size <= 0 && (subtree_refinement_count <= 0 || subtree_refinement_size <= 0) {
+        if root_refinement_size <= 0
+            && (subtree_refinement_count <= 0 || subtree_refinement_size <= 0)
+        {
             return;
         }
         let mut subtree_refinement_count = subtree_refinement_count;
@@ -618,7 +618,10 @@ impl Tree {
 
         let mut total_leaf_count_in_subtrees = 0i32;
         for i in 0..subtree_refinement_targets.count {
-            let node = &*self.nodes.as_ptr().add(subtree_refinement_targets[i] as usize);
+            let node = &*self
+                .nodes
+                .as_ptr()
+                .add(subtree_refinement_targets[i] as usize);
             total_leaf_count_in_subtrees += node.a.leaf_count + node.b.leaf_count;
         }
 
@@ -650,7 +653,8 @@ impl Tree {
             );
         }
 
-        let tasks_slice = std::slice::from_raw_parts_mut(tasks.as_ptr() as *mut Task, task_count as usize);
+        let tasks_slice =
+            std::slice::from_raw_parts_mut(tasks.as_ptr() as *mut Task, task_count as usize);
         if internally_dispatch {
             (*task_stack).allocate_continuation_and_push(
                 tasks_slice,
@@ -742,8 +746,7 @@ impl Tree {
         end_index: i32,
         refinement_targets: &mut QuickList<i32>,
     ) {
-        if *start_index >= end_index
-            || refinement_targets.count == target_subtree_refinement_count
+        if *start_index >= end_index || refinement_targets.count == target_subtree_refinement_count
         {
             return;
         }
@@ -770,8 +773,7 @@ impl Tree {
             }
         }
 
-        if *start_index >= end_index
-            || refinement_targets.count == target_subtree_refinement_count
+        if *start_index >= end_index || refinement_targets.count == target_subtree_refinement_count
         {
             return;
         }
@@ -900,8 +902,7 @@ impl Tree {
         root_refinement_node_indices: &mut QuickList<i32>,
         root_refinement_subtrees: &mut QuickList<NodeChild>,
     ) {
-        let mut root_stack =
-            QuickList::<(i32, i32)>::with_capacity(root_refinement_size, pool);
+        let mut root_stack = QuickList::<(i32, i32)>::with_capacity(root_refinement_size, pool);
         *root_stack.allocate_unsafely() = (0, root_refinement_size);
 
         let bundle_count =
@@ -917,8 +918,8 @@ impl Tree {
             let node = unsafe { &*self.nodes.get(node_to_visit.0) };
             let node_total_leaf_count = node.a.leaf_count + node.b.leaf_count;
             debug_assert!(node_to_visit.1 <= node_total_leaf_count);
-            let lower_subtree_budget = ((node_to_visit.1 + 1) / 2)
-                .min(node.a.leaf_count.min(node.b.leaf_count));
+            let lower_subtree_budget =
+                ((node_to_visit.1 + 1) / 2).min(node.a.leaf_count.min(node.b.leaf_count));
             let higher_subtree_budget = node_to_visit.1 - lower_subtree_budget;
             let use_smaller_for_a = lower_subtree_budget == node.a.leaf_count;
             let a_subtree_budget = if use_smaller_for_a {
@@ -1004,9 +1005,7 @@ impl Tree {
             -1,
         );
 
-        while heap.count > 0
-            && heap.count + root_refinement_subtrees.count < root_refinement_size
-        {
+        while heap.count > 0 && heap.count + root_refinement_subtrees.count < root_refinement_size {
             let entry = heap.pop();
             *root_refinement_node_indices.allocate_unsafely() = entry.index;
             let node = unsafe { &*self.nodes.get(entry.index) };
@@ -1220,10 +1219,7 @@ impl Tree {
                     false,
                 );
             }
-            self.reify_subtree_refinement_st(
-                &subtree_refinement_node_indices,
-                &refinement_nodes,
-            );
+            self.reify_subtree_refinement_st(&subtree_refinement_node_indices, &refinement_nodes);
 
             subtree_refinement_node_indices.count = 0;
             subtree_refinement_leaves.count = 0;

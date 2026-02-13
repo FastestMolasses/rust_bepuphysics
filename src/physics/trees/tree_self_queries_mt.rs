@@ -61,7 +61,9 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         let target_job_count = (1.0f32).max(job_multiplier * thread_count as f32);
         self.leaf_threshold = (tree.leaf_count as f32 / target_job_count) as i32;
         self.jobs = QuickList::with_capacity((target_job_count * 2.0) as i32, &mut *self.pool);
-        unsafe { *self.next_node_pair.get() = -1; }
+        unsafe {
+            *self.next_node_pair.get() = -1;
+        }
         self.overlap_handlers = overlap_handlers;
         self.tree = tree as *const Tree;
         // Collect jobs.
@@ -132,7 +134,9 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
     pub unsafe fn pair_test(&mut self, worker_index: i32) {
         debug_assert!(worker_index >= 0 && (worker_index as usize) < self.overlap_handlers.len());
         loop {
-            let next_node_pair_index = unsafe { AtomicI32::from_ptr(self.next_node_pair.get()).fetch_add(1, Ordering::AcqRel) } + 1;
+            let next_node_pair_index = unsafe {
+                AtomicI32::from_ptr(self.next_node_pair.get()).fetch_add(1, Ordering::AcqRel)
+            } + 1;
             if next_node_pair_index >= self.jobs.count {
                 break;
             }
@@ -200,7 +204,13 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
                 } else {
                     &lnode.b
                 };
-                self.dispatch_test_for_leaf(leaf_index, child_owning, a.index, a.leaf_count, results);
+                self.dispatch_test_for_leaf(
+                    leaf_index,
+                    child_owning,
+                    a.index,
+                    a.leaf_count,
+                    results,
+                );
             }
         } else if b.index >= 0 {
             // leaf A versus node B

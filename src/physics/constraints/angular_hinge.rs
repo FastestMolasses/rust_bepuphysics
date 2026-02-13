@@ -41,19 +41,27 @@ impl AngularHinge {
     ) {
         #[cfg(debug_assertions)]
         {
-            ConstraintChecker::assert_unit_length_vec3(self.local_hinge_axis_a, "AngularHinge", "local_hinge_axis_a");
-            ConstraintChecker::assert_unit_length_vec3(self.local_hinge_axis_b, "AngularHinge", "local_hinge_axis_b");
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_hinge_axis_a,
+                "AngularHinge",
+                "local_hinge_axis_a",
+            );
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_hinge_axis_b,
+                "AngularHinge",
+                "local_hinge_axis_b",
+            );
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "AngularHinge");
         }
 
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_hinge_axis_a, &mut target.local_hinge_axis_a);
         Vector3Wide::write_first(self.local_hinge_axis_b, &mut target.local_hinge_axis_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.spring_settings.angular_frequency) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_first_mut(&mut target.spring_settings.twice_damping_ratio) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_first_mut(&mut target.spring_settings.angular_frequency) =
+                self.spring_settings.angular_frequency;
+            *GatherScatter::get_first_mut(&mut target.spring_settings.twice_damping_ratio) =
+                self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -63,13 +71,18 @@ impl AngularHinge {
         inner_index: usize,
         description: &mut AngularHinge,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
-        Vector3Wide::read_first(&source.local_hinge_axis_a, &mut description.local_hinge_axis_a);
-        Vector3Wide::read_first(&source.local_hinge_axis_b, &mut description.local_hinge_axis_b);
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
+        Vector3Wide::read_first(
+            &source.local_hinge_axis_a,
+            &mut description.local_hinge_axis_a,
+        );
+        Vector3Wide::read_first(
+            &source.local_hinge_axis_b,
+            &mut description.local_hinge_axis_b,
+        );
         description.spring_settings.angular_frequency = source.spring_settings.angular_frequency[0];
-        description.spring_settings.twice_damping_ratio = source.spring_settings.twice_damping_ratio[0];
+        description.spring_settings.twice_damping_ratio =
+            source.spring_settings.twice_damping_ratio[0];
     }
 }
 
@@ -119,8 +132,16 @@ impl AngularHingeFunctions {
         let epsilon = Vector::<f32>::splat(1e-7);
         let use_fallback_x = x_length.simd_lt(epsilon).to_int();
         let use_fallback_y = y_length.simd_lt(epsilon).to_int();
-        hinge_axis_b_on_plane_x = Vector3Wide::conditional_select(&use_fallback_x, hinge_axis_a, &hinge_axis_b_on_plane_x);
-        hinge_axis_b_on_plane_y = Vector3Wide::conditional_select(&use_fallback_y, hinge_axis_a, &hinge_axis_b_on_plane_y);
+        hinge_axis_b_on_plane_x = Vector3Wide::conditional_select(
+            &use_fallback_x,
+            hinge_axis_a,
+            &hinge_axis_b_on_plane_x,
+        );
+        hinge_axis_b_on_plane_y = Vector3Wide::conditional_select(
+            &use_fallback_y,
+            hinge_axis_a,
+            &hinge_axis_b_on_plane_y,
+        );
 
         let hbxha = Vector3Wide::dot_val(&hinge_axis_b_on_plane_x, hinge_axis_a);
         let hbyha = Vector3Wide::dot_val(&hinge_axis_b_on_plane_y, hinge_axis_a);
@@ -151,7 +172,11 @@ impl AngularHingeFunctions {
         *angular_velocity_a = tmp;
 
         let mut negated_velocity_change_b = Vector3Wide::default();
-        Matrix2x3Wide::transform(csi, negated_impulse_to_velocity_b, &mut negated_velocity_change_b);
+        Matrix2x3Wide::transform(
+            csi,
+            negated_impulse_to_velocity_b,
+            &mut negated_velocity_change_b,
+        );
         Vector3Wide::subtract(angular_velocity_b, &negated_velocity_change_b, &mut tmp);
         *angular_velocity_b = tmp;
     }
@@ -169,9 +194,21 @@ impl AngularHingeFunctions {
         Helpers::build_orthonormal_basis(local_hinge_axis_a, &mut local_ax, &mut local_ay);
         let mut orientation_matrix_a = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
-        Matrix3x3Wide::transform_without_overlap(local_hinge_axis_a, &orientation_matrix_a, hinge_axis_a);
-        Matrix3x3Wide::transform_without_overlap(&local_ax, &orientation_matrix_a, &mut jacobian_a.x);
-        Matrix3x3Wide::transform_without_overlap(&local_ay, &orientation_matrix_a, &mut jacobian_a.y);
+        Matrix3x3Wide::transform_without_overlap(
+            local_hinge_axis_a,
+            &orientation_matrix_a,
+            hinge_axis_a,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            &local_ax,
+            &orientation_matrix_a,
+            &mut jacobian_a.x,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            &local_ay,
+            &orientation_matrix_a,
+            &mut jacobian_a.y,
+        );
     }
 
     pub fn warm_start(
@@ -188,12 +225,31 @@ impl AngularHingeFunctions {
     ) {
         let mut _hinge_axis_a = Vector3Wide::default();
         let mut jacobian_a = Matrix2x3Wide::default();
-        Self::compute_jacobians(&prestep.local_hinge_axis_a, orientation_a, &mut _hinge_axis_a, &mut jacobian_a);
+        Self::compute_jacobians(
+            &prestep.local_hinge_axis_a,
+            orientation_a,
+            &mut _hinge_axis_a,
+            &mut jacobian_a,
+        );
         let mut impulse_to_velocity_a = Matrix2x3Wide::default();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(&jacobian_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::multiply_without_overlap_2x3(
+            &jacobian_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut negated_impulse_to_velocity_b = Matrix2x3Wide::default();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(&jacobian_a, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
-        Self::apply_impulse(&impulse_to_velocity_a, &negated_impulse_to_velocity_b, accumulated_impulses, &mut wsv_a.angular, &mut wsv_b.angular);
+        Symmetric3x3Wide::multiply_without_overlap_2x3(
+            &jacobian_a,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
+        Self::apply_impulse(
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            accumulated_impulses,
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+        );
     }
 
     pub fn solve(
@@ -212,19 +268,44 @@ impl AngularHingeFunctions {
     ) {
         let mut hinge_axis_a = Vector3Wide::default();
         let mut jacobian_a = Matrix2x3Wide::default();
-        Self::compute_jacobians(&prestep.local_hinge_axis_a, orientation_a, &mut hinge_axis_a, &mut jacobian_a);
+        Self::compute_jacobians(
+            &prestep.local_hinge_axis_a,
+            orientation_a,
+            &mut hinge_axis_a,
+            &mut jacobian_a,
+        );
         let mut hinge_axis_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_hinge_axis_b, orientation_b, &mut hinge_axis_b);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_hinge_axis_b,
+            orientation_b,
+            &mut hinge_axis_b,
+        );
 
         // Note that JA = -JB. Compute J * M^-1 for impulse->velocity transforms.
         let mut impulse_to_velocity_a = Matrix2x3Wide::default();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(&jacobian_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::multiply_without_overlap_2x3(
+            &jacobian_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut negated_impulse_to_velocity_b = Matrix2x3Wide::default();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(&jacobian_a, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
+        Symmetric3x3Wide::multiply_without_overlap_2x3(
+            &jacobian_a,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
         let mut angular_a = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::complete_matrix_sandwich(&impulse_to_velocity_a, &jacobian_a, &mut angular_a);
+        Symmetric2x2Wide::complete_matrix_sandwich(
+            &impulse_to_velocity_a,
+            &jacobian_a,
+            &mut angular_a,
+        );
         let mut angular_b = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::complete_matrix_sandwich(&negated_impulse_to_velocity_b, &jacobian_a, &mut angular_b);
+        Symmetric2x2Wide::complete_matrix_sandwich(
+            &negated_impulse_to_velocity_b,
+            &jacobian_a,
+            &mut angular_b,
+        );
         let mut inverse_effective_mass = Symmetric2x2Wide::default();
         Symmetric2x2Wide::add(&angular_a, &angular_b, &mut inverse_effective_mass);
         let mut effective_mass = Symmetric2x2Wide::default();
@@ -233,7 +314,13 @@ impl AngularHingeFunctions {
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(&prestep.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+        SpringSettingsWide::compute_springiness(
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
 
         // Compute error angles.
         let mut error_angle = Vector2Wide::default();
@@ -244,7 +331,11 @@ impl AngularHingeFunctions {
         let neg_pev = -position_error_to_velocity;
         Vector2Wide::scale(&error_angle, &neg_pev, &mut bias_velocity);
         let mut bias_impulse = Vector2Wide::default();
-        Symmetric2x2Wide::transform_without_overlap(&bias_velocity, &effective_mass, &mut bias_impulse);
+        Symmetric2x2Wide::transform_without_overlap(
+            &bias_velocity,
+            &effective_mass,
+            &mut bias_impulse,
+        );
 
         // JB = -JA. This is (angularVelocityA * JA + angularVelocityB * JB) * effectiveMass
         let mut difference = Vector3Wide::default();
@@ -259,7 +350,11 @@ impl AngularHingeFunctions {
         csi = csi_scaled;
         // csi = biasImpulse - accumulatedImpulse * softnessImpulseScale - (csiaLinear + csiaAngular + csibLinear + csibAngular)
         let mut softness_contribution = Vector2Wide::default();
-        Vector2Wide::scale(accumulated_impulses, &softness_impulse_scale, &mut softness_contribution);
+        Vector2Wide::scale(
+            accumulated_impulses,
+            &softness_impulse_scale,
+            &mut softness_contribution,
+        );
         let mut tmp = Vector2Wide::default();
         Vector2Wide::add(&softness_contribution, &csi, &mut tmp);
         Vector2Wide::subtract(&bias_impulse, &tmp, &mut csi);
@@ -268,7 +363,13 @@ impl AngularHingeFunctions {
         Vector2Wide::add(accumulated_impulses, &csi, &mut new_accumulated);
         *accumulated_impulses = new_accumulated;
 
-        Self::apply_impulse(&impulse_to_velocity_a, &negated_impulse_to_velocity_b, &csi, &mut wsv_a.angular, &mut wsv_b.angular);
+        Self::apply_impulse(
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            &csi,
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+        );
     }
 }
 

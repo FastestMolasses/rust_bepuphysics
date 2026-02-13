@@ -251,7 +251,8 @@ impl<
                                 &mut child_shape_data_b,
                             );
 
-                            let child_a_to_child_b = pair.offset_b + child_pose_b.position - child_pose_a.position;
+                            let child_a_to_child_b =
+                                pair.offset_b + child_pose_b.position - child_pose_a.position;
                             if pair.flip_mask < 0 {
                                 // By reversing the order of the parameters, the manifold orientation is flipped.
                                 // This compensates for the flip induced by order requirements on this task.

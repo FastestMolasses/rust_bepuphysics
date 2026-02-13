@@ -1,15 +1,15 @@
 use glam::{Quat, Vec3};
 
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 
 // Re-export from canonical location.
-pub use crate::physics::collision_detection::ray_batchers::{IShapeRayHitHandler, RayData};
+pub use crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler;
 
 /// Defines a type usable as a shape by collidables.
 pub trait IShape {
@@ -55,7 +55,9 @@ pub trait IDisposableShape: IShape {
 /// Separated from `IShapeWide<TShape>` so it can be constrained without knowing TShape.
 pub trait IShapeWideAllocation {
     /// Gets the number of bytes required for internal allocations. Returns 0 for most shapes.
-    fn internal_allocation_size_of(&self) -> usize { 0 }
+    fn internal_allocation_size_of(&self) -> usize {
+        0
+    }
     /// Provides memory for internal allocations. No-op for shapes with zero allocation size.
     fn initialize_allocation(&mut self, _memory: &Buffer<u8>) {}
 
@@ -67,9 +69,13 @@ pub trait IShapeWideAllocation {
     ///
     /// # Safety
     /// `source` must point to a valid instance of the corresponding scalar shape type.
-    unsafe fn write_slot_raw(&mut self, index: usize, source: *const u8) where Self: Sized {
+    unsafe fn write_slot_raw(&mut self, index: usize, source: *const u8)
+    where
+        Self: Sized,
+    {
         let vector_width = crate::utilities::vector::VECTOR_WIDTH;
-        let scalar_float_count = std::mem::size_of::<Self>() / (vector_width * std::mem::size_of::<f32>());
+        let scalar_float_count =
+            std::mem::size_of::<Self>() / (vector_width * std::mem::size_of::<f32>());
         let src = source as *const f32;
         let dst = self as *mut Self as *mut f32;
         for i in 0..scalar_float_count {
@@ -158,7 +164,12 @@ use crate::physics::collidables::compound::CompoundChild;
 /// Both compound and homogeneous compound shapes implement this, but the method signature
 /// does not require child type parameters.
 pub trait INonConvexBounds {
-    fn compute_bounds_by_orientation(&self, orientation: glam::Quat, min: &mut glam::Vec3, max: &mut glam::Vec3);
+    fn compute_bounds_by_orientation(
+        &self,
+        orientation: glam::Quat,
+        min: &mut glam::Vec3,
+        max: &mut glam::Vec3,
+    );
 }
 
 /// Defines a compound shape type that has children of potentially different types.
@@ -191,8 +202,10 @@ pub trait ICompoundShape: IDisposableShape {
 }
 
 /// Defines a compound shape type that has children of only one type.
-pub trait IHomogeneousCompoundShape<TChildShape: IConvexShape, TChildShapeWide: IShapeWide<TChildShape>>:
-    IDisposableShape
+pub trait IHomogeneousCompoundShape<
+    TChildShape: IConvexShape,
+    TChildShapeWide: IShapeWide<TChildShape>,
+>: IDisposableShape
 {
     /// Gets the number of children in the compound shape.
     fn child_count(&self) -> i32;
@@ -205,7 +218,12 @@ pub trait IHomogeneousCompoundShape<TChildShape: IConvexShape, TChildShapeWide: 
     fn get_local_child_wide(&self, child_index: i32, target: &mut TChildShapeWide);
 
     /// Gets a child shape and its pose in the compound's local space.
-    fn get_posed_local_child(&self, child_index: i32, child_data: &mut TChildShape, child_pose: &mut RigidPose);
+    fn get_posed_local_child(
+        &self,
+        child_index: i32,
+        child_data: &mut TChildShape,
+        child_pose: &mut RigidPose,
+    );
 
     /// Computes the bounding box of the compound shape.
     fn compute_bounds(&self, orientation: glam::Quat, min: &mut glam::Vec3, max: &mut glam::Vec3);

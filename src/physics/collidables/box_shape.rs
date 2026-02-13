@@ -2,18 +2,18 @@ use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
-use crate::utilities::vector::Vector;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 
+use super::ray::RayWide;
+use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
-use super::ray::RayWide;
 
 /// Collision shape representing a solid cuboid.
 #[repr(C)]
@@ -255,8 +255,10 @@ impl IShapeWide<Box> for BoxWide {
             + self.half_height * self.half_height
             + self.half_length * self.half_length)
             .sqrt();
-        *maximum_angular_expansion =
-            *maximum_radius - self.half_length.simd_min(self.half_height.simd_min(self.half_length));
+        *maximum_angular_expansion = *maximum_radius
+            - self
+                .half_length
+                .simd_min(self.half_height.simd_min(self.half_length));
     }
 
     fn minimum_wide_ray_count() -> i32 {
@@ -395,9 +397,18 @@ impl ISupportFinder<Box, BoxWide> for BoxSupportFinder {
         support: &mut Vector3Wide,
     ) {
         let zero = Vector::<f32>::splat(0.0);
-        support.x = direction.x.simd_lt(zero).select(-shape.half_width, shape.half_width);
-        support.y = direction.y.simd_lt(zero).select(-shape.half_height, shape.half_height);
-        support.z = direction.z.simd_lt(zero).select(-shape.half_length, shape.half_length);
+        support.x = direction
+            .x
+            .simd_lt(zero)
+            .select(-shape.half_width, shape.half_width);
+        support.y = direction
+            .y
+            .simd_lt(zero)
+            .select(-shape.half_height, shape.half_height);
+        support.z = direction
+            .z
+            .simd_lt(zero)
+            .select(-shape.half_length, shape.half_length);
     }
 }
 
@@ -419,9 +430,18 @@ impl DepthRefinerSupportFinder<BoxWide> for BoxSupportFinder {
         support: &mut Vector3Wide,
     ) {
         let zero = Vector::<f32>::splat(0.0);
-        support.x = direction.x.simd_lt(zero).select(-shape.half_width, shape.half_width);
-        support.y = direction.y.simd_lt(zero).select(-shape.half_height, shape.half_height);
-        support.z = direction.z.simd_lt(zero).select(-shape.half_length, shape.half_length);
+        support.x = direction
+            .x
+            .simd_lt(zero)
+            .select(-shape.half_width, shape.half_width);
+        support.y = direction
+            .y
+            .simd_lt(zero)
+            .select(-shape.half_height, shape.half_height);
+        support.z = direction
+            .z
+            .simd_lt(zero)
+            .select(-shape.half_length, shape.half_length);
     }
 
     #[inline(always)]
@@ -439,7 +459,12 @@ impl DepthRefinerSupportFinder<BoxWide> for BoxSupportFinder {
             &mut local_direction,
         );
         let mut local_support = Vector3Wide::default();
-        <Self as DepthRefinerSupportFinder<BoxWide>>::compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        <Self as DepthRefinerSupportFinder<BoxWide>>::compute_local_support(
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
+        );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }

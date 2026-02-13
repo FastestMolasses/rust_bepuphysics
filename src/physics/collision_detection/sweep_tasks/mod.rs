@@ -4,23 +4,23 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 
-pub mod sphere_pair_distance_tester;
-pub mod sphere_capsule_distance_tester;
-pub mod sphere_box_distance_tester;
-pub mod sphere_cylinder_distance_tester;
-pub mod sphere_triangle_distance_tester;
-pub mod capsule_pair_distance_tester;
-pub mod capsule_cylinder_distance_tester;
 pub mod capsule_box_distance_tester;
-pub mod gjk_distance_tester;
-pub mod convex_pair_sweep_task;
-pub mod compound_pair_sweep_overlaps;
-pub mod convex_compound_sweep_overlap_finder;
+pub mod capsule_cylinder_distance_tester;
+pub mod capsule_pair_distance_tester;
+pub mod compound_homogeneous_compound_sweep_task;
 pub mod compound_pair_sweep_overlap_finder;
+pub mod compound_pair_sweep_overlaps;
+pub mod compound_pair_sweep_task;
+pub mod convex_compound_sweep_overlap_finder;
 pub mod convex_compound_sweep_task;
 pub mod convex_homogeneous_compound_sweep_task;
-pub mod compound_pair_sweep_task;
-pub mod compound_homogeneous_compound_sweep_task;
+pub mod convex_pair_sweep_task;
+pub mod gjk_distance_tester;
+pub mod sphere_box_distance_tester;
+pub mod sphere_capsule_distance_tester;
+pub mod sphere_cylinder_distance_tester;
+pub mod sphere_pair_distance_tester;
+pub mod sphere_triangle_distance_tester;
 
 /// Defines a tester that computes the distance between two shapes.
 pub trait IPairDistanceTester<TShapeWideA, TShapeWideB> {

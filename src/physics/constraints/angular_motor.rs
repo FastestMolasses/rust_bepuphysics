@@ -38,7 +38,10 @@ impl AngularMotor {
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "AngularMotor");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.target_velocity_local_a, &mut target.target_velocity_local_a);
+        Vector3Wide::write_first(
+            self.target_velocity_local_a,
+            &mut target.target_velocity_local_a,
+        );
         MotorSettingsWide::write_first(&self.settings, &mut target.settings);
     }
 
@@ -49,7 +52,10 @@ impl AngularMotor {
         description: &mut AngularMotor,
     ) {
         let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.target_velocity_local_a, &mut description.target_velocity_local_a);
+        Vector3Wide::read_first(
+            &source.target_velocity_local_a,
+            &mut description.target_velocity_local_a,
+        );
         MotorSettingsWide::read_first(&source.settings, &mut description.settings);
     }
 }
@@ -141,21 +147,13 @@ impl AngularMotorFunctions {
         Vector3Wide::subtract(&bias_velocity, &csv, &mut tmp);
         csv = tmp;
         let mut csi = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
-            &csv,
-            &unsoftened_effective_mass,
-            &mut csi,
-        );
+        Symmetric3x3Wide::transform_without_overlap(&csv, &unsoftened_effective_mass, &mut csi);
         csi = csi * effective_mass_cfm_scale;
         let softness_component = Vector3Wide::scale(accumulated_impulses, &softness_impulse_scale);
         Vector3Wide::subtract(&csi, &softness_component, &mut tmp);
         csi = tmp;
 
-        ServoSettingsWide::clamp_impulse_3d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
+        ServoSettingsWide::clamp_impulse_3d(&maximum_impulse, accumulated_impulses, &mut csi);
         AngularServoFunctions::apply_impulse(
             &mut wsv_a.angular,
             &mut wsv_b.angular,

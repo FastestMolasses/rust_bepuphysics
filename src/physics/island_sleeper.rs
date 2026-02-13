@@ -1,12 +1,11 @@
 // Translated from BepuPhysics/IslandSleeper.cs
 
-use glam::Vec3;
 use crate::physics::bodies::Bodies;
 use crate::physics::body_set::BodySet;
 use crate::physics::collidables::collidable_reference::CollidableReference;
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_set::ConstraintSet;
-use crate::physics::handles::{BodyHandle, ConstraintHandle};
+use crate::physics::handles::ConstraintHandle;
 use crate::physics::island_scaffold::{IslandScaffold, IslandScaffoldTypeBatch};
 use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::physics::solver::Solver;
@@ -17,6 +16,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use glam::Vec3;
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -73,7 +73,9 @@ struct WorkerTraversalResults {
 impl WorkerTraversalResults {
     fn dispose(&mut self, pool: &mut BufferPool) {
         for i in 0..self.islands.count {
-            unsafe { self.islands.get_mut(i).dispose(pool); }
+            unsafe {
+                self.islands.get_mut(i).dispose(pool);
+            }
         }
         self.islands.dispose(pool);
         self.traversed_bodies.dispose(pool);
@@ -164,7 +166,11 @@ impl IPredicate<i32> for SleepPredicate {
     fn matches(&self, body_index: &i32) -> bool {
         unsafe {
             let bodies = &*self.bodies;
-            bodies.active_set().activity.get(*body_index).sleep_candidate
+            bodies
+                .active_set()
+                .activity
+                .get(*body_index)
+                .sleep_candidate
         }
     }
 }
@@ -181,7 +187,8 @@ impl IForEach<i32> for ConstraintBodyEnumerator {
     fn loop_body(&mut self, body_index: i32) {
         if body_index != self.source_index {
             unsafe {
-                self.constraint_body_indices.add(body_index, &mut *self.pool);
+                self.constraint_body_indices
+                    .add(body_index, &mut *self.pool);
             }
         }
     }
@@ -261,10 +268,13 @@ impl IslandSleeper {
         let bodies = self.bodies();
         let solver = self.solver();
 
-        let initial_body_capacity = self.initial_island_body_capacity.min(bodies.active_set().count);
+        let initial_body_capacity = self
+            .initial_island_body_capacity
+            .min(bodies.active_set().count);
 
         let mut considered_bodies = IndexSet::new(pool, bodies.active_set().count);
-        let mut considered_constraints = IndexSet::new(pool, solver.handle_pool.highest_possibly_claimed_id() + 1);
+        let mut considered_constraints =
+            IndexSet::new(pool, solver.handle_pool.highest_possibly_claimed_id() + 1);
         let mut visitation_stack = QuickList::with_capacity(initial_body_capacity, pool);
 
         // Start traversal by pushing the initial body
@@ -359,7 +369,10 @@ impl IslandSleeper {
                 constraint_handles.add(entry.connecting_constraint_handle, pool);
                 considered_constraints.add_unsafely(handle_value);
                 enumerator.constraint_body_indices.count = 0;
-                solver.enumerate_connected_raw_body_references(entry.connecting_constraint_handle, enumerator);
+                solver.enumerate_connected_raw_body_references(
+                    entry.connecting_constraint_handle,
+                    enumerator,
+                );
                 for j in 0..enumerator.constraint_body_indices.count {
                     let connected = *enumerator.constraint_body_indices.get(j);
                     if !Self::push_body(
@@ -390,7 +403,8 @@ impl IslandSleeper {
             return;
         }
 
-        let candidate_count = (1.0f32).max(active_count as f32 * self.tested_fraction_per_frame) as i32;
+        let candidate_count =
+            (1.0f32).max(active_count as f32 * self.tested_fraction_per_frame) as i32;
         let pool = unsafe { &mut *self.pool };
         let mut traversal_start_body_indices = QuickList::with_capacity(candidate_count, pool);
 
@@ -447,19 +461,30 @@ impl IslandSleeper {
     ) {
         let bodies = &*self.bodies;
         let solver = &*self.solver;
-        let results = &mut *(self.worker_traversal_results.as_ptr().add(worker_index as usize) as *mut WorkerTraversalResults);
+        let results = &mut *(self
+            .worker_traversal_results
+            .as_ptr()
+            .add(worker_index as usize)
+            as *mut WorkerTraversalResults);
         results.islands = QuickList::with_capacity(64, thread_pool);
         let mut body_indices = QuickList::with_capacity(
-            self.initial_island_body_capacity.min(bodies.active_set().count),
+            self.initial_island_body_capacity
+                .min(bodies.active_set().count),
             thread_pool,
         );
         let mut constraint_handles = QuickList::with_capacity(
-            8.max(self.initial_island_constraint_capacity.min(solver.handle_pool.highest_possibly_claimed_id() + 1)),
+            8.max(
+                self.initial_island_constraint_capacity
+                    .min(solver.handle_pool.highest_possibly_claimed_id() + 1),
+            ),
             thread_pool,
         );
 
         let mut traversal_test = TraversalTest {
-            previously_traversed_bodies: std::cell::UnsafeCell::new(IndexSet::new(thread_pool, bodies.active_set().count)),
+            previously_traversed_bodies: std::cell::UnsafeCell::new(IndexSet::new(
+                thread_pool,
+                bodies.active_set().count,
+            )),
             predicate,
         };
 
@@ -469,14 +494,26 @@ impl IslandSleeper {
         while traversed_bodies < self.target_traversed_body_count_per_thread
             && slept_bodies < self.target_slept_body_count_per_thread
         {
-            let target_index = AtomicI32::from_ptr(self.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
+            let target_index =
+                AtomicI32::from_ptr(self.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
             if target_index >= self.traversal_start_body_indices.count {
                 break;
             }
             let body_index = *self.traversal_start_body_indices.get(target_index);
-            if self.collect_island(thread_pool, body_index, &mut traversal_test, &mut body_indices, &mut constraint_handles) {
+            if self.collect_island(
+                thread_pool,
+                body_index,
+                &mut traversal_test,
+                &mut body_indices,
+                &mut constraint_handles,
+            ) {
                 slept_bodies += body_indices.count;
-                let island = IslandScaffold::new(&mut body_indices, &mut constraint_handles, solver, thread_pool);
+                let island = IslandScaffold::new(
+                    &mut body_indices,
+                    &mut constraint_handles,
+                    solver,
+                    thread_pool,
+                );
                 results.islands.add(island, thread_pool);
             }
             traversed_bodies += body_indices.count;
@@ -496,7 +533,9 @@ impl IslandSleeper {
                 let pred = ForcedSleepPredicate;
                 sleeper.find_islands_on_worker(worker_index, thread_pool, &pred);
             } else {
-                let pred = SleepPredicate { bodies: sleeper.bodies };
+                let pred = SleepPredicate {
+                    bodies: sleeper.bodies,
+                };
                 sleeper.find_islands_on_worker(worker_index, thread_pool, &pred);
             }
         }
@@ -509,47 +548,66 @@ impl IslandSleeper {
             let solver_ptr = sleeper.solver;
             let broad_phase = &*sleeper.broad_phase;
             loop {
-                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
+                let index =
+                    AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= sleeper.gathering_jobs.count {
                     break;
                 }
                 let job = sleeper.gathering_jobs.get(index);
                 if job.is_body_job {
                     let source_set = (*bodies_ptr).sets.get(0);
-                    let set_ref = sleeper.new_inactive_sets.get(job.target_set_index_in_reference_list);
+                    let set_ref = sleeper
+                        .new_inactive_sets
+                        .get(job.target_set_index_in_reference_list);
                     for target_index in job.start_index..job.end_index {
                         let source_index = *job.source_indices.get(target_index);
                         let target_set = (*bodies_ptr).sets.get_mut(job.target_set_index);
-                        *target_set.index_to_handle.get_mut(target_index) = *source_set.index_to_handle.get(source_index);
-                        *target_set.activity.get_mut(target_index) = *source_set.activity.get(source_index);
+                        *target_set.index_to_handle.get_mut(target_index) =
+                            *source_set.index_to_handle.get(source_index);
+                        *target_set.activity.get_mut(target_index) =
+                            *source_set.activity.get(source_index);
                         let source_collidable = *source_set.collidables.get(source_index);
                         *target_set.collidables.get_mut(target_index) = source_collidable;
-                        *target_set.constraints.get_mut(target_index) = *source_set.constraints.get(source_index);
-                        *target_set.dynamics_state.get_mut(target_index) = *source_set.dynamics_state.get(source_index);
+                        *target_set.constraints.get_mut(target_index) =
+                            *source_set.constraints.get(source_index);
+                        *target_set.dynamics_state.get_mut(target_index) =
+                            *source_set.dynamics_state.get(source_index);
 
                         if source_collidable.shape.exists() {
-                            let bp_data = &mut *(set_ref.broad_phase_data.as_ptr().add(target_index as usize) as *mut CachedBroadPhaseData);
-                            bp_data.reference = *broad_phase.active_leaves.get(source_collidable.broad_phase_index);
-                            let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(source_collidable.broad_phase_index);
+                            let bp_data =
+                                &mut *(set_ref.broad_phase_data.as_ptr().add(target_index as usize)
+                                    as *mut CachedBroadPhaseData);
+                            bp_data.reference = *broad_phase
+                                .active_leaves
+                                .get(source_collidable.broad_phase_index);
+                            let (min_ptr, max_ptr) = broad_phase
+                                .get_active_bounds_pointers(source_collidable.broad_phase_index);
                             bp_data.bounds_min = *min_ptr;
                             bp_data.bounds_max = *max_ptr;
                         }
                     }
                 } else {
-                    let target_type_batch = (*solver_ptr).sets.get_mut(job.target_set_index)
-                        .batches.get_mut(job.target_batch_index)
-                        .type_batches.get_mut(job.target_type_batch_index);
+                    let target_type_batch = (*solver_ptr)
+                        .sets
+                        .get_mut(job.target_set_index)
+                        .batches
+                        .get_mut(job.target_batch_index)
+                        .type_batches
+                        .get_mut(job.target_type_batch_index);
                     let tp = (&(*solver_ptr).type_processors)[target_type_batch.type_id as usize]
-                        .as_ref().unwrap();
+                        .as_ref()
+                        .unwrap();
                     // Create a temporary scaffold referencing the job's constraint handles.
                     let source_scaffold = IslandScaffoldTypeBatch {
                         type_id: target_type_batch.type_id,
                         handles: job.source_indices,
                     };
                     tp.inner().gather_active_constraints(
-                        &*bodies_ptr, &*solver_ptr,
+                        &*bodies_ptr,
+                        &*solver_ptr,
                         &source_scaffold,
-                        job.start_index, job.end_index,
+                        job.start_index,
+                        job.end_index,
                         &mut *target_type_batch,
                     );
                     let constraint_remover = &mut *sleeper.constraint_remover;
@@ -566,7 +624,8 @@ impl IslandSleeper {
         unsafe {
             let sleeper = &mut *(dispatcher.unmanaged_context() as *mut IslandSleeper);
             loop {
-                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
+                let index =
+                    AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= sleeper.removal_jobs.count {
                     break;
                 }
@@ -580,7 +639,8 @@ impl IslandSleeper {
         unsafe {
             let sleeper = &*(dispatcher.unmanaged_context() as *const IslandSleeper);
             loop {
-                let index = AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
+                let index =
+                    AtomicI32::from_ptr(sleeper.job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
                 if index >= sleeper.type_batch_constraint_removal_job_count {
                     break;
                 }
@@ -603,9 +663,16 @@ impl IslandSleeper {
                     let set_index = self.new_inactive_sets.get(set_ref_index).index;
                     let inactive_body_count = (*bodies_ptr).sets.get(set_index).count;
                     for body_index_in_inactive_set in 0..inactive_body_count {
-                        let body_handle = *(*bodies_ptr).sets.get(set_index).index_to_handle.get(body_index_in_inactive_set);
+                        let body_handle = *(*bodies_ptr)
+                            .sets
+                            .get(set_index)
+                            .index_to_handle
+                            .get(body_index_in_inactive_set);
                         let location = (*bodies_ptr).handle_to_location.get(body_handle.0);
-                        debug_assert!(location.set_index == 0, "Set should still be 0 at this point.");
+                        debug_assert!(
+                            location.set_index == 0,
+                            "Set should still be 0 at this point."
+                        );
                         (&mut *self.constraint_remover).try_remove_body_from_constrained_kinematics_and_remove_all_constraints_for_body_from_fallback_batch(body_handle, location.index);
                         (*bodies_ptr).remove_from_active_set(location.index);
                         let location = (*bodies_ptr).handle_to_location.get_mut(body_handle.0);
@@ -624,7 +691,11 @@ impl IslandSleeper {
                         let collidable = set.collidables.get_mut(body_index);
                         if collidable.shape.exists() {
                             let data = set_ref.broad_phase_data.get(body_index);
-                            collidable.broad_phase_index = broad_phase.add_static(data.reference, &data.bounds_min, &data.bounds_max);
+                            collidable.broad_phase_index = broad_phase.add_static(
+                                data.reference,
+                                &data.bounds_min,
+                                &data.bounds_max,
+                            );
                         } else {
                             collidable.broad_phase_index = -1;
                         }
@@ -638,7 +709,10 @@ impl IslandSleeper {
                     let bodies_ptr = self.bodies;
                     let mut largest_body_count = 0;
                     for i in 0..self.new_inactive_sets.count {
-                        let set_count = (*bodies_ptr).sets.get(self.new_inactive_sets.get(i).index).count;
+                        let set_count = (*bodies_ptr)
+                            .sets
+                            .get(self.new_inactive_sets.get(i).index)
+                            .count;
                         if set_count > largest_body_count {
                             largest_body_count = set_count;
                         }
@@ -678,26 +752,36 @@ impl IslandSleeper {
         let thread_count = thread_dispatcher.map_or(1, |td| td.thread_count());
         let worker_traversal_thread_count = if deterministic { 1 } else { thread_count };
 
-        self.target_slept_body_count_per_thread = 1.max(target_slept_body_count / worker_traversal_thread_count);
-        self.target_traversed_body_count_per_thread = 1.max(target_traversed_body_count / worker_traversal_thread_count);
+        self.target_slept_body_count_per_thread =
+            1.max(target_slept_body_count / worker_traversal_thread_count);
+        self.target_traversed_body_count_per_thread =
+            1.max(target_traversed_body_count / worker_traversal_thread_count);
 
         // ═══ PHASE 1: TRAVERSAL ═══
         self.traversal_start_body_indices = *traversal_start_body_indices;
-        self.worker_traversal_results = pool.take::<WorkerTraversalResults>(worker_traversal_thread_count);
+        self.worker_traversal_results =
+            pool.take::<WorkerTraversalResults>(worker_traversal_thread_count);
         *self.job_index.get() = -1;
         self.force_sleep = force_sleep;
 
         if worker_traversal_thread_count > 1 {
             let td = thread_dispatcher.unwrap();
             let self_ptr = self as *mut IslandSleeper as *mut ();
-            td.dispatch_workers(Self::find_islands_worker, worker_traversal_thread_count, self_ptr, None);
+            td.dispatch_workers(
+                Self::find_islands_worker,
+                worker_traversal_thread_count,
+                self_ptr,
+                None,
+            );
         } else {
             // Single-threaded: run directly with the appropriate predicate.
             if force_sleep {
                 let pred = ForcedSleepPredicate;
                 self.find_islands_on_worker(0, pool, &pred);
             } else {
-                let pred = SleepPredicate { bodies: self.bodies };
+                let pred = SleepPredicate {
+                    bodies: self.bodies,
+                };
                 self.find_islands_on_worker(0, pool, &pred);
             }
         }
@@ -708,18 +792,24 @@ impl IslandSleeper {
             total_island_count += self.worker_traversal_results.get(i).islands.count;
         }
 
-        let dispose_worker_traversal_results = |sleeper: &mut IslandSleeper, pool: &mut BufferPool, td: Option<&dyn IThreadDispatcher>| {
-            if worker_traversal_thread_count > 1 {
-                let td = td.unwrap();
-                for worker_index in 0..worker_traversal_thread_count {
-                    let wpool = &mut *td.worker_pool_ptr(worker_index);
-                    sleeper.worker_traversal_results.get_mut(worker_index).dispose(wpool);
+        let dispose_worker_traversal_results =
+            |sleeper: &mut IslandSleeper,
+             pool: &mut BufferPool,
+             td: Option<&dyn IThreadDispatcher>| {
+                if worker_traversal_thread_count > 1 {
+                    let td = td.unwrap();
+                    for worker_index in 0..worker_traversal_thread_count {
+                        let wpool = &mut *td.worker_pool_ptr(worker_index);
+                        sleeper
+                            .worker_traversal_results
+                            .get_mut(worker_index)
+                            .dispose(wpool);
+                    }
+                } else {
+                    sleeper.worker_traversal_results.get_mut(0).dispose(pool);
                 }
-            } else {
-                sleeper.worker_traversal_results.get_mut(0).dispose(pool);
-            }
-            pool.return_buffer(&mut sleeper.worker_traversal_results);
-        };
+                pool.return_buffer(&mut sleeper.worker_traversal_results);
+            };
 
         if total_island_count == 0 {
             dispose_worker_traversal_results(self, pool, thread_dispatcher);
@@ -736,7 +826,10 @@ impl IslandSleeper {
         let solver_ptr = self.solver;
 
         for worker_index in 0..worker_traversal_thread_count {
-            let worker_islands = &(*self_ptr).worker_traversal_results.get(worker_index).islands;
+            let worker_islands = &(*self_ptr)
+                .worker_traversal_results
+                .get(worker_index)
+                .islands;
             for j in 0..worker_islands.count {
                 let island = worker_islands.get(j);
 
@@ -744,7 +837,9 @@ impl IslandSleeper {
                 let mut skip = false;
                 for prev_worker in 0..worker_index {
                     debug_assert!(island.body_indices.count > 0);
-                    if (*self_ptr).worker_traversal_results.get(prev_worker)
+                    if (*self_ptr)
+                        .worker_traversal_results
+                        .get(prev_worker)
                         .traversed_bodies
                         .contains(*island.body_indices.get(0))
                     {
@@ -758,11 +853,14 @@ impl IslandSleeper {
 
                 // Allocate new inactive set.
                 let set_index = (*self_ptr).set_id_pool.take();
-                (*self_ptr).new_inactive_sets.ensure_capacity((*self_ptr).new_inactive_sets.count + 1, pool);
+                (*self_ptr)
+                    .new_inactive_sets
+                    .ensure_capacity((*self_ptr).new_inactive_sets.count + 1, pool);
                 let reference_index = (*self_ptr).new_inactive_sets.count;
                 let new_set_ref = (*self_ptr).new_inactive_sets.allocate_unsafely();
                 new_set_ref.index = set_index;
-                new_set_ref.broad_phase_data = pool.take::<CachedBroadPhaseData>(island.body_indices.count);
+                new_set_ref.broad_phase_data =
+                    pool.take::<CachedBroadPhaseData>(island.body_indices.count);
                 (*self_ptr).ensure_sets_capacity(set_index + 1);
 
                 let body_count = island.body_indices.count;
@@ -772,19 +870,25 @@ impl IslandSleeper {
 
                 // Create inactive constraint set from the scaffold.
                 if island.protobatches.count > 0 {
-                    *(*solver_ptr).sets.get_mut(set_index) = ConstraintSet::new(pool, island.protobatches.count);
+                    *(*solver_ptr).sets.get_mut(set_index) =
+                        ConstraintSet::new(pool, island.protobatches.count);
                     let constraint_set = (*solver_ptr).sets.get_mut(set_index);
                     for batch_index in 0..island.protobatches.count {
                         let source_batch = island.protobatches.get(batch_index);
                         let target_batch = constraint_set.batches.allocate_unsafely();
-                        *target_batch = ConstraintBatch::new(pool, source_batch.type_id_to_index.len());
+                        *target_batch =
+                            ConstraintBatch::new(pool, source_batch.type_id_to_index.len());
                         for type_batch_index in 0..source_batch.type_batches.count {
                             let source_type_batch = source_batch.type_batches.get(type_batch_index);
-                            let tp = (&(*solver_ptr).type_processors)[source_type_batch.type_id as usize]
-                                .as_ref().unwrap();
+                            let tp = (&(*solver_ptr).type_processors)
+                                [source_type_batch.type_id as usize]
+                                .as_ref()
+                                .unwrap();
                             let target_type_batch = (*target_batch).create_new_type_batch(
-                                source_type_batch.type_id, tp.inner(),
-                                source_type_batch.handles.count, pool,
+                                source_type_batch.type_id,
+                                tp.inner(),
+                                source_type_batch.handles.count,
+                                pool,
                             );
                             (*target_type_batch).constraint_count = source_type_batch.handles.count;
                         }
@@ -797,9 +901,15 @@ impl IslandSleeper {
                     let bodies_per_job = body_count / job_count;
                     let remainder = body_count - bodies_per_job * job_count;
                     let mut previous_end = 0;
-                    (*self_ptr).gathering_jobs.ensure_capacity((*self_ptr).gathering_jobs.count + job_count, pool);
+                    (*self_ptr)
+                        .gathering_jobs
+                        .ensure_capacity((*self_ptr).gathering_jobs.count + job_count, pool);
                     for i in 0..job_count {
-                        let bodies_in_job = if i < remainder { bodies_per_job + 1 } else { bodies_per_job };
+                        let bodies_in_job = if i < remainder {
+                            bodies_per_job + 1
+                        } else {
+                            bodies_per_job
+                        };
                         let job = (*self_ptr).gathering_jobs.allocate_unsafely();
                         job.is_body_job = true;
                         job.source_indices = island.body_indices;
@@ -823,9 +933,15 @@ impl IslandSleeper {
                         let constraints_per_job = handle_count / job_count;
                         let remainder = handle_count - constraints_per_job * job_count;
                         let mut previous_end = 0;
-                        (*self_ptr).gathering_jobs.ensure_capacity((*self_ptr).gathering_jobs.count + job_count, pool);
+                        (*self_ptr)
+                            .gathering_jobs
+                            .ensure_capacity((*self_ptr).gathering_jobs.count + job_count, pool);
                         for i in 0..job_count {
-                            let constraints_in_job = if i < remainder { constraints_per_job + 1 } else { constraints_per_job };
+                            let constraints_in_job = if i < remainder {
+                                constraints_per_job + 1
+                            } else {
+                                constraints_per_job
+                            };
                             let job = (*self_ptr).gathering_jobs.allocate_unsafely();
                             job.is_body_job = false;
                             job.source_indices = source_type_batch.handles;
@@ -843,9 +959,8 @@ impl IslandSleeper {
                 // Copy fallback batch if applicable.
                 if island.protobatches.count > (*solver_ptr).fallback_batch_threshold() {
                     let constraint_set = (*solver_ptr).sets.get_mut(set_index);
-                    constraint_set.sequential_fallback = SequentialFallbackBatch::create_from(
-                        &island.fallback_batch, pool,
-                    );
+                    constraint_set.sequential_fallback =
+                        SequentialFallbackBatch::create_from(&island.fallback_batch, pool);
                 }
             }
         }
@@ -856,7 +971,12 @@ impl IslandSleeper {
         if thread_count > 1 {
             let td = thread_dispatcher.unwrap();
             let ctx = self_ptr as *mut ();
-            td.dispatch_workers(Self::gather_worker, (*self_ptr).gathering_jobs.count, ctx, None);
+            td.dispatch_workers(
+                Self::gather_worker,
+                (*self_ptr).gathering_jobs.count,
+                ctx,
+                None,
+            );
         } else {
             Self::gather_worker_inline(self_ptr, pool);
         }
@@ -876,16 +996,29 @@ impl IslandSleeper {
 
         (*self_ptr).removal_jobs = QuickList::with_capacity(4, pool);
         // Schedule heavier jobs first for better load balancing.
-        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob { job_type: RemovalJobType::NotifyNarrowPhasePairCache };
-        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob { job_type: RemovalJobType::RemoveBodiesFromActiveSet };
-        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob { job_type: RemovalJobType::AddCollidablesToStaticTree };
-        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob { job_type: RemovalJobType::RemoveFromBatchReferencedHandles };
+        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob {
+            job_type: RemovalJobType::NotifyNarrowPhasePairCache,
+        };
+        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob {
+            job_type: RemovalJobType::RemoveBodiesFromActiveSet,
+        };
+        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob {
+            job_type: RemovalJobType::AddCollidablesToStaticTree,
+        };
+        *(*self_ptr).removal_jobs.allocate_unsafely() = RemovalJob {
+            job_type: RemovalJobType::RemoveFromBatchReferencedHandles,
+        };
 
         *(*self_ptr).job_index.get() = -1;
         if thread_count > 1 {
             let td = thread_dispatcher.unwrap();
             let ctx = self_ptr as *mut ();
-            td.dispatch_workers(Self::execute_removal_worker, (*self_ptr).removal_jobs.count, ctx, None);
+            td.dispatch_workers(
+                Self::execute_removal_worker,
+                (*self_ptr).removal_jobs.count,
+                ctx,
+                None,
+            );
         } else {
             for i in 0..(*self_ptr).removal_jobs.count {
                 let job = *(*self_ptr).removal_jobs.get(i);
@@ -899,7 +1032,12 @@ impl IslandSleeper {
         if thread_count > 1 {
             let td = thread_dispatcher.unwrap();
             let ctx = self_ptr as *mut ();
-            td.dispatch_workers(Self::type_batch_constraint_removal_worker, (*self_ptr).type_batch_constraint_removal_job_count, ctx, None);
+            td.dispatch_workers(
+                Self::type_batch_constraint_removal_worker,
+                (*self_ptr).type_batch_constraint_removal_job_count,
+                ctx,
+                None,
+            );
         } else {
             for i in 0..(*self_ptr).type_batch_constraint_removal_job_count {
                 (&mut *(*self_ptr).constraint_remover).remove_constraints_from_type_batch(i);
@@ -916,7 +1054,8 @@ impl IslandSleeper {
                     let type_batch = batch.type_batches.get(type_batch_index);
                     for index_in_type_batch in 0..type_batch.constraint_count {
                         let handle = *type_batch.index_to_handle.get(index_in_type_batch);
-                        let constraint_location = (*solver_ptr).handle_to_constraint.get_mut(handle.0);
+                        let constraint_location =
+                            (*solver_ptr).handle_to_constraint.get_mut(handle.0);
                         constraint_location.set_index = set_index;
                         constraint_location.batch_index = batch_index;
                         constraint_location.index_in_type_batch = index_in_type_batch;
@@ -942,31 +1081,47 @@ impl IslandSleeper {
             let job = (*sleeper).gathering_jobs.get(index);
             if job.is_body_job {
                 let source_set = (*bodies_ptr).sets.get(0);
-                let set_ref = (*sleeper).new_inactive_sets.get(job.target_set_index_in_reference_list);
+                let set_ref = (*sleeper)
+                    .new_inactive_sets
+                    .get(job.target_set_index_in_reference_list);
                 for target_index in job.start_index..job.end_index {
                     let source_index = *job.source_indices.get(target_index);
                     let target_set = (*bodies_ptr).sets.get_mut(job.target_set_index);
-                    *target_set.index_to_handle.get_mut(target_index) = *source_set.index_to_handle.get(source_index);
-                    *target_set.activity.get_mut(target_index) = *source_set.activity.get(source_index);
+                    *target_set.index_to_handle.get_mut(target_index) =
+                        *source_set.index_to_handle.get(source_index);
+                    *target_set.activity.get_mut(target_index) =
+                        *source_set.activity.get(source_index);
                     let source_collidable = *source_set.collidables.get(source_index);
                     *target_set.collidables.get_mut(target_index) = source_collidable;
-                    *target_set.constraints.get_mut(target_index) = *source_set.constraints.get(source_index);
-                    *target_set.dynamics_state.get_mut(target_index) = *source_set.dynamics_state.get(source_index);
+                    *target_set.constraints.get_mut(target_index) =
+                        *source_set.constraints.get(source_index);
+                    *target_set.dynamics_state.get_mut(target_index) =
+                        *source_set.dynamics_state.get(source_index);
 
                     if source_collidable.shape.exists() {
-                        let bp_data = &mut *(set_ref.broad_phase_data.as_ptr().add(target_index as usize) as *mut CachedBroadPhaseData);
-                        bp_data.reference = *broad_phase.active_leaves.get(source_collidable.broad_phase_index);
-                        let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(source_collidable.broad_phase_index);
+                        let bp_data =
+                            &mut *(set_ref.broad_phase_data.as_ptr().add(target_index as usize)
+                                as *mut CachedBroadPhaseData);
+                        bp_data.reference = *broad_phase
+                            .active_leaves
+                            .get(source_collidable.broad_phase_index);
+                        let (min_ptr, max_ptr) = broad_phase
+                            .get_active_bounds_pointers(source_collidable.broad_phase_index);
                         bp_data.bounds_min = *min_ptr;
                         bp_data.bounds_max = *max_ptr;
                     }
                 }
             } else {
-                let target_type_batch = (*solver_ptr).sets.get_mut(job.target_set_index)
-                    .batches.get_mut(job.target_batch_index)
-                    .type_batches.get_mut(job.target_type_batch_index);
+                let target_type_batch = (*solver_ptr)
+                    .sets
+                    .get_mut(job.target_set_index)
+                    .batches
+                    .get_mut(job.target_batch_index)
+                    .type_batches
+                    .get_mut(job.target_type_batch_index);
                 let tp = (&(*solver_ptr).type_processors)[target_type_batch.type_id as usize]
-                    .as_ref().unwrap();
+                    .as_ref()
+                    .unwrap();
                 // The source_indices for constraint jobs contains ConstraintHandles stored as i32.
                 // Create a temporary scaffold referencing the job's constraint handles.
                 let source_scaffold = IslandScaffoldTypeBatch {
@@ -974,9 +1129,11 @@ impl IslandSleeper {
                     handles: job.source_indices,
                 };
                 tp.inner().gather_active_constraints(
-                    &*bodies_ptr, &*solver_ptr,
+                    &*bodies_ptr,
+                    &*solver_ptr,
                     &source_scaffold,
-                    job.start_index, job.end_index,
+                    job.start_index,
+                    job.end_index,
                     &mut *target_type_batch,
                 );
                 let constraint_remover = &mut *(*sleeper).constraint_remover;
@@ -995,7 +1152,14 @@ impl IslandSleeper {
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
         deterministic: bool,
     ) {
-        self.sleep(body_indices, thread_dispatcher, deterministic, i32::MAX, i32::MAX, true);
+        self.sleep(
+            body_indices,
+            thread_dispatcher,
+            deterministic,
+            i32::MAX,
+            i32::MAX,
+            true,
+        );
     }
 
     /// Forces a single body (and its island) to go to sleep.
@@ -1012,10 +1176,9 @@ impl IslandSleeper {
     pub fn ensure_sets_capacity(&mut self, sets_capacity: i32) {
         let bodies = unsafe { &mut *self.bodies };
         let solver = unsafe { &mut *self.solver };
-        let min_allocated = unsafe { (*(&self.set_id_pool as *const IdPool)).highest_possibly_claimed_id() } + 1;
-        let potentially_allocated = min_allocated
-            .min(bodies.sets.len())
-            .min(solver.sets.len());
+        let min_allocated =
+            unsafe { (*(&self.set_id_pool as *const IdPool)).highest_possibly_claimed_id() } + 1;
+        let potentially_allocated = min_allocated.min(bodies.sets.len()).min(solver.sets.len());
 
         if sets_capacity > bodies.sets.len() {
             bodies.resize_sets_capacity(sets_capacity, potentially_allocated);
@@ -1035,10 +1198,9 @@ impl IslandSleeper {
     pub fn resize_sets_capacity(&mut self, sets_capacity: i32) {
         let bodies = unsafe { &mut *self.bodies };
         let solver = unsafe { &mut *self.solver };
-        let min_allocated = unsafe { (*(&self.set_id_pool as *const IdPool)).highest_possibly_claimed_id() } + 1;
-        let potentially_allocated = min_allocated
-            .min(bodies.sets.len())
-            .min(solver.sets.len());
+        let min_allocated =
+            unsafe { (*(&self.set_id_pool as *const IdPool)).highest_possibly_claimed_id() } + 1;
+        let potentially_allocated = min_allocated.min(bodies.sets.len()).min(solver.sets.len());
         let target = potentially_allocated.max(sets_capacity);
 
         bodies.resize_sets_capacity(target, potentially_allocated);

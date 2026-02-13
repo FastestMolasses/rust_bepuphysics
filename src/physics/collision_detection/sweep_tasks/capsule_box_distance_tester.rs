@@ -94,17 +94,20 @@ fn get_edge_closest_point(
 
     // Note division by zero guard.
     let mut ta = (abda - abdb * dadb)
-        / Vector::<f32>::splat(1e-15)
-            .simd_max(Vector::<f32>::splat(1.0) - dadb * dadb);
+        / Vector::<f32>::splat(1e-15).simd_max(Vector::<f32>::splat(1.0) - dadb * dadb);
 
     // In some cases, ta won't be in a useful location. Need to constrain it to the projection of the box edge onto the capsule edge.
     let use_edge_x_f = edge_direction_index.simd_eq(Simd::splat(0));
     let use_edge_y_f = edge_direction_index.simd_eq(Simd::splat(1));
-    let b_half_extent = use_edge_x_f
-        .select(b.half_width, use_edge_y_f.select(b.half_height, b.half_length));
+    let b_half_extent = use_edge_x_f.select(
+        b.half_width,
+        use_edge_y_f.select(b.half_height, b.half_length),
+    );
     let b_onto_a_offset = b_half_extent * dadb.abs();
-    let ta_min = (-*capsule_half_length).simd_max((*capsule_half_length).simd_min(abda - b_onto_a_offset));
-    let ta_max = (*capsule_half_length).simd_min((-*capsule_half_length).simd_max(abda + b_onto_a_offset));
+    let ta_min =
+        (-*capsule_half_length).simd_max((*capsule_half_length).simd_min(abda - b_onto_a_offset));
+    let ta_max =
+        (*capsule_half_length).simd_min((-*capsule_half_length).simd_max(abda + b_onto_a_offset));
     ta = ta.simd_max(ta_min).simd_min(ta_max);
 
     let mut offset_along_capsule = Vector3Wide::default();
@@ -221,8 +224,13 @@ fn select_for_edge(
 ) {
     let use_candidate = edge_depth_candidate.simd_lt(*edge_depth).to_int();
     *edge_depth = edge_depth.simd_min(*edge_depth_candidate);
-    *edge_local_normal = Vector3Wide::conditional_select(&use_candidate, edge_local_normal_candidate, edge_local_normal);
-    *edge_direction_index = Mask::from_int(use_candidate).select(*edge_direction_index_candidate, *edge_direction_index);
+    *edge_local_normal = Vector3Wide::conditional_select(
+        &use_candidate,
+        edge_local_normal_candidate,
+        edge_local_normal,
+    );
+    *edge_direction_index = Mask::from_int(use_candidate)
+        .select(*edge_direction_index_candidate, *edge_direction_index);
 }
 
 #[inline(always)]
@@ -236,8 +244,10 @@ fn select3(
 ) {
     let use_candidate = depth_candidate.simd_lt(*depth).to_int();
     *depth = depth.simd_min(*depth_candidate);
-    *local_normal = Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
-    *local_closest = Vector3Wide::conditional_select(&use_candidate, local_closest_candidate, local_closest);
+    *local_normal =
+        Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
+    *local_closest =
+        Vector3Wide::conditional_select(&use_candidate, local_closest_candidate, local_closest);
 }
 
 #[inline(always)]
@@ -249,7 +259,8 @@ fn select2(
 ) {
     let use_candidate = depth_candidate.simd_lt(*depth).to_int();
     *depth = depth.simd_min(*depth_candidate);
-    *local_normal = Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
+    *local_normal =
+        Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
 }
 
 impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
@@ -272,7 +283,11 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
         Matrix3x3Wide::create_from_quaternion(orientation_b, &mut r_b);
         let capsule_axis = QuaternionWide::transform_unit_y(*orientation_a);
         let mut local_capsule_axis = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(&capsule_axis, &r_b, &mut local_capsule_axis);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            &capsule_axis,
+            &r_b,
+            &mut local_capsule_axis,
+        );
         let mut local_offset_b = Vector3Wide::default();
         Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &r_b, &mut local_offset_b);
         let mut local_offset_a = Vector3Wide::default();
@@ -306,14 +321,21 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
             &mut depth_candidate,
             &mut local_normal_candidate,
         );
-        select2(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+        select2(
+            &mut depth,
+            &mut local_normal,
+            &depth_candidate,
+            &local_normal_candidate,
+        );
         // Note that we did not yet pick a closest point for endpoint cases. That's because each case only generates a normal and interval test, not a minimal distance test.
         // The choice of which endpoint is actually closer is deferred until now.
         let mut endpoint_choice_dot = Vector::<f32>::default();
         Vector3Wide::dot(&local_capsule_axis, &local_normal, &mut endpoint_choice_dot);
         let mut local_closest = Vector3Wide::default();
         local_closest = Vector3Wide::conditional_select(
-            &endpoint_choice_dot.simd_lt(Vector::<f32>::splat(0.0)).to_int(),
+            &endpoint_choice_dot
+                .simd_lt(Vector::<f32>::splat(0.0))
+                .to_int(),
             &endpoint1,
             &endpoint0,
         );
@@ -322,19 +344,34 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
         let mut edge_depth = Vector::<f32>::default();
         let mut edge_local_normal = Vector3Wide::default();
         test_box_edge(
-            &local_offset_a.y, &local_offset_a.z, &local_offset_a.x,
-            &local_capsule_axis.y, &local_capsule_axis.z, &local_capsule_axis.x,
-            &b.half_height, &b.half_length, &b.half_width,
-            &mut edge_depth, &mut edge_local_normal.y, &mut edge_local_normal.z, &mut edge_local_normal.x,
+            &local_offset_a.y,
+            &local_offset_a.z,
+            &local_offset_a.x,
+            &local_capsule_axis.y,
+            &local_capsule_axis.z,
+            &local_capsule_axis.x,
+            &b.half_height,
+            &b.half_length,
+            &b.half_width,
+            &mut edge_depth,
+            &mut edge_local_normal.y,
+            &mut edge_local_normal.z,
+            &mut edge_local_normal.x,
         );
         let mut edge_direction_index = Simd::splat(0i32);
         // Swizzle XYZ -> ZXY
         let mut edge_depth_candidate = Vector::<f32>::default();
         let mut edge_local_normal_candidate = Vector3Wide::default();
         test_box_edge(
-            &local_offset_a.z, &local_offset_a.x, &local_offset_a.y,
-            &local_capsule_axis.z, &local_capsule_axis.x, &local_capsule_axis.y,
-            &b.half_length, &b.half_width, &b.half_height,
+            &local_offset_a.z,
+            &local_offset_a.x,
+            &local_offset_a.y,
+            &local_capsule_axis.z,
+            &local_capsule_axis.x,
+            &local_capsule_axis.y,
+            &b.half_length,
+            &b.half_width,
+            &b.half_height,
             &mut edge_depth_candidate,
             &mut edge_local_normal_candidate.z,
             &mut edge_local_normal_candidate.x,
@@ -350,9 +387,15 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
         );
         // Swizzle XYZ -> XYZ
         test_box_edge(
-            &local_offset_a.x, &local_offset_a.y, &local_offset_a.z,
-            &local_capsule_axis.x, &local_capsule_axis.y, &local_capsule_axis.z,
-            &b.half_width, &b.half_height, &b.half_length,
+            &local_offset_a.x,
+            &local_offset_a.y,
+            &local_offset_a.z,
+            &local_capsule_axis.x,
+            &local_capsule_axis.y,
+            &local_capsule_axis.z,
+            &b.half_width,
+            &b.half_height,
+            &b.half_length,
             &mut edge_depth_candidate,
             &mut edge_local_normal_candidate.x,
             &mut edge_local_normal_candidate.y,

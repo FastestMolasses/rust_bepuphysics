@@ -32,7 +32,11 @@ impl CapsuleBoxTester {
         QuaternionWide::transform_without_overlap(offset_b, &to_local_b, &mut transformed);
         Vector3Wide::negate(&transformed, local_offset_a);
         let mut box_local_orientation_a = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(orientation_a, &to_local_b, &mut box_local_orientation_a);
+        QuaternionWide::concatenate_without_overlap(
+            orientation_a,
+            &to_local_b,
+            &mut box_local_orientation_a,
+        );
         *capsule_axis = QuaternionWide::transform_unit_y(box_local_orientation_a);
 
         // Get the closest point on the capsule segment to the box center.
@@ -75,18 +79,24 @@ impl CapsuleBoxTester {
     ) {
         let ab_x = *box_edge_center_x - *offset_ax;
         let ab_y = *box_edge_center_y - *offset_ay;
-        let da_offset_b = *capsule_axis_x * ab_x + *capsule_axis_y * ab_y - *capsule_axis_z * *offset_az;
+        let da_offset_b =
+            *capsule_axis_x * ab_x + *capsule_axis_y * ab_y - *capsule_axis_z * *offset_az;
         *ta = (da_offset_b + *offset_az * *capsule_axis_z)
-            / Vector::<f32>::splat(1e-15).simd_max(Vector::<f32>::splat(1.0) - *capsule_axis_z * *capsule_axis_z);
+            / Vector::<f32>::splat(1e-15)
+                .simd_max(Vector::<f32>::splat(1.0) - *capsule_axis_z * *capsule_axis_z);
         let mut tb = *ta * *capsule_axis_z + *offset_az;
 
         let absdadb = capsule_axis_z.abs();
         let b_onto_a_offset = *box_half_length * absdadb;
         let a_onto_b_offset = *capsule_half_length * absdadb;
-        *ta_min = (-*capsule_half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(*capsule_half_length));
-        *ta_max = capsule_half_length.simd_min((da_offset_b + b_onto_a_offset).simd_max(-*capsule_half_length));
-        let b_min = (-*box_half_length).simd_max((*offset_az - a_onto_b_offset).simd_min(*box_half_length));
-        let b_max = box_half_length.simd_min((*offset_az + a_onto_b_offset).simd_max(-*box_half_length));
+        *ta_min = (-*capsule_half_length)
+            .simd_max((da_offset_b - b_onto_a_offset).simd_min(*capsule_half_length));
+        *ta_max = capsule_half_length
+            .simd_min((da_offset_b + b_onto_a_offset).simd_max(-*capsule_half_length));
+        let b_min =
+            (-*box_half_length).simd_max((*offset_az - a_onto_b_offset).simd_min(*box_half_length));
+        let b_max =
+            box_half_length.simd_min((*offset_az + a_onto_b_offset).simd_max(-*box_half_length));
         *ta = ta.simd_max(*ta_min).simd_min(*ta_max);
         tb = tb.simd_max(b_min).simd_min(b_max);
 
@@ -156,15 +166,31 @@ impl CapsuleBoxTester {
         let mut closest_point_on_a = Vector3Wide::default();
         let mut epsilon = Vector::<f32>::splat(0.0);
         Self::test_box_edge(
-            offset_ax, offset_ay, offset_az,
-            capsule_axis_x, capsule_axis_y, capsule_axis_z,
-            capsule_half_length, box_edge_center_x, box_edge_center_y,
-            box_half_width, box_half_height, box_half_length,
-            &mut ta_min, &mut ta_max, &mut closest_point_on_a,
-            n_x, n_y, n_z, ta, &mut epsilon,
+            offset_ax,
+            offset_ay,
+            offset_az,
+            capsule_axis_x,
+            capsule_axis_y,
+            capsule_axis_z,
+            capsule_half_length,
+            box_edge_center_x,
+            box_edge_center_y,
+            box_half_width,
+            box_half_height,
+            box_half_length,
+            &mut ta_min,
+            &mut ta_max,
+            &mut closest_point_on_a,
+            n_x,
+            n_y,
+            n_z,
+            ta,
+            &mut epsilon,
         );
 
-        let box_extreme = n_x.abs() * *box_half_width + n_y.abs() * *box_half_height + n_z.abs() * *box_half_length;
+        let box_extreme = n_x.abs() * *box_half_width
+            + n_y.abs() * *box_half_height
+            + n_z.abs() * *box_half_length;
         let capsule_extreme =
             *n_x * closest_point_on_a.x + *n_y * closest_point_on_a.y + *n_z * closest_point_on_a.z;
         *depth = box_extreme - capsule_extreme;
@@ -180,11 +206,11 @@ impl CapsuleBoxTester {
         normal_sign: &mut Vector<f32>,
     ) {
         let zero = Vector::<f32>::splat(0.0);
-        *normal_sign = offset_az.simd_gt(zero).select(
-            Vector::<f32>::splat(1.0),
-            Vector::<f32>::splat(-1.0),
-        );
-        *depth = *box_half_length + capsule_axis_z.abs() * *capsule_half_length - *normal_sign * *offset_az;
+        *normal_sign = offset_az
+            .simd_gt(zero)
+            .select(Vector::<f32>::splat(1.0), Vector::<f32>::splat(-1.0));
+        *depth = *box_half_length + capsule_axis_z.abs() * *capsule_half_length
+            - *normal_sign * *offset_az;
     }
 
     #[inline(always)]
@@ -241,69 +267,158 @@ impl CapsuleBoxTester {
         let mut local_offset_a = Vector3Wide::default();
         let mut capsule_axis = Vector3Wide::default();
         let mut edge_centers = Vector3Wide::default();
-        Self::prepare(a, b, offset_b, orientation_a, orientation_b, &mut local_offset_a, &mut capsule_axis, &mut edge_centers);
+        Self::prepare(
+            a,
+            b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            &mut local_offset_a,
+            &mut capsule_axis,
+            &mut edge_centers,
+        );
 
         // Test edges with swizzle pattern
         // Swizzle XYZ -> YZX
         let (mut ta, mut depth, mut nx, mut ny, mut nz);
         {
             let (mut ta_e, mut d_e, mut ny_e, mut nz_e, mut nx_e) = (
-                Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0),
-                Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
             );
             Self::test_and_refine_box_edge(
-                &local_offset_a.y, &local_offset_a.z, &local_offset_a.x,
-                &capsule_axis.y, &capsule_axis.z, &capsule_axis.x,
-                &a.half_length, &edge_centers.y, &edge_centers.z,
-                &b.half_height, &b.half_length, &b.half_width,
-                &mut ta_e, &mut d_e, &mut ny_e, &mut nz_e, &mut nx_e,
+                &local_offset_a.y,
+                &local_offset_a.z,
+                &local_offset_a.x,
+                &capsule_axis.y,
+                &capsule_axis.z,
+                &capsule_axis.x,
+                &a.half_length,
+                &edge_centers.y,
+                &edge_centers.z,
+                &b.half_height,
+                &b.half_length,
+                &b.half_width,
+                &mut ta_e,
+                &mut d_e,
+                &mut ny_e,
+                &mut nz_e,
+                &mut nx_e,
             );
-            ta = ta_e; depth = d_e; nx = nx_e; ny = ny_e; nz = nz_e;
+            ta = ta_e;
+            depth = d_e;
+            nx = nx_e;
+            ny = ny_e;
+            nz = nz_e;
         }
         // Swizzle XYZ -> ZXY
         {
             let (mut ta_e, mut d_e, mut nz_e, mut nx_e, mut ny_e) = (
-                Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0),
-                Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
             );
             Self::test_and_refine_box_edge(
-                &local_offset_a.z, &local_offset_a.x, &local_offset_a.y,
-                &capsule_axis.z, &capsule_axis.x, &capsule_axis.y,
-                &a.half_length, &edge_centers.z, &edge_centers.x,
-                &b.half_length, &b.half_width, &b.half_height,
-                &mut ta_e, &mut d_e, &mut nz_e, &mut nx_e, &mut ny_e,
+                &local_offset_a.z,
+                &local_offset_a.x,
+                &local_offset_a.y,
+                &capsule_axis.z,
+                &capsule_axis.x,
+                &capsule_axis.y,
+                &a.half_length,
+                &edge_centers.z,
+                &edge_centers.x,
+                &b.half_length,
+                &b.half_width,
+                &b.half_height,
+                &mut ta_e,
+                &mut d_e,
+                &mut nz_e,
+                &mut nx_e,
+                &mut ny_e,
             );
-            Self::select_with_ta(&mut depth, &mut ta, &mut nx, &mut ny, &mut nz, &d_e, &ta_e, &nx_e, &ny_e, &nz_e);
+            Self::select_with_ta(
+                &mut depth, &mut ta, &mut nx, &mut ny, &mut nz, &d_e, &ta_e, &nx_e, &ny_e, &nz_e,
+            );
         }
         // Swizzle XYZ -> XYZ
         {
             let (mut ta_e, mut d_e, mut nx_e, mut ny_e, mut nz_e) = (
-                Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0),
-                Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
+                Vector::<f32>::splat(0.0),
             );
             Self::test_and_refine_box_edge(
-                &local_offset_a.x, &local_offset_a.y, &local_offset_a.z,
-                &capsule_axis.x, &capsule_axis.y, &capsule_axis.z,
-                &a.half_length, &edge_centers.x, &edge_centers.y,
-                &b.half_width, &b.half_height, &b.half_length,
-                &mut ta_e, &mut d_e, &mut nx_e, &mut ny_e, &mut nz_e,
+                &local_offset_a.x,
+                &local_offset_a.y,
+                &local_offset_a.z,
+                &capsule_axis.x,
+                &capsule_axis.y,
+                &capsule_axis.z,
+                &a.half_length,
+                &edge_centers.x,
+                &edge_centers.y,
+                &b.half_width,
+                &b.half_height,
+                &b.half_length,
+                &mut ta_e,
+                &mut d_e,
+                &mut nx_e,
+                &mut ny_e,
+                &mut nz_e,
             );
-            Self::select_with_ta(&mut depth, &mut ta, &mut nx, &mut ny, &mut nz, &d_e, &ta_e, &nx_e, &ny_e, &nz_e);
+            Self::select_with_ta(
+                &mut depth, &mut ta, &mut nx, &mut ny, &mut nz, &d_e, &ta_e, &nx_e, &ny_e, &nz_e,
+            );
         }
 
         let zero = Vector::<f32>::splat(0.0);
         // Face X
         let (mut fx_depth, mut fxn) = (Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0));
-        Self::test_box_face(&local_offset_a.x, &capsule_axis.x, &a.half_length, &b.half_width, &mut fx_depth, &mut fxn);
-        Self::select_no_ta(&mut depth, &mut nx, &mut ny, &mut nz, &fx_depth, &fxn, &zero, &zero);
+        Self::test_box_face(
+            &local_offset_a.x,
+            &capsule_axis.x,
+            &a.half_length,
+            &b.half_width,
+            &mut fx_depth,
+            &mut fxn,
+        );
+        Self::select_no_ta(
+            &mut depth, &mut nx, &mut ny, &mut nz, &fx_depth, &fxn, &zero, &zero,
+        );
         // Face Y
         let (mut fy_depth, mut fyn) = (Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0));
-        Self::test_box_face(&local_offset_a.y, &capsule_axis.y, &a.half_length, &b.half_height, &mut fy_depth, &mut fyn);
-        Self::select_no_ta(&mut depth, &mut nx, &mut ny, &mut nz, &fy_depth, &zero, &fyn, &zero);
+        Self::test_box_face(
+            &local_offset_a.y,
+            &capsule_axis.y,
+            &a.half_length,
+            &b.half_height,
+            &mut fy_depth,
+            &mut fyn,
+        );
+        Self::select_no_ta(
+            &mut depth, &mut nx, &mut ny, &mut nz, &fy_depth, &zero, &fyn, &zero,
+        );
         // Face Z
         let (mut fz_depth, mut fzn) = (Vector::<f32>::splat(0.0), Vector::<f32>::splat(0.0));
-        Self::test_box_face(&local_offset_a.z, &capsule_axis.z, &a.half_length, &b.half_length, &mut fz_depth, &mut fzn);
-        Self::select_no_ta(&mut depth, &mut nx, &mut ny, &mut nz, &fz_depth, &zero, &zero, &fzn);
+        Self::test_box_face(
+            &local_offset_a.z,
+            &capsule_axis.z,
+            &a.half_length,
+            &b.half_length,
+            &mut fz_depth,
+            &mut fzn,
+        );
+        Self::select_no_ta(
+            &mut depth, &mut nx, &mut ny, &mut nz, &fz_depth, &zero, &zero, &fzn,
+        );
 
         // Choose representative box face and compute contact interval.
         let x_dot = nx * fxn;
@@ -314,8 +429,8 @@ impl CapsuleBoxTester {
         let use_z = !use_x & !use_y;
 
         let face_normal_dot_local_normal = use_x.select(x_dot, use_y.select(y_dot, z_dot));
-        let inverse_fndln =
-            Vector::<f32>::splat(1.0) / face_normal_dot_local_normal.simd_max(Vector::<f32>::splat(1e-15));
+        let inverse_fndln = Vector::<f32>::splat(1.0)
+            / face_normal_dot_local_normal.simd_max(Vector::<f32>::splat(1e-15));
         let capsule_axis_dot_fn = use_x.select(
             capsule_axis.x * fxn,
             use_y.select(capsule_axis.y * fyn, capsule_axis.z * fzn),
@@ -324,11 +439,16 @@ impl CapsuleBoxTester {
             local_offset_a.x * fxn,
             use_y.select(local_offset_a.y * fyn, local_offset_a.z * fzn),
         );
-        let face_plane_offset = use_x.select(b.half_width, use_y.select(b.half_height, b.half_length));
+        let face_plane_offset =
+            use_x.select(b.half_width, use_y.select(b.half_height, b.half_length));
         let t_axis = capsule_axis_dot_fn * inverse_fndln;
         let t_center = (capsule_center_dot_fn - face_plane_offset) * inverse_fndln;
 
-        let local_normal = Vector3Wide { x: nx, y: ny, z: nz };
+        let local_normal = Vector3Wide {
+            x: nx,
+            y: ny,
+            z: nz,
+        };
         let mut axis_offset = Vector3Wide::default();
         Vector3Wide::scale_to(&local_normal, &t_axis, &mut axis_offset);
         let mut center_offset = Vector3Wide::default();
@@ -343,7 +463,8 @@ impl CapsuleBoxTester {
         let ts_center_x = use_x.select(unprojected_center.y, unprojected_center.x);
         let ts_center_y = use_z.select(unprojected_center.y, unprojected_center.z);
 
-        let epsilon_scale = b.half_width
+        let epsilon_scale = b
+            .half_width
             .simd_max(b.half_height.simd_max(b.half_length))
             .simd_min(a.half_length.simd_max(a.radius));
         let epsilon = epsilon_scale * Vector::<f32>::splat(1e-3);
@@ -397,9 +518,21 @@ impl CapsuleBoxTester {
         // Transform to world space.
         let mut orientation_matrix_b = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_b, &mut orientation_matrix_b);
-        Matrix3x3Wide::transform_without_overlap(&local_normal, &orientation_matrix_b, &mut manifold.normal);
-        Matrix3x3Wide::transform_without_overlap(&local_a0, &orientation_matrix_b, &mut manifold.offset_a0);
-        Matrix3x3Wide::transform_without_overlap(&local_a1, &orientation_matrix_b, &mut manifold.offset_a1);
+        Matrix3x3Wide::transform_without_overlap(
+            &local_normal,
+            &orientation_matrix_b,
+            &mut manifold.normal,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            &local_a0,
+            &orientation_matrix_b,
+            &mut manifold.offset_a0,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            &local_a1,
+            &orientation_matrix_b,
+            &mut manifold.offset_a1,
+        );
 
         // Apply normal offset to contact positions.
         let neg_offset0 = manifold.depth0 * Vector::<f32>::splat(0.5) - a.radius;

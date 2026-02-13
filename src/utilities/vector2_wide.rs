@@ -1,7 +1,7 @@
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
 use glam::Vec2;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
+use std::ops::{AddAssign, MulAssign, Neg, Sub};
 use std::simd::Mask;
 
 /// Two dimensional vector with SIMD lanes.

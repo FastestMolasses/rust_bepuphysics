@@ -28,7 +28,11 @@ impl WorkerBufferPools {
     /// * `default_block_capacity` - Default block capacity in thread pools.
     pub fn new(initial_worker_count: usize, default_block_capacity: i32) -> Self {
         let pools = (0..initial_worker_count)
-            .map(|_| UnsafeCell::new(BufferPool::new_with_minimum_block_size(default_block_capacity)))
+            .map(|_| {
+                UnsafeCell::new(BufferPool::new_with_minimum_block_size(
+                    default_block_capacity,
+                ))
+            })
             .collect();
         Self {
             pools,
@@ -89,9 +93,10 @@ impl WorkerBufferPools {
     /// Ensures that there are at least `worker_count` pools available.
     pub fn ensure_worker_count(&mut self, worker_count: usize) {
         while self.pools.len() < worker_count {
-            self.pools.push(UnsafeCell::new(
-                BufferPool::new_with_minimum_block_size(self.default_block_capacity),
-            ));
+            self.pools
+                .push(UnsafeCell::new(BufferPool::new_with_minimum_block_size(
+                    self.default_block_capacity,
+                )));
         }
     }
 

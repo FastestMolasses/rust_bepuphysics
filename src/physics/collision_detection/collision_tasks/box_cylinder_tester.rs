@@ -201,7 +201,11 @@ impl BoxCylinderTester {
         let mut r_a = Matrix3x3Wide::default();
         Matrix3x3Wide::multiply_by_transpose_without_overlap(&world_ra, &world_rb, &mut r_a);
         let mut local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &world_rb, &mut local_offset_b);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            offset_b,
+            &world_rb,
+            &mut local_offset_b,
+        );
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
 
@@ -217,7 +221,8 @@ impl BoxCylinderTester {
         let box_support_finder = BoxSupportFinder;
         let cylinder_support_finder = CylinderSupportFinder;
 
-        let mut inactive_lanes = BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
+        let mut inactive_lanes =
+            BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
         let depth_threshold = -*speculative_margin;
         let epsilon_scale = a
             .half_width
@@ -229,12 +234,20 @@ impl BoxCylinderTester {
         let mut closest_on_b = Vector3Wide::default();
         let initial_normal = local_normal.clone();
         DepthRefiner::find_minimum_depth_with_witness(
-            b, a, &local_offset_a, &r_a,
-            &cylinder_support_finder, &box_support_finder,
-            &initial_normal, &inactive_lanes,
+            b,
+            a,
+            &local_offset_a,
+            &r_a,
+            &cylinder_support_finder,
+            &box_support_finder,
+            &initial_normal,
+            &inactive_lanes,
             &(epsilon_scale * Vector::<f32>::splat(1e-6)),
             &depth_threshold,
-            &mut depth, &mut local_normal, &mut closest_on_b, 25,
+            &mut depth,
+            &mut local_normal,
+            &mut closest_on_b,
+            25,
         );
 
         inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
@@ -245,7 +258,11 @@ impl BoxCylinderTester {
 
         // Identify the box face.
         let mut local_normal_in_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(&local_normal, &r_a, &mut local_normal_in_a);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            &local_normal,
+            &r_a,
+            &mut local_normal_in_a,
+        );
         let abs_local_normal_in_a = local_normal_in_a.abs();
         let use_x = abs_local_normal_in_a.x.simd_gt(abs_local_normal_in_a.y)
             & abs_local_normal_in_a.x.simd_gt(abs_local_normal_in_a.z);
@@ -269,12 +286,19 @@ impl BoxCylinderTester {
         Vector3Wide::conditionally_negate(&negate_face, &mut box_face_normal);
         Vector3Wide::conditionally_negate(&negate_face, &mut box_face_x);
         Vector3Wide::conditionally_negate(&negate_face, &mut box_face_y);
-        let box_face_half_width = use_x.select(a.half_height, use_y.select(a.half_length, a.half_width));
-        let box_face_half_height = use_x.select(a.half_length, use_y.select(a.half_width, a.half_height));
-        let box_face_normal_offset = use_x.select(a.half_width, use_y.select(a.half_height, a.half_length));
+        let box_face_half_width =
+            use_x.select(a.half_height, use_y.select(a.half_length, a.half_width));
+        let box_face_half_height =
+            use_x.select(a.half_length, use_y.select(a.half_width, a.half_height));
+        let box_face_normal_offset =
+            use_x.select(a.half_width, use_y.select(a.half_height, a.half_length));
         let box_face_center_offset = Vector3Wide::scale(&box_face_normal, &box_face_normal_offset);
         let mut box_face_center = Vector3Wide::default();
-        Vector3Wide::add(&box_face_center_offset, &local_offset_a, &mut box_face_center);
+        Vector3Wide::add(
+            &box_face_center_offset,
+            &local_offset_a,
+            &mut box_face_center,
+        );
         let box_face_x_offset = Vector3Wide::scale(&box_face_x, &box_face_half_width);
         let box_face_y_offset = Vector3Wide::scale(&box_face_y, &box_face_half_height);
         let mut v00 = Vector3Wide::default();
@@ -286,15 +310,24 @@ impl BoxCylinderTester {
         let v11_pre_y = v11.clone();
         Vector3Wide::add(&v11_pre_y, &box_face_y_offset, &mut v11);
 
-        let cap_center_by =
-            local_normal.y.simd_lt(zero_f).select(-b.half_length, b.half_length);
+        let cap_center_by = local_normal
+            .y
+            .simd_lt(zero_f)
+            .select(-b.half_length, b.half_length);
 
         let use_cap = (!inactive_lanes.simd_lt(zero_i))
-            & local_normal.y.abs().simd_gt(Vector::<f32>::splat(0.70710678118));
+            & local_normal
+                .y
+                .abs()
+                .simd_gt(Vector::<f32>::splat(0.70710678118));
         let use_cap_i = use_cap.to_int();
 
         let mut face_normal_dot_local_normal = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&box_face_normal, &local_normal, &mut face_normal_dot_local_normal);
+        Vector3Wide::dot(
+            &box_face_normal,
+            &local_normal,
+            &mut face_normal_dot_local_normal,
+        );
         let inverse_face_normal_dot_local_normal = one_f / face_normal_dot_local_normal;
 
         if use_cap_i.simd_lt(zero_i).any() {
@@ -322,16 +355,32 @@ impl BoxCylinderTester {
             let mut p10 = Vector2Wide::default();
             let mut p11 = Vector2Wide::default();
             CylinderPairTester::project_onto_cap_b(
-                &cap_center_by, &inverse_local_normal_y, &local_normal, &v00, &mut p00,
+                &cap_center_by,
+                &inverse_local_normal_y,
+                &local_normal,
+                &v00,
+                &mut p00,
             );
             CylinderPairTester::project_onto_cap_b(
-                &cap_center_by, &inverse_local_normal_y, &local_normal, &v01, &mut p01,
+                &cap_center_by,
+                &inverse_local_normal_y,
+                &local_normal,
+                &v01,
+                &mut p01,
             );
             CylinderPairTester::project_onto_cap_b(
-                &cap_center_by, &inverse_local_normal_y, &local_normal, &v10, &mut p10,
+                &cap_center_by,
+                &inverse_local_normal_y,
+                &local_normal,
+                &v10,
+                &mut p10,
             );
             CylinderPairTester::project_onto_cap_b(
-                &cap_center_by, &inverse_local_normal_y, &local_normal, &v11, &mut p11,
+                &cap_center_by,
+                &inverse_local_normal_y,
+                &local_normal,
+                &v11,
+                &mut p11,
             );
 
             let mut edge0010 = Vector2Wide::default();
@@ -356,20 +405,36 @@ impl BoxCylinderTester {
             let mut t_max1101 = zero_f;
             let mut intersected1101 = zero_i;
             Self::intersect_line_circle(
-                &p00, &edge0010, &b.radius,
-                &mut t_min0010, &mut t_max0010, &mut intersected0010,
+                &p00,
+                &edge0010,
+                &b.radius,
+                &mut t_min0010,
+                &mut t_max0010,
+                &mut intersected0010,
             );
             Self::intersect_line_circle(
-                &p01, &edge0100, &b.radius,
-                &mut t_min0100, &mut t_max0100, &mut intersected0100,
+                &p01,
+                &edge0100,
+                &b.radius,
+                &mut t_min0100,
+                &mut t_max0100,
+                &mut intersected0100,
             );
             Self::intersect_line_circle(
-                &p10, &edge1011, &b.radius,
-                &mut t_min1011, &mut t_max1011, &mut intersected1011,
+                &p10,
+                &edge1011,
+                &b.radius,
+                &mut t_min1011,
+                &mut t_max1011,
+                &mut intersected1011,
             );
             Self::intersect_line_circle(
-                &p11, &edge1101, &b.radius,
-                &mut t_min1101, &mut t_max1101, &mut intersected1101,
+                &p11,
+                &edge1101,
+                &b.radius,
+                &mut t_min1101,
+                &mut t_max1101,
+                &mut intersected1101,
             );
 
             t_min0010 = t_min0010.simd_max(zero_f).simd_min(one_f);
@@ -382,20 +447,52 @@ impl BoxCylinderTester {
             t_max1011 = t_max1011.simd_max(zero_f).simd_min(one_f);
 
             Self::add_candidate_for_edge(
-                &p00, &edge0010, &t_min0010, &t_max0010, &intersected0010,
-                &zero_i, &use_cap_i, pair_count, candidates, &mut candidate_count,
+                &p00,
+                &edge0010,
+                &t_min0010,
+                &t_max0010,
+                &intersected0010,
+                &zero_i,
+                &use_cap_i,
+                pair_count,
+                candidates,
+                &mut candidate_count,
             );
             Self::add_candidate_for_edge(
-                &p01, &edge0100, &t_min0100, &t_max0100, &intersected0100,
-                &Vector::<i32>::splat(1), &use_cap_i, pair_count, candidates, &mut candidate_count,
+                &p01,
+                &edge0100,
+                &t_min0100,
+                &t_max0100,
+                &intersected0100,
+                &Vector::<i32>::splat(1),
+                &use_cap_i,
+                pair_count,
+                candidates,
+                &mut candidate_count,
             );
             Self::add_candidate_for_edge(
-                &p10, &edge1011, &t_min1011, &t_max1011, &intersected1011,
-                &Vector::<i32>::splat(2), &use_cap_i, pair_count, candidates, &mut candidate_count,
+                &p10,
+                &edge1011,
+                &t_min1011,
+                &t_max1011,
+                &intersected1011,
+                &Vector::<i32>::splat(2),
+                &use_cap_i,
+                pair_count,
+                candidates,
+                &mut candidate_count,
             );
             Self::add_candidate_for_edge(
-                &p11, &edge1101, &t_min1101, &t_max1101, &intersected1101,
-                &Vector::<i32>::splat(3), &use_cap_i, pair_count, candidates, &mut candidate_count,
+                &p11,
+                &edge1101,
+                &t_min1101,
+                &t_max1101,
+                &intersected1101,
+                &Vector::<i32>::splat(3),
+                &use_cap_i,
+                pair_count,
+                candidates,
+                &mut candidate_count,
             );
 
             let mut interior0 = Vector2Wide::default();
@@ -403,8 +500,13 @@ impl BoxCylinderTester {
             let mut interior2 = Vector2Wide::default();
             let mut interior3 = Vector2Wide::default();
             Self::generate_interior_points(
-                b, &local_normal, &closest_on_b,
-                &mut interior0, &mut interior1, &mut interior2, &mut interior3,
+                b,
+                &local_normal,
+                &closest_on_b,
+                &mut interior0,
+                &mut interior1,
+                &mut interior2,
+                &mut interior3,
             );
 
             let edge0010_plane0 = p00.x * edge0010.y - p00.y * edge0010.x;
@@ -416,28 +518,60 @@ impl BoxCylinderTester {
             let edge1011_plane_min = edge1011_plane0.simd_min(edge1011_plane1);
             let edge1011_plane_max = edge1011_plane0.simd_max(edge1011_plane1);
             Self::try_add_interior_point(
-                &interior0, &Vector::<i32>::splat(8),
-                &edge0010, &edge0010_plane_min, &edge0010_plane_max,
-                &edge1011, &edge1011_plane_min, &edge1011_plane_max,
-                &use_cap_i, candidates, &mut candidate_count, pair_count,
+                &interior0,
+                &Vector::<i32>::splat(8),
+                &edge0010,
+                &edge0010_plane_min,
+                &edge0010_plane_max,
+                &edge1011,
+                &edge1011_plane_min,
+                &edge1011_plane_max,
+                &use_cap_i,
+                candidates,
+                &mut candidate_count,
+                pair_count,
             );
             Self::try_add_interior_point(
-                &interior1, &Vector::<i32>::splat(9),
-                &edge0010, &edge0010_plane_min, &edge0010_plane_max,
-                &edge1011, &edge1011_plane_min, &edge1011_plane_max,
-                &use_cap_i, candidates, &mut candidate_count, pair_count,
+                &interior1,
+                &Vector::<i32>::splat(9),
+                &edge0010,
+                &edge0010_plane_min,
+                &edge0010_plane_max,
+                &edge1011,
+                &edge1011_plane_min,
+                &edge1011_plane_max,
+                &use_cap_i,
+                candidates,
+                &mut candidate_count,
+                pair_count,
             );
             Self::try_add_interior_point(
-                &interior2, &Vector::<i32>::splat(10),
-                &edge0010, &edge0010_plane_min, &edge0010_plane_max,
-                &edge1011, &edge1011_plane_min, &edge1011_plane_max,
-                &use_cap_i, candidates, &mut candidate_count, pair_count,
+                &interior2,
+                &Vector::<i32>::splat(10),
+                &edge0010,
+                &edge0010_plane_min,
+                &edge0010_plane_max,
+                &edge1011,
+                &edge1011_plane_min,
+                &edge1011_plane_max,
+                &use_cap_i,
+                candidates,
+                &mut candidate_count,
+                pair_count,
             );
             Self::try_add_interior_point(
-                &interior3, &Vector::<i32>::splat(11),
-                &edge0010, &edge0010_plane_min, &edge0010_plane_max,
-                &edge1011, &edge1011_plane_min, &edge1011_plane_max,
-                &use_cap_i, candidates, &mut candidate_count, pair_count,
+                &interior3,
+                &Vector::<i32>::splat(11),
+                &edge0010,
+                &edge0010_plane_min,
+                &edge0010_plane_max,
+                &edge1011,
+                &edge1011_plane_min,
+                &edge1011_plane_max,
+                &use_cap_i,
+                candidates,
+                &mut candidate_count,
+                pair_count,
             );
 
             let mut cap_center_to_box_face_center = Vector3Wide::default();
@@ -485,19 +619,35 @@ impl BoxCylinderTester {
             local_contact.z = candidate0.y;
             let mut a_to_local_contact = Vector3Wide::default();
             Vector3Wide::add(&local_contact, &local_offset_b, &mut a_to_local_contact);
-            Matrix3x3Wide::transform_without_overlap(&a_to_local_contact, &world_rb, &mut manifold.offset_a0);
+            Matrix3x3Wide::transform_without_overlap(
+                &a_to_local_contact,
+                &world_rb,
+                &mut manifold.offset_a0,
+            );
             local_contact.x = candidate1.x;
             local_contact.z = candidate1.y;
             Vector3Wide::add(&local_contact, &local_offset_b, &mut a_to_local_contact);
-            Matrix3x3Wide::transform_without_overlap(&a_to_local_contact, &world_rb, &mut manifold.offset_a1);
+            Matrix3x3Wide::transform_without_overlap(
+                &a_to_local_contact,
+                &world_rb,
+                &mut manifold.offset_a1,
+            );
             local_contact.x = candidate2.x;
             local_contact.z = candidate2.y;
             Vector3Wide::add(&local_contact, &local_offset_b, &mut a_to_local_contact);
-            Matrix3x3Wide::transform_without_overlap(&a_to_local_contact, &world_rb, &mut manifold.offset_a2);
+            Matrix3x3Wide::transform_without_overlap(
+                &a_to_local_contact,
+                &world_rb,
+                &mut manifold.offset_a2,
+            );
             local_contact.x = candidate3.x;
             local_contact.z = candidate3.y;
             Vector3Wide::add(&local_contact, &local_offset_b, &mut a_to_local_contact);
-            Matrix3x3Wide::transform_without_overlap(&a_to_local_contact, &world_rb, &mut manifold.offset_a3);
+            Matrix3x3Wide::transform_without_overlap(
+                &a_to_local_contact,
+                &world_rb,
+                &mut manifold.offset_a3,
+            );
             manifold.feature_id0 = candidate0.feature_id;
             manifold.feature_id1 = candidate1.feature_id;
             manifold.feature_id2 = candidate2.feature_id;
@@ -558,7 +708,8 @@ impl BoxCylinderTester {
             let lower_threshold = 0.01f32 * 0.01;
             let upper_threshold = 0.02f32 * 0.02;
             let interpolation_min = Vector::<f32>::splat(upper_threshold);
-            let inverse_interpolation_span = Vector::<f32>::splat(1.0 / (upper_threshold - lower_threshold));
+            let inverse_interpolation_span =
+                Vector::<f32>::splat(1.0 / (upper_threshold - lower_threshold));
             let unrestrict_weight_x = ((interpolation_min
                 - edge_normal_x.y * edge_normal_x.y * inverse_edge_normal_x_length_squared)
                 * inverse_interpolation_span)
@@ -603,17 +754,31 @@ impl BoxCylinderTester {
             local_contact1.z = closest_on_b.z;
 
             let mut contact0_world = Vector3Wide::default();
-            Matrix3x3Wide::transform_without_overlap(&local_contact0, &world_rb, &mut contact0_world);
+            Matrix3x3Wide::transform_without_overlap(
+                &local_contact0,
+                &world_rb,
+                &mut contact0_world,
+            );
             let mut contact1_world = Vector3Wide::default();
-            Matrix3x3Wide::transform_without_overlap(&local_contact1, &world_rb, &mut contact1_world);
+            Matrix3x3Wide::transform_without_overlap(
+                &local_contact1,
+                &world_rb,
+                &mut contact1_world,
+            );
             let contact0_tmp = contact0_world.clone();
             Vector3Wide::add(&contact0_tmp, offset_b, &mut contact0_world);
             let contact1_tmp = contact1_world.clone();
             Vector3Wide::add(&contact1_tmp, offset_b, &mut contact1_world);
-            manifold.offset_a0 = Vector3Wide::conditional_select(&use_side_i, &contact0_world, &manifold.offset_a0);
-            manifold.offset_a1 = Vector3Wide::conditional_select(&use_side_i, &contact1_world, &manifold.offset_a1);
-            manifold.feature_id0 = use_side_i.simd_ne(zero_i).select(zero_i, manifold.feature_id0);
-            manifold.feature_id1 = use_side_i.simd_ne(zero_i).select(Vector::<i32>::splat(1), manifold.feature_id1);
+            manifold.offset_a0 =
+                Vector3Wide::conditional_select(&use_side_i, &contact0_world, &manifold.offset_a0);
+            manifold.offset_a1 =
+                Vector3Wide::conditional_select(&use_side_i, &contact1_world, &manifold.offset_a1);
+            manifold.feature_id0 = use_side_i
+                .simd_ne(zero_i)
+                .select(zero_i, manifold.feature_id0);
+            manifold.feature_id1 = use_side_i
+                .simd_ne(zero_i)
+                .select(Vector::<i32>::splat(1), manifold.feature_id1);
 
             let mut box_face_to_contact0 = Vector3Wide::default();
             let mut box_face_to_contact1 = Vector3Wide::default();
@@ -635,8 +800,12 @@ impl BoxCylinderTester {
                 depth1.simd_ge(depth_threshold).to_int() & t_max.simd_gt(t_min).to_int(),
                 manifold.contact1_exists,
             );
-            manifold.contact2_exists = use_side_i.simd_ne(zero_i).select(zero_i, manifold.contact2_exists);
-            manifold.contact3_exists = use_side_i.simd_ne(zero_i).select(zero_i, manifold.contact3_exists);
+            manifold.contact2_exists = use_side_i
+                .simd_ne(zero_i)
+                .select(zero_i, manifold.contact2_exists);
+            manifold.contact3_exists = use_side_i
+                .simd_ne(zero_i)
+                .select(zero_i, manifold.contact3_exists);
         }
 
         Matrix3x3Wide::transform_without_overlap(&local_normal, &world_rb, &mut manifold.normal);

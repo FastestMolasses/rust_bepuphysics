@@ -2,20 +2,20 @@ use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
-use crate::utilities::vector::Vector;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::math_helper;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::symmetric3x3::Symmetric3x3;
-use crate::utilities::math_helper;
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::symmetric3x3::Symmetric3x3;
+use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 
-use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use super::mesh_inertia_helper::MeshInertiaHelper;
-use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use super::ray::RayWide;
+use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
+use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 
 /// Collision shape representing an individual triangle.
 /// Triangle collisions and ray tests are one-sided; only tests which see the triangle as wound
@@ -133,8 +133,15 @@ impl IConvexShape for Triangle {
         Matrix3x3::transform_transpose(&offset, &orientation, &mut local_offset);
         let mut local_direction = Vec3::ZERO;
         Matrix3x3::transform_transpose(&direction, &orientation, &mut local_direction);
-        if Triangle::ray_test_vertices(self.a, self.b, self.c, local_offset, local_direction, t, normal)
-        {
+        if Triangle::ray_test_vertices(
+            self.a,
+            self.b,
+            self.c,
+            local_offset,
+            local_direction,
+            t,
+            normal,
+        ) {
             let n = *normal;
             Matrix3x3::transform(&n, &orientation, normal);
             return true;
@@ -144,9 +151,8 @@ impl IConvexShape for Triangle {
 
     fn compute_inertia(&self, mass: f32) -> BodyInertia {
         // Use MeshInertiaHelper to compute the exact triangle inertia tensor.
-        let inertia_tensor = MeshInertiaHelper::compute_triangle_contribution(
-            self.a, self.b, self.c, mass,
-        );
+        let inertia_tensor =
+            MeshInertiaHelper::compute_triangle_contribution(self.a, self.b, self.c, mass);
         let mut inverse_inertia = Symmetric3x3::default();
         Symmetric3x3::invert(&inertia_tensor, &mut inverse_inertia);
         let mut result = BodyInertia::default();
@@ -419,7 +425,12 @@ impl ISupportFinder<Triangle, TriangleWide> for TriangleSupportFinder {
             &mut local_direction,
         );
         let mut local_support = Vector3Wide::default();
-        self.compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        self.compute_local_support(
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
+        );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 
@@ -493,8 +504,13 @@ impl crate::physics::collision_detection::support_finder::ISupportFinder<Triangl
             &mut local_direction,
         );
         let mut local_support = Vector3Wide::default();
-        <Self as crate::physics::collision_detection::support_finder::ISupportFinder<TriangleWide>>::compute_local_support(
-            shape, &local_direction, terminated_lanes, &mut local_support,
+        <Self as crate::physics::collision_detection::support_finder::ISupportFinder<
+            TriangleWide,
+        >>::compute_local_support(
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
         );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }

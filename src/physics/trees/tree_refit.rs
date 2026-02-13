@@ -16,8 +16,7 @@ impl Tree {
                 // Compute the new bounding box for this node.
                 let parent = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
                     .add(metanode.parent as usize);
-                let child_in_parent =
-                    Self::node_child_mut(parent, metanode.index_in_parent);
+                let child_in_parent = Self::node_child_mut(parent, metanode.index_in_parent);
                 BoundingBox::create_merged(
                     node.a.min,
                     node.a.max,
@@ -36,22 +35,15 @@ impl Tree {
     fn refit_recursive(&self, node_index: i32, min: &mut Vec3, max: &mut Vec3) {
         debug_assert!(self.leaf_count >= 2);
         unsafe {
-            let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
-                .add(node_index as usize);
+            let node =
+                &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
             if node.a.index >= 0 {
                 self.refit_recursive(node.a.index, &mut node.a.min, &mut node.a.max);
             }
             if node.b.index >= 0 {
                 self.refit_recursive(node.b.index, &mut node.b.min, &mut node.b.max);
             }
-            BoundingBox::create_merged(
-                node.a.min,
-                node.a.max,
-                node.b.min,
-                node.b.max,
-                min,
-                max,
-            );
+            BoundingBox::create_merged(node.a.min, node.a.max, node.b.min, node.b.max, min, max);
         }
     }
 

@@ -74,7 +74,9 @@ impl BodyReference {
             if !value {
                 let loc = self.memory_location();
                 let sleeper = unsafe { &mut *self.bodies().sleeper };
-                unsafe { sleeper.sleep_body(loc.index); }
+                unsafe {
+                    sleeper.sleep_body(loc.index);
+                }
             }
         } else {
             if value {
@@ -93,10 +95,12 @@ impl BodyReference {
         if collidable.shape.exists() {
             let broad_phase = &*self.bodies().broad_phase;
             if loc.set_index == 0 {
-                let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
+                let (min_ptr, max_ptr) =
+                    broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
                 (true, min_ptr, max_ptr)
             } else {
-                let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(collidable.broad_phase_index);
+                let (min_ptr, max_ptr) =
+                    broad_phase.get_static_bounds_pointers(collidable.broad_phase_index);
                 (true, min_ptr, max_ptr)
             }
         } else {
@@ -313,7 +317,8 @@ impl BodyReference {
 
     /// Sets a body's properties according to a description.
     pub fn apply_description(&self, description: &BodyDescription) {
-        self.bodies_mut().apply_description(self.handle, description);
+        self.bodies_mut()
+            .apply_description(self.handle, description);
     }
 
     /// Changes the shape of a body.
@@ -345,20 +350,20 @@ impl BodyReference {
         );
         Self::apply_linear_impulse_to(impulse, local_inertia.inverse_mass, &mut velocity.linear);
         let angular_impulse = impulse_offset.cross(impulse);
-        Self::apply_angular_impulse_to(angular_impulse, &inverse_inertia_tensor, &mut velocity.angular);
+        Self::apply_angular_impulse_to(
+            angular_impulse,
+            &inverse_inertia_tensor,
+            &mut velocity.angular,
+        );
     }
 
     /// Applies an impulse to a body by index in a body set.
     #[inline(always)]
-    pub fn apply_impulse_by_index(
-        set: &BodySet,
-        index: i32,
-        impulse: Vec3,
-        impulse_offset: Vec3,
-    ) {
+    pub fn apply_impulse_by_index(set: &BodySet, index: i32, impulse: Vec3, impulse_offset: Vec3) {
         // Use raw pointer access to avoid creating &T then casting to *mut T (UB under Stacked Borrows).
         // Buffer wraps a raw pointer, so we go through it directly.
-        let state_ptr = unsafe { set.dynamics_state.as_ptr().add(index as usize) as *mut BodyDynamics };
+        let state_ptr =
+            unsafe { set.dynamics_state.as_ptr().add(index as usize) as *mut BodyDynamics };
         unsafe {
             Self::apply_impulse_static(
                 impulse,
@@ -388,11 +393,7 @@ impl BodyReference {
 
     /// Applies a linear impulse to a linear velocity.
     #[inline(always)]
-    pub fn apply_linear_impulse_to(
-        impulse: Vec3,
-        inverse_mass: f32,
-        linear_velocity: &mut Vec3,
-    ) {
+    pub fn apply_linear_impulse_to(impulse: Vec3, inverse_mass: f32, linear_velocity: &mut Vec3) {
         *linear_velocity += impulse * inverse_mass;
     }
 
@@ -435,7 +436,11 @@ impl BodyReference {
             state.motion.pose.orientation,
             &mut inverse_inertia,
         );
-        Self::apply_angular_impulse_to(angular_impulse, &inverse_inertia, &mut state.motion.velocity.angular);
+        Self::apply_angular_impulse_to(
+            angular_impulse,
+            &inverse_inertia,
+            &mut state.motion.velocity.angular,
+        );
     }
 }
 

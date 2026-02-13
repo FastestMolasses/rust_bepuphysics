@@ -1,6 +1,5 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionBatcherContinuations.cs
 
-use crate::physics::collision_detection::contact_manifold::ConvexContactManifold;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;

@@ -2,11 +2,11 @@ use glam::{Quat, Vec3};
 use std::fmt;
 
 use crate::utilities::quaternion_ex;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3::Symmetric3x3;
+use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 
 /// Represents a rigid transformation.
 #[repr(C)]
@@ -85,7 +85,11 @@ impl RigidPose {
     /// to performing transform a followed by transform b.
     #[inline(always)]
     pub fn multiply_without_overlap(a: &RigidPose, b: &RigidPose, result: &mut RigidPose) {
-        quaternion_ex::concatenate_without_overlap(a.orientation, b.orientation, &mut result.orientation);
+        quaternion_ex::concatenate_without_overlap(
+            a.orientation,
+            b.orientation,
+            &mut result.orientation,
+        );
         let rotated_translation_a = quaternion_ex::transform(a.position, b.orientation);
         result.position = rotated_translation_a + b.position;
     }
@@ -207,7 +211,11 @@ const _: () = {
 
 impl fmt::Display for BodyInertia {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}, {:?}", self.inverse_mass, self.inverse_inertia_tensor)
+        write!(
+            f,
+            "{}, {:?}",
+            self.inverse_mass, self.inverse_inertia_tensor
+        )
     }
 }
 

@@ -1,6 +1,5 @@
 // Translated from BepuPhysics/IslandScaffold.cs
 
-use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::physics::solver::Solver;
@@ -55,7 +54,11 @@ impl IslandScaffoldConstraintBatch {
         let type_proc_len = solver.type_processors.len() as i32;
         let type_id_to_index: Buffer<i32> = pool.take_at_least(type_proc_len);
         // Initialize all to -1 (0xFF bytes)
-        std::ptr::write_bytes(type_id_to_index.as_ptr() as *mut u8, 0xFF, type_id_to_index.len() as usize * std::mem::size_of::<i32>());
+        std::ptr::write_bytes(
+            type_id_to_index.as_ptr() as *mut u8,
+            0xFF,
+            type_id_to_index.len() as usize * std::mem::size_of::<i32>(),
+        );
 
         let type_batches = QuickList::with_capacity(type_proc_len, pool);
         let active_count = (*solver.bodies).active_set().count;
@@ -73,12 +76,21 @@ impl IslandScaffoldConstraintBatch {
     }
 
     #[inline(always)]
-    fn get_or_create_type_batch(&mut self, type_id: i32, solver: &Solver, pool: &mut BufferPool) -> &mut IslandScaffoldTypeBatch {
+    fn get_or_create_type_batch(
+        &mut self,
+        type_id: i32,
+        solver: &Solver,
+        pool: &mut BufferPool,
+    ) -> &mut IslandScaffoldTypeBatch {
         let id_map = self.type_id_to_index.get_mut(type_id);
         if *id_map == -1 {
             *id_map = self.type_batches.count;
             let type_batch = self.type_batches.allocate_unsafely();
-            *type_batch = IslandScaffoldTypeBatch::new(pool, type_id, solver.get_minimum_capacity_for_type(type_id));
+            *type_batch = IslandScaffoldTypeBatch::new(
+                pool,
+                type_id,
+                solver.get_minimum_capacity_for_type(type_id),
+            );
             type_batch
         } else {
             self.type_batches.get_mut(*id_map)
@@ -95,7 +107,9 @@ impl IslandScaffoldConstraintBatch {
         pool: &mut BufferPool,
         fallback_batch: &mut SequentialFallbackBatch,
     ) -> bool {
-        if batch_index == solver.fallback_batch_threshold() || self.referenced_body_indices.can_fit(dynamic_body_indices) {
+        if batch_index == solver.fallback_batch_threshold()
+            || self.referenced_body_indices.can_fit(dynamic_body_indices)
+        {
             let type_batch = self.get_or_create_type_batch(type_id, solver, pool);
             debug_assert!(type_batch.type_id == type_id);
             type_batch.handles.add(constraint_handle.0, pool);
@@ -106,11 +120,17 @@ impl IslandScaffoldConstraintBatch {
             } else {
                 // This is the fallback batch, so we need to fill it with relevant information.
                 let bodies = &*solver.bodies;
-                let mut dynamic_body_handles: Vec<BodyHandle> = Vec::with_capacity(dynamic_body_indices.len());
+                let mut dynamic_body_handles: Vec<BodyHandle> =
+                    Vec::with_capacity(dynamic_body_indices.len());
                 for &idx in dynamic_body_indices {
                     dynamic_body_handles.push(*bodies.active_set().index_to_handle.get(idx));
                 }
-                fallback_batch.allocate_for_inactive(&dynamic_body_handles, bodies, pool, bodies.minimum_constraint_capacity_per_body);
+                fallback_batch.allocate_for_inactive(
+                    &dynamic_body_handles,
+                    bodies,
+                    pool,
+                    bodies.minimum_constraint_capacity_per_body,
+                );
             }
             true
         } else {
@@ -146,10 +166,15 @@ impl IslandScaffold {
         solver: &Solver,
         pool: &mut BufferPool,
     ) -> Self {
-        debug_assert!(body_indices.count > 0, "Don't create islands with no bodies!");
+        debug_assert!(
+            body_indices.count > 0,
+            "Don't create islands with no bodies!"
+        );
         // Create a copy of the body indices with just enough space.
         let mut island_body_indices = QuickList::with_capacity(body_indices.count, pool);
-        body_indices.span.copy_to(0, &mut island_body_indices.span, 0, body_indices.count);
+        body_indices
+            .span
+            .copy_to(0, &mut island_body_indices.span, 0, body_indices.count);
         island_body_indices.count = body_indices.count;
 
         let mut scaffold = Self {
@@ -165,13 +190,21 @@ impl IslandScaffold {
         scaffold
     }
 
-    unsafe fn add_constraint(&mut self, constraint_handle: ConstraintHandle, solver: &Solver, pool: &mut BufferPool) {
+    unsafe fn add_constraint(
+        &mut self,
+        constraint_handle: ConstraintHandle,
+        solver: &Solver,
+        pool: &mut BufferPool,
+    ) {
         let location = *solver.handle_to_constraint.get(constraint_handle.0);
         let type_id = location.type_id;
         let type_processor = solver.type_processors[type_id as usize].as_ref().unwrap();
         let bodies_per_constraint = type_processor.bodies_per_constraint;
         let mut body_indices_buf = [0i32; 8]; // stack alloc — matches C# stackalloc
-        debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
+        debug_assert!(
+            bodies_per_constraint <= 8,
+            "Bodies per constraint exceeds stack buffer size"
+        );
 
         let mut enumerator = ConstraintHandleEnumerator {
             body_indices: body_indices_buf.as_mut_ptr(),
@@ -196,7 +229,8 @@ impl IslandScaffold {
 
         // No existing batch could hold it; create a new one.
         if self.protobatches.span.len() == self.protobatches.count {
-            self.protobatches.ensure_capacity(self.protobatches.count + 1, pool);
+            self.protobatches
+                .ensure_capacity(self.protobatches.count + 1, pool);
         }
         let new_batch_index = self.protobatches.count;
         let new_batch = self.protobatches.allocate_unsafely();
@@ -210,7 +244,10 @@ impl IslandScaffold {
             pool,
             &mut self.fallback_batch,
         );
-        debug_assert!(added, "If we created a new batch for a constraint, it must successfully add.");
+        debug_assert!(
+            added,
+            "If we created a new batch for a constraint, it must successfully add."
+        );
     }
 
     pub fn dispose(&mut self, pool: &mut BufferPool) {

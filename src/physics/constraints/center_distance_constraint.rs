@@ -1,13 +1,10 @@
-use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::math_helper;
-use crate::utilities::vector3_wide::Vector3Wide;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
-use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
+use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::math_helper;
 use crate::utilities::vector::Vector;
-use glam::Vec3;
+use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::num::SimdFloat;
 
 /// Constrains the center of two bodies to be separated by a goal distance.
 #[repr(C)]
@@ -36,9 +33,15 @@ impl CenterDistanceConstraint {
     ) {
         #[cfg(debug_assertions)]
         {
-            debug_assert!(self.target_distance >= 0.0, "CenterDistanceConstraint.TargetDistance must be nonnegative.");
+            debug_assert!(
+                self.target_distance >= 0.0,
+                "CenterDistanceConstraint.TargetDistance must be nonnegative."
+            );
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "CenterDistanceConstraint");
+            ConstraintChecker::assert_valid_spring_settings(
+                &self.spring_settings,
+                "CenterDistanceConstraint",
+            );
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         unsafe {
@@ -81,7 +84,11 @@ impl CenterDistanceConstraintFunctions {
         let mut change_a = Vector3Wide::default();
         Vector3Wide::scale_to(jacobian_a, &(*impulse * *inverse_mass_a), &mut change_a);
         let mut negated_change_b = Vector3Wide::default();
-        Vector3Wide::scale_to(jacobian_a, &(*impulse * *inverse_mass_b), &mut negated_change_b);
+        Vector3Wide::scale_to(
+            jacobian_a,
+            &(*impulse * *inverse_mass_b),
+            &mut negated_change_b,
+        );
         let mut tmp = Vector3Wide::default();
         Vector3Wide::add(&a.linear, &change_a, &mut tmp);
         a.linear = tmp;
@@ -112,7 +119,14 @@ impl CenterDistanceConstraintFunctions {
         jacobian_a.y = use_fallback.select(Vector::<f32>::splat(0.0), jacobian_a.y);
         jacobian_a.z = use_fallback.select(Vector::<f32>::splat(0.0), jacobian_a.z);
 
-        Self::apply_impulse(&jacobian_a, &inertia_a.inverse_mass, &inertia_b.inverse_mass, accumulated_impulses, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &jacobian_a,
+            &inertia_a.inverse_mass,
+            &inertia_b.inverse_mass,
+            accumulated_impulses,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
@@ -152,7 +166,8 @@ impl CenterDistanceConstraintFunctions {
             &mut softness_impulse_scale,
         );
         // Jacobian is just the unit length direction, so the effective mass is simple:
-        let effective_mass = effective_mass_cfm_scale / (inertia_a.inverse_mass + inertia_b.inverse_mass);
+        let effective_mass =
+            effective_mass_cfm_scale / (inertia_a.inverse_mass + inertia_b.inverse_mass);
 
         // Compute the position error and bias velocities.
         let bias_velocity = (distance - prestep.target_distance) * position_error_to_velocity;
@@ -162,9 +177,17 @@ impl CenterDistanceConstraintFunctions {
         Vector3Wide::dot(&wsv_a.linear, &jacobian_a, &mut linear_csv_a);
         let mut negated_csv_b = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&wsv_b.linear, &jacobian_a, &mut negated_csv_b);
-        let csi = (bias_velocity - (linear_csv_a - negated_csv_b)) * effective_mass - *accumulated_impulse * softness_impulse_scale;
+        let csi = (bias_velocity - (linear_csv_a - negated_csv_b)) * effective_mass
+            - *accumulated_impulse * softness_impulse_scale;
         *accumulated_impulse = *accumulated_impulse + csi;
-        Self::apply_impulse(&jacobian_a, &inertia_a.inverse_mass, &inertia_b.inverse_mass, &csi, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &jacobian_a,
+            &inertia_a.inverse_mass,
+            &inertia_b.inverse_mass,
+            &csi,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

@@ -12,11 +12,11 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::compound_pair_collision_task::ICompoundPairOverlapFinder;
-use super::compound_pair_overlaps::{ChildOverlapsCollection, CompoundPairOverlaps, OverlapQueryForPair};
+use super::compound_pair_overlaps::{ChildOverlapsCollection, CompoundPairOverlaps};
 use super::convex_compound_overlap_finder::IBoundsQueryableCompound;
 
 /// Internal data linking a subpair to its source pair and child.
@@ -108,25 +108,59 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
                 let pair = &*subpair.pair;
                 let child = &*subpair.child;
 
-                Vector3Wide::write_first(pair.offset_b, GatherScatter::get_offset_instance_mut(&mut offset_b, j));
-                QuaternionWide::write_first(pair.orientation_a, GatherScatter::get_offset_instance_mut(&mut orientation_a, j));
-                QuaternionWide::write_first(pair.orientation_b, GatherScatter::get_offset_instance_mut(&mut orientation_b, j));
-                Vector3Wide::write_first(pair.relative_linear_velocity_a, GatherScatter::get_offset_instance_mut(&mut relative_linear_velocity_a, j));
-                Vector3Wide::write_first(pair.angular_velocity_a, GatherScatter::get_offset_instance_mut(&mut angular_velocity_a, j));
-                Vector3Wide::write_first(pair.angular_velocity_b, GatherScatter::get_offset_instance_mut(&mut angular_velocity_b, j));
-                *(&mut maximum_allowed_expansion as *mut Vector<f32> as *mut f32).add(j) = pair.maximum_expansion;
+                Vector3Wide::write_first(
+                    pair.offset_b,
+                    GatherScatter::get_offset_instance_mut(&mut offset_b, j),
+                );
+                QuaternionWide::write_first(
+                    pair.orientation_a,
+                    GatherScatter::get_offset_instance_mut(&mut orientation_a, j),
+                );
+                QuaternionWide::write_first(
+                    pair.orientation_b,
+                    GatherScatter::get_offset_instance_mut(&mut orientation_b, j),
+                );
+                Vector3Wide::write_first(
+                    pair.relative_linear_velocity_a,
+                    GatherScatter::get_offset_instance_mut(&mut relative_linear_velocity_a, j),
+                );
+                Vector3Wide::write_first(
+                    pair.angular_velocity_a,
+                    GatherScatter::get_offset_instance_mut(&mut angular_velocity_a, j),
+                );
+                Vector3Wide::write_first(
+                    pair.angular_velocity_b,
+                    GatherScatter::get_offset_instance_mut(&mut angular_velocity_b, j),
+                );
+                *(&mut maximum_allowed_expansion as *mut Vector<f32> as *mut f32).add(j) =
+                    pair.maximum_expansion;
 
-                RigidPoseWide::write_first(child.as_pose(), GatherScatter::get_offset_instance_mut(&mut local_poses_a, j));
+                RigidPoseWide::write_first(
+                    child.as_pose(),
+                    GatherScatter::get_offset_instance_mut(&mut local_poses_a, j),
+                );
             }
 
             // Transform child poses from compound A space to compound B's local space.
             let to_local_b = QuaternionWide::conjugate(&orientation_b);
             let mut local_orientations_a = QuaternionWide::default();
-            QuaternionWide::concatenate_without_overlap(&orientation_a, &to_local_b, &mut local_orientations_a);
+            QuaternionWide::concatenate_without_overlap(
+                &orientation_a,
+                &to_local_b,
+                &mut local_orientations_a,
+            );
             let mut local_child_orientations_a = QuaternionWide::default();
-            QuaternionWide::concatenate_without_overlap(&local_poses_a.orientation, &local_orientations_a, &mut local_child_orientations_a);
+            QuaternionWide::concatenate_without_overlap(
+                &local_poses_a.orientation,
+                &local_orientations_a,
+                &mut local_child_orientations_a,
+            );
             let mut local_offset_a = Vector3Wide::default();
-            QuaternionWide::transform_without_overlap(&local_poses_a.position, &local_orientations_a, &mut local_offset_a);
+            QuaternionWide::transform_without_overlap(
+                &local_poses_a.position,
+                &local_orientations_a,
+                &mut local_offset_a,
+            );
             let mut local_offset_b = Vector3Wide::default();
             QuaternionWide::transform_without_overlap(&offset_b, &to_local_b, &mut local_offset_b);
             let mut local_positions_a = Vector3Wide::default();
@@ -141,7 +175,9 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
                     0,
                     &mut local_child_orientation_a,
                 );
-                let batch = shapes.get_batch(shape_index.type_id() as usize).expect("Shape batch must exist");
+                let batch = shapes
+                    .get_batch(shape_index.type_id() as usize)
+                    .expect("Shape batch must exist");
                 let mut min = glam::Vec3::ZERO;
                 let mut max = glam::Vec3::ZERO;
                 let mr = &mut maximum_radius as *mut Vector<f32> as *mut f32;
@@ -155,20 +191,33 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
                     &mut max,
                 );
                 Vector3Wide::write_first(min, GatherScatter::get_offset_instance_mut(&mut mins, j));
-                Vector3Wide::write_first(max, GatherScatter::get_offset_instance_mut(&mut maxes, j));
+                Vector3Wide::write_first(
+                    max,
+                    GatherScatter::get_offset_instance_mut(&mut maxes, j),
+                );
             }
 
             // Expand bounds for velocity, angular motion, and speculative margin.
             let mut local_relative_linear_velocity_a = Vector3Wide::default();
-            QuaternionWide::transform_without_overlap(&relative_linear_velocity_a, &to_local_b, &mut local_relative_linear_velocity_a);
+            QuaternionWide::transform_without_overlap(
+                &relative_linear_velocity_a,
+                &to_local_b,
+                &mut local_relative_linear_velocity_a,
+            );
             let mut radius_a = Vector::<f32>::default();
             Vector3Wide::length_into(&local_offset_a, &mut radius_a);
             BoundingBoxHelpers::expand_local_bounding_boxes(
-                &mut mins, &mut maxes,
-                radius_a, &local_positions_a,
-                &local_relative_linear_velocity_a, &angular_velocity_a, &angular_velocity_b,
+                &mut mins,
+                &mut maxes,
+                radius_a,
+                &local_positions_a,
+                &local_relative_linear_velocity_a,
+                &angular_velocity_a,
+                &angular_velocity_b,
                 dt,
-                maximum_radius, maximum_angular_expansion, maximum_allowed_expansion,
+                maximum_radius,
+                maximum_angular_expansion,
+                maximum_allowed_expansion,
             );
 
             // Store results in query bounds for downstream overlap testing.
@@ -186,7 +235,10 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
         let pair_queries = overlaps.pair_queries;
         let compound_b = &*(pair_queries[0usize].container as *const TCompoundB);
         compound_b.find_local_overlaps::<CompoundPairOverlaps, ChildOverlapsCollection>(
-            &pair_queries, pool, shapes, overlaps,
+            &pair_queries,
+            pool,
+            shapes,
+            overlaps,
         );
 
         pool.return_buffer(&mut subpair_data);

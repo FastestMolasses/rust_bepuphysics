@@ -1,17 +1,14 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ConvexCollisionTask.cs
 
+use super::pair_types::{ICollisionPair, ICollisionPairWide};
 use crate::physics::collidables::shape::IShapeWideAllocation;
-use crate::physics::collision_detection::collision_batcher::{CollisionBatcher, ICollisionCallbacks};
-use crate::physics::collision_detection::collision_batcher_continuations::PairContinuation;
 use crate::physics::collision_detection::collision_task_registry::{BatcherVtable, CollisionTask};
 use crate::physics::collision_detection::contact_manifold::ConvexContactManifold;
 use crate::physics::collision_detection::convex_contact_manifold_wide::IContactManifoldWide;
 use crate::physics::collision_detection::untyped_list::UntypedList;
-use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use super::pair_types::{ICollisionPair, ICollisionPairWide};
 
 /// Trait for pair testers that perform SIMD-wide collision tests between two shapes.
 pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
@@ -54,18 +51,21 @@ pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
 
 /// The type-erased function pointer for executing a convex collision batch.
 /// Parameters: (batch, vtable)
-type ConvexExecuteFn = unsafe fn(
-    &mut UntypedList,
-    &BatcherVtable,
-);
+type ConvexExecuteFn = unsafe fn(&mut UntypedList, &BatcherVtable);
 
 /// Monomorphized execution loop for convex collision tasks.
 /// This function is instantiated per concrete pair type combination and stored as a function pointer.
-unsafe fn execute_batch_inner<TPair, TPairWide, TShapeWideA, TShapeWideB, TManifoldWide, TPairTester>(
+unsafe fn execute_batch_inner<
+    TPair,
+    TPairWide,
+    TShapeWideA,
+    TShapeWideB,
+    TManifoldWide,
+    TPairTester,
+>(
     batch: &mut UntypedList,
     vtable: &BatcherVtable,
-)
-where
+) where
     TPair: ICollisionPair + Copy,
     TPairWide: ICollisionPairWide<TShapeWideA, TShapeWideB, TPair> + Default,
     TManifoldWide: IContactManifoldWide + Default,
@@ -87,7 +87,9 @@ where
         if alloc_size > 0 {
             _alloc_a = vec![0u8; alloc_size];
             let buf = crate::utilities::memory::buffer::Buffer::new(
-                _alloc_a.as_ptr() as *mut u8, alloc_size as i32, -1,
+                _alloc_a.as_ptr() as *mut u8,
+                alloc_size as i32,
+                -1,
             );
             a_wide.initialize_allocation(&buf);
         } else {
@@ -100,7 +102,9 @@ where
         if alloc_size > 0 {
             _alloc_b = vec![0u8; alloc_size];
             let buf = crate::utilities::memory::buffer::Buffer::new(
-                _alloc_b.as_ptr() as *mut u8, alloc_size as i32, -1,
+                _alloc_b.as_ptr() as *mut u8,
+                alloc_size as i32,
+                -1,
             );
             b_wide.initialize_allocation(&buf);
         } else {
@@ -170,9 +174,11 @@ where
             // Use raw pointer offset to get lane-offset views (like C#'s GetOffsetInstance).
             // This adds j * sizeof(f32) bytes to the struct pointer, giving a "view" into lane j.
             let manifold_source = (&manifold_wide as *const TManifoldWide as *const u8)
-                .add(j as usize * std::mem::size_of::<f32>()) as *const TManifoldWide;
+                .add(j as usize * std::mem::size_of::<f32>())
+                as *const TManifoldWide;
             let offset_source = (offset_b_ptr as *const u8)
-                .add(j as usize * std::mem::size_of::<f32>()) as *const Vector3Wide;
+                .add(j as usize * std::mem::size_of::<f32>())
+                as *const Vector3Wide;
             (*manifold_source).read_first(&*offset_source, &mut manifold);
             let pair = &*bundle_start.add(j as usize);
             (vtable.process_convex_result)(vtable.batcher, &mut manifold, pair.get_continuation());
@@ -187,16 +193,29 @@ pub struct ConvexCollisionTaskInstance {
     pub batch_size: i32,
     pub shape_type_index_a: i32,
     pub shape_type_index_b: i32,
-    pub pair_type: crate::physics::collision_detection::collision_task_registry::CollisionTaskPairType,
+    pub pair_type:
+        crate::physics::collision_detection::collision_task_registry::CollisionTaskPairType,
     execute_fn: ConvexExecuteFn,
 }
 
-impl crate::physics::collision_detection::collision_task_registry::CollisionTask for ConvexCollisionTaskInstance {
-    fn batch_size(&self) -> i32 { self.batch_size }
-    fn shape_type_index_a(&self) -> i32 { self.shape_type_index_a }
-    fn shape_type_index_b(&self) -> i32 { self.shape_type_index_b }
-    fn subtask_generator(&self) -> bool { false }
-    fn pair_type(&self) -> crate::physics::collision_detection::collision_task_registry::CollisionTaskPairType {
+impl crate::physics::collision_detection::collision_task_registry::CollisionTask
+    for ConvexCollisionTaskInstance
+{
+    fn batch_size(&self) -> i32 {
+        self.batch_size
+    }
+    fn shape_type_index_a(&self) -> i32 {
+        self.shape_type_index_a
+    }
+    fn shape_type_index_b(&self) -> i32 {
+        self.shape_type_index_b
+    }
+    fn subtask_generator(&self) -> bool {
+        false
+    }
+    fn pair_type(
+        &self,
+    ) -> crate::physics::collision_detection::collision_task_registry::CollisionTaskPairType {
         self.pair_type
     }
     fn execute_batch(
@@ -209,8 +228,14 @@ impl crate::physics::collision_detection::collision_task_registry::CollisionTask
 }
 
 /// Creates a convex collision task instance with a monomorphized execution loop.
-pub fn create_convex_collision_task<TPair, TPairWide, TShapeWideA, TShapeWideB, TManifoldWide, TPairTester>(
-) -> ConvexCollisionTaskInstance
+pub fn create_convex_collision_task<
+    TPair,
+    TPairWide,
+    TShapeWideA,
+    TShapeWideB,
+    TManifoldWide,
+    TPairTester,
+>() -> ConvexCollisionTaskInstance
 where
     TPair: ICollisionPair + Copy + 'static,
     TPairWide: ICollisionPairWide<TShapeWideA, TShapeWideB, TPair> + Default + 'static,
@@ -224,12 +249,26 @@ where
         shape_type_index_a: TPair::pair_type() as i32, // Will be overridden by shape TypeId
         shape_type_index_b: -1,
         pair_type: TPair::pair_type(),
-        execute_fn: execute_batch_inner::<TPair, TPairWide, TShapeWideA, TShapeWideB, TManifoldWide, TPairTester>,
+        execute_fn: execute_batch_inner::<
+            TPair,
+            TPairWide,
+            TShapeWideA,
+            TShapeWideB,
+            TManifoldWide,
+            TPairTester,
+        >,
     }
 }
 
 /// Creates a convex collision task instance with explicit shape type indices.
-pub fn create_convex_collision_task_with_ids<TPair, TPairWide, TShapeWideA, TShapeWideB, TManifoldWide, TPairTester>(
+pub fn create_convex_collision_task_with_ids<
+    TPair,
+    TPairWide,
+    TShapeWideA,
+    TShapeWideB,
+    TManifoldWide,
+    TPairTester,
+>(
     shape_type_a: i32,
     shape_type_b: i32,
 ) -> ConvexCollisionTaskInstance
@@ -246,6 +285,13 @@ where
         shape_type_index_a: shape_type_a,
         shape_type_index_b: shape_type_b,
         pair_type: TPair::pair_type(),
-        execute_fn: execute_batch_inner::<TPair, TPairWide, TShapeWideA, TShapeWideB, TManifoldWide, TPairTester>,
+        execute_fn: execute_batch_inner::<
+            TPair,
+            TPairWide,
+            TShapeWideA,
+            TShapeWideB,
+            TManifoldWide,
+            TPairTester,
+        >,
     }
 }

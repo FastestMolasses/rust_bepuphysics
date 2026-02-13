@@ -66,8 +66,11 @@ impl RefitAndRefineMultithreadedContext {
         self.tree = tree as *mut Tree;
 
         self.refinement_candidates = pool.take_at_least::<QuickList<i32>>(self.thread_count);
-        let (maximum_subtrees, estimated_refinement_candidate_count, refinement_leaf_count_threshold) =
-            tree.get_refit_and_mark_tuning();
+        let (
+            maximum_subtrees,
+            estimated_refinement_candidate_count,
+            refinement_leaf_count_threshold,
+        ) = tree.get_refit_and_mark_tuning();
         self.maximum_subtrees = maximum_subtrees;
         self.refinement_leaf_count_threshold = refinement_leaf_count_threshold;
         self.refit_nodes = QuickList::with_capacity(maximum_subtrees, pool);
@@ -78,8 +81,7 @@ impl RefitAndRefineMultithreadedContext {
                 QuickList::with_capacity(estimated_refinement_candidate_count, &mut *worker_pool);
         }
 
-        let mut multithreading_leaf_count_threshold =
-            tree.leaf_count / (self.thread_count * 2);
+        let mut multithreading_leaf_count_threshold = tree.leaf_count / (self.thread_count * 2);
         if multithreading_leaf_count_threshold < refinement_leaf_count_threshold {
             multithreading_leaf_count_threshold = refinement_leaf_count_threshold;
         }
@@ -93,7 +95,9 @@ impl RefitAndRefineMultithreadedContext {
             &mut *worker_pool_0,
         );
 
-        unsafe { *self.refit_node_index.get() = -1; }
+        unsafe {
+            *self.refit_node_index.get() = -1;
+        }
     }
 
     pub unsafe fn create_refinement_jobs(
@@ -126,33 +130,50 @@ impl RefitAndRefineMultithreadedContext {
         let mut index = offset;
         for _ in 0..target_refinement_count - 1 {
             index += period;
-            while index >= self.refinement_candidates.get(current_candidates_index).count {
-                index -= self.refinement_candidates.get(current_candidates_index).count;
+            while index
+                >= self
+                    .refinement_candidates
+                    .get(current_candidates_index)
+                    .count
+            {
+                index -= self
+                    .refinement_candidates
+                    .get(current_candidates_index)
+                    .count;
                 current_candidates_index += 1;
                 if current_candidates_index >= self.thread_count {
                     current_candidates_index -= self.thread_count;
                 }
             }
             debug_assert!(
-                index < self.refinement_candidates.get(current_candidates_index).count
+                index
+                    < self
+                        .refinement_candidates
+                        .get(current_candidates_index)
+                        .count
                     && index >= 0
             );
-            let node_index =
-                self.refinement_candidates.get(current_candidates_index)[index];
+            let node_index = self.refinement_candidates.get(current_candidates_index)[index];
             debug_assert!(
                 tree.metanodes.get(node_index).cost_or_flag.refine_flag == 0,
                 "Refinement target search shouldn't run into the same node twice!"
             );
             self.refinement_targets.add_unsafely(node_index);
-            (*((tree.metanodes.as_ptr() as *mut Metanode).add(node_index as usize))).cost_or_flag.refine_flag = 1;
+            (*((tree.metanodes.as_ptr() as *mut Metanode).add(node_index as usize)))
+                .cost_or_flag
+                .refine_flag = 1;
         }
 
         if tree.metanodes.get(0).cost_or_flag.refine_flag != 1 {
             self.refinement_targets.add_unsafely(0);
-            (*((tree.metanodes.as_ptr() as *mut Metanode).add(0))).cost_or_flag.refine_flag = 1;
+            (*((tree.metanodes.as_ptr() as *mut Metanode).add(0)))
+                .cost_or_flag
+                .refine_flag = 1;
         }
 
-        unsafe { *self.refine_index.get() = -1; }
+        unsafe {
+            *self.refine_index.get() = -1;
+        }
     }
 
     pub unsafe fn clean_up_for_refit_and_refine(&mut self, pool: &mut BufferPool) {
@@ -203,12 +224,7 @@ impl RefitAndRefineMultithreadedContext {
         self.create_refinement_jobs(pool, frame_index, refine_aggressiveness_scale);
         let refine_count = self.refinement_targets.count;
         // Phase 2: Refine.
-        thread_dispatcher.dispatch_workers(
-            refine_worker,
-            refine_count,
-            ctx_ptr as *mut (),
-            None,
-        );
+        thread_dispatcher.dispatch_workers(refine_worker, refine_count, ctx_ptr as *mut (), None);
         self.clean_up_for_refit_and_refine(pool);
     }
 
@@ -230,7 +246,8 @@ impl RefitAndRefineMultithreadedContext {
             let child = &*children.add(i);
             if child.index >= 0 {
                 // Increment refine_flag to count pending child work.
-                let metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((node_index) as usize);
+                let metanode =
+                    &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((node_index) as usize);
                 metanode.cost_or_flag.refine_flag += 1;
 
                 if child.leaf_count <= multithreading_leaf_count_threshold {
@@ -273,7 +290,10 @@ impl RefitAndRefineMultithreadedContext {
 
         let node = &mut *(tree.nodes.as_ptr() as *mut Node).add(node_index as usize);
         let metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((node_index) as usize);
-        debug_assert!(metanode.parent >= 0, "The root should not be marked for refit.");
+        debug_assert!(
+            metanode.parent >= 0,
+            "The root should not be marked for refit."
+        );
 
         let parent = &mut *(tree.nodes.as_ptr() as *mut Node).add(metanode.parent as usize);
         let child_in_parent = Tree::node_child_mut(parent, metanode.index_in_parent);
@@ -293,7 +313,8 @@ impl RefitAndRefineMultithreadedContext {
 
         // Walk up the tree, atomically decrementing refine_flag.
         let mut current_node = parent;
-        let mut current_metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((metanode.parent) as usize);
+        let mut current_metanode =
+            &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((metanode.parent) as usize);
         loop {
             let refine_flag_ptr = &mut current_metanode.cost_or_flag.refine_flag as *mut i32;
             let prev = AtomicI32::from_ptr(refine_flag_ptr).fetch_sub(1, Ordering::AcqRel);
@@ -304,7 +325,8 @@ impl RefitAndRefineMultithreadedContext {
                 for j in 0..2 {
                     let child = &*children.add(j);
                     if child.index >= 0 {
-                        let child_metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((child.index) as usize);
+                        let child_metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode)
+                            .add((child.index) as usize);
                         current_metanode.cost_or_flag.local_cost_change +=
                             child_metanode.cost_or_flag.local_cost_change;
                         child_metanode.cost_or_flag.refine_flag = 0;
@@ -345,8 +367,10 @@ impl RefitAndRefineMultithreadedContext {
                         .add(current_metanode.parent as usize);
                     let child_in_parent =
                         Tree::node_child_mut(parent_node, current_metanode.index_in_parent);
-                    let premetric =
-                        Tree::compute_bounds_metric_vecs(&child_in_parent.min, &child_in_parent.max);
+                    let premetric = Tree::compute_bounds_metric_vecs(
+                        &child_in_parent.min,
+                        &child_in_parent.max,
+                    );
                     child_in_parent.min = Vec3::splat(f32::MAX);
                     child_in_parent.max = Vec3::splat(f32::MIN);
                     for j in 0..2 {
@@ -360,12 +384,15 @@ impl RefitAndRefineMultithreadedContext {
                             &mut child_in_parent.max,
                         );
                     }
-                    let postmetric =
-                        Tree::compute_bounds_metric_vecs(&child_in_parent.min, &child_in_parent.max);
+                    let postmetric = Tree::compute_bounds_metric_vecs(
+                        &child_in_parent.min,
+                        &child_in_parent.max,
+                    );
                     current_metanode.cost_or_flag.local_cost_change += postmetric - premetric;
 
                     current_node = parent_node;
-                    current_metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode).add((current_metanode.parent) as usize);
+                    current_metanode = &mut *(tree.metanodes.as_ptr() as *mut Metanode)
+                        .add((current_metanode.parent) as usize);
                 }
             } else {
                 break;
@@ -390,7 +417,9 @@ impl RefitAndRefineMultithreadedContext {
         let thread_pool = thread_dispatcher.worker_pool_ptr(worker_index);
         debug_assert!((*self.tree).leaf_count > 2);
         loop {
-            let refit_index = unsafe { AtomicI32::from_ptr(self.refit_node_index.get()).fetch_add(1, Ordering::AcqRel) } + 1;
+            let refit_index = unsafe {
+                AtomicI32::from_ptr(self.refit_node_index.get()).fetch_add(1, Ordering::AcqRel)
+            } + 1;
             if refit_index >= self.refit_nodes.count {
                 break;
             }
@@ -429,9 +458,9 @@ impl RefitAndRefineMultithreadedContext {
         }
         let thread_pool = thread_dispatcher.worker_pool_ptr(worker_index);
 
-        let subtree_count_estimate =
-            (self.maximum_subtrees as u32).next_power_of_two() as i32;
-        let mut subtree_references = QuickList::<i32>::with_capacity(subtree_count_estimate, &mut *thread_pool);
+        let subtree_count_estimate = (self.maximum_subtrees as u32).next_power_of_two() as i32;
+        let mut subtree_references =
+            QuickList::<i32>::with_capacity(subtree_count_estimate, &mut *thread_pool);
         let mut treelet_internal_nodes =
             QuickList::<i32>::with_capacity(subtree_count_estimate, &mut *thread_pool);
 
@@ -440,7 +469,9 @@ impl RefitAndRefineMultithreadedContext {
             tree.create_binned_resources(&mut *thread_pool, self.maximum_subtrees);
 
         loop {
-            let refine_index = unsafe { AtomicI32::from_ptr(self.refine_index.get()).fetch_add(1, Ordering::AcqRel) } + 1;
+            let refine_index = unsafe {
+                AtomicI32::from_ptr(self.refine_index.get()).fetch_add(1, Ordering::AcqRel)
+            } + 1;
             if refine_index >= self.refinement_targets.count {
                 break;
             }
@@ -462,8 +493,7 @@ impl RefitAndRefineMultithreadedContext {
 /// Worker function for refit-and-mark phase.
 fn refit_and_mark_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
     unsafe {
-        let ctx =
-            &*(dispatcher.unmanaged_context() as *const RefitAndRefineMultithreadedContext);
+        let ctx = &*(dispatcher.unmanaged_context() as *const RefitAndRefineMultithreadedContext);
         ctx.refit_and_mark_for_worker(worker_index, dispatcher);
     }
 }
@@ -471,8 +501,7 @@ fn refit_and_mark_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) 
 /// Worker function for refine phase.
 fn refine_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
     unsafe {
-        let ctx =
-            &*(dispatcher.unmanaged_context() as *const RefitAndRefineMultithreadedContext);
+        let ctx = &*(dispatcher.unmanaged_context() as *const RefitAndRefineMultithreadedContext);
         ctx.refine_for_worker(worker_index, dispatcher);
     }
 }

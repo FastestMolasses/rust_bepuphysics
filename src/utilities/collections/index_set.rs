@@ -39,7 +39,11 @@ impl IndexSet {
     }
 
     #[inline(always)]
-    fn internal_resize(flags: &mut Buffer<u64>, pool: &mut impl UnmanagedMemoryPool, capacity: i32) {
+    fn internal_resize(
+        flags: &mut Buffer<u64>,
+        pool: &mut impl UnmanagedMemoryPool,
+        capacity: i32,
+    ) {
         Self::internal_resize_for_bundle_count(flags, pool, Self::get_bundle_capacity(capacity));
     }
 

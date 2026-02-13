@@ -1,14 +1,14 @@
 use glam::{Quat, Vec3};
 
-use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::symmetric3x3::Symmetric3x3;
 
+use super::compound::CompoundChild;
+use super::shapes::Shapes;
+use super::typed_index::TypedIndex;
 use crate::physics::body_properties::{BodyInertia, RigidPose};
 use crate::physics::pose_integration::PoseIntegration;
-use super::compound::CompoundChild;
-use super::typed_index::TypedIndex;
-use super::shapes::Shapes;
 
 /// A child entry in the compound builder.
 pub struct CompoundBuilderChild {
@@ -83,12 +83,7 @@ impl CompoundBuilder {
     }
 
     /// Adds a new shape assuming infinite inertia (kinematic child).
-    pub fn add_for_kinematic(
-        &mut self,
-        shape: TypedIndex,
-        local_pose: &RigidPose,
-        weight: f32,
-    ) {
+    pub fn add_for_kinematic(&mut self, shape: TypedIndex, local_pose: &RigidPose, weight: f32) {
         self.children.push(CompoundBuilderChild {
             local_pose: *local_pose,
             shape_index: shape,
@@ -99,10 +94,7 @@ impl CompoundBuilder {
 
     /// Gets the contribution to an inertia tensor of a point mass at the given offset from the center of mass.
     #[inline(always)]
-    pub fn get_offset_inertia_contribution(
-        offset: Vec3,
-        mass: f32,
-    ) -> Symmetric3x3 {
+    pub fn get_offset_inertia_contribution(offset: Vec3, mass: f32) -> Symmetric3x3 {
         let inner_product = offset.dot(offset);
         Symmetric3x3 {
             xx: mass * (inner_product - offset.x * offset.x),
@@ -137,9 +129,7 @@ impl CompoundBuilder {
 
     /// Builds a buffer of compound children from the accumulated set for a dynamic compound.
     /// Computes a center of mass and recenters child shapes relative to it.
-    pub fn build_dynamic_compound_recentered(
-        &self,
-    ) -> (Buffer<CompoundChild>, BodyInertia, Vec3) {
+    pub fn build_dynamic_compound_recentered(&self) -> (Buffer<CompoundChild>, BodyInertia, Vec3) {
         let pool = unsafe { &mut *self.pool };
         let mut center = Vec3::ZERO;
         let mut total_weight = 0.0f32;
@@ -185,10 +175,7 @@ impl CompoundBuilder {
         for child in &self.children {
             total_weight += child.weight;
         }
-        debug_assert!(
-            total_weight > 0.0,
-            "The compound must have nonzero weight."
-        );
+        debug_assert!(total_weight > 0.0, "The compound must have nonzero weight.");
         let inverse_mass = 1.0 / total_weight;
 
         let mut children: Buffer<CompoundChild> = pool.take(self.children.len() as i32);
@@ -216,9 +203,7 @@ impl CompoundBuilder {
     }
 
     /// Builds a buffer of compound children for a kinematic compound with recentering.
-    pub fn build_kinematic_compound_recentered(
-        &self,
-    ) -> (Buffer<CompoundChild>, Vec3) {
+    pub fn build_kinematic_compound_recentered(&self) -> (Buffer<CompoundChild>, Vec3) {
         let pool = unsafe { &mut *self.pool };
         let mut center = Vec3::ZERO;
         let mut total_weight = 0.0f32;
@@ -307,8 +292,7 @@ impl CompoundBuilder {
         inverse_local_inertias: &[Symmetric3x3],
         child_masses: &[f32],
     ) -> (BodyInertia, Vec3) {
-        let (center_of_mass, inverse_mass) =
-            Self::compute_center_of_mass(children, child_masses);
+        let (center_of_mass, inverse_mass) = Self::compute_center_of_mass(children, child_masses);
         let mut summed_inertia = Symmetric3x3::default();
         for i in 0..children.len() as usize {
             children[i].local_position -= center_of_mass;
@@ -341,10 +325,9 @@ impl CompoundBuilder {
         for i in 0..len {
             let child = &children[i];
             if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
-                if let Some(inertia) = batch.try_compute_inertia(
-                    child.shape_index.index() as usize,
-                    child_masses[i],
-                ) {
+                if let Some(inertia) =
+                    batch.try_compute_inertia(child.shape_index.index() as usize, child_masses[i])
+                {
                     local_inverse_inertias[i] = inertia.inverse_inertia_tensor;
                 }
             }
@@ -364,10 +347,9 @@ impl CompoundBuilder {
         for i in 0..len {
             let child = &children[i];
             if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
-                if let Some(inertia) = batch.try_compute_inertia(
-                    child.shape_index.index() as usize,
-                    child_masses[i],
-                ) {
+                if let Some(inertia) =
+                    batch.try_compute_inertia(child.shape_index.index() as usize, child_masses[i])
+                {
                     local_inverse_inertias[i] = inertia.inverse_inertia_tensor;
                 }
             }

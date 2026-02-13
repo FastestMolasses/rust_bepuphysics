@@ -1,21 +1,21 @@
 use glam::{Quat, Vec3};
 use std::mem::size_of;
 
+use crate::utilities::for_each_ref::IBreakableForEach;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::for_each_ref::IBreakableForEach;
 
 use super::mesh_inertia_helper::{ITriangleSource, MeshInertiaHelper};
-use crate::physics::collision_detection::ray_batchers::RayData;
-use super::shape::{IShape, IDisposableShape, IHomogeneousCompoundShape};
-use crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler;
+use super::shape::{IDisposableShape, IHomogeneousCompoundShape, IShape};
 use super::shapes::Shapes;
-use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use super::triangle::Triangle;
 use super::triangle::TriangleWide;
+use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
+use crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler;
+use crate::physics::collision_detection::ray_batchers::RayData;
 
 // The IRayLeafTester trait uses the RayData type from ray_batcher, not collidables::ray.
 use crate::physics::trees::ray_batcher::RayData as TreeRayData;
@@ -118,8 +118,13 @@ impl<THandler: IShapeRayHitHandler> IRayLeafTester for HitLeafTester<THandler> {
             let mut world_normal = Vec3::ZERO;
             Matrix3x3::transform(&scaled_normal, &self.orientation, &mut world_normal);
             world_normal = world_normal.normalize();
-            self.hit_handler
-                .on_ray_hit(&self.original_ray, &mut *maximum_t, t, world_normal, leaf_index);
+            self.hit_handler.on_ray_hit(
+                &self.original_ray,
+                &mut *maximum_t,
+                t,
+                world_normal,
+                leaf_index,
+            );
         }
     }
 }
@@ -255,11 +260,7 @@ impl Mesh {
     }
 
     /// Creates a mesh shape with an acceleration structure built using the binned builder.
-    pub unsafe fn new(
-        triangles: Buffer<Triangle>,
-        scale: Vec3,
-        pool: &mut BufferPool,
-    ) -> Self {
+    pub unsafe fn new(triangles: Buffer<Triangle>, scale: Vec3, pool: &mut BufferPool) -> Self {
         let tri_len = triangles.len();
         let mut mesh = Self::create_without_tree_build(triangles, scale, pool);
         let mut subtrees: Buffer<NodeChild> = pool.take_at_least(tri_len);
@@ -267,14 +268,30 @@ impl Mesh {
             std::slice::from_raw_parts(mesh.triangles.as_ptr(), tri_len as usize),
             std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), tri_len as usize),
         );
-        mesh.tree.binned_build(subtrees, Some(pool as *mut BufferPool), None, None, 0, -1, -1, 16, 64, 1.0 / 16.0, 64, false);
+        mesh.tree.binned_build(
+            subtrees,
+            Some(pool as *mut BufferPool),
+            None,
+            None,
+            0,
+            -1,
+            -1,
+            16,
+            64,
+            1.0 / 16.0,
+            64,
+            false,
+        );
         pool.return_buffer(&mut subtrees);
         mesh
     }
 
     /// Loads a mesh from data stored in a byte buffer previously stored by the `serialize` function.
     pub unsafe fn from_bytes(data: &[u8], pool: &mut BufferPool) -> Self {
-        assert!(data.len() >= 16, "Data is not large enough to contain a header.");
+        assert!(
+            data.len() >= 16,
+            "Data is not large enough to contain a header."
+        );
 
         let scale = *(data.as_ptr() as *const Vec3);
         let triangle_count = *(data.as_ptr().add(12) as *const i32);
@@ -325,8 +342,7 @@ impl Mesh {
             data.as_mut_ptr().add(16),
             triangle_byte_count,
         );
-        self.tree
-            .serialize(&mut data[16 + triangle_byte_count..]);
+        self.tree.serialize(&mut data[16 + triangle_byte_count..]);
     }
 
     /// Gets the number of children (triangles) in the mesh.
@@ -417,8 +433,13 @@ impl Mesh {
         Matrix3x3::transform(&ray.direction, &inverse_orientation, &mut local_direction);
         local_origin *= self.inverse_scale;
         local_direction *= self.inverse_scale;
-        self.tree
-            .ray_cast(local_origin, local_direction, maximum_t, &mut leaf_tester, 0);
+        self.tree.ray_cast(
+            local_origin,
+            local_direction,
+            maximum_t,
+            &mut leaf_tester,
+            0,
+        );
         // The leaf tester could have mutated the hit handler; copy it back over.
         std::ptr::write(hit_handler, leaf_tester.hit_handler);
     }
@@ -496,7 +517,11 @@ impl Mesh {
 
     /// Computes the inertia of the mesh around its volumetric center and recenters the points
     /// of the mesh around it. Assumes the mesh is closed and should be treated as solid.
-    pub fn compute_closed_inertia_recentered(&mut self, mass: f32, center: &mut Vec3) -> BodyInertia {
+    pub fn compute_closed_inertia_recentered(
+        &mut self,
+        mass: f32,
+        center: &mut Vec3,
+    ) -> BodyInertia {
         let mut triangle_source = MeshTriangleSource::new(self);
         let (_volume, inertia_tensor, com) =
             MeshInertiaHelper::compute_closed_inertia_with_center(&mut triangle_source, mass);
@@ -564,8 +589,7 @@ impl Mesh {
     /// Assumes the mesh is open and should be treated as a triangle soup.
     pub fn compute_open_inertia(&self, mass: f32) -> BodyInertia {
         let mut triangle_source = MeshTriangleSource::new(self);
-        let inertia_tensor =
-            MeshInertiaHelper::compute_open_inertia(&mut triangle_source, mass);
+        let inertia_tensor = MeshInertiaHelper::compute_open_inertia(&mut triangle_source, mass);
         let mut inverse_inertia_tensor = Symmetric3x3::default();
         Symmetric3x3::invert(&inertia_tensor, &mut inverse_inertia_tensor);
         let mut inertia = BodyInertia::default();
@@ -631,7 +655,12 @@ impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
         self.get_local_child_wide(child_index, target);
     }
 
-    fn get_posed_local_child(&self, child_index: i32, child_data: &mut Triangle, child_pose: &mut RigidPose) {
+    fn get_posed_local_child(
+        &self,
+        child_index: i32,
+        child_data: &mut Triangle,
+        child_pose: &mut RigidPose,
+    ) {
         self.get_posed_local_child(child_index, child_data, child_pose);
     }
 
@@ -654,7 +683,8 @@ impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
             }
         }
         let mut adapter = OverlapAdapter(overlaps);
-        self.tree.get_overlaps_minmax(*local_min, *local_max, &mut adapter);
+        self.tree
+            .get_overlaps_minmax(*local_min, *local_max, &mut adapter);
     }
 }
 
@@ -690,7 +720,10 @@ impl IBoundsQueryableCompound for Mesh {
             let scaled_min = mesh.inverse_scale * pair.min;
             let scaled_max = mesh.inverse_scale * pair.max;
             let overlaps_for_pair = overlaps.get_overlaps_for_pair(i);
-            let mut adapter = MeshOverlapAdapter { overlaps: overlaps_for_pair, pool };
+            let mut adapter = MeshOverlapAdapter {
+                overlaps: overlaps_for_pair,
+                pool,
+            };
             // Take a min/max to compensate for negative scales.
             mesh.tree.get_overlaps_minmax(
                 scaled_min.min(scaled_max),

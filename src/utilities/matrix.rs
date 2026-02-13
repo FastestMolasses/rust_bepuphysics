@@ -1,4 +1,4 @@
-use crate::{out, out_unsafe, utilities::matrix3x3::Matrix3x3};
+use crate::{out, utilities::matrix3x3::Matrix3x3};
 use glam::{Quat, Vec3, Vec4};
 use std::ops::Mul;
 
@@ -437,12 +437,7 @@ impl Matrix {
 
     /// Creates a view matrix pointing in a direction with a given up vector, into the provided matrix.
     #[inline(always)]
-    pub fn create_view(
-        position: Vec3,
-        forward: Vec3,
-        up_vector: Vec3,
-        view_matrix: &mut Self,
-    ) {
+    pub fn create_view(position: Vec3, forward: Vec3, up_vector: Vec3, view_matrix: &mut Self) {
         let length = forward.length();
         let z = forward / -length;
         let x = up_vector.cross(z).normalize();
@@ -462,12 +457,7 @@ impl Matrix {
 
     /// Creates a view matrix pointing from a position to a target with the given up vector, into the provided matrix.
     #[inline(always)]
-    pub fn create_look_at(
-        position: Vec3,
-        target: Vec3,
-        up_vector: Vec3,
-        view_matrix: &mut Self,
-    ) {
+    pub fn create_look_at(position: Vec3, target: Vec3, up_vector: Vec3, view_matrix: &mut Self) {
         let forward = target - position;
         Self::create_view(position, forward, up_vector, view_matrix);
     }

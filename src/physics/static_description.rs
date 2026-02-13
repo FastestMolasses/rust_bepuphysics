@@ -55,11 +55,7 @@ impl StaticDescription {
 
     /// Builds a new static description from position, orientation, and shape with `Discrete` continuity.
     #[inline(always)]
-    pub fn from_pose_parts_discrete(
-        position: Vec3,
-        orientation: Quat,
-        shape: TypedIndex,
-    ) -> Self {
+    pub fn from_pose_parts_discrete(position: Vec3, orientation: Quat, shape: TypedIndex) -> Self {
         Self {
             pose: RigidPose::new(position, orientation),
             shape,

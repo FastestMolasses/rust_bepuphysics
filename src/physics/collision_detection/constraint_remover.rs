@@ -93,10 +93,14 @@ impl RemovalCache {
         if index >= 0 {
             unsafe {
                 let slot = &mut *self.removals_for_type_batches.get_mut(index);
-                slot.per_body_removal_targets
-                    .ensure_capacity(slot.per_body_removal_targets.count + per_body_removal_count, pool);
-                slot.constraint_handles_to_remove
-                    .ensure_capacity(slot.constraint_handles_to_remove.count + constraint_handle_count, pool);
+                slot.per_body_removal_targets.ensure_capacity(
+                    slot.per_body_removal_targets.count + per_body_removal_count,
+                    pool,
+                );
+                slot.constraint_handles_to_remove.ensure_capacity(
+                    slot.constraint_handles_to_remove.count + constraint_handle_count,
+                    pool,
+                );
             }
             return index;
         }
@@ -170,9 +174,13 @@ impl WorkerCache {
         let mut type_batch_index = TypeBatchIndex::default();
         type_batch_index.batch = constraint.batch_index as i16;
         let constraint_batch = solver.active_set().batches.get(constraint.batch_index);
-        type_batch_index.type_batch = *constraint_batch.type_index_to_type_batch_index.get(constraint.type_id) as i16;
+        type_batch_index.type_batch = *constraint_batch
+            .type_index_to_type_batch_index
+            .get(constraint.type_id) as i16;
 
-        let type_processor = solver.type_processors[constraint.type_id as usize].as_ref().unwrap();
+        let type_processor = solver.type_processors[constraint.type_id as usize]
+            .as_ref()
+            .unwrap();
         let bodies_per_constraint = type_processor.bodies_per_constraint as i32;
 
         let pool = &mut *self.pool;
@@ -194,9 +202,14 @@ impl WorkerCache {
         // Enumerate connected body references and push PerBodyRemovalTargets.
         // We do this here rather than during flush because removals from type batches
         // make enumerating connected body indices a race condition there.
-        let type_batch = constraint_batch.type_batches.get(type_batch_index.type_batch as i32);
+        let type_batch = constraint_batch
+            .type_batches
+            .get(type_batch_index.type_batch as i32);
         let mut encoded_body_indices = [0i32; 8]; // max bodies per constraint
-        debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
+        debug_assert!(
+            bodies_per_constraint <= 8,
+            "Bodies per constraint exceeds stack buffer size"
+        );
         let mut enumerator = PassthroughReferenceCollector::new(encoded_body_indices.as_mut_ptr());
         solver.enumerate_connected_raw_body_references_from_type_batch(
             type_batch,
@@ -206,12 +219,20 @@ impl WorkerCache {
 
         for i in 0..bodies_per_constraint {
             let encoded = encoded_body_indices[i as usize];
-            type_batch_removals.per_body_removal_targets.add_unsafely(PerBodyRemovalTarget {
-                encoded_body_index: encoded,
-                constraint_handle,
-                batch_index: type_batch_index.batch as i32,
-                body_handle: BodyHandle(bodies.active_set().index_to_handle.get(encoded & Bodies::BODY_REFERENCE_MASK).0),
-            });
+            type_batch_removals
+                .per_body_removal_targets
+                .add_unsafely(PerBodyRemovalTarget {
+                    encoded_body_index: encoded,
+                    constraint_handle,
+                    batch_index: type_batch_index.batch as i32,
+                    body_handle: BodyHandle(
+                        bodies
+                            .active_set()
+                            .index_to_handle
+                            .get(encoded & Bodies::BODY_REFERENCE_MASK)
+                            .0,
+                    ),
+                });
         }
     }
 
@@ -292,12 +313,18 @@ impl ConstraintRemover {
         if let Some(d) = dispatcher {
             for i in 0..self.thread_count {
                 // Use per-thread worker pools to avoid contention.
-                self.worker_caches
-                    .push(WorkerCache::new(d.worker_pool_ptr(i), batch_capacity, capacity_per_batch));
+                self.worker_caches.push(WorkerCache::new(
+                    d.worker_pool_ptr(i),
+                    batch_capacity,
+                    capacity_per_batch,
+                ));
             }
         } else {
-            self.worker_caches
-                .push(WorkerCache::new(self.pool, batch_capacity, capacity_per_batch));
+            self.worker_caches.push(WorkerCache::new(
+                self.pool,
+                batch_capacity,
+                capacity_per_batch,
+            ));
         }
 
         // Allocate the fallback deallocation list if needed.
@@ -322,8 +349,7 @@ impl ConstraintRemover {
                 unsafe {
                     let type_batch_index = *cache.removals.type_batches.get(j);
                     let worker_removals = &*cache.removals.removals_for_type_batches.get(j);
-                    removed_constraint_count +=
-                        worker_removals.constraint_handles_to_remove.count;
+                    removed_constraint_count += worker_removals.constraint_handles_to_remove.count;
                     let batch_index = batches.allocate_space_for_targets(
                         type_batch_index,
                         worker_removals.constraint_handles_to_remove.count,
@@ -361,13 +387,16 @@ impl ConstraintRemover {
                         .constraint_handles_to_remove
                         .as_mut_slice()
                         .sort_unstable_by(|a, b| a.0.cmp(&b.0));
-                    removals.per_body_removal_targets.as_mut_slice().sort_unstable_by(|a, b| {
-                        let a_key =
-                            ((a.constraint_handle.0 as i64) << 32) | (a.body_handle.0 as i64);
-                        let b_key =
-                            ((b.constraint_handle.0 as i64) << 32) | (b.body_handle.0 as i64);
-                        a_key.cmp(&b_key)
-                    });
+                    removals
+                        .per_body_removal_targets
+                        .as_mut_slice()
+                        .sort_unstable_by(|a, b| {
+                            let a_key =
+                                ((a.constraint_handle.0 as i64) << 32) | (a.body_handle.0 as i64);
+                            let b_key =
+                                ((b.constraint_handle.0 as i64) << 32) | (b.body_handle.0 as i64);
+                            a_key.cmp(&b_key)
+                        });
                 }
             }
             // Sort the batches by type batch index (deterministic ordering).
@@ -384,9 +413,7 @@ impl ConstraintRemover {
                     paired.iter().map(|(tb, _)| *tb).collect();
                 let new_removals: Vec<RemovalsForTypeBatch> = paired
                     .iter()
-                    .map(|(_, old_idx)| {
-                        *batches.removals_for_type_batches.get(*old_idx as i32)
-                    })
+                    .map(|(_, old_idx)| *batches.removals_for_type_batches.get(*old_idx as i32))
                     .collect();
                 for i in 0..count {
                     *batches.type_batches.get_mut(i as i32) = new_type_batches[i];
@@ -422,8 +449,8 @@ impl ConstraintRemover {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
                 unsafe {
-                    let batch_handles = &(*batches.removals_for_type_batches.get(i))
-                        .constraint_handles_to_remove;
+                    let batch_handles =
+                        &(*batches.removals_for_type_batches.get(i)).constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
                         solver.handle_pool.return_unsafely(batch_handles.get(j).0);
@@ -438,8 +465,8 @@ impl ConstraintRemover {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
                 unsafe {
-                    let removals = &(*batches.removals_for_type_batches.get(i))
-                        .per_body_removal_targets;
+                    let removals =
+                        &(*batches.removals_for_type_batches.get(i)).per_body_removal_targets;
                     let bodies = &mut *self.bodies;
                     let solver = &mut *self.solver;
                     for j in 0..removals.count {
@@ -448,10 +475,14 @@ impl ConstraintRemover {
                             target.encoded_body_index & Bodies::BODY_REFERENCE_MASK,
                             target.constraint_handle,
                         );
-                        if was_last && (target.encoded_body_index & Bodies::KINEMATIC_MASK as i32) != 0 {
+                        if was_last
+                            && (target.encoded_body_index & Bodies::KINEMATIC_MASK as i32) != 0
+                        {
                             // This is a kinematic with no remaining constraints. Remove from constrained kinematic set.
                             let pool = &mut *self.pool;
-                            solver.constrained_kinematic_handles.fast_remove(&target.body_handle.0);
+                            solver
+                                .constrained_kinematic_handles
+                                .fast_remove(&target.body_handle.0);
                         }
                     }
                 }
@@ -465,8 +496,13 @@ impl ConstraintRemover {
             let batches = self.batches.as_ref().unwrap();
             let batch = *batches.type_batches.get(index);
             let solver_ptr = self.solver;
-            let constraint_batch = (*solver_ptr).active_set_mut().batches.get_mut(batch.batch as i32);
-            let type_batch = constraint_batch.type_batches.get_mut(batch.type_batch as i32);
+            let constraint_batch = (*solver_ptr)
+                .active_set_mut()
+                .batches
+                .get_mut(batch.batch as i32);
+            let type_batch = constraint_batch
+                .type_batches
+                .get_mut(batch.type_batch as i32);
             let type_processor = (&(*solver_ptr).type_processors)[type_batch.type_id as usize]
                 .as_ref()
                 .unwrap();
@@ -497,8 +533,8 @@ impl ConstraintRemover {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
                 unsafe {
-                    let batch_handles = &(*batches.removals_for_type_batches.get(i))
-                        .constraint_handles_to_remove;
+                    let batch_handles =
+                        &(*batches.removals_for_type_batches.get(i)).constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
                         (*solver.handle_to_constraint.get_mut(batch_handles.get(j).0)).set_index =
@@ -518,9 +554,15 @@ impl ConstraintRemover {
     ) {
         let solver = &mut *self.solver;
         let pool = &mut *self.pool;
-        solver.try_remove_dynamic_body_from_fallback(body_handle, body_index, &mut self.allocation_ids_to_free);
+        solver.try_remove_dynamic_body_from_fallback(
+            body_handle,
+            body_index,
+            &mut self.allocation_ids_to_free,
+        );
         // Note that we don't check kinematicity here. If it's dynamic, that's fine, this won't do anything.
-        solver.constrained_kinematic_handles.fast_remove(&body_handle.0);
+        solver
+            .constrained_kinematic_handles
+            .fast_remove(&body_handle.0);
     }
 
     /// Removes constraints from batch referenced handles (non-fallback batches).
@@ -535,8 +577,8 @@ impl ConstraintRemover {
                         // Fallback batch is handled separately.
                         continue;
                     }
-                    let removals = &(*batches.removals_for_type_batches.get(i))
-                        .per_body_removal_targets;
+                    let removals =
+                        &(*batches.removals_for_type_batches.get(i)).per_body_removal_targets;
                     for j in 0..removals.count {
                         let target = removals.get(j);
                         solver
@@ -561,8 +603,8 @@ impl ConstraintRemover {
                     if type_batch_idx.batch as i32 != fallback_threshold {
                         continue;
                     }
-                    let removals = &(*batches.removals_for_type_batches.get(i))
-                        .per_body_removal_targets;
+                    let removals =
+                        &(*batches.removals_for_type_batches.get(i)).per_body_removal_targets;
                     for j in 0..removals.count {
                         let target = removals.get(j);
                         let encoded = target.encoded_body_index & Bodies::BODY_REFERENCE_MASK;
@@ -645,8 +687,11 @@ impl ConstraintRemover {
         unsafe {
             let solver = &*self.solver;
             let bodies = &*self.bodies;
-            self.worker_caches[worker_index as usize]
-                .enqueue_for_removal(constraint_handle, solver, bodies);
+            self.worker_caches[worker_index as usize].enqueue_for_removal(
+                constraint_handle,
+                solver,
+                bodies,
+            );
         }
     }
 }

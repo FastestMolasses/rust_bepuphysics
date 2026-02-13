@@ -61,8 +61,9 @@ impl BoxPairTester {
             let n_bx = local_normal_ay * r_bx.y + local_normal_az * r_bx.z;
             let n_by = local_normal_ay * r_by.y + local_normal_az * r_by.z;
             let n_bz = local_normal_ay * r_bz.y + local_normal_az * r_bz.z;
-            let extreme_b =
-                n_bx.abs() * *half_width_b + n_by.abs() * *half_height_b + n_bz.abs() * *half_length_b;
+            let extreme_b = n_bx.abs() * *half_width_b
+                + n_by.abs() * *half_height_b
+                + n_bz.abs() * *half_length_b;
             depth = extreme_a + extreme_b
                 - (*offset_by * local_normal_ay + *offset_bz * local_normal_az).abs();
             depth = length.simd_lt(eps).select(max_val, depth);
@@ -77,8 +78,9 @@ impl BoxPairTester {
             let n_bx = nx * r_bx.x + nz * r_bx.z;
             let n_by = nx * r_by.x + nz * r_by.z;
             let n_bz = nx * r_bz.x + nz * r_bz.z;
-            let extreme_b =
-                n_bx.abs() * *half_width_b + n_by.abs() * *half_height_b + n_bz.abs() * *half_length_b;
+            let extreme_b = n_bx.abs() * *half_width_b
+                + n_by.abs() * *half_height_b
+                + n_bz.abs() * *half_length_b;
             let d = extreme_a + extreme_b - (*offset_bx * nx + *offset_bz * nz).abs();
             let d = length.simd_lt(eps).select(max_val, d);
             let use_y = d.simd_lt(depth);
@@ -97,8 +99,9 @@ impl BoxPairTester {
             let n_bx = nx * r_bx.x + ny * r_bx.y;
             let n_by = nx * r_by.x + ny * r_by.y;
             let n_bz = nx * r_bz.x + ny * r_bz.y;
-            let extreme_b =
-                n_bx.abs() * *half_width_b + n_by.abs() * *half_height_b + n_bz.abs() * *half_length_b;
+            let extreme_b = n_bx.abs() * *half_width_b
+                + n_by.abs() * *half_height_b
+                + n_bz.abs() * *half_length_b;
             let d = extreme_a + extreme_b - (*offset_bx * nx + *offset_by * ny).abs();
             let d = length.simd_lt(eps).select(max_val, d);
             let use_z = d.simd_lt(depth);
@@ -158,12 +161,10 @@ impl BoxPairTester {
         Vector3Wide::dot(&vertex_offset_on_b_face, face_tangent_by, &mut candidate.y);
         candidate.feature_id = *feature_id;
 
-        let contained = candidate.x.abs().simd_le(*half_span_bx)
-            & candidate.y.abs().simd_le(*half_span_by);
-        let below_buffer_capacity =
-            (*candidate_count).simd_lt(Vector::<i32>::splat(8));
-        let contact_exists =
-            *allow_contacts & contained.to_int() & below_buffer_capacity.to_int();
+        let contained =
+            candidate.x.abs().simd_le(*half_span_bx) & candidate.y.abs().simd_le(*half_span_by);
+        let below_buffer_capacity = (*candidate_count).simd_lt(Vector::<i32>::splat(8));
+        let contact_exists = *allow_contacts & contained.to_int() & below_buffer_capacity.to_int();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -205,24 +206,68 @@ impl BoxPairTester {
                 Vector::<f32>::splat(f32::MAX),
             );
         Self::add_box_a_vertex(
-            v00, f00, face_normal_b, contact_normal, &inverse_contact_normal_dot_face_normal_b,
-            face_center_b, face_tangent_bx, face_tangent_by, half_span_bx, half_span_by,
-            candidates, candidate_count, pair_count, allow_contacts,
+            v00,
+            f00,
+            face_normal_b,
+            contact_normal,
+            &inverse_contact_normal_dot_face_normal_b,
+            face_center_b,
+            face_tangent_bx,
+            face_tangent_by,
+            half_span_bx,
+            half_span_by,
+            candidates,
+            candidate_count,
+            pair_count,
+            allow_contacts,
         );
         Self::add_box_a_vertex(
-            v01, f01, face_normal_b, contact_normal, &inverse_contact_normal_dot_face_normal_b,
-            face_center_b, face_tangent_bx, face_tangent_by, half_span_bx, half_span_by,
-            candidates, candidate_count, pair_count, allow_contacts,
+            v01,
+            f01,
+            face_normal_b,
+            contact_normal,
+            &inverse_contact_normal_dot_face_normal_b,
+            face_center_b,
+            face_tangent_bx,
+            face_tangent_by,
+            half_span_bx,
+            half_span_by,
+            candidates,
+            candidate_count,
+            pair_count,
+            allow_contacts,
         );
         Self::add_box_a_vertex(
-            v10, f10, face_normal_b, contact_normal, &inverse_contact_normal_dot_face_normal_b,
-            face_center_b, face_tangent_bx, face_tangent_by, half_span_bx, half_span_by,
-            candidates, candidate_count, pair_count, allow_contacts,
+            v10,
+            f10,
+            face_normal_b,
+            contact_normal,
+            &inverse_contact_normal_dot_face_normal_b,
+            face_center_b,
+            face_tangent_bx,
+            face_tangent_by,
+            half_span_bx,
+            half_span_by,
+            candidates,
+            candidate_count,
+            pair_count,
+            allow_contacts,
         );
         Self::add_box_a_vertex(
-            v11, f11, face_normal_b, contact_normal, &inverse_contact_normal_dot_face_normal_b,
-            face_center_b, face_tangent_bx, face_tangent_by, half_span_bx, half_span_by,
-            candidates, candidate_count, pair_count, allow_contacts,
+            v11,
+            f11,
+            face_normal_b,
+            contact_normal,
+            &inverse_contact_normal_dot_face_normal_b,
+            face_center_b,
+            face_tangent_bx,
+            face_tangent_by,
+            half_span_bx,
+            half_span_by,
+            candidates,
+            candidate_count,
+            pair_count,
+            allow_contacts,
         );
     }
 
@@ -240,20 +285,33 @@ impl BoxPairTester {
         let mut distance01 = Vector::<f32>::splat(0.0);
         let mut distance10 = Vector::<f32>::splat(0.0);
         let mut distance11 = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(edge_start_b0_to_edge_anchor_a00, box_edge_plane_normal, &mut distance00);
-        Vector3Wide::dot(edge_start_b0_to_edge_anchor_a11, box_edge_plane_normal, &mut distance01);
-        Vector3Wide::dot(edge_start_b1_to_edge_anchor_a00, box_edge_plane_normal, &mut distance10);
-        Vector3Wide::dot(edge_start_b1_to_edge_anchor_a11, box_edge_plane_normal, &mut distance11);
+        Vector3Wide::dot(
+            edge_start_b0_to_edge_anchor_a00,
+            box_edge_plane_normal,
+            &mut distance00,
+        );
+        Vector3Wide::dot(
+            edge_start_b0_to_edge_anchor_a11,
+            box_edge_plane_normal,
+            &mut distance01,
+        );
+        Vector3Wide::dot(
+            edge_start_b1_to_edge_anchor_a00,
+            box_edge_plane_normal,
+            &mut distance10,
+        );
+        Vector3Wide::dot(
+            edge_start_b1_to_edge_anchor_a11,
+            box_edge_plane_normal,
+            &mut distance11,
+        );
         let mut velocity = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(box_edge_plane_normal, edge_direction, &mut velocity);
         let inverse_velocity = Vector::<f32>::splat(1.0) / velocity;
 
-        let edge_start_is_inside0 =
-            (distance00 * distance01).simd_le(Vector::<f32>::splat(0.0));
-        let edge_start_is_inside1 =
-            (distance10 * distance11).simd_le(Vector::<f32>::splat(0.0));
-        let dont_use_fallback =
-            velocity.abs().simd_gt(Vector::<f32>::splat(1e-15));
+        let edge_start_is_inside0 = (distance00 * distance01).simd_le(Vector::<f32>::splat(0.0));
+        let edge_start_is_inside1 = (distance10 * distance11).simd_le(Vector::<f32>::splat(0.0));
+        let dont_use_fallback = velocity.abs().simd_gt(Vector::<f32>::splat(1e-15));
         let t00 = distance00 * inverse_velocity;
         let t01 = distance01 * inverse_velocity;
         let t10 = distance10 * inverse_velocity;
@@ -344,9 +402,8 @@ impl BoxPairTester {
             pair_count,
         );
 
-        let max_exists = *allow_contacts
-            & max.simd_ge(*min).to_int()
-            & max.abs().simd_le(*half_span_b).to_int();
+        let max_exists =
+            *allow_contacts & max.simd_ge(*min).to_int() & max.abs().simd_le(*half_span_b).to_int();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -380,9 +437,17 @@ impl BoxPairTester {
     ) {
         // Compute edge plane normals perpendicular to the contact normal
         let mut edge_plane_normal_ax = Vector3Wide::default();
-        Vector3Wide::cross_without_overlap(face_tangent_ay, contact_normal, &mut edge_plane_normal_ax);
+        Vector3Wide::cross_without_overlap(
+            face_tangent_ay,
+            contact_normal,
+            &mut edge_plane_normal_ax,
+        );
         let mut edge_plane_normal_ay = Vector3Wide::default();
-        Vector3Wide::cross_without_overlap(face_tangent_ax, contact_normal, &mut edge_plane_normal_ay);
+        Vector3Wide::cross_without_overlap(
+            face_tangent_ax,
+            contact_normal,
+            &mut edge_plane_normal_ay,
+        );
 
         let edge_offset_bx = Vector3Wide::scale(face_tangent_by, half_span_by);
         let edge_offset_by = Vector3Wide::scale(face_tangent_bx, half_span_bx);
@@ -390,15 +455,27 @@ impl BoxPairTester {
         let edge_start_bx1 = *face_center_b + edge_offset_bx;
         let (min_x0, max_x0, unflipped_min_x1, unflipped_max_x1) =
             Self::clip_box_b_edges_against_box_a_face(
-                &edge_start_bx0, &edge_start_bx1, face_tangent_bx, half_span_bx,
-                vertex_a00, vertex_a11, &edge_plane_normal_ax, &edge_plane_normal_ay,
+                &edge_start_bx0,
+                &edge_start_bx1,
+                face_tangent_bx,
+                half_span_bx,
+                vertex_a00,
+                vertex_a11,
+                &edge_plane_normal_ax,
+                &edge_plane_normal_ay,
             );
         let edge_start_by0 = *face_center_b - edge_offset_by;
         let edge_start_by1 = *face_center_b + edge_offset_by;
         let (unflipped_min_y0, unflipped_max_y0, min_y1, max_y1) =
             Self::clip_box_b_edges_against_box_a_face(
-                &edge_start_by0, &edge_start_by1, face_tangent_by, half_span_by,
-                vertex_a00, vertex_a11, &edge_plane_normal_ax, &edge_plane_normal_ay,
+                &edge_start_by0,
+                &edge_start_by1,
+                face_tangent_by,
+                half_span_by,
+                vertex_a00,
+                vertex_a11,
+                &edge_plane_normal_ax,
+                &edge_plane_normal_ay,
             );
 
         // Flip intervals to ensure consistent winding
@@ -420,8 +497,16 @@ impl BoxPairTester {
         max_c.x = max_x0;
         max_c.y = min_c.y;
         Self::add_contacts_for_edge(
-            &min_x0, &min_c, &max_x0, &max_c, half_span_bx, &epsilon,
-            candidates, candidate_count, allow_contacts, pair_count,
+            &min_x0,
+            &min_c,
+            &max_x0,
+            &max_c,
+            half_span_bx,
+            &epsilon,
+            candidates,
+            candidate_count,
+            allow_contacts,
+            pair_count,
         );
 
         // Y1
@@ -432,8 +517,16 @@ impl BoxPairTester {
         max_c.x = *half_span_bx;
         max_c.y = max_y1;
         Self::add_contacts_for_edge(
-            &min_y1, &min_c, &max_y1, &max_c, half_span_by, &epsilon,
-            candidates, candidate_count, allow_contacts, pair_count,
+            &min_y1,
+            &min_c,
+            &max_y1,
+            &max_c,
+            half_span_by,
+            &epsilon,
+            candidates,
+            candidate_count,
+            allow_contacts,
+            pair_count,
         );
 
         // X1
@@ -444,8 +537,16 @@ impl BoxPairTester {
         max_c.x = unflipped_min_x1;
         max_c.y = *half_span_by;
         Self::add_contacts_for_edge(
-            &min_x1, &min_c, &max_x1, &max_c, half_span_bx, &epsilon,
-            candidates, candidate_count, allow_contacts, pair_count,
+            &min_x1,
+            &min_c,
+            &max_x1,
+            &max_c,
+            half_span_bx,
+            &epsilon,
+            candidates,
+            candidate_count,
+            allow_contacts,
+            pair_count,
         );
 
         // Y0
@@ -456,8 +557,16 @@ impl BoxPairTester {
         max_c.x = -*half_span_bx;
         max_c.y = unflipped_min_y0;
         Self::add_contacts_for_edge(
-            &min_y0, &min_c, &max_y0, &max_c, half_span_by, &epsilon,
-            candidates, candidate_count, allow_contacts, pair_count,
+            &min_y0,
+            &min_c,
+            &max_y0,
+            &max_c,
+            half_span_by,
+            &epsilon,
+            candidates,
+            candidate_count,
+            allow_contacts,
+            pair_count,
         );
     }
 
@@ -499,17 +608,28 @@ impl BoxPairTester {
             Matrix3x3Wide::multiply_by_transpose_without_overlap(&world_rb, &world_ra, &mut r_b);
             let mut local_offset_b = Vector3Wide::default();
             Matrix3x3Wide::transform_by_transposed_without_overlap(
-                offset_b, &world_ra, &mut local_offset_b,
+                offset_b,
+                &world_ra,
+                &mut local_offset_b,
             );
 
             let mut local_normal = Vector3Wide::default();
 
             // Test edge-edge axes: b.X
-            let (mut depth, mut ln_x, mut ln_y, mut ln_z) = Self::test_edge_edge(
-                &a.half_width, &a.half_height, &a.half_length,
-                &b.half_width, &b.half_height, &b.half_length,
-                &local_offset_b.x, &local_offset_b.y, &local_offset_b.z,
-                &r_b.x, &r_b.y, &r_b.z, &r_b.x,
+            let (mut depth, ln_x, ln_y, ln_z) = Self::test_edge_edge(
+                &a.half_width,
+                &a.half_height,
+                &a.half_length,
+                &b.half_width,
+                &b.half_height,
+                &b.half_length,
+                &local_offset_b.x,
+                &local_offset_b.y,
+                &local_offset_b.z,
+                &r_b.x,
+                &r_b.y,
+                &r_b.z,
+                &r_b.x,
             );
             local_normal.x = ln_x;
             local_normal.y = ln_y;
@@ -517,21 +637,53 @@ impl BoxPairTester {
 
             // b.Y
             let (ey_depth, ey_nx, ey_ny, ey_nz) = Self::test_edge_edge(
-                &a.half_width, &a.half_height, &a.half_length,
-                &b.half_width, &b.half_height, &b.half_length,
-                &local_offset_b.x, &local_offset_b.y, &local_offset_b.z,
-                &r_b.x, &r_b.y, &r_b.z, &r_b.y,
+                &a.half_width,
+                &a.half_height,
+                &a.half_length,
+                &b.half_width,
+                &b.half_height,
+                &b.half_length,
+                &local_offset_b.x,
+                &local_offset_b.y,
+                &local_offset_b.z,
+                &r_b.x,
+                &r_b.y,
+                &r_b.z,
+                &r_b.y,
             );
-            Self::select(&mut depth, &mut local_normal, &ey_depth, &ey_nx, &ey_ny, &ey_nz);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &ey_depth,
+                &ey_nx,
+                &ey_ny,
+                &ey_nz,
+            );
 
             // b.Z
             let (ez_depth, ez_nx, ez_ny, ez_nz) = Self::test_edge_edge(
-                &a.half_width, &a.half_height, &a.half_length,
-                &b.half_width, &b.half_height, &b.half_length,
-                &local_offset_b.x, &local_offset_b.y, &local_offset_b.z,
-                &r_b.x, &r_b.y, &r_b.z, &r_b.z,
+                &a.half_width,
+                &a.half_height,
+                &a.half_length,
+                &b.half_width,
+                &b.half_height,
+                &b.half_length,
+                &local_offset_b.x,
+                &local_offset_b.y,
+                &local_offset_b.z,
+                &r_b.x,
+                &r_b.y,
+                &r_b.z,
+                &r_b.z,
             );
-            Self::select(&mut depth, &mut local_normal, &ez_depth, &ez_nx, &ez_ny, &ez_nz);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &ez_depth,
+                &ez_nx,
+                &ez_ny,
+                &ez_nz,
+            );
 
             // Test face normals of A
             let abs_rbx = r_b.x.abs();
@@ -540,46 +692,93 @@ impl BoxPairTester {
             let one = Vector::<f32>::splat(1.0);
             let zero_f = Vector::<f32>::splat(0.0);
 
-            let face_ax_depth = a.half_width + b.half_width * abs_rbx.x
-                + b.half_height * abs_rby.x + b.half_length * abs_rbz.x
+            let face_ax_depth = a.half_width
+                + b.half_width * abs_rbx.x
+                + b.half_height * abs_rby.x
+                + b.half_length * abs_rbz.x
                 - local_offset_b.x.abs();
-            Self::select(&mut depth, &mut local_normal, &face_ax_depth, &one, &zero_f, &zero_f);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &face_ax_depth,
+                &one,
+                &zero_f,
+                &zero_f,
+            );
 
-            let face_ay_depth = a.half_height + b.half_width * abs_rbx.y
-                + b.half_height * abs_rby.y + b.half_length * abs_rbz.y
+            let face_ay_depth = a.half_height
+                + b.half_width * abs_rbx.y
+                + b.half_height * abs_rby.y
+                + b.half_length * abs_rbz.y
                 - local_offset_b.y.abs();
-            Self::select(&mut depth, &mut local_normal, &face_ay_depth, &zero_f, &one, &zero_f);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &face_ay_depth,
+                &zero_f,
+                &one,
+                &zero_f,
+            );
 
-            let face_az_depth = a.half_length + b.half_width * abs_rbx.z
-                + b.half_height * abs_rby.z + b.half_length * abs_rbz.z
+            let face_az_depth = a.half_length
+                + b.half_width * abs_rbx.z
+                + b.half_height * abs_rby.z
+                + b.half_length * abs_rbz.z
                 - local_offset_b.z.abs();
-            Self::select(&mut depth, &mut local_normal, &face_az_depth, &zero_f, &zero_f, &one);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &face_az_depth,
+                &zero_f,
+                &zero_f,
+                &one,
+            );
 
             // Test face normals of B
             let mut b_local_offset_b = Vector3Wide::default();
             Matrix3x3Wide::transform_by_transposed_without_overlap(
-                &local_offset_b, &r_b, &mut b_local_offset_b,
+                &local_offset_b,
+                &r_b,
+                &mut b_local_offset_b,
             );
-            let face_bx_depth = b.half_width + a.half_width * abs_rbx.x
-                + a.half_height * abs_rbx.y + a.half_length * abs_rbx.z
+            let face_bx_depth = b.half_width
+                + a.half_width * abs_rbx.x
+                + a.half_height * abs_rbx.y
+                + a.half_length * abs_rbx.z
                 - b_local_offset_b.x.abs();
             Self::select(
-                &mut depth, &mut local_normal,
-                &face_bx_depth, &r_b.x.x, &r_b.x.y, &r_b.x.z,
+                &mut depth,
+                &mut local_normal,
+                &face_bx_depth,
+                &r_b.x.x,
+                &r_b.x.y,
+                &r_b.x.z,
             );
-            let face_by_depth = b.half_height + a.half_width * abs_rby.x
-                + a.half_height * abs_rby.y + a.half_length * abs_rby.z
+            let face_by_depth = b.half_height
+                + a.half_width * abs_rby.x
+                + a.half_height * abs_rby.y
+                + a.half_length * abs_rby.z
                 - b_local_offset_b.y.abs();
             Self::select(
-                &mut depth, &mut local_normal,
-                &face_by_depth, &r_b.y.x, &r_b.y.y, &r_b.y.z,
+                &mut depth,
+                &mut local_normal,
+                &face_by_depth,
+                &r_b.y.x,
+                &r_b.y.y,
+                &r_b.y.z,
             );
-            let face_bz_depth = b.half_length + a.half_width * abs_rbz.x
-                + a.half_height * abs_rbz.y + a.half_length * abs_rbz.z
+            let face_bz_depth = b.half_length
+                + a.half_width * abs_rbz.x
+                + a.half_height * abs_rbz.y
+                + a.half_length * abs_rbz.z
                 - b_local_offset_b.z.abs();
             Self::select(
-                &mut depth, &mut local_normal,
-                &face_bz_depth, &r_b.z.x, &r_b.z.y, &r_b.z.z,
+                &mut depth,
+                &mut local_normal,
+                &face_bz_depth,
+                &r_b.z.x,
+                &r_b.z.y,
+                &r_b.z.z,
             );
 
             // Early out if no contacts
@@ -597,13 +796,14 @@ impl BoxPairTester {
             // Calibrate normal to point from B to A
             let mut normal_dot_offset_b = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&local_normal, &local_offset_b, &mut normal_dot_offset_b);
-            let should_negate_normal =
-                normal_dot_offset_b.simd_gt(Vector::<f32>::splat(0.0));
+            let should_negate_normal = normal_dot_offset_b.simd_gt(Vector::<f32>::splat(0.0));
             local_normal.x = should_negate_normal.select(-local_normal.x, local_normal.x);
             local_normal.y = should_negate_normal.select(-local_normal.y, local_normal.y);
             local_normal.z = should_negate_normal.select(-local_normal.z, local_normal.z);
             Matrix3x3Wide::transform_without_overlap(
-                &local_normal, &world_ra, &mut manifold.normal,
+                &local_normal,
+                &world_ra,
+                &mut manifold.normal,
             );
 
             // Choose representative face on each box based on max normal alignment
@@ -626,32 +826,29 @@ impl BoxPairTester {
                 &Vector3Wide::conditional_select(&use_ax, &world_ra.x, &world_ra.z),
             );
             let normal_a = Vector3Wide::conditional_select(
-                &use_ax, &world_ra.x,
+                &use_ax,
+                &world_ra.x,
                 &Vector3Wide::conditional_select(&use_ay, &world_ra.y, &world_ra.z),
             );
             let tangent_ax = Vector3Wide::conditional_select(
-                &use_ax, &world_ra.z,
+                &use_ax,
+                &world_ra.z,
                 &Vector3Wide::conditional_select(&use_ay, &world_ra.x, &world_ra.y),
             );
             let tangent_ay = Vector3Wide::conditional_select(
-                &use_ax, &world_ra.y,
+                &use_ax,
+                &world_ra.y,
                 &Vector3Wide::conditional_select(&use_ay, &world_ra.z, &world_ra.x),
             );
 
             let use_ax_f = use_ax.simd_lt(Vector::<i32>::splat(0));
             let use_ay_f = use_ay.simd_lt(Vector::<i32>::splat(0));
-            let half_span_ax = use_ax_f.select(
-                a.half_length,
-                use_ay_f.select(a.half_width, a.half_height),
-            );
-            let half_span_ay = use_ax_f.select(
-                a.half_height,
-                use_ay_f.select(a.half_length, a.half_width),
-            );
-            let half_span_az = use_ax_f.select(
-                a.half_width,
-                use_ay_f.select(a.half_height, a.half_length),
-            );
+            let half_span_ax =
+                use_ax_f.select(a.half_length, use_ay_f.select(a.half_width, a.half_height));
+            let half_span_ay =
+                use_ax_f.select(a.half_height, use_ay_f.select(a.half_length, a.half_width));
+            let half_span_az =
+                use_ax_f.select(a.half_width, use_ay_f.select(a.half_height, a.half_length));
 
             let local_x_id = Vector::<i32>::splat(1);
             let local_y_id = Vector::<i32>::splat(4);
@@ -679,29 +876,26 @@ impl BoxPairTester {
             let use_by_f = use_by.simd_lt(Vector::<i32>::splat(0));
 
             let mut normal_b = Vector3Wide::conditional_select(
-                &use_bx, &world_rb.x,
+                &use_bx,
+                &world_rb.x,
                 &Vector3Wide::conditional_select(&use_by, &world_rb.y, &world_rb.z),
             );
             let tangent_bx = Vector3Wide::conditional_select(
-                &use_bx, &world_rb.z,
+                &use_bx,
+                &world_rb.z,
                 &Vector3Wide::conditional_select(&use_by, &world_rb.x, &world_rb.y),
             );
             let tangent_by = Vector3Wide::conditional_select(
-                &use_bx, &world_rb.y,
+                &use_bx,
+                &world_rb.y,
                 &Vector3Wide::conditional_select(&use_by, &world_rb.z, &world_rb.x),
             );
-            let half_span_bx = use_bx_f.select(
-                b.half_length,
-                use_by_f.select(b.half_width, b.half_height),
-            );
-            let half_span_by = use_bx_f.select(
-                b.half_height,
-                use_by_f.select(b.half_length, b.half_width),
-            );
-            let half_span_bz = use_bx_f.select(
-                b.half_width,
-                use_by_f.select(b.half_height, b.half_length),
-            );
+            let half_span_bx =
+                use_bx_f.select(b.half_length, use_by_f.select(b.half_width, b.half_height));
+            let half_span_by =
+                use_bx_f.select(b.half_height, use_by_f.select(b.half_length, b.half_width));
+            let half_span_bz =
+                use_bx_f.select(b.half_width, use_by_f.select(b.half_height, b.half_length));
             let use_bx_i = use_bx.simd_lt(Vector::<i32>::splat(0));
             let use_by_i = use_by.simd_lt(Vector::<i32>::splat(0));
             let axis_id_bx = use_bx_i.select(local_z_id, use_by_i.select(local_x_id, local_y_id));
@@ -711,8 +905,7 @@ impl BoxPairTester {
             // Calibrate face normals: normalA toward B, normalB toward A
             let mut calibration_dot_a = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&normal_a, &manifold.normal, &mut calibration_dot_a);
-            let should_negate_normal_a =
-                calibration_dot_a.simd_gt(Vector::<f32>::splat(0.0));
+            let should_negate_normal_a = calibration_dot_a.simd_gt(Vector::<f32>::splat(0.0));
             let mut normal_a = normal_a;
             normal_a.x = should_negate_normal_a.select(-normal_a.x, normal_a.x);
             normal_a.y = should_negate_normal_a.select(-normal_a.y, normal_a.y);
@@ -720,8 +913,7 @@ impl BoxPairTester {
 
             let mut calibration_dot_b = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&normal_b, &manifold.normal, &mut calibration_dot_b);
-            let should_negate_normal_b =
-                calibration_dot_b.simd_lt(Vector::<f32>::splat(0.0));
+            let should_negate_normal_b = calibration_dot_b.simd_lt(Vector::<f32>::splat(0.0));
             normal_b.x = should_negate_normal_b.select(-normal_b.x, normal_b.x);
             normal_b.y = should_negate_normal_b.select(-normal_b.y, normal_b.y);
             normal_b.z = should_negate_normal_b.select(-normal_b.z, normal_b.z);
@@ -760,10 +952,25 @@ impl BoxPairTester {
 
             let mut candidate_count = Vector::<i32>::splat(0);
             Self::create_edge_contacts(
-                &face_center_b, &tangent_bx, &tangent_by, &half_span_bx, &half_span_by,
-                &vertex_a00, &vertex_a11, &tangent_ax, &tangent_ay, &manifold.normal,
-                &edge_id_bx0, &edge_id_bx1, &edge_id_by0, &edge_id_by1,
-                &epsilon_scale, candidates, &mut candidate_count, pair_count, &allow_contacts,
+                &face_center_b,
+                &tangent_bx,
+                &tangent_by,
+                &half_span_bx,
+                &half_span_by,
+                &vertex_a00,
+                &vertex_a11,
+                &tangent_ax,
+                &tangent_ay,
+                &manifold.normal,
+                &edge_id_bx0,
+                &edge_id_bx1,
+                &edge_id_by0,
+                &edge_id_by1,
+                &epsilon_scale,
+                candidates,
+                &mut candidate_count,
+                pair_count,
+                &allow_contacts,
             );
 
             // Face A vertices — note feature ids are negated to disambiguate
@@ -774,11 +981,25 @@ impl BoxPairTester {
             let vertex_id10 = -(axis_id_az + axis_id_ax);
             let vertex_id11 = -(axis_id_az + axis_id_ax + axis_id_ay);
             Self::add_box_a_vertices(
-                &face_center_b, &tangent_bx, &tangent_by, &half_span_bx, &half_span_by,
-                &normal_b, &manifold.normal,
-                &vertex_a00, &vertex_a01, &vertex_a10, &vertex_a11,
-                &vertex_id00, &vertex_id01, &vertex_id10, &vertex_id11,
-                candidates, &mut candidate_count, pair_count, &allow_contacts,
+                &face_center_b,
+                &tangent_bx,
+                &tangent_by,
+                &half_span_bx,
+                &half_span_by,
+                &normal_b,
+                &manifold.normal,
+                &vertex_a00,
+                &vertex_a01,
+                &vertex_a10,
+                &vertex_a11,
+                &vertex_id00,
+                &vertex_id01,
+                &vertex_id10,
+                &vertex_id11,
+                candidates,
+                &mut candidate_count,
+                pair_count,
+                &allow_contacts,
             );
 
             // Reduce to 4 contacts
@@ -810,20 +1031,40 @@ impl BoxPairTester {
 
             // Transform contacts into manifold
             Self::transform_contact_to_manifold(
-                &contact0, &face_center_b, &tangent_bx, &tangent_by,
-                &mut manifold.offset_a0, &mut manifold.depth0, &mut manifold.feature_id0,
+                &contact0,
+                &face_center_b,
+                &tangent_bx,
+                &tangent_by,
+                &mut manifold.offset_a0,
+                &mut manifold.depth0,
+                &mut manifold.feature_id0,
             );
             Self::transform_contact_to_manifold(
-                &contact1, &face_center_b, &tangent_bx, &tangent_by,
-                &mut manifold.offset_a1, &mut manifold.depth1, &mut manifold.feature_id1,
+                &contact1,
+                &face_center_b,
+                &tangent_bx,
+                &tangent_by,
+                &mut manifold.offset_a1,
+                &mut manifold.depth1,
+                &mut manifold.feature_id1,
             );
             Self::transform_contact_to_manifold(
-                &contact2, &face_center_b, &tangent_bx, &tangent_by,
-                &mut manifold.offset_a2, &mut manifold.depth2, &mut manifold.feature_id2,
+                &contact2,
+                &face_center_b,
+                &tangent_bx,
+                &tangent_by,
+                &mut manifold.offset_a2,
+                &mut manifold.depth2,
+                &mut manifold.feature_id2,
             );
             Self::transform_contact_to_manifold(
-                &contact3, &face_center_b, &tangent_bx, &tangent_by,
-                &mut manifold.offset_a3, &mut manifold.depth3, &mut manifold.feature_id3,
+                &contact3,
+                &face_center_b,
+                &tangent_bx,
+                &tangent_by,
+                &mut manifold.offset_a3,
+                &mut manifold.depth3,
+                &mut manifold.feature_id3,
             );
         }
     }

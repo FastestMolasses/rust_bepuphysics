@@ -1,6 +1,5 @@
 // Translated from BepuPhysics/Constraints/Contact/ContactConvexTypes.cs
 
-use crate::out;
 use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::contact::contact_convex_common::*;
@@ -399,7 +398,11 @@ impl Contact1OneBodyFunctions {
     ) {
         //Note that we solve the penetration constraints before the friction constraints.
         //This makes the friction constraints more authoritative, since they happen last.
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
         SpringSettingsWide::compute_springiness(
             &prestep.material_properties.spring_settings,
             dt,
@@ -511,8 +514,20 @@ impl Contact2OneBodyFunctions {
         velocity_a: &BodyVelocityWide,
         prestep: &mut Contact2OneBodyPrestepData,
     ) {
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.normal, velocity_a, &mut prestep.contact0.depth);
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact1.offset_a, &prestep.normal, velocity_a, &mut prestep.contact1.depth);
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact0.depth,
+        );
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact1.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact1.depth,
+        );
     }
 
     #[inline(always)]
@@ -526,11 +541,41 @@ impl Contact2OneBodyFunctions {
     ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_2(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &mut offset_to_manifold_center_a);
-        TangentFrictionOneBody::warm_start(&x, &z, &offset_to_manifold_center_a, inertia_a, &accumulated_impulses.tangent, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact0.offset_a, &accumulated_impulses.penetration0, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact1.offset_a, &accumulated_impulses.penetration1, wsv_a);
-        TwistFrictionOneBody::warm_start(&prestep.normal, inertia_a, &accumulated_impulses.twist, wsv_a);
+        FrictionHelpers::compute_friction_center_2(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &mut offset_to_manifold_center_a,
+        );
+        TangentFrictionOneBody::warm_start(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            inertia_a,
+            &accumulated_impulses.tangent,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &accumulated_impulses.penetration1,
+            wsv_a,
+        );
+        TwistFrictionOneBody::warm_start(
+            &prestep.normal,
+            inertia_a,
+            &accumulated_impulses.twist,
+            wsv_a,
+        );
     }
 
     #[inline(always)]
@@ -544,21 +589,82 @@ impl Contact2OneBodyFunctions {
         accumulated_impulses: &mut Contact2AccumulatedImpulses,
         wsv_a: &mut BodyVelocityWide,
     ) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact0.offset_a, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact1.offset_a, &prestep.contact1.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration1, wsv_a);
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &prestep.contact1.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration1,
+            wsv_a,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient = Vector::<f32>::splat(1.0 / 2.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1);
+        let premultiplied_friction_coefficient =
+            Vector::<f32>::splat(1.0 / 2.0) * prestep.material_properties.friction_coefficient;
+        let maximum_tangent_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_2(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &mut offset_to_manifold_center_a);
-        TangentFrictionOneBody::solve(&x, &z, &offset_to_manifold_center_a, inertia_a, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a);
-        let maximum_twist_impulse = premultiplied_friction_coefficient * (
-            accumulated_impulses.penetration0 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a) +
-            accumulated_impulses.penetration1 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact1.offset_a));
-        TwistFrictionOneBody::solve(&prestep.normal, inertia_a, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a);
+        FrictionHelpers::compute_friction_center_2(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &mut offset_to_manifold_center_a,
+        );
+        TangentFrictionOneBody::solve(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            inertia_a,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+        );
+        let maximum_twist_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
+                + accumulated_impulses.penetration1
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact1.offset_a,
+                    ));
+        TwistFrictionOneBody::solve(
+            &prestep.normal,
+            inertia_a,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+        );
     }
 }
 
@@ -583,15 +689,27 @@ pub struct Contact3OneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact3OneBodyPrestepData {
-    fn get_material_properties(&self) -> &MaterialPropertiesWide { &self.material_properties }
-    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide { &mut self.material_properties }
-    fn contact_count() -> i32 { 3 }
-    fn body_count() -> i32 { 1 }
+    fn get_material_properties(&self) -> &MaterialPropertiesWide {
+        &self.material_properties
+    }
+    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
+        &mut self.material_properties
+    }
+    fn contact_count() -> i32 {
+        3
+    }
+    fn body_count() -> i32 {
+        1
+    }
 }
 
 impl IConvexContactPrestep for Contact3OneBodyPrestepData {
-    fn get_normal(&self) -> &Vector3Wide { &self.normal }
-    fn get_normal_mut(&mut self) -> &mut Vector3Wide { &mut self.normal }
+    fn get_normal(&self) -> &Vector3Wide {
+        &self.normal
+    }
+    fn get_normal_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.normal
+    }
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
@@ -608,43 +726,200 @@ impl Contact3OneBodyFunctions {
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = true;
 
     #[inline(always)]
-    pub fn incrementally_update_for_substep(dt: &Vector<f32>, velocity_a: &BodyVelocityWide, prestep: &mut Contact3OneBodyPrestepData) {
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.normal, velocity_a, &mut prestep.contact0.depth);
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact1.offset_a, &prestep.normal, velocity_a, &mut prestep.contact1.depth);
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact2.offset_a, &prestep.normal, velocity_a, &mut prestep.contact2.depth);
+    pub fn incrementally_update_for_substep(
+        dt: &Vector<f32>,
+        velocity_a: &BodyVelocityWide,
+        prestep: &mut Contact3OneBodyPrestepData,
+    ) {
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact0.depth,
+        );
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact1.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact1.depth,
+        );
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact2.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact2.depth,
+        );
     }
 
     #[inline(always)]
-    pub fn warm_start(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, prestep: &mut Contact3OneBodyPrestepData, accumulated_impulses: &mut Contact3AccumulatedImpulses, wsv_a: &mut BodyVelocityWide) {
+    pub fn warm_start(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        prestep: &mut Contact3OneBodyPrestepData,
+        accumulated_impulses: &mut Contact3AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+    ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_3(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &mut offset_to_manifold_center_a);
-        TangentFrictionOneBody::warm_start(&x, &z, &offset_to_manifold_center_a, inertia_a, &accumulated_impulses.tangent, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact0.offset_a, &accumulated_impulses.penetration0, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact1.offset_a, &accumulated_impulses.penetration1, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact2.offset_a, &accumulated_impulses.penetration2, wsv_a);
-        TwistFrictionOneBody::warm_start(&prestep.normal, inertia_a, &accumulated_impulses.twist, wsv_a);
+        FrictionHelpers::compute_friction_center_3(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &mut offset_to_manifold_center_a,
+        );
+        TangentFrictionOneBody::warm_start(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            inertia_a,
+            &accumulated_impulses.tangent,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &accumulated_impulses.penetration1,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &accumulated_impulses.penetration2,
+            wsv_a,
+        );
+        TwistFrictionOneBody::warm_start(
+            &prestep.normal,
+            inertia_a,
+            &accumulated_impulses.twist,
+            wsv_a,
+        );
     }
 
     #[inline(always)]
-    pub fn solve(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, dt: f32, inverse_dt: f32, prestep: &mut Contact3OneBodyPrestepData, accumulated_impulses: &mut Contact3AccumulatedImpulses, wsv_a: &mut BodyVelocityWide) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+    pub fn solve(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        dt: f32,
+        inverse_dt: f32,
+        prestep: &mut Contact3OneBodyPrestepData,
+        accumulated_impulses: &mut Contact3AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+    ) {
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact0.offset_a, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact1.offset_a, &prestep.contact1.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration1, wsv_a);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact2.offset_a, &prestep.contact2.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration2, wsv_a);
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &prestep.contact1.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration1,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &prestep.contact2.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration2,
+            wsv_a,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient = Vector::<f32>::splat(1.0 / 3.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1 + accumulated_impulses.penetration2);
+        let premultiplied_friction_coefficient =
+            Vector::<f32>::splat(1.0 / 3.0) * prestep.material_properties.friction_coefficient;
+        let maximum_tangent_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                + accumulated_impulses.penetration1
+                + accumulated_impulses.penetration2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_3(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &mut offset_to_manifold_center_a);
-        TangentFrictionOneBody::solve(&x, &z, &offset_to_manifold_center_a, inertia_a, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a);
-        let maximum_twist_impulse = premultiplied_friction_coefficient * (
-            accumulated_impulses.penetration0 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a) +
-            accumulated_impulses.penetration1 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact1.offset_a) +
-            accumulated_impulses.penetration2 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact2.offset_a));
-        TwistFrictionOneBody::solve(&prestep.normal, inertia_a, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a);
+        FrictionHelpers::compute_friction_center_3(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &mut offset_to_manifold_center_a,
+        );
+        TangentFrictionOneBody::solve(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            inertia_a,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+        );
+        let maximum_twist_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
+                + accumulated_impulses.penetration1
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact1.offset_a,
+                    )
+                + accumulated_impulses.penetration2
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact2.offset_a,
+                    ));
+        TwistFrictionOneBody::solve(
+            &prestep.normal,
+            inertia_a,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+        );
     }
 }
 
@@ -670,15 +945,27 @@ pub struct Contact4OneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact4OneBodyPrestepData {
-    fn get_material_properties(&self) -> &MaterialPropertiesWide { &self.material_properties }
-    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide { &mut self.material_properties }
-    fn contact_count() -> i32 { 4 }
-    fn body_count() -> i32 { 1 }
+    fn get_material_properties(&self) -> &MaterialPropertiesWide {
+        &self.material_properties
+    }
+    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
+        &mut self.material_properties
+    }
+    fn contact_count() -> i32 {
+        4
+    }
+    fn body_count() -> i32 {
+        1
+    }
 }
 
 impl IConvexContactPrestep for Contact4OneBodyPrestepData {
-    fn get_normal(&self) -> &Vector3Wide { &self.normal }
-    fn get_normal_mut(&mut self) -> &mut Vector3Wide { &mut self.normal }
+    fn get_normal(&self) -> &Vector3Wide {
+        &self.normal
+    }
+    fn get_normal_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.normal
+    }
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
@@ -695,47 +982,237 @@ impl Contact4OneBodyFunctions {
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = true;
 
     #[inline(always)]
-    pub fn incrementally_update_for_substep(dt: &Vector<f32>, velocity_a: &BodyVelocityWide, prestep: &mut Contact4OneBodyPrestepData) {
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.normal, velocity_a, &mut prestep.contact0.depth);
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact1.offset_a, &prestep.normal, velocity_a, &mut prestep.contact1.depth);
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact2.offset_a, &prestep.normal, velocity_a, &mut prestep.contact2.depth);
-        PenetrationLimitOneBody::update_penetration_depth(dt, &prestep.contact3.offset_a, &prestep.normal, velocity_a, &mut prestep.contact3.depth);
+    pub fn incrementally_update_for_substep(
+        dt: &Vector<f32>,
+        velocity_a: &BodyVelocityWide,
+        prestep: &mut Contact4OneBodyPrestepData,
+    ) {
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact0.depth,
+        );
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact1.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact1.depth,
+        );
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact2.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact2.depth,
+        );
+        PenetrationLimitOneBody::update_penetration_depth(
+            dt,
+            &prestep.contact3.offset_a,
+            &prestep.normal,
+            velocity_a,
+            &mut prestep.contact3.depth,
+        );
     }
 
     #[inline(always)]
-    pub fn warm_start(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, prestep: &mut Contact4OneBodyPrestepData, accumulated_impulses: &mut Contact4AccumulatedImpulses, wsv_a: &mut BodyVelocityWide) {
+    pub fn warm_start(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        prestep: &mut Contact4OneBodyPrestepData,
+        accumulated_impulses: &mut Contact4AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+    ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_4(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact3.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &prestep.contact3.depth, &mut offset_to_manifold_center_a);
-        TangentFrictionOneBody::warm_start(&x, &z, &offset_to_manifold_center_a, inertia_a, &accumulated_impulses.tangent, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact0.offset_a, &accumulated_impulses.penetration0, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact1.offset_a, &accumulated_impulses.penetration1, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact2.offset_a, &accumulated_impulses.penetration2, wsv_a);
-        PenetrationLimitOneBody::warm_start(inertia_a, &prestep.normal, &prestep.contact3.offset_a, &accumulated_impulses.penetration3, wsv_a);
-        TwistFrictionOneBody::warm_start(&prestep.normal, inertia_a, &accumulated_impulses.twist, wsv_a);
+        FrictionHelpers::compute_friction_center_4(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact3.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &prestep.contact3.depth,
+            &mut offset_to_manifold_center_a,
+        );
+        TangentFrictionOneBody::warm_start(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            inertia_a,
+            &accumulated_impulses.tangent,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &accumulated_impulses.penetration1,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &accumulated_impulses.penetration2,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::warm_start(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact3.offset_a,
+            &accumulated_impulses.penetration3,
+            wsv_a,
+        );
+        TwistFrictionOneBody::warm_start(
+            &prestep.normal,
+            inertia_a,
+            &accumulated_impulses.twist,
+            wsv_a,
+        );
     }
 
     #[inline(always)]
-    pub fn solve(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, dt: f32, inverse_dt: f32, prestep: &mut Contact4OneBodyPrestepData, accumulated_impulses: &mut Contact4AccumulatedImpulses, wsv_a: &mut BodyVelocityWide) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+    pub fn solve(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        dt: f32,
+        inverse_dt: f32,
+        prestep: &mut Contact4OneBodyPrestepData,
+        accumulated_impulses: &mut Contact4AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+    ) {
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact0.offset_a, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact1.offset_a, &prestep.contact1.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration1, wsv_a);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact2.offset_a, &prestep.contact2.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration2, wsv_a);
-        PenetrationLimitOneBody::solve(inertia_a, &prestep.normal, &prestep.contact3.offset_a, &prestep.contact3.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration3, wsv_a);
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &prestep.contact1.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration1,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &prestep.contact2.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration2,
+            wsv_a,
+        );
+        PenetrationLimitOneBody::solve(
+            inertia_a,
+            &prestep.normal,
+            &prestep.contact3.offset_a,
+            &prestep.contact3.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration3,
+            wsv_a,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient = Vector::<f32>::splat(1.0 / 4.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1 + accumulated_impulses.penetration2 + accumulated_impulses.penetration3);
+        let premultiplied_friction_coefficient =
+            Vector::<f32>::splat(1.0 / 4.0) * prestep.material_properties.friction_coefficient;
+        let maximum_tangent_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                + accumulated_impulses.penetration1
+                + accumulated_impulses.penetration2
+                + accumulated_impulses.penetration3);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_4(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact3.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &prestep.contact3.depth, &mut offset_to_manifold_center_a);
-        TangentFrictionOneBody::solve(&x, &z, &offset_to_manifold_center_a, inertia_a, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a);
-        let maximum_twist_impulse = premultiplied_friction_coefficient * (
-            accumulated_impulses.penetration0 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a) +
-            accumulated_impulses.penetration1 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact1.offset_a) +
-            accumulated_impulses.penetration2 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact2.offset_a) +
-            accumulated_impulses.penetration3 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact3.offset_a));
-        TwistFrictionOneBody::solve(&prestep.normal, inertia_a, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a);
+        FrictionHelpers::compute_friction_center_4(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact3.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &prestep.contact3.depth,
+            &mut offset_to_manifold_center_a,
+        );
+        TangentFrictionOneBody::solve(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            inertia_a,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+        );
+        let maximum_twist_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
+                + accumulated_impulses.penetration1
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact1.offset_a,
+                    )
+                + accumulated_impulses.penetration2
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact2.offset_a,
+                    )
+                + accumulated_impulses.penetration3
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact3.offset_a,
+                    ));
+        TwistFrictionOneBody::solve(
+            &prestep.normal,
+            inertia_a,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+        );
     }
 }
 
@@ -759,15 +1236,27 @@ pub struct Contact1PrestepData {
 }
 
 impl IContactPrestep for Contact1PrestepData {
-    fn get_material_properties(&self) -> &MaterialPropertiesWide { &self.material_properties }
-    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide { &mut self.material_properties }
-    fn contact_count() -> i32 { 1 }
-    fn body_count() -> i32 { 2 }
+    fn get_material_properties(&self) -> &MaterialPropertiesWide {
+        &self.material_properties
+    }
+    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
+        &mut self.material_properties
+    }
+    fn contact_count() -> i32 {
+        1
+    }
+    fn body_count() -> i32 {
+        2
+    }
 }
 
 impl IConvexContactPrestep for Contact1PrestepData {
-    fn get_normal(&self) -> &Vector3Wide { &self.normal }
-    fn get_normal_mut(&mut self) -> &mut Vector3Wide { &mut self.normal }
+    fn get_normal(&self) -> &Vector3Wide {
+        &self.normal
+    }
+    fn get_normal_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.normal
+    }
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 1);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
@@ -779,8 +1268,12 @@ impl IConvexContactPrestep for Contact1PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact1PrestepData {
-    fn get_offset_b(&self) -> &Vector3Wide { &self.offset_b }
-    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide { &mut self.offset_b }
+    fn get_offset_b(&self) -> &Vector3Wide {
+        &self.offset_b
+    }
+    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.offset_b
+    }
 }
 
 pub struct Contact1Functions;
@@ -789,36 +1282,154 @@ impl Contact1Functions {
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = true;
 
     #[inline(always)]
-    pub fn incrementally_update_for_substep(dt: &Vector<f32>, velocity_a: &BodyVelocityWide, velocity_b: &BodyVelocityWide, prestep: &mut Contact1PrestepData) {
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact0.depth);
+    pub fn incrementally_update_for_substep(
+        dt: &Vector<f32>,
+        velocity_a: &BodyVelocityWide,
+        velocity_b: &BodyVelocityWide,
+        prestep: &mut Contact1PrestepData,
+    ) {
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact0.depth,
+        );
     }
 
     #[inline(always)]
-    pub fn warm_start(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, prestep: &mut Contact1PrestepData, accumulated_impulses: &mut Contact1AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
+    pub fn warm_start(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        prestep: &mut Contact1PrestepData,
+        accumulated_impulses: &mut Contact1AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&prestep.contact0.offset_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::warm_start(&x, &z, &prestep.contact0.offset_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &accumulated_impulses.tangent, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &prestep.contact0.offset_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::warm_start(
+            &x,
+            &z,
+            &prestep.contact0.offset_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b, &accumulated_impulses.penetration0, wsv_a, wsv_b);
-        TwistFriction::warm_start(&prestep.normal, inertia_a, inertia_b, &accumulated_impulses.twist, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
+        TwistFriction::warm_start(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
-    pub fn solve(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, dt: f32, inverse_dt: f32, prestep: &mut Contact1PrestepData, accumulated_impulses: &mut Contact1AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+    pub fn solve(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        dt: f32,
+        inverse_dt: f32,
+        prestep: &mut Contact1PrestepData,
+        accumulated_impulses: &mut Contact1AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient * accumulated_impulses.penetration0;
+        let maximum_tangent_impulse =
+            prestep.material_properties.friction_coefficient * accumulated_impulses.penetration0;
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&prestep.contact0.offset_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::solve(&x, &z, &prestep.contact0.offset_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &prestep.contact0.offset_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::solve(
+            &x,
+            &z,
+            &prestep.contact0.offset_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
         //If there's only one contact, then the contact patch as determined by contact distance would be zero.
-        let maximum_twist_impulse = prestep.material_properties.friction_coefficient * accumulated_impulses.penetration0 * prestep.contact0.depth.simd_max(Vector::<f32>::splat(0.0));
-        TwistFriction::solve(&prestep.normal, inertia_a, inertia_b, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a, wsv_b);
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
+            * accumulated_impulses.penetration0
+            * prestep.contact0.depth.simd_max(Vector::<f32>::splat(0.0));
+        TwistFriction::solve(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 }
 
@@ -843,15 +1454,27 @@ pub struct Contact2PrestepData {
 }
 
 impl IContactPrestep for Contact2PrestepData {
-    fn get_material_properties(&self) -> &MaterialPropertiesWide { &self.material_properties }
-    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide { &mut self.material_properties }
-    fn contact_count() -> i32 { 2 }
-    fn body_count() -> i32 { 2 }
+    fn get_material_properties(&self) -> &MaterialPropertiesWide {
+        &self.material_properties
+    }
+    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
+        &mut self.material_properties
+    }
+    fn contact_count() -> i32 {
+        2
+    }
+    fn body_count() -> i32 {
+        2
+    }
 }
 
 impl IConvexContactPrestep for Contact2PrestepData {
-    fn get_normal(&self) -> &Vector3Wide { &self.normal }
-    fn get_normal_mut(&mut self) -> &mut Vector3Wide { &mut self.normal }
+    fn get_normal(&self) -> &Vector3Wide {
+        &self.normal
+    }
+    fn get_normal_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.normal
+    }
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 2);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
@@ -863,8 +1486,12 @@ impl IConvexContactPrestep for Contact2PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact2PrestepData {
-    fn get_offset_b(&self) -> &Vector3Wide { &self.offset_b }
-    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide { &mut self.offset_b }
+    fn get_offset_b(&self) -> &Vector3Wide {
+        &self.offset_b
+    }
+    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.offset_b
+    }
 }
 
 pub struct Contact2Functions;
@@ -873,47 +1500,213 @@ impl Contact2Functions {
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = true;
 
     #[inline(always)]
-    pub fn incrementally_update_for_substep(dt: &Vector<f32>, velocity_a: &BodyVelocityWide, velocity_b: &BodyVelocityWide, prestep: &mut Contact2PrestepData) {
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact0.depth);
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact1.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact1.depth);
+    pub fn incrementally_update_for_substep(
+        dt: &Vector<f32>,
+        velocity_a: &BodyVelocityWide,
+        velocity_b: &BodyVelocityWide,
+        prestep: &mut Contact2PrestepData,
+    ) {
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact0.depth,
+        );
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact1.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact1.depth,
+        );
     }
 
     #[inline(always)]
-    pub fn warm_start(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, prestep: &mut Contact2PrestepData, accumulated_impulses: &mut Contact2AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
+    pub fn warm_start(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        prestep: &mut Contact2PrestepData,
+        accumulated_impulses: &mut Contact2AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_2(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &mut offset_to_manifold_center_a);
+        FrictionHelpers::compute_friction_center_2(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &mut offset_to_manifold_center_a,
+        );
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&offset_to_manifold_center_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::warm_start(&x, &z, &offset_to_manifold_center_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &accumulated_impulses.tangent, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &offset_to_manifold_center_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::warm_start(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b1 = prestep.contact1.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact1.offset_a, &contact_offset_b1, &accumulated_impulses.penetration1, wsv_a, wsv_b);
-        TwistFriction::warm_start(&prestep.normal, inertia_a, inertia_b, &accumulated_impulses.twist, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &contact_offset_b1,
+            &accumulated_impulses.penetration1,
+            wsv_a,
+            wsv_b,
+        );
+        TwistFriction::warm_start(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
-    pub fn solve(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, dt: f32, inverse_dt: f32, prestep: &mut Contact2PrestepData, accumulated_impulses: &mut Contact2AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+    pub fn solve(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        dt: f32,
+        inverse_dt: f32,
+        prestep: &mut Contact2PrestepData,
+        accumulated_impulses: &mut Contact2AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b1 = prestep.contact1.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact1.offset_a, &contact_offset_b1, &prestep.contact1.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration1, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &contact_offset_b1,
+            &prestep.contact1.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration1,
+            wsv_a,
+            wsv_b,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient = Vector::<f32>::splat(1.0 / 2.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1);
+        let premultiplied_friction_coefficient =
+            Vector::<f32>::splat(1.0 / 2.0) * prestep.material_properties.friction_coefficient;
+        let maximum_tangent_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_2(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &mut offset_to_manifold_center_a);
+        FrictionHelpers::compute_friction_center_2(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &mut offset_to_manifold_center_a,
+        );
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&offset_to_manifold_center_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::solve(&x, &z, &offset_to_manifold_center_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a, wsv_b);
-        let maximum_twist_impulse = premultiplied_friction_coefficient * (
-            accumulated_impulses.penetration0 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a) +
-            accumulated_impulses.penetration1 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact1.offset_a));
-        TwistFriction::solve(&prestep.normal, inertia_a, inertia_b, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &offset_to_manifold_center_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::solve(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
+        let maximum_twist_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
+                + accumulated_impulses.penetration1
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact1.offset_a,
+                    ));
+        TwistFriction::solve(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 }
 
@@ -939,15 +1732,27 @@ pub struct Contact3PrestepData {
 }
 
 impl IContactPrestep for Contact3PrestepData {
-    fn get_material_properties(&self) -> &MaterialPropertiesWide { &self.material_properties }
-    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide { &mut self.material_properties }
-    fn contact_count() -> i32 { 3 }
-    fn body_count() -> i32 { 2 }
+    fn get_material_properties(&self) -> &MaterialPropertiesWide {
+        &self.material_properties
+    }
+    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
+        &mut self.material_properties
+    }
+    fn contact_count() -> i32 {
+        3
+    }
+    fn body_count() -> i32 {
+        2
+    }
 }
 
 impl IConvexContactPrestep for Contact3PrestepData {
-    fn get_normal(&self) -> &Vector3Wide { &self.normal }
-    fn get_normal_mut(&mut self) -> &mut Vector3Wide { &mut self.normal }
+    fn get_normal(&self) -> &Vector3Wide {
+        &self.normal
+    }
+    fn get_normal_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.normal
+    }
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
@@ -959,8 +1764,12 @@ impl IConvexContactPrestep for Contact3PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact3PrestepData {
-    fn get_offset_b(&self) -> &Vector3Wide { &self.offset_b }
-    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide { &mut self.offset_b }
+    fn get_offset_b(&self) -> &Vector3Wide {
+        &self.offset_b
+    }
+    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.offset_b
+    }
 }
 
 pub struct Contact3Functions;
@@ -969,53 +1778,261 @@ impl Contact3Functions {
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = true;
 
     #[inline(always)]
-    pub fn incrementally_update_for_substep(dt: &Vector<f32>, velocity_a: &BodyVelocityWide, velocity_b: &BodyVelocityWide, prestep: &mut Contact3PrestepData) {
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact0.depth);
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact1.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact1.depth);
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact2.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact2.depth);
+    pub fn incrementally_update_for_substep(
+        dt: &Vector<f32>,
+        velocity_a: &BodyVelocityWide,
+        velocity_b: &BodyVelocityWide,
+        prestep: &mut Contact3PrestepData,
+    ) {
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact0.depth,
+        );
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact1.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact1.depth,
+        );
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact2.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact2.depth,
+        );
     }
 
     #[inline(always)]
-    pub fn warm_start(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, prestep: &mut Contact3PrestepData, accumulated_impulses: &mut Contact3AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
+    pub fn warm_start(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        prestep: &mut Contact3PrestepData,
+        accumulated_impulses: &mut Contact3AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_3(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &mut offset_to_manifold_center_a);
+        FrictionHelpers::compute_friction_center_3(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &mut offset_to_manifold_center_a,
+        );
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&offset_to_manifold_center_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::warm_start(&x, &z, &offset_to_manifold_center_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &accumulated_impulses.tangent, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &offset_to_manifold_center_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::warm_start(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b1 = prestep.contact1.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact1.offset_a, &contact_offset_b1, &accumulated_impulses.penetration1, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &contact_offset_b1,
+            &accumulated_impulses.penetration1,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b2 = prestep.contact2.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact2.offset_a, &contact_offset_b2, &accumulated_impulses.penetration2, wsv_a, wsv_b);
-        TwistFriction::warm_start(&prestep.normal, inertia_a, inertia_b, &accumulated_impulses.twist, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &contact_offset_b2,
+            &accumulated_impulses.penetration2,
+            wsv_a,
+            wsv_b,
+        );
+        TwistFriction::warm_start(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
-    pub fn solve(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, dt: f32, inverse_dt: f32, prestep: &mut Contact3PrestepData, accumulated_impulses: &mut Contact3AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+    pub fn solve(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        dt: f32,
+        inverse_dt: f32,
+        prestep: &mut Contact3PrestepData,
+        accumulated_impulses: &mut Contact3AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b1 = prestep.contact1.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact1.offset_a, &contact_offset_b1, &prestep.contact1.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration1, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &contact_offset_b1,
+            &prestep.contact1.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration1,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b2 = prestep.contact2.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact2.offset_a, &contact_offset_b2, &prestep.contact2.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration2, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &contact_offset_b2,
+            &prestep.contact2.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration2,
+            wsv_a,
+            wsv_b,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient = Vector::<f32>::splat(1.0 / 3.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1 + accumulated_impulses.penetration2);
+        let premultiplied_friction_coefficient =
+            Vector::<f32>::splat(1.0 / 3.0) * prestep.material_properties.friction_coefficient;
+        let maximum_tangent_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                + accumulated_impulses.penetration1
+                + accumulated_impulses.penetration2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_3(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &mut offset_to_manifold_center_a);
+        FrictionHelpers::compute_friction_center_3(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &mut offset_to_manifold_center_a,
+        );
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&offset_to_manifold_center_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::solve(&x, &z, &offset_to_manifold_center_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a, wsv_b);
-        let maximum_twist_impulse = premultiplied_friction_coefficient * (
-            accumulated_impulses.penetration0 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a) +
-            accumulated_impulses.penetration1 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact1.offset_a) +
-            accumulated_impulses.penetration2 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact2.offset_a));
-        TwistFriction::solve(&prestep.normal, inertia_a, inertia_b, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &offset_to_manifold_center_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::solve(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
+        let maximum_twist_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
+                + accumulated_impulses.penetration1
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact1.offset_a,
+                    )
+                + accumulated_impulses.penetration2
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact2.offset_a,
+                    ));
+        TwistFriction::solve(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 }
 
@@ -1042,15 +2059,27 @@ pub struct Contact4PrestepData {
 }
 
 impl IContactPrestep for Contact4PrestepData {
-    fn get_material_properties(&self) -> &MaterialPropertiesWide { &self.material_properties }
-    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide { &mut self.material_properties }
-    fn contact_count() -> i32 { 4 }
-    fn body_count() -> i32 { 2 }
+    fn get_material_properties(&self) -> &MaterialPropertiesWide {
+        &self.material_properties
+    }
+    fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
+        &mut self.material_properties
+    }
+    fn contact_count() -> i32 {
+        4
+    }
+    fn body_count() -> i32 {
+        2
+    }
 }
 
 impl IConvexContactPrestep for Contact4PrestepData {
-    fn get_normal(&self) -> &Vector3Wide { &self.normal }
-    fn get_normal_mut(&mut self) -> &mut Vector3Wide { &mut self.normal }
+    fn get_normal(&self) -> &Vector3Wide {
+        &self.normal
+    }
+    fn get_normal_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.normal
+    }
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
@@ -1062,8 +2091,12 @@ impl IConvexContactPrestep for Contact4PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact4PrestepData {
-    fn get_offset_b(&self) -> &Vector3Wide { &self.offset_b }
-    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide { &mut self.offset_b }
+    fn get_offset_b(&self) -> &Vector3Wide {
+        &self.offset_b
+    }
+    fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
+        &mut self.offset_b
+    }
 }
 
 pub struct Contact4Functions;
@@ -1072,59 +2105,308 @@ impl Contact4Functions {
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = true;
 
     #[inline(always)]
-    pub fn incrementally_update_for_substep(dt: &Vector<f32>, velocity_a: &BodyVelocityWide, velocity_b: &BodyVelocityWide, prestep: &mut Contact4PrestepData) {
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact0.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact0.depth);
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact1.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact1.depth);
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact2.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact2.depth);
-        PenetrationLimit::update_penetration_depth(dt, &prestep.contact3.offset_a, &prestep.offset_b, &prestep.normal, velocity_a, velocity_b, &mut prestep.contact3.depth);
+    pub fn incrementally_update_for_substep(
+        dt: &Vector<f32>,
+        velocity_a: &BodyVelocityWide,
+        velocity_b: &BodyVelocityWide,
+        prestep: &mut Contact4PrestepData,
+    ) {
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact0.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact0.depth,
+        );
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact1.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact1.depth,
+        );
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact2.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact2.depth,
+        );
+        PenetrationLimit::update_penetration_depth(
+            dt,
+            &prestep.contact3.offset_a,
+            &prestep.offset_b,
+            &prestep.normal,
+            velocity_a,
+            velocity_b,
+            &mut prestep.contact3.depth,
+        );
     }
 
     #[inline(always)]
-    pub fn warm_start(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, prestep: &mut Contact4PrestepData, accumulated_impulses: &mut Contact4AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
+    pub fn warm_start(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        prestep: &mut Contact4PrestepData,
+        accumulated_impulses: &mut Contact4AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_4(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact3.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &prestep.contact3.depth, &mut offset_to_manifold_center_a);
+        FrictionHelpers::compute_friction_center_4(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact3.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &prestep.contact3.depth,
+            &mut offset_to_manifold_center_a,
+        );
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&offset_to_manifold_center_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::warm_start(&x, &z, &offset_to_manifold_center_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &accumulated_impulses.tangent, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &offset_to_manifold_center_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::warm_start(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b1 = prestep.contact1.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact1.offset_a, &contact_offset_b1, &accumulated_impulses.penetration1, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &contact_offset_b1,
+            &accumulated_impulses.penetration1,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b2 = prestep.contact2.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact2.offset_a, &contact_offset_b2, &accumulated_impulses.penetration2, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &contact_offset_b2,
+            &accumulated_impulses.penetration2,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b3 = prestep.contact3.offset_a - prestep.offset_b;
-        PenetrationLimit::warm_start(inertia_a, inertia_b, &prestep.normal, &prestep.contact3.offset_a, &contact_offset_b3, &accumulated_impulses.penetration3, wsv_a, wsv_b);
-        TwistFriction::warm_start(&prestep.normal, inertia_a, inertia_b, &accumulated_impulses.twist, wsv_a, wsv_b);
+        PenetrationLimit::warm_start(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact3.offset_a,
+            &contact_offset_b3,
+            &accumulated_impulses.penetration3,
+            wsv_a,
+            wsv_b,
+        );
+        TwistFriction::warm_start(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
-    pub fn solve(_position_a: &Vector3Wide, _orientation_a: &QuaternionWide, inertia_a: &BodyInertiaWide, _position_b: &Vector3Wide, _orientation_b: &QuaternionWide, inertia_b: &BodyInertiaWide, dt: f32, inverse_dt: f32, prestep: &mut Contact4PrestepData, accumulated_impulses: &mut Contact4AccumulatedImpulses, wsv_a: &mut BodyVelocityWide, wsv_b: &mut BodyVelocityWide) {
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
-        SpringSettingsWide::compute_springiness(&prestep.material_properties.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+    pub fn solve(
+        _position_a: &Vector3Wide,
+        _orientation_a: &QuaternionWide,
+        inertia_a: &BodyInertiaWide,
+        _position_b: &Vector3Wide,
+        _orientation_b: &QuaternionWide,
+        inertia_b: &BodyInertiaWide,
+        dt: f32,
+        inverse_dt: f32,
+        prestep: &mut Contact4PrestepData,
+        accumulated_impulses: &mut Contact4AccumulatedImpulses,
+        wsv_a: &mut BodyVelocityWide,
+        wsv_b: &mut BodyVelocityWide,
+    ) {
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
+        SpringSettingsWide::compute_springiness(
+            &prestep.material_properties.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let contact_offset_b0 = prestep.contact0.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact0.offset_a, &contact_offset_b0, &prestep.contact0.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration0, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact0.offset_a,
+            &contact_offset_b0,
+            &prestep.contact0.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration0,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b1 = prestep.contact1.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact1.offset_a, &contact_offset_b1, &prestep.contact1.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration1, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact1.offset_a,
+            &contact_offset_b1,
+            &prestep.contact1.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration1,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b2 = prestep.contact2.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact2.offset_a, &contact_offset_b2, &prestep.contact2.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration2, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact2.offset_a,
+            &contact_offset_b2,
+            &prestep.contact2.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration2,
+            wsv_a,
+            wsv_b,
+        );
         let contact_offset_b3 = prestep.contact3.offset_a - prestep.offset_b;
-        PenetrationLimit::solve(inertia_a, inertia_b, &prestep.normal, &prestep.contact3.offset_a, &contact_offset_b3, &prestep.contact3.depth, &position_error_to_velocity, &effective_mass_cfm_scale, &prestep.material_properties.maximum_recovery_velocity, &inverse_dt_wide, &softness_impulse_scale, &mut accumulated_impulses.penetration3, wsv_a, wsv_b);
+        PenetrationLimit::solve(
+            inertia_a,
+            inertia_b,
+            &prestep.normal,
+            &prestep.contact3.offset_a,
+            &contact_offset_b3,
+            &prestep.contact3.depth,
+            &position_error_to_velocity,
+            &effective_mass_cfm_scale,
+            &prestep.material_properties.maximum_recovery_velocity,
+            &inverse_dt_wide,
+            &softness_impulse_scale,
+            &mut accumulated_impulses.penetration3,
+            wsv_a,
+            wsv_b,
+        );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient = Vector::<f32>::splat(1.0 / 4.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1 + accumulated_impulses.penetration2 + accumulated_impulses.penetration3);
+        let premultiplied_friction_coefficient =
+            Vector::<f32>::splat(1.0 / 4.0) * prestep.material_properties.friction_coefficient;
+        let maximum_tangent_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                + accumulated_impulses.penetration1
+                + accumulated_impulses.penetration2
+                + accumulated_impulses.penetration3);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
-        FrictionHelpers::compute_friction_center_4(&prestep.contact0.offset_a, &prestep.contact1.offset_a, &prestep.contact2.offset_a, &prestep.contact3.offset_a, &prestep.contact0.depth, &prestep.contact1.depth, &prestep.contact2.depth, &prestep.contact3.depth, &mut offset_to_manifold_center_a);
+        FrictionHelpers::compute_friction_center_4(
+            &prestep.contact0.offset_a,
+            &prestep.contact1.offset_a,
+            &prestep.contact2.offset_a,
+            &prestep.contact3.offset_a,
+            &prestep.contact0.depth,
+            &prestep.contact1.depth,
+            &prestep.contact2.depth,
+            &prestep.contact3.depth,
+            &mut offset_to_manifold_center_a,
+        );
         let mut offset_to_manifold_center_b = Vector3Wide::default();
-        Vector3Wide::subtract(&offset_to_manifold_center_a, &prestep.offset_b, &mut offset_to_manifold_center_b);
-        TangentFriction::solve(&x, &z, &offset_to_manifold_center_a, &offset_to_manifold_center_b, inertia_a, inertia_b, &maximum_tangent_impulse, &mut accumulated_impulses.tangent, wsv_a, wsv_b);
-        let maximum_twist_impulse = premultiplied_friction_coefficient * (
-            accumulated_impulses.penetration0 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a) +
-            accumulated_impulses.penetration1 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact1.offset_a) +
-            accumulated_impulses.penetration2 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact2.offset_a) +
-            accumulated_impulses.penetration3 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact3.offset_a));
-        TwistFriction::solve(&prestep.normal, inertia_a, inertia_b, &maximum_twist_impulse, &mut accumulated_impulses.twist, wsv_a, wsv_b);
+        Vector3Wide::subtract(
+            &offset_to_manifold_center_a,
+            &prestep.offset_b,
+            &mut offset_to_manifold_center_b,
+        );
+        TangentFriction::solve(
+            &x,
+            &z,
+            &offset_to_manifold_center_a,
+            &offset_to_manifold_center_b,
+            inertia_a,
+            inertia_b,
+            &maximum_tangent_impulse,
+            &mut accumulated_impulses.tangent,
+            wsv_a,
+            wsv_b,
+        );
+        let maximum_twist_impulse = premultiplied_friction_coefficient
+            * (accumulated_impulses.penetration0
+                * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
+                + accumulated_impulses.penetration1
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact1.offset_a,
+                    )
+                + accumulated_impulses.penetration2
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact2.offset_a,
+                    )
+                + accumulated_impulses.penetration3
+                    * Vector3Wide::distance(
+                        &offset_to_manifold_center_a,
+                        &prestep.contact3.offset_a,
+                    ));
+        TwistFriction::solve(
+            &prestep.normal,
+            inertia_a,
+            inertia_b,
+            &maximum_twist_impulse,
+            &mut accumulated_impulses.twist,
+            wsv_a,
+            wsv_b,
+        );
     }
 }
 

@@ -3,29 +3,25 @@
 use crate::physics::collision_detection::contact_manifold::{
     ConvexContact, ConvexContactManifold, NonconvexContactManifold,
 };
+use crate::physics::collision_detection::narrow_phase::{
+    PendingConstraintAddCache, SortConstraintTarget,
+};
 use crate::physics::collision_detection::narrow_phase_callbacks::PairMaterialProperties;
-use crate::physics::collision_detection::narrow_phase::{PendingConstraintAddCache, SortConstraintTarget};
 use crate::physics::collision_detection::pair_cache::{CollidablePair, ConstraintCache, PairCache};
 use crate::physics::collision_detection::untyped_list::UntypedList;
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraint_reference::ConstraintReference;
-use crate::physics::handles::{BodyHandle, ConstraintHandle};
-use crate::physics::solver::Solver;
 use crate::physics::constraints::contact::contact_constraint_description::{
     ConstraintContactData, NonconvexConstraintContactData,
 };
+use crate::physics::handles::BodyHandle;
+use crate::physics::solver::Solver;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
-use glam::Vec3;
 
 /// Interface for extracting solver contact data from constraints.
 pub trait ISolverContactDataExtractor {
-    fn convex_one_body(
-        &mut self,
-        body_handle: BodyHandle,
-        prestep: *const u8,
-        impulses: *const u8,
-    );
+    fn convex_one_body(&mut self, body_handle: BodyHandle, prestep: *const u8, impulses: *const u8);
     fn convex_two_body(
         &mut self,
         body_handle_a: BodyHandle,
@@ -182,7 +178,9 @@ impl ContactDataCopier {
     ) {
         let contact_count = manifold.count;
         for i in 0..contact_count as isize {
-            let source_contact = &*(&manifold.contact0 as *const crate::physics::collision_detection::contact_manifold::Contact).offset(i);
+            let source_contact = &*(&manifold.contact0
+                as *const crate::physics::collision_detection::contact_manifold::Contact)
+                .offset(i);
             let target_contact = &mut *target_contacts.offset(i);
             *(&mut constraint_cache.feature_id0 as *mut i32).offset(i) = source_contact.feature_id;
             target_contact.offset_a = source_contact.offset;
@@ -220,7 +218,12 @@ struct AccessorBase {
 
 impl AccessorBase {
     /// Constructs the base with computed fields from type sizes.
-    fn new(constraint_type_id: i32, contact_count: i32, convex: bool, accumulated_impulse_size: usize) -> Self {
+    fn new(
+        constraint_type_id: i32,
+        contact_count: i32,
+        convex: bool,
+        accumulated_impulse_size: usize,
+    ) -> Self {
         Self {
             constraint_type_id,
             accumulated_impulse_bundle_stride_in_bytes: accumulated_impulse_size as i32,
@@ -247,10 +250,13 @@ impl AccessorBase {
             &mut inner,
         );
 
-        let buffer_ptr = (*constraint_reference.type_batch_pointer).accumulated_impulses.as_ptr();
+        let buffer_ptr = (*constraint_reference.type_batch_pointer)
+            .accumulated_impulses
+            .as_ptr();
         let stride = self.accumulated_impulse_bundle_stride_in_bytes as usize;
         // Vector<f32> is VECTOR_LEN contiguous f32s.
-        let vector_size = std::mem::size_of::<f32>() * crate::utilities::vector::optimal_lanes::<f32>();
+        let vector_size =
+            std::mem::size_of::<f32>() * crate::utilities::vector::optimal_lanes::<f32>();
 
         if self.convex {
             // Convex layout: [tangent: Vector2Wide (2 vectors)] [penetration0: Vector<f32>] [penetration1..] [twist: Vector<f32>]
@@ -259,7 +265,9 @@ impl AccessorBase {
             let base_byte_ptr = buffer_ptr.add(stride * bundle_index + vector2wide_size);
             for i in 0..self.contact_count as usize {
                 // Each penetration vector is vector_size bytes. Lane `inner` is at offset `inner * sizeof(f32)`.
-                let f32_ptr = base_byte_ptr.add(i * vector_size + inner * std::mem::size_of::<f32>()) as *const f32;
+                let f32_ptr = base_byte_ptr
+                    .add(i * vector_size + inner * std::mem::size_of::<f32>())
+                    as *const f32;
                 *old_impulses.add(i) = *f32_ptr;
             }
         } else {
@@ -269,7 +277,11 @@ impl AccessorBase {
             let base_byte_ptr = buffer_ptr.add(stride * bundle_index);
             for i in 0..self.contact_count as usize {
                 // Penetration is at offset 2 * vector_size within each NonconvexAccumulatedImpulses
-                let f32_ptr = base_byte_ptr.add(i * nonconvex_impulse_stride + 2 * vector_size + inner * std::mem::size_of::<f32>()) as *const f32;
+                let f32_ptr = base_byte_ptr.add(
+                    i * nonconvex_impulse_stride
+                        + 2 * vector_size
+                        + inner * std::mem::size_of::<f32>(),
+                ) as *const f32;
                 *old_impulses.add(i) = *f32_ptr;
             }
         }
@@ -291,24 +303,35 @@ impl AccessorBase {
             &mut inner,
         );
 
-        let buffer_ptr = (*constraint_reference.type_batch_pointer).accumulated_impulses.as_mut_ptr();
+        let buffer_ptr = (*constraint_reference.type_batch_pointer)
+            .accumulated_impulses
+            .as_mut_ptr();
         let stride = self.accumulated_impulse_bundle_stride_in_bytes as usize;
-        let vector_size = std::mem::size_of::<f32>() * crate::utilities::vector::optimal_lanes::<f32>();
+        let vector_size =
+            std::mem::size_of::<f32>() * crate::utilities::vector::optimal_lanes::<f32>();
 
-        debug_assert!((*constraint_reference.type_batch_pointer).type_id == self.constraint_type_id);
+        debug_assert!(
+            (*constraint_reference.type_batch_pointer).type_id == self.constraint_type_id
+        );
 
         if self.convex {
             let vector2wide_size = 2 * vector_size;
             let base_byte_ptr = buffer_ptr.add(stride * bundle_index + vector2wide_size);
             for i in 0..self.contact_count as usize {
-                let f32_ptr = base_byte_ptr.add(i * vector_size + inner * std::mem::size_of::<f32>()) as *mut f32;
+                let f32_ptr = base_byte_ptr
+                    .add(i * vector_size + inner * std::mem::size_of::<f32>())
+                    as *mut f32;
                 *f32_ptr = *contact_impulses.add(i);
             }
         } else {
             let nonconvex_impulse_stride = 3 * vector_size;
             let base_byte_ptr = buffer_ptr.add(stride * bundle_index);
             for i in 0..self.contact_count as usize {
-                let f32_ptr = base_byte_ptr.add(i * nonconvex_impulse_stride + 2 * vector_size + inner * std::mem::size_of::<f32>()) as *mut f32;
+                let f32_ptr = base_byte_ptr.add(
+                    i * nonconvex_impulse_stride
+                        + 2 * vector_size
+                        + inner * std::mem::size_of::<f32>(),
+                ) as *mut f32;
                 *f32_ptr = *contact_impulses.add(i);
             }
         }
@@ -330,11 +353,11 @@ unsafe fn extract_one_body_contact_data<TPrestep: Copy, TImpulses: Copy>(
     use crate::utilities::bundle_indexing::BundleIndexing;
     use crate::utilities::gather_scatter::GatherScatter;
     use crate::utilities::vector::Vector;
-    use crate::physics::bodies::Bodies;
 
     let set = &solver.sets[constraint_location.set_index as usize];
     let batch = &set.batches[constraint_location.batch_index];
-    let type_batch_index = batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
+    let type_batch_index =
+        batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
     let type_batch = &batch.type_batches[type_batch_index];
 
     let mut bundle_index = 0usize;
@@ -357,7 +380,8 @@ unsafe fn extract_one_body_contact_data<TPrestep: Copy, TImpulses: Copy>(
 
     let prestep_ptr = (type_batch.prestep_data.as_ptr() as *const TPrestep).add(bundle_index);
     let prestep = GatherScatter::get_offset_instance(&*prestep_ptr, inner_index);
-    let impulses_ptr = (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
+    let impulses_ptr =
+        (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
     let impulses = GatherScatter::get_offset_instance(&*impulses_ptr, inner_index);
 
     if convex {
@@ -382,14 +406,15 @@ unsafe fn extract_two_body_contact_data<TPrestep: Copy, TImpulses: Copy>(
     extractor: &mut dyn ISolverContactDataExtractor,
     convex: bool,
 ) {
-    use crate::utilities::bundle_indexing::BundleIndexing;
-    use crate::utilities::gather_scatter::GatherScatter;
     use crate::physics::bodies::Bodies;
     use crate::physics::constraints::body_references::TwoBodyReferences;
+    use crate::utilities::bundle_indexing::BundleIndexing;
+    use crate::utilities::gather_scatter::GatherScatter;
 
     let set = &solver.sets[constraint_location.set_index as usize];
     let batch = &set.batches[constraint_location.batch_index];
-    let type_batch_index = batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
+    let type_batch_index =
+        batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
     let type_batch = &batch.type_batches[type_batch_index];
 
     let mut bundle_index = 0usize;
@@ -402,11 +427,13 @@ unsafe fn extract_two_body_contact_data<TPrestep: Copy, TImpulses: Copy>(
 
     let prestep_ptr = (type_batch.prestep_data.as_ptr() as *const TPrestep).add(bundle_index);
     let prestep = GatherScatter::get_offset_instance(&*prestep_ptr, inner_index);
-    let impulses_ptr = (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
+    let impulses_ptr =
+        (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
     let impulses = GatherScatter::get_offset_instance(&*impulses_ptr, inner_index);
 
     // Two-body: body references are TwoBodyReferences bundles
-    let body_refs_ptr = (type_batch.body_references.as_ptr() as *const TwoBodyReferences).add(bundle_index);
+    let body_refs_ptr =
+        (type_batch.body_references.as_ptr() as *const TwoBodyReferences).add(bundle_index);
     let body_refs = GatherScatter::get_offset_instance(&*body_refs_ptr, inner_index);
     let index_a = body_refs.index_a.as_array()[0] & Bodies::BODY_REFERENCE_MASK;
     let index_b = body_refs.index_b.as_array()[0] & Bodies::BODY_REFERENCE_MASK;
@@ -450,7 +477,8 @@ unsafe fn extract_one_body_prestep_and_impulses<TPrestep: Copy, TImpulses: Copy>
 
     let set = &solver.sets[constraint_location.set_index as usize];
     let batch = &set.batches[constraint_location.batch_index];
-    let type_batch_index = batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
+    let type_batch_index =
+        batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
     let type_batch = &batch.type_batches[type_batch_index];
 
     let mut bundle_index = 0usize;
@@ -463,7 +491,8 @@ unsafe fn extract_one_body_prestep_and_impulses<TPrestep: Copy, TImpulses: Copy>
 
     let prestep_ptr = (type_batch.prestep_data.as_ptr() as *const TPrestep).add(bundle_index);
     let prestep = GatherScatter::get_offset_instance(&*prestep_ptr, inner_index);
-    let impulses_ptr = (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
+    let impulses_ptr =
+        (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
     let impulses = GatherScatter::get_offset_instance(&*impulses_ptr, inner_index);
 
     if convex {
@@ -491,7 +520,8 @@ unsafe fn extract_two_body_prestep_and_impulses<TPrestep: Copy, TImpulses: Copy>
 
     let set = &solver.sets[constraint_location.set_index as usize];
     let batch = &set.batches[constraint_location.batch_index];
-    let type_batch_index = batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
+    let type_batch_index =
+        batch.type_index_to_type_batch_index[constraint_location.type_id as usize];
     let type_batch = &batch.type_batches[type_batch_index];
 
     let mut bundle_index = 0usize;
@@ -504,7 +534,8 @@ unsafe fn extract_two_body_prestep_and_impulses<TPrestep: Copy, TImpulses: Copy>
 
     let prestep_ptr = (type_batch.prestep_data.as_ptr() as *const TPrestep).add(bundle_index);
     let prestep = GatherScatter::get_offset_instance(&*prestep_ptr, inner_index);
-    let impulses_ptr = (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
+    let impulses_ptr =
+        (type_batch.accumulated_impulses.as_ptr() as *const TImpulses).add(bundle_index);
     let impulses = GatherScatter::get_offset_instance(&*impulses_ptr, inner_index);
 
     if convex {
@@ -526,23 +557,31 @@ unsafe fn extract_two_body_prestep_and_impulses<TPrestep: Copy, TImpulses: Copy>
 // =============================================================================
 
 use crate::physics::collision_detection::narrow_phase::{
-    NarrowPhaseGeneric, TwoBodyHandles,
-    ContactImpulses1, ContactImpulses2, ContactImpulses3, ContactImpulses4,
+    ContactImpulses1, ContactImpulses2, ContactImpulses3, ContactImpulses4, TwoBodyHandles,
 };
-use crate::physics::collision_detection::narrow_phase_callbacks::INarrowPhaseCallbacks;
+use crate::physics::collision_detection::pair_cache::PairCacheChangeIndex;
 use crate::physics::constraints::constraint_description::IConstraintDescription;
 use crate::physics::constraints::contact::contact_convex_descriptions::*;
 use crate::physics::constraints::contact::contact_nonconvex_descriptions::*;
-use crate::physics::collision_detection::pair_cache::PairCacheChangeIndex;
 
 /// Reads a PendingConstraint from an UntypedList by byte offset.
 ///
 /// PendingConstraint layout: CollidablePair | PairCacheChangeIndex | TBodyHandles | TDescription | TContactImpulses
 #[inline(always)]
-unsafe fn read_pending_constraint<TBodyHandles: Copy, TDescription: IConstraintDescription + Copy, TContactImpulses: Copy>(
+unsafe fn read_pending_constraint<
+    TBodyHandles: Copy,
+    TDescription: IConstraintDescription + Copy,
+    TContactImpulses: Copy,
+>(
     list: &UntypedList,
     index: i32,
-) -> (*mut CollidablePair, PairCacheChangeIndex, *const TBodyHandles, *const TDescription, *const TContactImpulses) {
+) -> (
+    *mut CollidablePair,
+    PairCacheChangeIndex,
+    *const TBodyHandles,
+    *const TDescription,
+    *const TContactImpulses,
+) {
     let element_size = std::mem::size_of::<CollidablePair>()
         + std::mem::size_of::<PairCacheChangeIndex>()
         + std::mem::size_of::<TBodyHandles>()
@@ -569,7 +608,11 @@ unsafe fn read_pending_constraint<TBodyHandles: Copy, TDescription: IConstraintD
 }
 
 /// Sequential add to simulation — iterates pending constraints and adds them one by one.
-unsafe fn sequential_add_to_simulation<TBodyHandles: Copy, TDescription: IConstraintDescription + Copy, TContactImpulses: Copy>(
+unsafe fn sequential_add_to_simulation<
+    TBodyHandles: Copy,
+    TDescription: IConstraintDescription + Copy,
+    TContactImpulses: Copy,
+>(
     list: &mut UntypedList,
     narrow_phase: *const super::narrow_phase::NarrowPhase,
     solver: &mut Solver,
@@ -585,10 +628,8 @@ unsafe fn sequential_add_to_simulation<TBodyHandles: Copy, TDescription: IConstr
             read_pending_constraint::<TBodyHandles, TDescription, TContactImpulses>(list, i);
 
         // Create a BodyHandle slice from the body handles pointer.
-        let body_handle_slice = std::slice::from_raw_parts(
-            body_handles_ptr as *const BodyHandle,
-            body_count as usize,
-        );
+        let body_handle_slice =
+            std::slice::from_raw_parts(body_handles_ptr as *const BodyHandle, body_count as usize);
         let desc = &*description_ptr;
         let type_id = TDescription::constraint_type_id();
         let handle = (*solver_ptr).add(body_handle_slice, type_id, |batch, bi, ii| {
@@ -606,7 +647,11 @@ unsafe fn sequential_add_to_simulation<TBodyHandles: Copy, TDescription: IConstr
 }
 
 /// Speculative batch add — uses precomputed batch indices for faster constraint batch allocation.
-unsafe fn add_to_simulation_speculative<TBodyHandles: Copy, TDescription: IConstraintDescription + Copy, TContactImpulses: Copy>(
+unsafe fn add_to_simulation_speculative<
+    TBodyHandles: Copy,
+    TDescription: IConstraintDescription + Copy,
+    TContactImpulses: Copy,
+>(
     narrow_phase: *const super::narrow_phase::NarrowPhase,
     solver: &mut Solver,
     pair_cache: &mut PairCache,
@@ -619,13 +664,12 @@ unsafe fn add_to_simulation_speculative<TBodyHandles: Copy, TDescription: IConst
     body_count: i32,
 ) {
     let solver_ptr = solver as *mut Solver;
-    let body_handle_slice = std::slice::from_raw_parts(
-        body_handles_ptr as *const BodyHandle,
-        body_count as usize,
-    );
+    let body_handle_slice =
+        std::slice::from_raw_parts(body_handles_ptr as *const BodyHandle, body_count as usize);
 
     let mut encoded_body_indices = vec![0i32; body_count as usize];
-    let blocking = (*solver_ptr).get_blocking_body_handles(body_handle_slice, &mut encoded_body_indices);
+    let blocking =
+        (*solver_ptr).get_blocking_body_handles(body_handle_slice, &mut encoded_body_indices);
     let type_id = TDescription::constraint_type_id();
 
     let mut target_batch = batch_index;
@@ -664,7 +708,11 @@ unsafe fn add_to_simulation_speculative<TBodyHandles: Copy, TDescription: IConst
 }
 
 /// Sequential add with speculative batch indices.
-unsafe fn sequential_add_to_simulation_speculative<TBodyHandles: Copy, TDescription: IConstraintDescription + Copy, TContactImpulses: Copy>(
+unsafe fn sequential_add_to_simulation_speculative<
+    TBodyHandles: Copy,
+    TDescription: IConstraintDescription + Copy,
+    TContactImpulses: Copy,
+>(
     list: &mut UntypedList,
     narrow_phase_constraint_type_id: i32,
     speculative_batch_indices: &mut Buffer<Buffer<u16>>,
@@ -682,13 +730,26 @@ unsafe fn sequential_add_to_simulation_speculative<TBodyHandles: Copy, TDescript
             read_pending_constraint::<TBodyHandles, TDescription, TContactImpulses>(list, i);
         let batch_index = *batch_indices_for_type.get(i) as i32;
         add_to_simulation_speculative::<TBodyHandles, TDescription, TContactImpulses>(
-            narrow_phase, solver, pair_cache, &mut *pair, change, body_handles_ptr, description_ptr, impulses_ptr, batch_index, body_count,
+            narrow_phase,
+            solver,
+            pair_cache,
+            &mut *pair,
+            change,
+            body_handles_ptr,
+            description_ptr,
+            impulses_ptr,
+            batch_index,
+            body_count,
         );
     }
 }
 
 /// Deterministic add — iterate sorted constraint targets from all workers and add with speculative batches.
-unsafe fn deterministic_add_all<TBodyHandles: Copy, TDescription: IConstraintDescription + Copy, TContactImpulses: Copy>(
+unsafe fn deterministic_add_all<
+    TBodyHandles: Copy,
+    TDescription: IConstraintDescription + Copy,
+    TContactImpulses: Copy,
+>(
     type_index: i32,
     overlap_workers_pending: &[*mut PendingConstraintAddCache],
     sorted_constraints: &mut QuickList<SortConstraintTarget>,
@@ -706,7 +767,10 @@ unsafe fn deterministic_add_all<TBodyHandles: Copy, TDescription: IConstraintDes
         let target = sorted_constraints.get(i);
         let worker_cache = &*overlap_workers_pending[target.worker_index as usize];
         let list = &*worker_cache.pending_constraints_by_type.get(type_index);
-        let base = list.buffer.as_ptr().add(target.byte_index_in_cache as usize);
+        let base = list
+            .buffer
+            .as_ptr()
+            .add(target.byte_index_in_cache as usize);
         let mut offset = 0usize;
 
         let pair = base.add(offset) as *mut CollidablePair;
@@ -724,9 +788,21 @@ unsafe fn deterministic_add_all<TBodyHandles: Copy, TDescription: IConstraintDes
         let impulses_ptr = base.add(offset) as *const TContactImpulses;
 
         let index = target.byte_index_in_cache as usize / element_size;
-        let batch_index = *worker_cache.speculative_batch_indices.get(type_index).get(index as i32) as i32;
+        let batch_index = *worker_cache
+            .speculative_batch_indices
+            .get(type_index)
+            .get(index as i32) as i32;
         add_to_simulation_speculative::<TBodyHandles, TDescription, TContactImpulses>(
-            narrow_phase, solver, pair_cache, &mut *pair, change, body_handles_ptr, description_ptr, impulses_ptr, batch_index, body_count,
+            narrow_phase,
+            solver,
+            pair_cache,
+            &mut *pair,
+            change,
+            body_handles_ptr,
+            description_ptr,
+            impulses_ptr,
+            batch_index,
+            body_count,
         );
     }
 }
@@ -1160,7 +1236,14 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 solver: &Solver,
                 extractor: &mut dyn ISolverContactDataExtractor,
             ) {
-                unsafe { extract_one_body_contact_data::<$prestep, $impulse>(constraint_location, solver, extractor, false); }
+                unsafe {
+                    extract_one_body_contact_data::<$prestep, $impulse>(
+                        constraint_location,
+                        solver,
+                        extractor,
+                        false,
+                    );
+                }
             }
 
             fn extract_contact_prestep_and_impulses(
@@ -1169,7 +1252,14 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 solver: &Solver,
                 extractor: &mut dyn ISolverContactPrestepAndImpulsesExtractor,
             ) {
-                unsafe { extract_one_body_prestep_and_impulses::<$prestep, $impulse>(constraint_location, solver, extractor, false); }
+                unsafe {
+                    extract_one_body_prestep_and_impulses::<$prestep, $impulse>(
+                        constraint_location,
+                        solver,
+                        extractor,
+                        false,
+                    );
+                }
             }
 
             fn flush_sequentially(
@@ -1181,7 +1271,13 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 pair_cache: &mut PairCache,
             ) {
                 unsafe {
-                    sequential_add_to_simulation::<i32, $desc, $contact_impulses>(list, narrow_phase, solver, pair_cache, 1);
+                    sequential_add_to_simulation::<i32, $desc, $contact_impulses>(
+                        list,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                        1,
+                    );
                 }
             }
 
@@ -1196,7 +1292,13 @@ macro_rules! impl_nonconvex_one_body_accessor {
             ) {
                 unsafe {
                     sequential_add_to_simulation_speculative::<i32, $desc, $contact_impulses>(
-                        list, narrow_phase_constraint_type_id, speculative_batch_indices, narrow_phase, solver, pair_cache, 1,
+                        list,
+                        narrow_phase_constraint_type_id,
+                        speculative_batch_indices,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                        1,
                     );
                 }
             }
@@ -1212,7 +1314,13 @@ macro_rules! impl_nonconvex_one_body_accessor {
             ) {
                 unsafe {
                     deterministic_add_all::<i32, $desc, $contact_impulses>(
-                        type_index, overlap_workers_pending, sorted_constraints, narrow_phase, solver, pair_cache, 1,
+                        type_index,
+                        overlap_workers_pending,
+                        sorted_constraints,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                        1,
                     );
                 }
             }
@@ -1314,7 +1422,14 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 solver: &Solver,
                 extractor: &mut dyn ISolverContactDataExtractor,
             ) {
-                unsafe { extract_two_body_contact_data::<$prestep, $impulse>(constraint_location, solver, extractor, false); }
+                unsafe {
+                    extract_two_body_contact_data::<$prestep, $impulse>(
+                        constraint_location,
+                        solver,
+                        extractor,
+                        false,
+                    );
+                }
             }
 
             fn extract_contact_prestep_and_impulses(
@@ -1323,7 +1438,14 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 solver: &Solver,
                 extractor: &mut dyn ISolverContactPrestepAndImpulsesExtractor,
             ) {
-                unsafe { extract_two_body_prestep_and_impulses::<$prestep, $impulse>(constraint_location, solver, extractor, false); }
+                unsafe {
+                    extract_two_body_prestep_and_impulses::<$prestep, $impulse>(
+                        constraint_location,
+                        solver,
+                        extractor,
+                        false,
+                    );
+                }
             }
 
             fn flush_sequentially(
@@ -1335,7 +1457,13 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 pair_cache: &mut PairCache,
             ) {
                 unsafe {
-                    sequential_add_to_simulation::<TwoBodyHandles, $desc, $contact_impulses>(list, narrow_phase, solver, pair_cache, 2);
+                    sequential_add_to_simulation::<TwoBodyHandles, $desc, $contact_impulses>(
+                        list,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                        2,
+                    );
                 }
             }
 
@@ -1349,8 +1477,18 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 pair_cache: &mut PairCache,
             ) {
                 unsafe {
-                    sequential_add_to_simulation_speculative::<TwoBodyHandles, $desc, $contact_impulses>(
-                        list, narrow_phase_constraint_type_id, speculative_batch_indices, narrow_phase, solver, pair_cache, 2,
+                    sequential_add_to_simulation_speculative::<
+                        TwoBodyHandles,
+                        $desc,
+                        $contact_impulses,
+                    >(
+                        list,
+                        narrow_phase_constraint_type_id,
+                        speculative_batch_indices,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                        2,
                     );
                 }
             }
@@ -1366,7 +1504,13 @@ macro_rules! impl_nonconvex_two_body_accessor {
             ) {
                 unsafe {
                     deterministic_add_all::<TwoBodyHandles, $desc, $contact_impulses>(
-                        type_index, overlap_workers_pending, sorted_constraints, narrow_phase, solver, pair_cache, 2,
+                        type_index,
+                        overlap_workers_pending,
+                        sorted_constraints,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                        2,
                     );
                 }
             }
@@ -1466,7 +1610,11 @@ impl NarrowPhaseGenericOpaque {
         // (not on TCallbacks for the actual constraint update logic), this is safe.
         use crate::physics::collision_detection::narrow_phase::NarrowPhaseUpdateConstraint;
         let np = self as *mut Self as *mut u8;
-        NarrowPhaseUpdateConstraint::update_constraint::<TBodyHandles, TDescription, TContactImpulses>(
+        NarrowPhaseUpdateConstraint::update_constraint::<
+            TBodyHandles,
+            TDescription,
+            TContactImpulses,
+        >(
             np,
             worker_index,
             pair,
@@ -1484,79 +1632,135 @@ impl NarrowPhaseGenericOpaque {
 // =============================================================================
 
 use crate::physics::constraints::contact::contact_convex_types::{
-    Contact1OneBodyPrestepData, Contact1AccumulatedImpulses,
-    Contact2OneBodyPrestepData, Contact2AccumulatedImpulses,
-    Contact3OneBodyPrestepData, Contact3AccumulatedImpulses,
-    Contact4OneBodyPrestepData, Contact4AccumulatedImpulses,
-    Contact1PrestepData, Contact2PrestepData, Contact3PrestepData, Contact4PrestepData,
+    Contact1AccumulatedImpulses, Contact1OneBodyPrestepData, Contact1PrestepData,
+    Contact2AccumulatedImpulses, Contact2OneBodyPrestepData, Contact2PrestepData,
+    Contact3AccumulatedImpulses, Contact3OneBodyPrestepData, Contact3PrestepData,
+    Contact4AccumulatedImpulses, Contact4OneBodyPrestepData, Contact4PrestepData,
 };
 use crate::physics::constraints::contact::contact_nonconvex_types::{
-    Contact2NonconvexOneBodyPrestepData, Contact2NonconvexAccumulatedImpulses,
-    Contact3NonconvexOneBodyPrestepData, Contact3NonconvexAccumulatedImpulses,
-    Contact4NonconvexOneBodyPrestepData, Contact4NonconvexAccumulatedImpulses,
-    Contact2NonconvexPrestepData, Contact3NonconvexPrestepData, Contact4NonconvexPrestepData,
+    Contact2NonconvexAccumulatedImpulses, Contact2NonconvexOneBodyPrestepData,
+    Contact2NonconvexPrestepData, Contact3NonconvexAccumulatedImpulses,
+    Contact3NonconvexOneBodyPrestepData, Contact3NonconvexPrestepData,
+    Contact4NonconvexAccumulatedImpulses, Contact4NonconvexOneBodyPrestepData,
+    Contact4NonconvexPrestepData,
 };
 
 // Convex one-body (type IDs 0-3)
 impl_convex_one_body_accessor!(
-    Contact1OneBodyAccessor, Contact1OneBody, Contact1OneBodyPrestepData,
-    Contact1AccumulatedImpulses, ContactImpulses1, 1
+    Contact1OneBodyAccessor,
+    Contact1OneBody,
+    Contact1OneBodyPrestepData,
+    Contact1AccumulatedImpulses,
+    ContactImpulses1,
+    1
 );
 impl_convex_one_body_accessor!(
-    Contact2OneBodyAccessor, Contact2OneBody, Contact2OneBodyPrestepData,
-    Contact2AccumulatedImpulses, ContactImpulses2, 2
+    Contact2OneBodyAccessor,
+    Contact2OneBody,
+    Contact2OneBodyPrestepData,
+    Contact2AccumulatedImpulses,
+    ContactImpulses2,
+    2
 );
 impl_convex_one_body_accessor!(
-    Contact3OneBodyAccessor, Contact3OneBody, Contact3OneBodyPrestepData,
-    Contact3AccumulatedImpulses, ContactImpulses3, 3
+    Contact3OneBodyAccessor,
+    Contact3OneBody,
+    Contact3OneBodyPrestepData,
+    Contact3AccumulatedImpulses,
+    ContactImpulses3,
+    3
 );
 impl_convex_one_body_accessor!(
-    Contact4OneBodyAccessor, Contact4OneBody, Contact4OneBodyPrestepData,
-    Contact4AccumulatedImpulses, ContactImpulses4, 4
+    Contact4OneBodyAccessor,
+    Contact4OneBody,
+    Contact4OneBodyPrestepData,
+    Contact4AccumulatedImpulses,
+    ContactImpulses4,
+    4
 );
 
 // Convex two-body (type IDs 4-7)
 impl_convex_two_body_accessor!(
-    Contact1TwoBodyAccessor, Contact1TwoBody, Contact1PrestepData,
-    Contact1AccumulatedImpulses, ContactImpulses1, 1
+    Contact1TwoBodyAccessor,
+    Contact1TwoBody,
+    Contact1PrestepData,
+    Contact1AccumulatedImpulses,
+    ContactImpulses1,
+    1
 );
 impl_convex_two_body_accessor!(
-    Contact2TwoBodyAccessor, Contact2TwoBody, Contact2PrestepData,
-    Contact2AccumulatedImpulses, ContactImpulses2, 2
+    Contact2TwoBodyAccessor,
+    Contact2TwoBody,
+    Contact2PrestepData,
+    Contact2AccumulatedImpulses,
+    ContactImpulses2,
+    2
 );
 impl_convex_two_body_accessor!(
-    Contact3TwoBodyAccessor, Contact3TwoBody, Contact3PrestepData,
-    Contact3AccumulatedImpulses, ContactImpulses3, 3
+    Contact3TwoBodyAccessor,
+    Contact3TwoBody,
+    Contact3PrestepData,
+    Contact3AccumulatedImpulses,
+    ContactImpulses3,
+    3
 );
 impl_convex_two_body_accessor!(
-    Contact4TwoBodyAccessor, Contact4TwoBody, Contact4PrestepData,
-    Contact4AccumulatedImpulses, ContactImpulses4, 4
+    Contact4TwoBodyAccessor,
+    Contact4TwoBody,
+    Contact4PrestepData,
+    Contact4AccumulatedImpulses,
+    ContactImpulses4,
+    4
 );
 
 // Nonconvex one-body (type IDs 8-10)
 impl_nonconvex_one_body_accessor!(
-    Contact2NonconvexOneBodyAccessor, Contact2NonconvexOneBody, Contact2NonconvexOneBodyPrestepData,
-    Contact2NonconvexAccumulatedImpulses, ContactImpulses2, 2
+    Contact2NonconvexOneBodyAccessor,
+    Contact2NonconvexOneBody,
+    Contact2NonconvexOneBodyPrestepData,
+    Contact2NonconvexAccumulatedImpulses,
+    ContactImpulses2,
+    2
 );
 impl_nonconvex_one_body_accessor!(
-    Contact3NonconvexOneBodyAccessor, Contact3NonconvexOneBody, Contact3NonconvexOneBodyPrestepData,
-    Contact3NonconvexAccumulatedImpulses, ContactImpulses3, 3
+    Contact3NonconvexOneBodyAccessor,
+    Contact3NonconvexOneBody,
+    Contact3NonconvexOneBodyPrestepData,
+    Contact3NonconvexAccumulatedImpulses,
+    ContactImpulses3,
+    3
 );
 impl_nonconvex_one_body_accessor!(
-    Contact4NonconvexOneBodyAccessor, Contact4NonconvexOneBody, Contact4NonconvexOneBodyPrestepData,
-    Contact4NonconvexAccumulatedImpulses, ContactImpulses4, 4
+    Contact4NonconvexOneBodyAccessor,
+    Contact4NonconvexOneBody,
+    Contact4NonconvexOneBodyPrestepData,
+    Contact4NonconvexAccumulatedImpulses,
+    ContactImpulses4,
+    4
 );
 
 // Nonconvex two-body (type IDs 15-17)
 impl_nonconvex_two_body_accessor!(
-    Contact2NonconvexTwoBodyAccessor, Contact2Nonconvex, Contact2NonconvexPrestepData,
-    Contact2NonconvexAccumulatedImpulses, ContactImpulses2, 2
+    Contact2NonconvexTwoBodyAccessor,
+    Contact2Nonconvex,
+    Contact2NonconvexPrestepData,
+    Contact2NonconvexAccumulatedImpulses,
+    ContactImpulses2,
+    2
 );
 impl_nonconvex_two_body_accessor!(
-    Contact3NonconvexTwoBodyAccessor, Contact3Nonconvex, Contact3NonconvexPrestepData,
-    Contact3NonconvexAccumulatedImpulses, ContactImpulses3, 3
+    Contact3NonconvexTwoBodyAccessor,
+    Contact3Nonconvex,
+    Contact3NonconvexPrestepData,
+    Contact3NonconvexAccumulatedImpulses,
+    ContactImpulses3,
+    3
 );
 impl_nonconvex_two_body_accessor!(
-    Contact4NonconvexTwoBodyAccessor, Contact4Nonconvex, Contact4NonconvexPrestepData,
-    Contact4NonconvexAccumulatedImpulses, ContactImpulses4, 4
+    Contact4NonconvexTwoBodyAccessor,
+    Contact4Nonconvex,
+    Contact4NonconvexPrestepData,
+    Contact4NonconvexAccumulatedImpulses,
+    ContactImpulses4,
+    4
 );

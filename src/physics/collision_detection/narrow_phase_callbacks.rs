@@ -1,9 +1,9 @@
 // Translated from BepuPhysics/CollisionDetection/INarrowPhaseCallbacks.cs
 
-use crate::physics::collidables::collidable_reference::CollidableReference;
-use crate::physics::constraints::spring_settings::SpringSettings;
 use super::contact_manifold::{ConvexContactManifold, IContactManifold};
 use super::pair_cache::CollidablePair;
+use crate::physics::collidables::collidable_reference::CollidableReference;
+use crate::physics::constraints::spring_settings::SpringSettings;
 
 /// Material properties governing the interaction between colliding bodies.
 /// Used by the narrow phase to create constraints of the appropriate configuration.

@@ -14,12 +14,7 @@ impl Tree {
     /// Tests a ray against an AABB defined by min/max.
     /// Returns true if the ray intersects, and writes the entry t into `t`.
     #[inline(always)]
-    pub unsafe fn intersects_ray(
-        min: Vec3,
-        max: Vec3,
-        ray: *const TreeRay,
-        t: &mut f32,
-    ) -> bool {
+    pub unsafe fn intersects_ray(min: Vec3, max: Vec3, ray: *const TreeRay, t: &mut f32) -> bool {
         let t0 = min * (*ray).inverse_direction - (*ray).origin_over_direction;
         let t1 = max * (*ray).inverse_direction - (*ray).origin_over_direction;
         let t_exit = t0.max(t1);
@@ -39,10 +34,12 @@ impl Tree {
     ) {
         debug_assert!(
             (node_index >= 0 && node_index < self.node_count)
-                || (Self::encode(node_index) >= 0
-                    && Self::encode(node_index) < self.leaf_count)
+                || (Self::encode(node_index) >= 0 && Self::encode(node_index) < self.leaf_count)
         );
-        debug_assert!(self.leaf_count >= 2, "This implementation assumes all nodes are filled.");
+        debug_assert!(
+            self.leaf_count >= 2,
+            "This implementation assumes all nodes are filled."
+        );
 
         let mut stack_end: i32 = 0;
         loop {
@@ -144,11 +141,7 @@ impl Tree {
             &mut *ray_data.as_mut_ptr(),
             &mut *tree_ray.as_mut_ptr(),
         );
-        self.ray_cast_internal(
-            tree_ray.as_mut_ptr(),
-            ray_data.as_mut_ptr(),
-            leaf_tester,
-        );
+        self.ray_cast_internal(tree_ray.as_mut_ptr(), ray_data.as_mut_ptr(), leaf_tester);
         // The maximumT could have been mutated by the leaf tester. Propagate that change.
         *maximum_t = (*tree_ray.as_ptr()).maximum_t;
     }

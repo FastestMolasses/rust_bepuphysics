@@ -1,13 +1,13 @@
+use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
+use crate::physics::constraints::servo_settings::{ServoSettings, ServoSettingsWide};
+use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::math_helper;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
-use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
-use crate::physics::constraints::servo_settings::{ServoSettings, ServoSettingsWide};
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Quat;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
@@ -38,8 +38,16 @@ impl TwistServo {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_unit_length_quat(self.local_basis_a, "TwistServo", "local_basis_a");
-            ConstraintChecker::assert_unit_length_quat(self.local_basis_b, "TwistServo", "local_basis_b");
+            ConstraintChecker::assert_unit_length_quat(
+                self.local_basis_a,
+                "TwistServo",
+                "local_basis_a",
+            );
+            ConstraintChecker::assert_unit_length_quat(
+                self.local_basis_b,
+                "TwistServo",
+                "local_basis_b",
+            );
             ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "TwistServo");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
@@ -93,9 +101,17 @@ impl TwistServoFunctions {
         jacobian_a: &mut Vector3Wide,
     ) {
         let mut basis_quaternion_a = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(local_basis_a, orientation_a, &mut basis_quaternion_a);
+        QuaternionWide::concatenate_without_overlap(
+            local_basis_a,
+            orientation_a,
+            &mut basis_quaternion_a,
+        );
         let mut basis_quaternion_b = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(local_basis_b, orientation_b, &mut basis_quaternion_b);
+        QuaternionWide::concatenate_without_overlap(
+            local_basis_b,
+            orientation_b,
+            &mut basis_quaternion_b,
+        );
 
         QuaternionWide::transform_unit_xz(&basis_quaternion_b, basis_bx, basis_bz);
         Matrix3x3Wide::create_from_quaternion(&basis_quaternion_a, basis_a);
@@ -119,9 +135,17 @@ impl TwistServoFunctions {
         angle: &mut Vector<f32>,
     ) {
         let mut aligning_rotation = QuaternionWide::default();
-        QuaternionWide::get_quaternion_between_normalized_vectors(basis_bz, &basis_a.z, &mut aligning_rotation);
+        QuaternionWide::get_quaternion_between_normalized_vectors(
+            basis_bz,
+            &basis_a.z,
+            &mut aligning_rotation,
+        );
         let mut aligned_basis_bx = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(basis_bx, &aligning_rotation, &mut aligned_basis_bx);
+        QuaternionWide::transform_without_overlap(
+            basis_bx,
+            &aligning_rotation,
+            &mut aligned_basis_bx,
+        );
         let mut x = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&aligned_basis_bx, &basis_a.x, &mut x);
         let mut y = Vector::<f32>::splat(0.0);
@@ -141,8 +165,16 @@ impl TwistServoFunctions {
         negated_impulse_to_velocity_b: &mut Vector3Wide,
         unsoftened_inverse_effective_mass: &mut Vector<f32>,
     ) {
-        Symmetric3x3Wide::transform_without_overlap(jacobian_a, inverse_inertia_a, impulse_to_velocity_a);
-        Symmetric3x3Wide::transform_without_overlap(jacobian_a, inverse_inertia_b, negated_impulse_to_velocity_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            jacobian_a,
+            inverse_inertia_a,
+            impulse_to_velocity_a,
+        );
+        Symmetric3x3Wide::transform_without_overlap(
+            jacobian_a,
+            inverse_inertia_b,
+            negated_impulse_to_velocity_b,
+        );
         let mut angular_a = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(impulse_to_velocity_a, jacobian_a, &mut angular_a);
         let mut angular_b = Vector::<f32>::splat(0.0);
@@ -202,7 +234,11 @@ impl TwistServoFunctions {
         Vector3Wide::add(angular_velocity_a, &velocity_change_a, &mut tmp);
         *angular_velocity_a = tmp;
         let mut negated_velocity_change_b = Vector3Wide::default();
-        Vector3Wide::scale_to(negated_impulse_to_velocity_b, csi, &mut negated_velocity_change_b);
+        Vector3Wide::scale_to(
+            negated_impulse_to_velocity_b,
+            csi,
+            &mut negated_velocity_change_b,
+        );
         Vector3Wide::subtract(angular_velocity_b, &negated_velocity_change_b, &mut tmp);
         *angular_velocity_b = tmp;
     }
@@ -217,9 +253,17 @@ impl TwistServoFunctions {
         jacobian_a: &mut Vector3Wide,
     ) {
         let mut basis_quaternion_a = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(local_basis_a, orientation_a, &mut basis_quaternion_a);
+        QuaternionWide::concatenate_without_overlap(
+            local_basis_a,
+            orientation_a,
+            &mut basis_quaternion_a,
+        );
         let mut basis_quaternion_b = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(local_basis_b, orientation_b, &mut basis_quaternion_b);
+        QuaternionWide::concatenate_without_overlap(
+            local_basis_b,
+            orientation_b,
+            &mut basis_quaternion_b,
+        );
 
         let basis_a_z = QuaternionWide::transform_unit_z(basis_quaternion_a);
         let basis_b_z = QuaternionWide::transform_unit_z(basis_quaternion_b);
@@ -248,12 +292,32 @@ impl TwistServoFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut jacobian_a = Vector3Wide::default();
-        Self::compute_jacobian_simple(orientation_a, orientation_b, &prestep.local_basis_a, &prestep.local_basis_b, &mut jacobian_a);
+        Self::compute_jacobian_simple(
+            orientation_a,
+            orientation_b,
+            &prestep.local_basis_a,
+            &prestep.local_basis_b,
+            &mut jacobian_a,
+        );
         let mut impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&jacobian_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &jacobian_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut negated_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&jacobian_a, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
-        Self::apply_impulse(&mut wsv_a.angular, &mut wsv_b.angular, &impulse_to_velocity_a, &negated_impulse_to_velocity_b, accumulated_impulses);
+        Symmetric3x3Wide::transform_without_overlap(
+            &jacobian_a,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
+        Self::apply_impulse(
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            accumulated_impulses,
+        );
     }
 
     #[inline(always)]
@@ -276,8 +340,14 @@ impl TwistServoFunctions {
         let mut basis_a = Matrix3x3Wide::default();
         let mut jacobian_a = Vector3Wide::default();
         Self::compute_jacobian_full(
-            orientation_a, orientation_b, &prestep.local_basis_a, &prestep.local_basis_b,
-            &mut basis_bx, &mut basis_bz, &mut basis_a, &mut jacobian_a,
+            orientation_a,
+            orientation_b,
+            &prestep.local_basis_a,
+            &prestep.local_basis_b,
+            &mut basis_bx,
+            &mut basis_bz,
+            &mut basis_a,
+            &mut jacobian_a,
         );
 
         let mut impulse_to_velocity_a = Vector3Wide::default();
@@ -322,14 +392,27 @@ impl TwistServoFunctions {
         let mut net_velocity = Vector3Wide::default();
         Vector3Wide::subtract(&wsv_a.angular, &wsv_b.angular, &mut net_velocity);
         let mut csi_velocity_component = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&net_velocity, &velocity_to_impulse_a, &mut csi_velocity_component);
+        Vector3Wide::dot(
+            &net_velocity,
+            &velocity_to_impulse_a,
+            &mut csi_velocity_component,
+        );
         // csi = biasImpulse - accumulatedImpulse * softnessImpulseScale - csiVelocityComponent
-        let mut csi = bias_impulse - *accumulated_impulses * softness_impulse_scale - csi_velocity_component;
+        let mut csi =
+            bias_impulse - *accumulated_impulses * softness_impulse_scale - csi_velocity_component;
         let previous_accumulated_impulse = *accumulated_impulses;
-        *accumulated_impulses = (*accumulated_impulses + csi).simd_max(-maximum_impulse).simd_min(maximum_impulse);
+        *accumulated_impulses = (*accumulated_impulses + csi)
+            .simd_max(-maximum_impulse)
+            .simd_min(maximum_impulse);
         csi = *accumulated_impulses - previous_accumulated_impulse;
 
-        Self::apply_impulse(&mut wsv_a.angular, &mut wsv_b.angular, &impulse_to_velocity_a, &negated_impulse_to_velocity_b, &csi);
+        Self::apply_impulse(
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            &csi,
+        );
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

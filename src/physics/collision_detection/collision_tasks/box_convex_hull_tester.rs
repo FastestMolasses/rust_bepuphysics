@@ -63,7 +63,11 @@ impl BoxConvexHullTester {
         let mut center_distance = zero_f;
         Vector3Wide::length_into(&local_offset_a, &mut center_distance);
         let mut initial_normal = Vector3Wide::default();
-        Vector3Wide::scale_to(&local_offset_a, &(one_f / center_distance), &mut initial_normal);
+        Vector3Wide::scale_to(
+            &local_offset_a,
+            &(one_f / center_distance),
+            &mut initial_normal,
+        );
         let use_initial_fallback = center_distance.simd_lt(Vector::<f32>::splat(1e-8));
         initial_normal.x = use_initial_fallback.select(zero_f, initial_normal.x);
         initial_normal.y = use_initial_fallback.select(one_f, initial_normal.y);
@@ -162,13 +166,20 @@ impl BoxConvexHullTester {
         let not_negate_face = !negate_face;
         Vector3Wide::conditionally_negate(&not_negate_face, &mut box_face_x);
 
-        let box_face_half_width = use_x.select(a.half_height, use_y.select(a.half_length, a.half_width));
-        let box_face_half_height = use_x.select(a.half_length, use_y.select(a.half_width, a.half_height));
-        let box_face_normal_offset = use_x.select(a.half_width, use_y.select(a.half_height, a.half_length));
+        let box_face_half_width =
+            use_x.select(a.half_height, use_y.select(a.half_length, a.half_width));
+        let box_face_half_height =
+            use_x.select(a.half_length, use_y.select(a.half_width, a.half_height));
+        let box_face_normal_offset =
+            use_x.select(a.half_width, use_y.select(a.half_height, a.half_length));
 
         let box_face_center_offset = Vector3Wide::scale(&box_face_normal, &box_face_normal_offset);
         let mut box_face_center = Vector3Wide::default();
-        Vector3Wide::add(&box_face_center_offset, &local_offset_a, &mut box_face_center);
+        Vector3Wide::add(
+            &box_face_center_offset,
+            &local_offset_a,
+            &mut box_face_center,
+        );
 
         let box_face_x_offset = Vector3Wide::scale(&box_face_x, &box_face_half_width);
         let box_face_y_offset = Vector3Wide::scale(&box_face_y, &box_face_half_height);
@@ -252,12 +263,9 @@ impl BoxConvexHullTester {
             let slot_face_y = GatherScatter::get_offset_instance(&box_face_y, slot_index);
 
             // 4 box edges: X is 00->10, Y is 10->11, Z is 11->01, W is 01->00
-            let box_edge_start_x =
-                [v00_slot.x[0], v10_slot.x[0], v11_slot.x[0], v01_slot.x[0]];
-            let box_edge_start_y =
-                [v00_slot.y[0], v10_slot.y[0], v11_slot.y[0], v01_slot.y[0]];
-            let box_edge_start_z =
-                [v00_slot.z[0], v10_slot.z[0], v11_slot.z[0], v01_slot.z[0]];
+            let box_edge_start_x = [v00_slot.x[0], v10_slot.x[0], v11_slot.x[0], v01_slot.x[0]];
+            let box_edge_start_y = [v00_slot.y[0], v10_slot.y[0], v11_slot.y[0], v01_slot.y[0]];
+            let box_edge_start_z = [v00_slot.z[0], v10_slot.z[0], v11_slot.z[0], v01_slot.z[0]];
             let edge_direction_x = [
                 slot_face_x.x[0],
                 slot_face_y.x[0],
@@ -350,12 +358,9 @@ impl BoxConvexHullTester {
                 let mut denominator = [0.0f32; 4];
                 let mut edge_intersections = [0.0f32; 4];
                 for k in 0..4 {
-                    hull_edge_start_to_box_edge_x[k] =
-                        box_edge_start_x[k] - hull_edge_start_x4[k];
-                    hull_edge_start_to_box_edge_y[k] =
-                        box_edge_start_y[k] - hull_edge_start_y4[k];
-                    hull_edge_start_to_box_edge_z[k] =
-                        box_edge_start_z[k] - hull_edge_start_z4[k];
+                    hull_edge_start_to_box_edge_x[k] = box_edge_start_x[k] - hull_edge_start_x4[k];
+                    hull_edge_start_to_box_edge_y[k] = box_edge_start_y[k] - hull_edge_start_y4[k];
+                    hull_edge_start_to_box_edge_z[k] = box_edge_start_z[k] - hull_edge_start_z4[k];
                     box_vertex_containment_dots[k] = hull_edge_plane_normal_x4[k]
                         * hull_edge_start_to_box_edge_x[k]
                         + hull_edge_plane_normal_y4[k] * hull_edge_start_to_box_edge_y[k]

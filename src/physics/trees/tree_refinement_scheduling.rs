@@ -9,8 +9,8 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 impl Tree {
     pub(crate) fn refit_and_measure(&self, child: &mut NodeChild) -> f32 {
         unsafe {
-            let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
-                .add(child.index as usize);
+            let node =
+                &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(child.index as usize);
 
             debug_assert!(self.leaf_count >= 2);
 
@@ -48,11 +48,9 @@ impl Tree {
         debug_assert!(leaf_count_threshold > 1);
 
         unsafe {
-            let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
-                .add(child.index as usize);
-            debug_assert!(
-                self.metanodes.get(child.index).cost_or_flag.refine_flag == 0
-            );
+            let node =
+                &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(child.index as usize);
+            debug_assert!(self.metanodes.get(child.index).cost_or_flag.refine_flag == 0);
             let mut child_change = 0.0f32;
 
             let premetric = Self::compute_bounds_metric_vecs(&child.min, &child.max);
@@ -113,8 +111,8 @@ impl Tree {
         );
 
         unsafe {
-            let children = &mut (*(self.nodes.as_ptr() as *mut super::node::Node)).a
-                as *mut NodeChild;
+            let children =
+                &mut (*(self.nodes.as_ptr() as *mut super::node::Node)).a as *mut NodeChild;
 
             let mut child_change = 0.0f32;
             let mut merged = BoundingBox {
@@ -186,10 +184,8 @@ impl Tree {
         i32, /* refinement_leaf_count_threshold */
     ) {
         let maximum_subtrees = ((self.leaf_count as f64).sqrt() * 3.0) as i32;
-        let estimated_refinement_candidate_count =
-            (self.leaf_count * 2) / maximum_subtrees;
-        let refinement_leaf_count_threshold =
-            self.leaf_count.min(maximum_subtrees);
+        let estimated_refinement_candidate_count = (self.leaf_count * 2) / maximum_subtrees;
+        let refinement_leaf_count_threshold = self.leaf_count.min(maximum_subtrees);
         (
             maximum_subtrees,
             estimated_refinement_candidate_count,
@@ -214,8 +210,7 @@ impl Tree {
                  have been corrupted by infinites or NaNs."
             );
         }
-        let refine_aggressiveness =
-            (cost_change * refine_aggressiveness_scale).max(0.0);
+        let refine_aggressiveness = (cost_change * refine_aggressiveness_scale).max(0.0);
         let refine_portion = (refine_aggressiveness * 0.25).min(1.0);
 
         let target_refinement_scale = (self.node_count as f32).min(
@@ -225,11 +220,11 @@ impl Tree {
                 + refinement_candidates_count as f32 * refine_portion,
         );
 
-        let refinement_period = (1i32).max(
-            (refinement_candidates_count as f32 / target_refinement_scale) as i32,
-        );
+        let refinement_period =
+            (1i32).max((refinement_candidates_count as f32 / target_refinement_scale) as i32);
         let refinement_offset = ((frame_index as i64 * 236887691i64 + 104395303i64)
-            % (1i64.max(refinement_candidates_count as i64))) as i32;
+            % (1i64.max(refinement_candidates_count as i64)))
+            as i32;
         let target_refinement_count =
             refinement_candidates_count.min(target_refinement_scale as i32);
 
@@ -256,11 +251,8 @@ impl Tree {
             QuickList::<i32>::with_capacity(estimated_refinement_candidate_count, pool);
 
         // Collect the refinement candidates.
-        let cost_change = self.refit_and_mark_root(
-            leaf_count_threshold,
-            &mut refinement_candidates,
-            pool,
-        );
+        let cost_change =
+            self.refit_and_mark_root(leaf_count_threshold, &mut refinement_candidates, pool);
 
         let (target_refinement_count, period, offset) = self.get_refine_tuning(
             frame_index,
@@ -269,8 +261,7 @@ impl Tree {
             cost_change,
         );
 
-        let mut refinement_targets =
-            QuickList::<i32>::with_capacity(target_refinement_count, pool);
+        let mut refinement_targets = QuickList::<i32>::with_capacity(target_refinement_count, pool);
 
         let mut index = offset;
         unsafe {
@@ -304,13 +295,10 @@ impl Tree {
         }
 
         // Refine all marked targets.
-        let mut subtree_references =
-            QuickList::<i32>::with_capacity(maximum_subtrees, pool);
-        let mut treelet_internal_nodes =
-            QuickList::<i32>::with_capacity(maximum_subtrees, pool);
+        let mut subtree_references = QuickList::<i32>::with_capacity(maximum_subtrees, pool);
+        let mut treelet_internal_nodes = QuickList::<i32>::with_capacity(maximum_subtrees, pool);
 
-        let (mut buffer, mut resources) =
-            self.create_binned_resources(pool, maximum_subtrees);
+        let (mut buffer, mut resources) = self.create_binned_resources(pool, maximum_subtrees);
 
         for i in 0..refinement_targets.count {
             subtree_references.count = 0;

@@ -30,7 +30,12 @@ pub trait UnmanagedMemoryPool {
     /// Resizes a typed buffer to the smallest size available in the pool which contains
     /// the target size. Copies a subset of elements into the new buffer.
     /// Final buffer size is at least as large as the target size and may be larger.
-    fn resize_to_at_least<T: Copy>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32);
+    fn resize_to_at_least<T: Copy>(
+        &mut self,
+        buffer: &mut Buffer<T>,
+        target_size: i32,
+        copy_count: i32,
+    );
 
     /// Resizes a buffer to the target size. Copies a subset of elements into the new buffer.
     fn resize<T: Copy>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32);

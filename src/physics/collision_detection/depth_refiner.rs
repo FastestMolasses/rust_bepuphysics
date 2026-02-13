@@ -167,11 +167,7 @@ impl DepthRefiner {
 
     /// Fills an empty simplex slot with the given support point.
     #[inline(always)]
-    fn fill_slot(
-        vertex: &mut Vertex,
-        support: &Vector3Wide,
-        terminated_lanes: &Vector<i32>,
-    ) {
+    fn fill_slot(vertex: &mut Vertex, support: &Vector3Wide, terminated_lanes: &Vector<i32>) {
         // Note that this always fills empty slots. That's important- we avoid figuring out what subsimplex is active
         // and instead just treat it as a degenerate simplex with some duplicates. (Shares code with the actual degenerate path.)
         let dont_fill_slot = vertex.exists | *terminated_lanes;
@@ -184,11 +180,7 @@ impl DepthRefiner {
 
     /// Force-fills a simplex slot.
     #[inline(always)]
-    fn force_fill_slot(
-        should_fill: &Vector<i32>,
-        vertex: &mut Vertex,
-        support: &Vector3Wide,
-    ) {
+    fn force_fill_slot(should_fill: &Vector<i32>, vertex: &mut Vertex, support: &Vector3Wide) {
         vertex.exists = vertex.exists | *should_fill;
         vertex.support = Vector3Wide::conditional_select(should_fill, support, &vertex.support);
     }
@@ -303,7 +295,8 @@ impl DepthRefiner {
         let termination_epsilon_squared = termination_epsilon * termination_epsilon;
 
         if has_new_support {
-            let simplex_full = (simplex.a.exists & (simplex.b.exists & simplex.c.exists)) & !*terminated_lanes;
+            let simplex_full =
+                (simplex.a.exists & (simplex.b.exists & simplex.c.exists)) & !*terminated_lanes;
             // Fill any empty slots with the new support. Combines partial simplex case with degenerate simplex case.
             Self::fill_slot(&mut simplex.a, support, terminated_lanes);
             Self::fill_slot(&mut simplex.b, support, terminated_lanes);
@@ -324,7 +317,11 @@ impl DepthRefiner {
                 Vector3Wide::subtract(support, &simplex.c.support, &mut cd);
                 let mut triangle_normal_early = Vector3Wide::default();
                 unsafe {
-                    Vector3Wide::cross_without_overlap(&ab_early, &ca_early, &mut triangle_normal_early);
+                    Vector3Wide::cross_without_overlap(
+                        &ab_early,
+                        &ca_early,
+                        &mut triangle_normal_early,
+                    );
                 }
                 // (ad x n) * (d - searchTarget) = (n x (d - searchTarget)) * ad
                 let mut target_to_support = Vector3Wide::default();
@@ -415,7 +412,10 @@ impl DepthRefiner {
 
         let mut calibration_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&triangle_normal, best_normal, &mut calibration_dot);
-        Vector3Wide::conditionally_negate(&calibration_dot.simd_lt(zero_f).to_int(), &mut triangle_normal);
+        Vector3Wide::conditionally_negate(
+            &calibration_dot.simd_lt(zero_f).to_int(),
+            &mut triangle_normal,
+        );
 
         let target_outside_triangle_edges = outside_ab | outside_bc | outside_ca;
 
@@ -504,40 +504,40 @@ impl DepthRefiner {
                 let t = use_ab
                     .simd_ne(zero_i)
                     .select(ab_t, use_bc.simd_ne(zero_i).select(bc_t, ca_t));
-                let mut edge_offset =
-                    Vector3Wide::conditional_select(&use_ab, &ab, &ca);
+                let mut edge_offset = Vector3Wide::conditional_select(&use_ab, &ab, &ca);
                 let mut edge_start =
                     Vector3Wide::conditional_select(&use_ab, &target_to_a, &target_to_c);
                 edge_offset = Vector3Wide::conditional_select(&use_bc, &bc, &edge_offset);
-                edge_start =
-                    Vector3Wide::conditional_select(&use_bc, &target_to_b, &edge_start);
+                edge_start = Vector3Wide::conditional_select(&use_bc, &target_to_b, &edge_start);
 
                 let scaled_offset = Vector3Wide::scale(&edge_offset, &(-t));
                 let mut triangle_to_target_candidate = Vector3Wide::default();
-                Vector3Wide::subtract(&scaled_offset, &edge_start, &mut triangle_to_target_candidate);
+                Vector3Wide::subtract(
+                    &scaled_offset,
+                    &edge_start,
+                    &mut triangle_to_target_candidate,
+                );
 
                 let origin_nearest_start = t.simd_eq(zero_f);
                 let origin_nearest_end = t.simd_eq(one_f);
                 let three_i = Vector::<i32>::splat(3);
                 let five_i = Vector::<i32>::splat(5);
                 let six_i = Vector::<i32>::splat(6);
-                let feature_for_ab = origin_nearest_start.select(
-                    one_i,
-                    origin_nearest_end.select(two_i, three_i),
-                );
-                let feature_for_bc = origin_nearest_start.select(
-                    two_i,
-                    origin_nearest_end.select(four_i, six_i),
-                );
-                let feature_for_ca = origin_nearest_start.select(
-                    four_i,
-                    origin_nearest_end.select(one_i, five_i),
-                );
+                let feature_for_ab =
+                    origin_nearest_start.select(one_i, origin_nearest_end.select(two_i, three_i));
+                let feature_for_bc =
+                    origin_nearest_start.select(two_i, origin_nearest_end.select(four_i, six_i));
+                let feature_for_ca =
+                    origin_nearest_start.select(four_i, origin_nearest_end.select(one_i, five_i));
                 let edge_features = use_ab.simd_ne(zero_i).select(
                     feature_for_ab,
-                    use_bc.simd_ne(zero_i).select(feature_for_bc, feature_for_ca),
+                    use_bc
+                        .simd_ne(zero_i)
+                        .select(feature_for_bc, feature_for_ca),
                 );
-                relevant_features = use_edge.simd_ne(zero_i).select(edge_features, relevant_features);
+                relevant_features = use_edge
+                    .simd_ne(zero_i)
+                    .select(edge_features, relevant_features);
                 triangle_to_target = Vector3Wide::conditional_select(
                     &use_edge,
                     &triangle_to_target_candidate,
@@ -547,8 +547,9 @@ impl DepthRefiner {
         }
 
         // We've examined the vertex and edge case, now check the triangle face case.
-        let target_contained_in_edge_planes =
-            (!target_outside_triangle_edges.to_int()) & (!simplex_degenerate.to_int()) & !*terminated_lanes;
+        let target_contained_in_edge_planes = (!target_outside_triangle_edges.to_int())
+            & (!simplex_degenerate.to_int())
+            & !*terminated_lanes;
         if target_contained_in_edge_planes.simd_lt(zero_i).any() {
             // At least one lane needs a face test.
             // dot(n, searchTarget - a)^2 / ||n||^2
@@ -643,7 +644,11 @@ impl DepthRefiner {
                 Vector3Wide::subtract(support, &simplex.c.support, &mut cd);
                 let mut triangle_normal_early = Vector3Wide::default();
                 unsafe {
-                    Vector3Wide::cross_without_overlap(&ab_early, &ca_early, &mut triangle_normal_early);
+                    Vector3Wide::cross_without_overlap(
+                        &ab_early,
+                        &ca_early,
+                        &mut triangle_normal_early,
+                    );
                 }
                 let mut target_to_support = Vector3Wide::default();
                 Vector3Wide::subtract(support, &search_target, &mut target_to_support);
@@ -693,9 +698,24 @@ impl DepthRefiner {
         } else {
             let a_support = simplex.a.support.clone();
             let a_support_on_a = simplex.a.support_on_a.clone();
-            Self::fill_slot_witness(&mut simplex.a, &a_support, &a_support_on_a, terminated_lanes);
-            Self::fill_slot_witness(&mut simplex.b, &a_support, &a_support_on_a, terminated_lanes);
-            Self::fill_slot_witness(&mut simplex.c, &a_support, &a_support_on_a, terminated_lanes);
+            Self::fill_slot_witness(
+                &mut simplex.a,
+                &a_support,
+                &a_support_on_a,
+                terminated_lanes,
+            );
+            Self::fill_slot_witness(
+                &mut simplex.b,
+                &a_support,
+                &a_support_on_a,
+                terminated_lanes,
+            );
+            Self::fill_slot_witness(
+                &mut simplex.c,
+                &a_support,
+                &a_support_on_a,
+                terminated_lanes,
+            );
         }
 
         let mut ab = Vector3Wide::default();
@@ -747,7 +767,10 @@ impl DepthRefiner {
 
         let mut calibration_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&triangle_normal, best_normal, &mut calibration_dot);
-        Vector3Wide::conditionally_negate(&calibration_dot.simd_lt(zero_f).to_int(), &mut triangle_normal);
+        Vector3Wide::conditionally_negate(
+            &calibration_dot.simd_lt(zero_f).to_int(),
+            &mut triangle_normal,
+        );
 
         let target_outside_triangle_edges = outside_ab | outside_bc | outside_ca;
 
@@ -758,11 +781,18 @@ impl DepthRefiner {
         let two_i = Vector::<i32>::splat(2);
         let four_i = Vector::<i32>::splat(4);
         let mut relevant_features = one_i;
-        simplex.a.weight = terminated_lanes.simd_ne(zero_i).select(simplex.a.weight, one_f);
-        simplex.b.weight = terminated_lanes.simd_ne(zero_i).select(simplex.b.weight, zero_f);
-        simplex.c.weight = terminated_lanes.simd_ne(zero_i).select(simplex.c.weight, zero_f);
-        simplex.weight_denominator =
-            terminated_lanes.simd_ne(zero_i).select(simplex.weight_denominator, one_f);
+        simplex.a.weight = terminated_lanes
+            .simd_ne(zero_i)
+            .select(simplex.a.weight, one_f);
+        simplex.b.weight = terminated_lanes
+            .simd_ne(zero_i)
+            .select(simplex.b.weight, zero_f);
+        simplex.c.weight = terminated_lanes
+            .simd_ne(zero_i)
+            .select(simplex.c.weight, zero_f);
+        simplex.weight_denominator = terminated_lanes
+            .simd_ne(zero_i)
+            .select(simplex.weight_denominator, one_f);
 
         let mut target_to_a_length_squared = Vector::<f32>::splat(0.0);
         Vector3Wide::length_squared_to(&target_to_a, &mut target_to_a_length_squared);
@@ -835,13 +865,11 @@ impl DepthRefiner {
                 let t = use_ab
                     .simd_ne(zero_i)
                     .select(ab_t, use_bc.simd_ne(zero_i).select(bc_t, ca_t));
-                let mut edge_offset =
-                    Vector3Wide::conditional_select(&use_ab, &ab, &ca);
+                let mut edge_offset = Vector3Wide::conditional_select(&use_ab, &ab, &ca);
                 let mut edge_start =
                     Vector3Wide::conditional_select(&use_ab, &target_to_a, &target_to_c);
                 edge_offset = Vector3Wide::conditional_select(&use_bc, &bc, &edge_offset);
-                edge_start =
-                    Vector3Wide::conditional_select(&use_bc, &target_to_b, &edge_start);
+                edge_start = Vector3Wide::conditional_select(&use_bc, &target_to_b, &edge_start);
 
                 let scaled_offset = Vector3Wide::scale(&edge_offset, &(-t));
                 let mut triangle_to_target_candidate = Vector3Wide::default();
@@ -856,24 +884,21 @@ impl DepthRefiner {
                 let three_i = Vector::<i32>::splat(3);
                 let five_i = Vector::<i32>::splat(5);
                 let six_i = Vector::<i32>::splat(6);
-                let feature_for_ab = origin_nearest_start.select(
-                    one_i,
-                    origin_nearest_end.select(two_i, three_i),
-                );
-                let feature_for_bc = origin_nearest_start.select(
-                    two_i,
-                    origin_nearest_end.select(four_i, six_i),
-                );
-                let feature_for_ca = origin_nearest_start.select(
-                    four_i,
-                    origin_nearest_end.select(one_i, five_i),
-                );
+                let feature_for_ab =
+                    origin_nearest_start.select(one_i, origin_nearest_end.select(two_i, three_i));
+                let feature_for_bc =
+                    origin_nearest_start.select(two_i, origin_nearest_end.select(four_i, six_i));
+                let feature_for_ca =
+                    origin_nearest_start.select(four_i, origin_nearest_end.select(one_i, five_i));
                 let edge_features = use_ab.simd_ne(zero_i).select(
                     feature_for_ab,
-                    use_bc.simd_ne(zero_i).select(feature_for_bc, feature_for_ca),
+                    use_bc
+                        .simd_ne(zero_i)
+                        .select(feature_for_bc, feature_for_ca),
                 );
-                relevant_features =
-                    use_edge.simd_ne(zero_i).select(edge_features, relevant_features);
+                relevant_features = use_edge
+                    .simd_ne(zero_i)
+                    .select(edge_features, relevant_features);
                 triangle_to_target = Vector3Wide::conditional_select(
                     &use_edge,
                     &triangle_to_target_candidate,
@@ -883,34 +908,30 @@ impl DepthRefiner {
                 // Weight tracking for witness computation.
                 let weight_edge_start = one_f - t;
                 simplex.a.weight = use_edge.simd_ne(zero_i).select(
-                    use_ab.simd_ne(zero_i).select(
-                        weight_edge_start,
-                        use_bc.simd_ne(zero_i).select(zero_f, t),
-                    ),
+                    use_ab
+                        .simd_ne(zero_i)
+                        .select(weight_edge_start, use_bc.simd_ne(zero_i).select(zero_f, t)),
                     simplex.a.weight,
                 );
                 simplex.b.weight = use_edge.simd_ne(zero_i).select(
-                    use_ab.simd_ne(zero_i).select(
-                        t,
-                        use_bc.simd_ne(zero_i).select(weight_edge_start, zero_f),
-                    ),
+                    use_ab
+                        .simd_ne(zero_i)
+                        .select(t, use_bc.simd_ne(zero_i).select(weight_edge_start, zero_f)),
                     simplex.b.weight,
                 );
                 simplex.c.weight = use_edge.simd_ne(zero_i).select(
-                    use_ab.simd_ne(zero_i).select(
-                        zero_f,
-                        use_bc
-                            .simd_ne(zero_i)
-                            .select(t, weight_edge_start),
-                    ),
+                    use_ab
+                        .simd_ne(zero_i)
+                        .select(zero_f, use_bc.simd_ne(zero_i).select(t, weight_edge_start)),
                     simplex.c.weight,
                 );
                 // Weight denominator is still just one, as it is in the vertex case.
             }
         }
 
-        let target_contained_in_edge_planes =
-            (!target_outside_triangle_edges.to_int()) & (!simplex_degenerate.to_int()) & !*terminated_lanes;
+        let target_contained_in_edge_planes = (!target_outside_triangle_edges.to_int())
+            & (!simplex_degenerate.to_int())
+            & !*terminated_lanes;
         if target_contained_in_edge_planes.simd_lt(zero_i).any() {
             let mut target_to_a_dot = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&target_to_a, &triangle_normal, &mut target_to_a_dot);
@@ -1030,7 +1051,12 @@ impl DepthRefiner {
     // ========================================================================
 
     /// Finds the minimum depth using an existing simplex state.
-    pub fn find_minimum_depth_with_simplex<TShapeWideA, TShapeWideB, TSupportFinderA, TSupportFinderB>(
+    pub fn find_minimum_depth_with_simplex<
+        TShapeWideA,
+        TShapeWideB,
+        TSupportFinderA,
+        TSupportFinderB,
+    >(
         a: &TShapeWideA,
         b: &TShapeWideB,
         local_offset_b: &Vector3Wide,
@@ -1102,13 +1128,13 @@ impl DepthRefiner {
             let mut depth = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&support, &normal, &mut depth);
 
-            let use_new_depth =
-                depth.simd_lt(*refined_depth).to_int() & !terminated_lanes;
-            *refined_depth = use_new_depth.simd_ne(Vector::<i32>::splat(0)).select(depth, *refined_depth);
+            let use_new_depth = depth.simd_lt(*refined_depth).to_int() & !terminated_lanes;
+            *refined_depth = use_new_depth
+                .simd_ne(Vector::<i32>::splat(0))
+                .select(depth, *refined_depth);
             *refined_normal =
                 Vector3Wide::conditional_select(&use_new_depth, &normal, refined_normal);
-            terminated_lanes =
-                terminated_lanes | refined_depth.simd_le(depth_threshold).to_int();
+            terminated_lanes = terminated_lanes | refined_depth.simd_le(depth_threshold).to_int();
             if terminated_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
                 break;
             }
@@ -1143,7 +1169,12 @@ impl DepthRefiner {
 
     /// Finds the minimum depth and computes the witness point on shape A.
     #[inline(always)]
-    pub fn find_minimum_depth_with_witness<TShapeWideA, TShapeWideB, TSupportFinderA, TSupportFinderB>(
+    pub fn find_minimum_depth_with_witness<
+        TShapeWideA,
+        TShapeWideB,
+        TSupportFinderA,
+        TSupportFinderB,
+    >(
         a: &TShapeWideA,
         b: &TShapeWideB,
         local_offset_b: &Vector3Wide,
@@ -1294,15 +1325,13 @@ impl DepthRefiner {
             let mut depth = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&support, &normal, &mut depth);
 
-            let use_new_depth =
-                depth.simd_lt(*refined_depth).to_int() & !terminated_lanes;
+            let use_new_depth = depth.simd_lt(*refined_depth).to_int() & !terminated_lanes;
             *refined_depth = use_new_depth
                 .simd_ne(Vector::<i32>::splat(0))
                 .select(depth, *refined_depth);
             *refined_normal =
                 Vector3Wide::conditional_select(&use_new_depth, &normal, refined_normal);
-            terminated_lanes =
-                terminated_lanes | refined_depth.simd_le(depth_threshold).to_int();
+            terminated_lanes = terminated_lanes | refined_depth.simd_le(depth_threshold).to_int();
             if terminated_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
                 break;
             }

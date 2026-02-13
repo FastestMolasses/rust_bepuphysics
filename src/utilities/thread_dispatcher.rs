@@ -14,7 +14,7 @@ pub type WorkerBodyFn = fn(worker_index: i32, dispatcher: &dyn IThreadDispatcher
 /// Provides multithreading dispatch primitives, a thread count, and per thread resource pools for the simulation to use.
 ///
 /// Note that the simulation does not require a true load balancing forloop implementation. All that's needed is a way to jumpstart some threads.
-/// All systems which use multithreading tend to have some form of domain specific load balancing that a general purpose thread pool or parallel for loop implementation 
+/// All systems which use multithreading tend to have some form of domain specific load balancing that a general purpose thread pool or parallel for loop implementation
 /// couldn't match. The simulation also tends to keep the number of dispatches as low as it can. Combined, these two things reduce the importance of a
 /// very highly optimized dispatcher.
 ///
@@ -141,7 +141,9 @@ impl ThreadDispatcher {
                         // Wait for signal
                         {
                             let mut guard = state_clone.signal.lock().unwrap();
-                            while *guard == last_generation && !state_clone.disposed.load(Ordering::Acquire) {
+                            while *guard == last_generation
+                                && !state_clone.disposed.load(Ordering::Acquire)
+                            {
                                 guard = state_clone.worker_cond.wait(guard).unwrap();
                             }
                             if state_clone.disposed.load(Ordering::Acquire) {
@@ -172,7 +174,10 @@ impl ThreadDispatcher {
             thread_count,
             workers,
             state,
-            worker_pools: WorkerBufferPools::new(thread_count as usize, thread_pool_block_allocation_size),
+            worker_pools: WorkerBufferPools::new(
+                thread_count as usize,
+                thread_pool_block_allocation_size,
+            ),
             worker_body: UnsafeCell::new(None),
             unmanaged_ctx: UnsafeCell::new(std::ptr::null_mut()),
             managed_ctx: UnsafeCell::new(None),
@@ -226,7 +231,9 @@ impl IThreadDispatcher for ThreadDispatcher {
         if maximum_worker_count > 1 {
             // Signal background workers
             let workers_to_signal = std::cmp::min(maximum_worker_count - 1, self.thread_count - 1);
-            self.state.remaining_counter.store(workers_to_signal, Ordering::Release);
+            self.state
+                .remaining_counter
+                .store(workers_to_signal, Ordering::Release);
 
             {
                 let mut guard = self.state.signal.lock().unwrap();

@@ -59,7 +59,8 @@ impl<
         continuation_index: &mut i32,
     ) -> *mut CompoundMeshReduction {
         let pool = &mut *vtable.pool;
-        let (index, continuation) = (&mut *vtable.compound_mesh_reductions).create_continuation(total_child_count, pool);
+        let (index, continuation) =
+            (&mut *vtable.compound_mesh_reductions).create_continuation(total_child_count, pool);
         *continuation_index = index;
 
         // Store mesh A's triangles in surplus space beyond total_child_count.
@@ -136,8 +137,7 @@ impl<
         // In meshes, the triangle's vertices already contain the offset.
         *child_pose_b = RigidPose::new(Vec3::ZERO, pair.orientation_b);
 
-        let continuation_child =
-            &mut cont.inner.children[continuation_child_index];
+        let continuation_child = &mut cont.inner.children[continuation_child_index];
         // Note: child pose offsets are default for mesh-mesh (vertices contain positions).
         continuation_child.offset_a = Vec3::ZERO;
         continuation_child.offset_b = Vec3::ZERO;

@@ -65,17 +65,16 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
         self.leaf_threshold =
             ((tree_a.leaf_count + tree_b.leaf_count) as f32 / target_job_count) as i32;
         self.jobs = QuickList::with_capacity((target_job_count * 2.0) as i32, &mut *self.pool);
-        unsafe { *self.next_node_pair.get() = -1; }
+        unsafe {
+            *self.next_node_pair.get() = -1;
+        }
         self.overlap_handlers = overlap_handlers;
         self.tree_a = tree_a as *const Tree;
         self.tree_b = tree_b as *const Tree;
 
         // Collect jobs.
         if tree_a.leaf_count >= 2 && tree_b.leaf_count >= 2 {
-            self.get_jobs_between_different_nodes(
-                &*tree_a.nodes.get(0),
-                &*tree_b.nodes.get(0),
-            );
+            self.get_jobs_between_different_nodes(&*tree_a.nodes.get(0), &*tree_b.nodes.get(0));
         } else if tree_a.leaf_count == 1 && tree_b.leaf_count >= 2 {
             let a = &*tree_a.nodes.get(0);
             let b = &*tree_b.nodes.get(0);
@@ -96,14 +95,9 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
             }
         } else {
             debug_assert!(tree_a.leaf_count == 1 && tree_b.leaf_count == 1);
-            if BoundingBox::intersects_unsafe(
-                &(*tree_a.nodes.get(0)).a,
-                &(*tree_b.nodes.get(0)).a,
-            ) {
-                self.dispatch_test_for_nodes(
-                    &(*tree_a.nodes.get(0)).a,
-                    &(*tree_b.nodes.get(0)).a,
-                );
+            if BoundingBox::intersects_unsafe(&(*tree_a.nodes.get(0)).a, &(*tree_b.nodes.get(0)).a)
+            {
+                self.dispatch_test_for_nodes(&(*tree_a.nodes.get(0)).a, &(*tree_b.nodes.get(0)).a);
             }
         }
     }
@@ -169,7 +163,9 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
     pub unsafe fn pair_test(&mut self, worker_index: i32) {
         debug_assert!(worker_index >= 0 && (worker_index as usize) < self.overlap_handlers.len());
         loop {
-            let next_node_pair_index = unsafe { AtomicI32::from_ptr(self.next_node_pair.get()).fetch_add(1, Ordering::AcqRel) } + 1;
+            let next_node_pair_index = unsafe {
+                AtomicI32::from_ptr(self.next_node_pair.get()).fetch_add(1, Ordering::AcqRel)
+            } + 1;
             if next_node_pair_index >= self.jobs.count {
                 break;
             }

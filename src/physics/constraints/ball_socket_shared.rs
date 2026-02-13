@@ -35,11 +35,7 @@ impl BallSocketShared {
             &mut angular_b_contribution,
         );
         let mut added = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::add(
-            &inverse_effective_mass,
-            &angular_b_contribution,
-            &mut added,
-        );
+        Symmetric3x3Wide::add(&inverse_effective_mass, &angular_b_contribution, &mut added);
         inverse_effective_mass = added;
 
         // Linear contributions are simply I * inverseMass * I, which is just boosting the diagonal.
@@ -71,12 +67,20 @@ impl BallSocketShared {
             Vector3Wide::cross_without_overlap(offset_a, constraint_space_impulse, &mut wsi);
         }
         let mut change = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&wsi, &inertia_a.inverse_inertia_tensor, &mut change);
+        Symmetric3x3Wide::transform_without_overlap(
+            &wsi,
+            &inertia_a.inverse_inertia_tensor,
+            &mut change,
+        );
         let mut tmp = Vector3Wide::default();
         Vector3Wide::add(&velocity_a.angular, &change, &mut tmp);
         velocity_a.angular = tmp;
 
-        Vector3Wide::scale_to(constraint_space_impulse, &inertia_a.inverse_mass, &mut change);
+        Vector3Wide::scale_to(
+            constraint_space_impulse,
+            &inertia_a.inverse_mass,
+            &mut change,
+        );
         Vector3Wide::add(&velocity_a.linear, &change, &mut tmp);
         velocity_a.linear = tmp;
 
@@ -84,11 +88,19 @@ impl BallSocketShared {
             // Note flip-negation: cross(impulse, offsetB) instead of cross(offsetB, impulse)
             Vector3Wide::cross_without_overlap(constraint_space_impulse, offset_b, &mut wsi);
         }
-        Symmetric3x3Wide::transform_without_overlap(&wsi, &inertia_b.inverse_inertia_tensor, &mut change);
+        Symmetric3x3Wide::transform_without_overlap(
+            &wsi,
+            &inertia_b.inverse_inertia_tensor,
+            &mut change,
+        );
         Vector3Wide::add(&velocity_b.angular, &change, &mut tmp);
         velocity_b.angular = tmp;
 
-        Vector3Wide::scale_to(constraint_space_impulse, &inertia_b.inverse_mass, &mut change);
+        Vector3Wide::scale_to(
+            constraint_space_impulse,
+            &inertia_b.inverse_mass,
+            &mut change,
+        );
         // Note subtraction; the jacobian is -I.
         Vector3Wide::subtract(&velocity_b.linear, &change, &mut tmp);
         velocity_b.linear = tmp;

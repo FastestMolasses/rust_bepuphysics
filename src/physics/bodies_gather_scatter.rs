@@ -65,8 +65,7 @@ impl Bodies {
                 source.inverse_inertia_tensor.zy;
             *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.zz) =
                 source.inverse_inertia_tensor.zz;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_mass) =
-                source.inverse_mass;
+            *GatherScatter::get_first_mut(&mut target_slot.inverse_mass) = source.inverse_mass;
         }
     }
 
@@ -220,12 +219,7 @@ impl Bodies {
             velocity,
         );
         let offset = if world_inertia { 24 } else { 16 };
-        Self::fallback_gather_inertia(
-            solver_states,
-            encoded_body_indices,
-            inertia,
-            offset,
-        );
+        Self::fallback_gather_inertia(solver_states, encoded_body_indices, inertia, offset);
     }
 
     /// Scatters pose (position + orientation) from wide bundles back to per-body AOS storage.
@@ -242,8 +236,9 @@ impl Bodies {
                 continue;
             }
             let body_index = encoded_body_indices[inner_index];
-            let pose =
-                &mut (*self.active_set_dynamics_ptr().add(body_index as usize)).motion.pose;
+            let pose = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
+                .motion
+                .pose;
             pose.position = Vec3::new(
                 position.x[inner_index],
                 position.y[inner_index],
@@ -271,8 +266,9 @@ impl Bodies {
                 continue;
             }
             let body_index = encoded_body_indices[inner_index];
-            let target =
-                &mut (*self.active_set_dynamics_ptr().add(body_index as usize)).inertia.world;
+            let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
+                .inertia
+                .world;
             target.inverse_inertia_tensor.xx = inertia.inverse_inertia_tensor.xx[inner_index];
             target.inverse_inertia_tensor.yx = inertia.inverse_inertia_tensor.yx[inner_index];
             target.inverse_inertia_tensor.yy = inertia.inverse_inertia_tensor.yy[inner_index];
@@ -296,8 +292,9 @@ impl Bodies {
                 continue;
             }
             let body_index = indices[inner_index];
-            let target =
-                &mut (*self.active_set_dynamics_ptr().add(body_index as usize)).motion.velocity;
+            let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
+                .motion
+                .velocity;
             if TAccessFilter::access_linear_velocity() {
                 target.linear = Vec3::new(
                     source_velocities.linear.x[inner_index],

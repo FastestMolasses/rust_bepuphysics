@@ -22,10 +22,12 @@ impl Tree {
     ) {
         debug_assert!(
             (node_index >= 0 && node_index < self.node_count)
-                || (Self::encode(node_index) >= 0
-                    && Self::encode(node_index) < self.leaf_count)
+                || (Self::encode(node_index) >= 0 && Self::encode(node_index) < self.leaf_count)
         );
-        debug_assert!(self.leaf_count >= 2, "This implementation assumes all nodes are filled.");
+        debug_assert!(
+            self.leaf_count >= 2,
+            "This implementation assumes all nodes are filled."
+        );
 
         let mut stack_end: i32 = 0;
         loop {
@@ -139,7 +141,12 @@ impl Tree {
         let mut expansion = Vec3::ZERO;
         Self::convert_box_to_centroid_with_extent(min, max, &mut origin, &mut expansion);
         let mut tree_ray = std::mem::MaybeUninit::<TreeRay>::uninit();
-        TreeRay::create_from(origin, direction, maximum_t, tree_ray.as_mut_ptr().as_mut().unwrap());
+        TreeRay::create_from(
+            origin,
+            direction,
+            maximum_t,
+            tree_ray.as_mut_ptr().as_mut().unwrap(),
+        );
         self.sweep_internal(
             expansion,
             origin,

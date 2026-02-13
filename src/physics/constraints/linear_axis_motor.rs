@@ -1,13 +1,11 @@
 use crate::physics::constraints::linear_axis_servo::LinearAxisServoFunctions;
 use crate::physics::constraints::motor_settings::{MotorSettings, MotorSettingsWide};
 use crate::physics::constraints::servo_settings::ServoSettingsWide;
-use crate::physics::constraints::spring_settings::SpringSettingsWide;
 use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 
 pub const BATCH_TYPE_ID: i32 = 39;
@@ -39,13 +37,13 @@ impl LinearAxisMotor {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
         Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
         Vector3Wide::write_first(self.local_axis, &mut target.local_plane_normal);
-        unsafe { *GatherScatter::get_first_mut(&mut target.target_velocity) = self.target_velocity; }
+        unsafe {
+            *GatherScatter::get_first_mut(&mut target.target_velocity) = self.target_velocity;
+        }
         MotorSettingsWide::write_first(&self.settings, &mut target.settings);
     }
 
@@ -55,9 +53,7 @@ impl LinearAxisMotor {
         inner_index: usize,
         description: &mut LinearAxisMotor,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
         Vector3Wide::read_first(&source.local_plane_normal, &mut description.local_axis);
@@ -69,7 +65,11 @@ impl LinearAxisMotor {
 impl LinearAxisMotorPrestepData {
     /// Legacy build_description on PrestepData (prefer LinearAxisMotor::build_description).
     #[inline(always)]
-    pub fn build_description_from_prestep(&self, description: &mut LinearAxisMotor, _bundle_index: usize) {
+    pub fn build_description_from_prestep(
+        &self,
+        description: &mut LinearAxisMotor,
+        _bundle_index: usize,
+    ) {
         Vector3Wide::read_first(&self.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&self.local_offset_b, &mut description.local_offset_b);
         Vector3Wide::read_first(&self.local_plane_normal, &mut description.local_axis);
@@ -101,17 +101,38 @@ impl LinearAxisMotorFunctions {
         let mut angular_ja = Vector3Wide::default();
         let mut angular_jb = Vector3Wide::default();
         LinearAxisServoFunctions::compute_jacobians(
-            &ab, orientation_a, orientation_b,
-            &prestep.local_plane_normal, &prestep.local_offset_a, &prestep.local_offset_b,
-            &mut _plane_normal_dot, &mut normal, &mut angular_ja, &mut angular_jb,
+            &ab,
+            orientation_a,
+            orientation_b,
+            &prestep.local_plane_normal,
+            &prestep.local_offset_a,
+            &prestep.local_offset_b,
+            &mut _plane_normal_dot,
+            &mut normal,
+            &mut angular_ja,
+            &mut angular_jb,
         );
         let mut angular_impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_ja, &inertia_a.inverse_inertia_tensor, &mut angular_impulse_to_velocity_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_ja,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_impulse_to_velocity_a,
+        );
         let mut angular_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_jb, &inertia_b.inverse_inertia_tensor, &mut angular_impulse_to_velocity_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_jb,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_impulse_to_velocity_b,
+        );
         LinearAxisServoFunctions::apply_impulse(
-            &normal, &angular_impulse_to_velocity_a, &angular_impulse_to_velocity_b,
-            inertia_a, inertia_b, accumulated_impulses, wsv_a, wsv_b,
+            &normal,
+            &angular_impulse_to_velocity_a,
+            &angular_impulse_to_velocity_b,
+            inertia_a,
+            inertia_b,
+            accumulated_impulses,
+            wsv_a,
+            wsv_b,
         );
     }
 
@@ -137,24 +158,39 @@ impl LinearAxisMotorFunctions {
         let mut angular_ja = Vector3Wide::default();
         let mut angular_jb = Vector3Wide::default();
         LinearAxisServoFunctions::compute_jacobians(
-            &ab, orientation_a, orientation_b,
-            &prestep.local_plane_normal, &prestep.local_offset_a, &prestep.local_offset_b,
-            &mut _plane_normal_dot, &mut normal, &mut angular_ja, &mut angular_jb,
+            &ab,
+            orientation_a,
+            orientation_b,
+            &prestep.local_plane_normal,
+            &prestep.local_offset_a,
+            &prestep.local_offset_b,
+            &mut _plane_normal_dot,
+            &mut normal,
+            &mut angular_ja,
+            &mut angular_jb,
         );
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
         let mut maximum_impulse = Vector::<f32>::splat(0.0);
         MotorSettingsWide::compute_softness(
-            &prestep.settings, dt,
-            &mut effective_mass_cfm_scale, &mut softness_impulse_scale, &mut maximum_impulse,
+            &prestep.settings,
+            dt,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+            &mut maximum_impulse,
         );
         let mut angular_impulse_to_velocity_a = Vector3Wide::default();
         let mut angular_impulse_to_velocity_b = Vector3Wide::default();
         let mut effective_mass = Vector::<f32>::splat(0.0);
         LinearAxisServoFunctions::compute_effective_mass(
-            &angular_ja, &angular_jb, inertia_a, inertia_b,
+            &angular_ja,
+            &angular_jb,
+            inertia_a,
+            inertia_b,
             &effective_mass_cfm_scale,
-            &mut angular_impulse_to_velocity_a, &mut angular_impulse_to_velocity_b, &mut effective_mass,
+            &mut angular_impulse_to_velocity_a,
+            &mut angular_impulse_to_velocity_b,
+            &mut effective_mass,
         );
 
         // csv = dot(wsvA.Linear - wsvB.Linear, normal) + dot(wsvA.Angular, angularJA) + dot(wsvB.Angular, angularJB)
@@ -169,8 +205,14 @@ impl LinearAxisMotorFunctions {
 
         ServoSettingsWide::clamp_impulse_1d(&maximum_impulse, accumulated_impulses, &mut csi);
         LinearAxisServoFunctions::apply_impulse(
-            &normal, &angular_impulse_to_velocity_a, &angular_impulse_to_velocity_b,
-            inertia_a, inertia_b, &csi, wsv_a, wsv_b,
+            &normal,
+            &angular_impulse_to_velocity_a,
+            &angular_impulse_to_velocity_b,
+            inertia_a,
+            inertia_b,
+            &csi,
+            wsv_a,
+            wsv_b,
         );
     }
 }

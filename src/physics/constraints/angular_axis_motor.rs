@@ -35,7 +35,11 @@ impl AngularAxisMotor {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_unit_length_vec3(self.local_axis_a, "AngularAxisMotor", "local_axis_a");
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_axis_a,
+                "AngularAxisMotor",
+                "local_axis_a",
+            );
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "AngularAxisMotor");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
@@ -105,9 +109,17 @@ impl AngularAxisMotorFunctions {
         let mut axis = Vector3Wide::default();
         QuaternionWide::transform_without_overlap(&prestep.local_axis_a, orientation_a, &mut axis);
         let mut j_ia = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&axis, &inertia_a.inverse_inertia_tensor, &mut j_ia);
+        Symmetric3x3Wide::transform_without_overlap(
+            &axis,
+            &inertia_a.inverse_inertia_tensor,
+            &mut j_ia,
+        );
         let mut j_ib = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&axis, &inertia_b.inverse_inertia_tensor, &mut j_ib);
+        Symmetric3x3Wide::transform_without_overlap(
+            &axis,
+            &inertia_b.inverse_inertia_tensor,
+            &mut j_ib,
+        );
         Self::apply_impulse(
             &j_ia,
             &j_ib,
@@ -135,11 +147,19 @@ impl AngularAxisMotorFunctions {
         let mut j_a = Vector3Wide::default();
         QuaternionWide::transform_without_overlap(&prestep.local_axis_a, orientation_a, &mut j_a);
         let mut j_ia = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&j_a, &inertia_a.inverse_inertia_tensor, &mut j_ia);
+        Symmetric3x3Wide::transform_without_overlap(
+            &j_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut j_ia,
+        );
         let mut contribution_a = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&j_a, &j_ia, &mut contribution_a);
         let mut j_ib = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&j_a, &inertia_b.inverse_inertia_tensor, &mut j_ib);
+        Symmetric3x3Wide::transform_without_overlap(
+            &j_a,
+            &inertia_b.inverse_inertia_tensor,
+            &mut j_ib,
+        );
         let mut contribution_b = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&j_a, &j_ib, &mut contribution_b);
 
@@ -161,18 +181,8 @@ impl AngularAxisMotorFunctions {
         let mut csi = (prestep.target_velocity + dot_b - dot_a) * effective_mass_cfm_scale
             / (contribution_a + contribution_b)
             - *accumulated_impulses * softness_impulse_scale;
-        ServoSettingsWide::clamp_impulse_1d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
-        Self::apply_impulse(
-            &j_ia,
-            &j_ib,
-            &csi,
-            &mut wsv_a.angular,
-            &mut wsv_b.angular,
-        );
+        ServoSettingsWide::clamp_impulse_1d(&maximum_impulse, accumulated_impulses, &mut csi);
+        Self::apply_impulse(&j_ia, &j_ib, &csi, &mut wsv_a.angular, &mut wsv_b.angular);
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

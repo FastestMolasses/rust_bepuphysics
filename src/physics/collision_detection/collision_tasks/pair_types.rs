@@ -2,7 +2,6 @@
 
 use crate::physics::collision_detection::collision_batcher_continuations::PairContinuation;
 use crate::physics::collision_detection::collision_task_registry::CollisionTaskPairType;
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;

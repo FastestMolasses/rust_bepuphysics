@@ -21,7 +21,11 @@ impl IForEach<i32> for ActiveBodyHandleRemover {
         unsafe {
             if Bodies::is_encoded_dynamic_reference(encoded_body_index) {
                 let body_index = encoded_body_index & Bodies::BODY_REFERENCE_MASK;
-                let handle = (*self.bodies).active_set().index_to_handle.get(body_index).0;
+                let handle = (*self.bodies)
+                    .active_set()
+                    .index_to_handle
+                    .get(body_index)
+                    .0;
                 (*self.handles).unset(handle);
             }
         }
@@ -57,7 +61,11 @@ impl ConstraintBatch {
             old_length != BufferPool::get_capacity_for_count::<i32>(new_size),
             "Shouldn't resize if nothing changes."
         );
-        pool.resize_to_at_least(&mut self.type_index_to_type_batch_index, new_size, old_length);
+        pool.resize_to_at_least(
+            &mut self.type_index_to_type_batch_index,
+            new_size,
+            old_length,
+        );
         for i in old_length..self.type_index_to_type_batch_index.len() {
             *self.type_index_to_type_batch_index.get_mut(i) = -1;
         }
@@ -99,7 +107,8 @@ impl ConstraintBatch {
         pool: &mut BufferPool,
     ) -> *mut TypeBatch {
         let new_index = self.type_batches.count;
-        self.type_batches.ensure_capacity(self.type_batches.count + 1, pool);
+        self.type_batches
+            .ensure_capacity(self.type_batches.count + 1, pool);
         *self.type_index_to_type_batch_index.get_mut(type_id) = new_index;
         let type_batch = self.type_batches.allocate_unsafely();
         *type_batch = TypeBatch::default();
@@ -130,15 +139,13 @@ impl ConstraintBatch {
     }
 
     /// Removes a type batch if it has no more constraints.
-    pub fn remove_type_batch_if_empty(
-        &mut self,
-        type_batch_index: i32,
-        pool: &mut BufferPool,
-    ) {
+    pub fn remove_type_batch_if_empty(&mut self, type_batch_index: i32, pool: &mut BufferPool) {
         let constraint_count = self.type_batches.get(type_batch_index).constraint_count;
         if constraint_count == 0 {
             let constraint_type_id = self.type_batches.get(type_batch_index).type_id;
-            *self.type_index_to_type_batch_index.get_mut(constraint_type_id) = -1;
+            *self
+                .type_index_to_type_batch_index
+                .get_mut(constraint_type_id) = -1;
             // Dispose before removal, or else we'll end up disposing whatever type batch
             // moves to occupy the newly empty slot.
             self.type_batches.get_mut(type_batch_index).dispose(pool);
@@ -232,13 +239,13 @@ impl ConstraintBatch {
             let target_capacity = Self::get_target_capacity(type_batch, solver);
             if target_capacity > type_batch.index_to_handle.len() {
                 let type_id = type_batch.type_id;
-                let type_processor = solver.type_processors[type_id as usize]
-                    .as_ref()
-                    .unwrap();
+                let type_processor = solver.type_processors[type_id as usize].as_ref().unwrap();
                 let type_batch_mut = self.type_batches.get_mut(i);
                 type_processor
                     .inner()
-                    .resize(type_batch_mut, target_capacity, unsafe { &mut *solver.pool });
+                    .resize(type_batch_mut, target_capacity, unsafe {
+                        &mut *solver.pool
+                    });
             }
         }
     }
@@ -249,13 +256,13 @@ impl ConstraintBatch {
             let type_batch = self.type_batches.get(i);
             let target_capacity = Self::get_target_capacity(type_batch, solver);
             let type_id = type_batch.type_id;
-            let type_processor = solver.type_processors[type_id as usize]
-                .as_ref()
-                .unwrap();
+            let type_processor = solver.type_processors[type_id as usize].as_ref().unwrap();
             let type_batch_mut = self.type_batches.get_mut(i);
             type_processor
                 .inner()
-                .resize(type_batch_mut, target_capacity, unsafe { &mut *solver.pool });
+                .resize(type_batch_mut, target_capacity, unsafe {
+                    &mut *solver.pool
+                });
         }
     }
 

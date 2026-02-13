@@ -67,7 +67,11 @@ impl Quicksort {
 
     /// Sorts keys and values using Bentley-McIlroy 3-way partitioning.
     /// This avoids performance drops in corner cases with many duplicate keys.
-    pub fn sort_with_three_way_partitioning<TKey: Copy, TValue: Copy, TComparer: RefComparer<TKey>>(
+    pub fn sort_with_three_way_partitioning<
+        TKey: Copy,
+        TValue: Copy,
+        TComparer: RefComparer<TKey>,
+    >(
         keys: &mut [TKey],
         values: &mut [TValue],
         l: i32,

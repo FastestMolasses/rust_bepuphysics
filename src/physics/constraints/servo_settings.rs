@@ -82,8 +82,11 @@ impl ServoSettingsWide {
         let bias_velocity = *error * *position_error_to_velocity;
         let zero = Vector::<f32>::splat(0.0);
         let neg_mask = bias_velocity.simd_lt(zero);
-        let neg_branch = (-servo_settings.maximum_speed).simd_max((-base_speed).simd_min(bias_velocity));
-        let pos_branch = servo_settings.maximum_speed.simd_min(base_speed.simd_max(bias_velocity));
+        let neg_branch =
+            (-servo_settings.maximum_speed).simd_max((-base_speed).simd_min(bias_velocity));
+        let pos_branch = servo_settings
+            .maximum_speed
+            .simd_min(base_speed.simd_max(bias_velocity));
         *clamped_bias_velocity = neg_mask.select(neg_branch, pos_branch);
         *maximum_impulse = servo_settings.maximum_force * Vector::<f32>::splat(dt);
     }
@@ -117,7 +120,11 @@ impl ServoSettingsWide {
         // Protect against division by zero.
         let use_fallback = target_speed.simd_lt(epsilon);
         let scale = use_fallback.select(one, scale_raw);
-        Vector3Wide::scale_to(error_axis, &(scale * unclamped_bias_speed), clamped_bias_velocity);
+        Vector3Wide::scale_to(
+            error_axis,
+            &(scale * unclamped_bias_speed),
+            clamped_bias_velocity,
+        );
         *maximum_impulse = servo_settings.maximum_force * Vector::<f32>::splat(dt);
     }
 
@@ -132,7 +139,6 @@ impl ServoSettingsWide {
         clamped_bias_velocity: &mut Vector3Wide,
         maximum_impulse: &mut Vector<f32>,
     ) {
-        use std::simd::num::SimdFloat;
         use std::simd::cmp::SimdPartialOrd;
 
         let mut error_length = Vector::<f32>::splat(0.0);
@@ -180,7 +186,8 @@ impl ServoSettingsWide {
             .simd_min(*error_length * inverse_dt_wide);
         let unclamped_bias_speed = *error_length * *position_error_to_bias_velocity;
         let target_speed = base_speed.simd_max(unclamped_bias_speed);
-        let scale_raw = Vector::<f32>::splat(1.0).simd_min(servo_settings.maximum_speed / target_speed);
+        let scale_raw =
+            Vector::<f32>::splat(1.0).simd_min(servo_settings.maximum_speed / target_speed);
         let epsilon = Vector::<f32>::splat(1e-10);
         let use_fallback = target_speed.simd_lt(epsilon);
         let scale = use_fallback.select(Vector::<f32>::splat(1.0), scale_raw);

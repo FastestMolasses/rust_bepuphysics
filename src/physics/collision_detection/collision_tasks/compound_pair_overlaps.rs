@@ -32,11 +32,7 @@ impl ChildOverlapsCollection {
     #[inline(always)]
     pub fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
         if self.count == self.overlaps.len() {
-            let new_size = if self.count > 0 {
-                self.count * 2
-            } else {
-                4
-            };
+            let new_size = if self.count > 0 { self.count * 2 } else { 4 };
             let mut new_buffer: Buffer<i32> = pool.take_at_least(new_size);
             if self.count > 0 {
                 unsafe {
@@ -109,11 +105,7 @@ pub struct CompoundPairOverlaps {
 
 impl CompoundPairOverlaps {
     /// Creates a new CompoundPairOverlaps with the given capacity.
-    pub fn new(
-        pool: &mut BufferPool,
-        pair_count: i32,
-        total_compound_child_count: i32,
-    ) -> Self {
+    pub fn new(pool: &mut BufferPool, pair_count: i32, total_compound_child_count: i32) -> Self {
         let child_overlaps = pool.take(total_compound_child_count);
         let pair_queries = pool.take(total_compound_child_count);
         let pair_regions = pool.take(pair_count);

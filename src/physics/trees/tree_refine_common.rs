@@ -44,8 +44,7 @@ impl SubtreeBinaryHeap {
             let child = &*children.add(child_index);
             if child.index >= 0 {
                 let mut index = self.count;
-                let cost =
-                    Tree::compute_bounds_metric_vecs(&child.min, &child.max);
+                let cost = Tree::compute_bounds_metric_vecs(&child.min, &child.max);
                 self.count += 1;
 
                 // Sift up.
@@ -90,15 +89,13 @@ impl SubtreeBinaryHeap {
                     if cost > child_a.cost {
                         break;
                     }
-                    *self.entries.add(index as usize) =
-                        *self.entries.add(child_index_a as usize);
+                    *self.entries.add(index as usize) = *self.entries.add(child_index_a as usize);
                     index = child_index_a;
                 } else {
                     if cost > child_b.cost {
                         break;
                     }
-                    *self.entries.add(index as usize) =
-                        *self.entries.add(child_index_b as usize);
+                    *self.entries.add(index as usize) = *self.entries.add(child_index_b as usize);
                     index = child_index_b;
                 }
             } else if child_index_a < self.count {
@@ -107,8 +104,7 @@ impl SubtreeBinaryHeap {
                 if cost > child_a.cost {
                     break;
                 }
-                *self.entries.add(index as usize) =
-                    *self.entries.add(child_index_a as usize);
+                *self.entries.add(index as usize) = *self.entries.add(child_index_a as usize);
                 index = child_index_a;
             } else {
                 // The children were beyond the heap.
@@ -179,8 +175,7 @@ impl Tree {
         // Note: treelet root is NOT added to internal nodes list.
         // Its cost is excluded from treelet_cost because the treelet root cannot change.
         *treelet_cost = 0.0;
-        let mut remaining_subtree_space =
-            maximum_subtrees - priority_queue.count - subtrees.count;
+        let mut remaining_subtree_space = maximum_subtrees - priority_queue.count - subtrees.count;
         let mut highest_index = 0i32;
         let mut highest_cost = 0.0f32;
         while priority_queue.try_pop(
@@ -251,17 +246,13 @@ impl Tree {
             "Bad treelet parent."
         );
         assert!(
-            treelet_index_in_parent >= -1
-                && (treelet_parent < 0 || treelet_index_in_parent < 2),
+            treelet_index_in_parent >= -1 && (treelet_parent < 0 || treelet_index_in_parent < 2),
             "Bad treelet index in parent."
         );
         if treelet_parent >= 0 {
             let parent_node = &*self.nodes.get(treelet_parent);
             let child = Self::node_child(parent_node, treelet_index_in_parent);
-            assert_eq!(
-                child.leaf_count, found_leaf_count,
-                "Bad leaf count."
-            );
+            assert_eq!(child.leaf_count, found_leaf_count, "Bad leaf count.");
         }
         assert_eq!(
             subtree_node_pointers.count, found_subtrees,
@@ -270,8 +261,7 @@ impl Tree {
         for i in 0..collected_subtree_references.count {
             assert!(
                 subtree_node_pointers.contains(&collected_subtree_references[i])
-                    && collected_subtree_references
-                        .contains(&subtree_node_pointers[i]),
+                    && collected_subtree_references.contains(&subtree_node_pointers[i]),
                 "Bad subtree reference."
             );
         }
@@ -315,28 +305,20 @@ impl Tree {
                     &mut child_found_subtrees,
                     &mut child_found_leaf_count,
                 );
-                assert_eq!(
-                    child_found_leaf_count, child.leaf_count,
-                    "Bad leaf count."
-                );
+                assert_eq!(child_found_leaf_count, child.leaf_count, "Bad leaf count.");
                 *found_subtrees += child_found_subtrees;
                 *found_leaf_count += child_found_leaf_count;
             } else {
                 let subtree_node_pointer_index = Self::encode(child.index);
-                let subtree_node_pointer =
-                    subtree_node_pointers[subtree_node_pointer_index];
+                let subtree_node_pointer = subtree_node_pointers[subtree_node_pointer_index];
                 if subtree_node_pointer >= 0 {
                     let node = &*self.nodes.get(subtree_node_pointer);
                     let mut total_leaf_count = 0i32;
                     let node_children = &node.a as *const super::node::NodeChild;
                     for child_index in 0..2 {
-                        total_leaf_count +=
-                            (*node_children.add(child_index)).leaf_count;
+                        total_leaf_count += (*node_children.add(child_index)).leaf_count;
                     }
-                    assert_eq!(
-                        child.leaf_count, total_leaf_count,
-                        "Bad leaf count."
-                    );
+                    assert_eq!(child.leaf_count, total_leaf_count, "Bad leaf count.");
                     *found_leaf_count += total_leaf_count;
                 } else {
                     let _leaf_index = Self::encode(subtree_node_pointer);

@@ -1,18 +1,20 @@
 // Translated from BepuPhysics/CollisionDetection/BroadPhase.cs
 
 use crate::physics::collidables::collidable_reference::CollidableReference;
-use crate::physics::collision_detection::ray_batchers::{IBroadPhaseRayTester, IBroadPhaseSweepTester, RayData};
+use crate::physics::collision_detection::ray_batchers::{
+    IBroadPhaseRayTester, IBroadPhaseSweepTester, RayData,
+};
 use crate::physics::trees::ray_batcher::{RayData as TreeRayData, TreeRay};
 use crate::physics::trees::tree::Tree;
 use crate::physics::trees::tree_multithreaded_refit_refine::RefitAndRefineMultithreadedContext;
 use crate::physics::trees::tree_ray_cast::IRayLeafTester;
 use crate::physics::trees::tree_sweep::ISweepLeafTester;
+use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::for_each_ref::IBreakableForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use crate::utilities::task_scheduling::{Task, TaskStack};
-use crate::utilities::bounding_box::BoundingBox;
+use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use glam::Vec3;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
@@ -43,7 +45,8 @@ pub fn default_refinement_scheduler(
     use_priority_queue: &mut bool,
 ) {
     let refine_root = frame_index % root_refinement_period == 0;
-    let target_optimized_leaf_count = (tree.leaf_count as f32 * optimization_fraction).ceil() as i32;
+    let target_optimized_leaf_count =
+        (tree.leaf_count as f32 * optimization_fraction).ceil() as i32;
     // The square root of the leaf count gets us roughly halfway down the tree.
     // Root and subtree refinements need to be larger than that: subtrees must be able to exchange nodes,
     // and the root refinement is the intermediary.
@@ -69,9 +72,8 @@ pub fn default_refinement_scheduler(
         0.0
     };
     let divisor = subtree_ref_size_f.max(1.0);
-    *subtree_refinement_count = 0i32.max(
-        (target_optimized_leaf_count as f32 / divisor - adjustment).round() as i32,
-    );
+    *subtree_refinement_count =
+        0i32.max((target_optimized_leaf_count as f32 / divisor - adjustment).round() as i32);
     if !refine_root {
         *subtree_refinement_count = 1i32.max(*subtree_refinement_count);
     }
@@ -277,7 +279,12 @@ impl BroadPhase {
         pool: &mut BufferPool,
         leaves: &mut Buffer<CollidableReference>,
     ) -> i32 {
-        let bounds = BoundingBox { min: *min, _pad0: 0.0, max: *max, _pad1: 0.0 };
+        let bounds = BoundingBox {
+            min: *min,
+            _pad0: 0.0,
+            max: *max,
+            _pad1: 0.0,
+        };
         let leaf_index = tree.add(bounds, pool);
         if leaf_index >= leaves.len() {
             pool.resize_to_at_least(leaves, tree.leaf_count + 1, leaves.len());
@@ -362,19 +369,13 @@ impl BroadPhase {
 
     /// Gets pointers to the leaf's bounds stored in the active tree.
     #[inline(always)]
-    pub unsafe fn get_active_bounds_pointers(
-        &self,
-        index: i32,
-    ) -> (*mut Vec3, *mut Vec3) {
+    pub unsafe fn get_active_bounds_pointers(&self, index: i32) -> (*mut Vec3, *mut Vec3) {
         self.active_tree.get_bounds_pointers(index)
     }
 
     /// Gets pointers to the leaf's bounds stored in the static tree.
     #[inline(always)]
-    pub unsafe fn get_static_bounds_pointers(
-        &self,
-        index: i32,
-    ) -> (*mut Vec3, *mut Vec3) {
+    pub unsafe fn get_static_bounds_pointers(&self, index: i32) -> (*mut Vec3, *mut Vec3) {
         self.static_tree.get_bounds_pointers(index)
     }
 
@@ -396,16 +397,26 @@ impl BroadPhase {
             let bp = &mut *(dispatcher.unmanaged_context() as *mut BroadPhase);
             let thread_pool = dispatcher.worker_pool_ptr(worker_index);
             loop {
-                let job_index = AtomicI32::from_ptr(bp.remaining_job_count.get()).fetch_sub(1, Ordering::AcqRel) - 1;
+                let job_index = AtomicI32::from_ptr(bp.remaining_job_count.get())
+                    .fetch_sub(1, Ordering::AcqRel)
+                    - 1;
                 if job_index < 0 {
                     break;
                 }
                 let active_count = bp.active_refine_context.refit_nodes.count;
                 if job_index < active_count {
-                    bp.active_refine_context.execute_refit_and_mark_job(&mut *thread_pool, worker_index, job_index);
+                    bp.active_refine_context.execute_refit_and_mark_job(
+                        &mut *thread_pool,
+                        worker_index,
+                        job_index,
+                    );
                 } else {
                     let static_index = job_index - active_count;
-                    bp.static_refine_context.execute_refit_and_mark_job(&mut *thread_pool, worker_index, static_index);
+                    bp.static_refine_context.execute_refit_and_mark_job(
+                        &mut *thread_pool,
+                        worker_index,
+                        static_index,
+                    );
                 }
             }
         }
@@ -416,13 +427,28 @@ impl BroadPhase {
         unsafe {
             let bp = &mut *(dispatcher.unmanaged_context() as *mut BroadPhase);
             let thread_pool = dispatcher.worker_pool_ptr(worker_index);
-            let max_subtrees = bp.active_refine_context.maximum_subtrees.max(bp.static_refine_context.maximum_subtrees);
-            let mut subtree_references = crate::utilities::collections::quicklist::QuickList::with_capacity(max_subtrees, &mut *thread_pool);
-            let mut treelet_internal_nodes = crate::utilities::collections::quicklist::QuickList::with_capacity(max_subtrees, &mut *thread_pool);
+            let max_subtrees = bp
+                .active_refine_context
+                .maximum_subtrees
+                .max(bp.static_refine_context.maximum_subtrees);
+            let mut subtree_references =
+                crate::utilities::collections::quicklist::QuickList::with_capacity(
+                    max_subtrees,
+                    &mut *thread_pool,
+                );
+            let mut treelet_internal_nodes =
+                crate::utilities::collections::quicklist::QuickList::with_capacity(
+                    max_subtrees,
+                    &mut *thread_pool,
+                );
             // Create binned resources using the active tree (both contexts share the same max_subtrees).
-            let (mut buffer, mut resources) = bp.active_tree.create_binned_resources(&mut *thread_pool, max_subtrees);
+            let (mut buffer, mut resources) = bp
+                .active_tree
+                .create_binned_resources(&mut *thread_pool, max_subtrees);
             loop {
-                let job_index = AtomicI32::from_ptr(bp.remaining_job_count.get()).fetch_sub(1, Ordering::AcqRel) - 1;
+                let job_index = AtomicI32::from_ptr(bp.remaining_job_count.get())
+                    .fetch_sub(1, Ordering::AcqRel)
+                    - 1;
                 if job_index < 0 {
                     break;
                 }
@@ -461,8 +487,16 @@ impl BroadPhase {
             let pool = &mut *self.pool;
             if let Some(td_ptr) = thread_dispatcher {
                 let td = &*td_ptr;
-                self.active_refine_context.create_refit_and_mark_jobs(&mut self.active_tree, pool, td);
-                self.static_refine_context.create_refit_and_mark_jobs(&mut self.static_tree, pool, td);
+                self.active_refine_context.create_refit_and_mark_jobs(
+                    &mut self.active_tree,
+                    pool,
+                    td,
+                );
+                self.static_refine_context.create_refit_and_mark_jobs(
+                    &mut self.static_tree,
+                    pool,
+                    td,
+                );
                 let active_refit = self.active_refine_context.refit_nodes.count;
                 let static_refit = self.static_refine_context.refit_nodes.count;
                 *self.remaining_job_count.get() = active_refit + static_refit;
@@ -473,8 +507,10 @@ impl BroadPhase {
                     self_ptr,
                     None,
                 );
-                self.active_refine_context.create_refinement_jobs(pool, self.frame_index, 1.0);
-                self.static_refine_context.create_refinement_jobs(pool, self.frame_index, 1.0);
+                self.active_refine_context
+                    .create_refinement_jobs(pool, self.frame_index, 1.0);
+                self.static_refine_context
+                    .create_refinement_jobs(pool, self.frame_index, 1.0);
                 let active_refine = self.active_refine_context.refinement_targets.count;
                 let static_refine = self.static_refine_context.refinement_targets.count;
                 *self.remaining_job_count.get() = active_refine + static_refine;
@@ -484,11 +520,15 @@ impl BroadPhase {
                     self_ptr,
                     None,
                 );
-                self.active_refine_context.clean_up_for_refit_and_refine(pool);
-                self.static_refine_context.clean_up_for_refit_and_refine(pool);
+                self.active_refine_context
+                    .clean_up_for_refit_and_refine(pool);
+                self.static_refine_context
+                    .clean_up_for_refit_and_refine(pool);
             } else {
-                self.active_tree.refit_and_refine(pool, self.frame_index, 1.0);
-                self.static_tree.refit_and_refine(pool, self.frame_index, 1.0);
+                self.active_tree
+                    .refit_and_refine(pool, self.frame_index, 1.0);
+                self.static_tree
+                    .refit_and_refine(pool, self.frame_index, 1.0);
             }
         }
         self.frame_index += 1;
@@ -609,11 +649,7 @@ impl BroadPhase {
                     0,
                     on_complete,
                 );
-                TaskStack::dispatch_workers(
-                    dispatcher,
-                    &mut task_stack,
-                    thread_count,
-                );
+                TaskStack::dispatch_workers(dispatcher, &mut task_stack, thread_count);
                 task_stack.dispose(pool, dispatcher);
 
                 if self.active_tree.leaf_count > 2 {
@@ -799,7 +835,10 @@ impl BroadPhase {
         let mut ray_data = std::mem::MaybeUninit::<TreeRayData>::uninit();
         let mut tree_ray = std::mem::MaybeUninit::<TreeRay>::uninit();
         TreeRay::create_from_ray(
-            origin, direction, maximum_t, id,
+            origin,
+            direction,
+            maximum_t,
+            id,
             &mut *ray_data.as_mut_ptr(),
             &mut *tree_ray.as_mut_ptr(),
         );
@@ -842,7 +881,9 @@ impl BroadPhase {
             leaves: &self.active_leaves,
         };
         self.active_tree.sweep_internal(
-            expansion, origin, direction,
+            expansion,
+            origin,
+            direction,
             tree_ray.as_mut_ptr(),
             &mut active_tester,
         );
@@ -851,7 +892,9 @@ impl BroadPhase {
             leaves: &self.static_leaves,
         };
         self.static_tree.sweep_internal(
-            expansion, origin, direction,
+            expansion,
+            origin,
+            direction,
             tree_ray.as_mut_ptr(),
             &mut static_tester,
         );
@@ -865,7 +908,13 @@ impl BroadPhase {
         maximum_t: f32,
         sweep_tester: &mut TSweepTester,
     ) {
-        self.sweep_minmax(bounding_box.min, bounding_box.max, direction, maximum_t, sweep_tester);
+        self.sweep_minmax(
+            bounding_box.min,
+            bounding_box.max,
+            direction,
+            maximum_t,
+            sweep_tester,
+        );
     }
 
     /// Finds any overlaps between a bounding box and leaf bounding boxes.
@@ -879,12 +928,14 @@ impl BroadPhase {
             enumerator: overlap_enumerator as *mut TOverlapEnumerator,
             leaves: &self.active_leaves,
         };
-        self.active_tree.get_overlaps_minmax(min, max, &mut active_enumerator);
+        self.active_tree
+            .get_overlaps_minmax(min, max, &mut active_enumerator);
         let mut static_enumerator = BoxQueryEnumerator {
             enumerator: overlap_enumerator as *mut TOverlapEnumerator,
             leaves: &self.static_leaves,
         };
-        self.static_tree.get_overlaps_minmax(min, max, &mut static_enumerator);
+        self.static_tree
+            .get_overlaps_minmax(min, max, &mut static_enumerator);
     }
 
     /// Finds any overlaps between a bounding box and leaf bounding boxes.
@@ -906,7 +957,12 @@ struct RayLeafTester<'a, TRayTester: IBroadPhaseRayTester> {
 
 impl<'a, TRayTester: IBroadPhaseRayTester> IRayLeafTester for RayLeafTester<'a, TRayTester> {
     #[inline(always)]
-    unsafe fn test_leaf(&mut self, leaf_index: i32, ray_data: *mut TreeRayData, maximum_t: *mut f32) {
+    unsafe fn test_leaf(
+        &mut self,
+        leaf_index: i32,
+        ray_data: *mut TreeRayData,
+        maximum_t: *mut f32,
+    ) {
         let collidable = *self.leaves.get(leaf_index);
         (*self.leaf_tester).ray_test(collidable, ray_data as *const RayData, maximum_t);
     }
@@ -917,7 +973,9 @@ struct SweepLeafTester<'a, TSweepTester: IBroadPhaseSweepTester> {
     leaves: &'a Buffer<CollidableReference>,
 }
 
-impl<'a, TSweepTester: IBroadPhaseSweepTester> ISweepLeafTester for SweepLeafTester<'a, TSweepTester> {
+impl<'a, TSweepTester: IBroadPhaseSweepTester> ISweepLeafTester
+    for SweepLeafTester<'a, TSweepTester>
+{
     #[inline(always)]
     fn test_leaf(&mut self, leaf_index: i32, maximum_t: &mut f32) {
         let collidable = *self.leaves.get(leaf_index);

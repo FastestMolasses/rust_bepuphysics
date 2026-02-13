@@ -56,11 +56,7 @@ impl Helpers {
 
     /// Builds an orthonormal basis from a normal vector (scalar version).
     #[inline(always)]
-    pub fn build_orthonormal_basis_scalar(
-        normal: Vec3,
-        t1: &mut Vec3,
-        t2: &mut Vec3,
-    ) {
+    pub fn build_orthonormal_basis_scalar(normal: Vec3, t1: &mut Vec3, t2: &mut Vec3) {
         let sign = if normal.z < 0.0 { -1.0f32 } else { 1.0f32 };
 
         let scale = -1.0 / (sign + normal.z);

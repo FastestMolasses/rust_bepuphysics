@@ -1,7 +1,6 @@
 // Translated from BepuPhysics/CollisionDetection/FreshnessChecker.cs
 
 use crate::physics::collision_detection::pair_cache::PairCache;
-use crate::physics::handles::ConstraintHandle;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 
@@ -54,8 +53,7 @@ impl FreshnessChecker {
         if mapping_count > 0 {
             if thread_count > 1 {
                 const JOBS_PER_THREAD: i32 = 2;
-                self.freshness_job_count =
-                    i32::min(thread_count * JOBS_PER_THREAD, mapping_count);
+                self.freshness_job_count = i32::min(thread_count * JOBS_PER_THREAD, mapping_count);
                 let pairs_per_job = mapping_count / self.freshness_job_count;
                 let remainder = mapping_count - pairs_per_job * self.freshness_job_count;
                 let mut previous_end = 0i32;

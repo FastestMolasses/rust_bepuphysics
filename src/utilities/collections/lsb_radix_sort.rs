@@ -74,10 +74,42 @@ pub unsafe fn sort_u32<T: Copy>(
         *byte3 = prev_sum3;
     }
 
-    reorder_for_byte(keys, keys_scratch, values, values_scratch, key_count, bucket_counts, 0);
-    reorder_for_byte(keys_scratch, keys, values_scratch, values, key_count, byte1_counts, 8);
-    reorder_for_byte(keys, keys_scratch, values, values_scratch, key_count, byte2_counts, 16);
-    reorder_for_byte(keys_scratch, keys, values_scratch, values, key_count, byte3_counts, 24);
+    reorder_for_byte(
+        keys,
+        keys_scratch,
+        values,
+        values_scratch,
+        key_count,
+        bucket_counts,
+        0,
+    );
+    reorder_for_byte(
+        keys_scratch,
+        keys,
+        values_scratch,
+        values,
+        key_count,
+        byte1_counts,
+        8,
+    );
+    reorder_for_byte(
+        keys,
+        keys_scratch,
+        values,
+        values_scratch,
+        key_count,
+        byte2_counts,
+        16,
+    );
+    reorder_for_byte(
+        keys_scratch,
+        keys,
+        values_scratch,
+        values,
+        key_count,
+        byte3_counts,
+        24,
+    );
 }
 
 /// Sorts keys and values using 24-bit key radix sort (3 passes).
@@ -122,9 +154,33 @@ pub unsafe fn sort_u24<T: Copy>(
         *byte2 = prev_sum2;
     }
 
-    reorder_for_byte(input_keys, output_keys, input_values, output_values, key_count, bucket_counts, 0);
-    reorder_for_byte(output_keys, input_keys, output_values, input_values, key_count, byte1_counts, 8);
-    reorder_for_byte(input_keys, output_keys, input_values, output_values, key_count, byte2_counts, 16);
+    reorder_for_byte(
+        input_keys,
+        output_keys,
+        input_values,
+        output_values,
+        key_count,
+        bucket_counts,
+        0,
+    );
+    reorder_for_byte(
+        output_keys,
+        input_keys,
+        output_values,
+        input_values,
+        key_count,
+        byte1_counts,
+        8,
+    );
+    reorder_for_byte(
+        input_keys,
+        output_keys,
+        input_values,
+        output_values,
+        key_count,
+        byte2_counts,
+        16,
+    );
 }
 
 /// Sorts keys and values using 16-bit key radix sort (2 passes).
@@ -162,8 +218,24 @@ pub unsafe fn sort_u16<T: Copy>(
         *byte1 = prev_sum1;
     }
 
-    reorder_for_byte(keys, keys_scratch, values, values_scratch, key_count, bucket_counts, 0);
-    reorder_for_byte(keys_scratch, keys, values_scratch, values, key_count, byte1_counts, 8);
+    reorder_for_byte(
+        keys,
+        keys_scratch,
+        values,
+        values_scratch,
+        key_count,
+        bucket_counts,
+        0,
+    );
+    reorder_for_byte(
+        keys_scratch,
+        keys,
+        values_scratch,
+        values,
+        key_count,
+        byte1_counts,
+        8,
+    );
 }
 
 /// Sorts keys and values using 8-bit key radix sort (1 pass).
@@ -190,7 +262,15 @@ pub unsafe fn sort_u8<T: Copy>(
         *byte0 = prev_sum0;
     }
 
-    reorder_for_byte(input_keys, output_keys, input_values, output_values, key_count, bucket_counts, 0);
+    reorder_for_byte(
+        input_keys,
+        output_keys,
+        input_values,
+        output_values,
+        key_count,
+        bucket_counts,
+        0,
+    );
 }
 
 /// Result of a radix sort operation, indicating which buffers contain the sorted data.

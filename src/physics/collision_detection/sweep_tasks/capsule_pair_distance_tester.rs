@@ -51,10 +51,16 @@ impl IPairDistanceTester<CapsuleWide, CapsuleWide> for CapsulePairDistanceTester
         let absdadb = dadb.abs();
         let b_onto_a_offset = b.half_length * absdadb;
         let a_onto_b_offset = a.half_length * absdadb;
-        let a_min = (-a.half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(a.half_length));
-        let a_max = a.half_length.simd_min((-a.half_length).simd_max(da_offset_b + b_onto_a_offset));
-        let b_min = (-b.half_length).simd_max((-a_onto_b_offset - db_offset_b).simd_min(b.half_length));
-        let b_max = b.half_length.simd_min((-b.half_length).simd_max(a_onto_b_offset - db_offset_b));
+        let a_min =
+            (-a.half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(a.half_length));
+        let a_max = a
+            .half_length
+            .simd_min((-a.half_length).simd_max(da_offset_b + b_onto_a_offset));
+        let b_min =
+            (-b.half_length).simd_max((-a_onto_b_offset - db_offset_b).simd_min(b.half_length));
+        let b_max = b
+            .half_length
+            .simd_min((-b.half_length).simd_max(a_onto_b_offset - db_offset_b));
         ta = ta.simd_max(a_min).simd_min(a_max);
         tb = tb.simd_max(b_min).simd_min(b_max);
 

@@ -91,11 +91,7 @@ pub trait CollisionTask {
     /// Gets the pair type that the execute_batch call requires.
     fn pair_type(&self) -> CollisionTaskPairType;
     /// Executes the task on the given input.
-    fn execute_batch(
-        &self,
-        batch: &mut UntypedList,
-        vtable: &BatcherVtable,
-    );
+    fn execute_batch(&self, batch: &mut UntypedList, vtable: &BatcherVtable);
 }
 
 /// Metadata about a collision task.
@@ -148,7 +144,10 @@ impl CollisionTaskRegistry {
         for i in 0..new_size {
             self.top_level_matrix[i].resize_with(new_size, CollisionTaskReference::default);
             for j in old_size..new_size {
-                self.top_level_matrix[i][j] = CollisionTaskReference { task_index: -1, ..Default::default() };
+                self.top_level_matrix[i][j] = CollisionTaskReference {
+                    task_index: -1,
+                    ..Default::default()
+                };
             }
         }
     }
@@ -157,7 +156,11 @@ impl CollisionTaskRegistry {
     pub fn register(&mut self, task: Box<dyn CollisionTask>) -> usize {
         // Some tasks can generate tasks. Note that this can only be one level deep; nesting compounds is not allowed.
         // All such generators will be placed at the beginning.
-        let index = if task.subtask_generator() { 0 } else { self.count };
+        let index = if task.subtask_generator() {
+            0
+        } else {
+            self.count
+        };
 
         let new_count = self.count + 1;
         if self.tasks.len() < new_count {
@@ -221,13 +224,21 @@ impl CollisionTaskRegistry {
 
     /// Gets metadata about the task associated with a shape type pair.
     #[inline(always)]
-    pub fn get_task_reference(&self, top_level_type_a: i32, top_level_type_b: i32) -> &CollisionTaskReference {
+    pub fn get_task_reference(
+        &self,
+        top_level_type_a: i32,
+        top_level_type_b: i32,
+    ) -> &CollisionTaskReference {
         &self.top_level_matrix[top_level_type_a as usize][top_level_type_b as usize]
     }
 
     /// Gets a mutable reference to the metadata about the task associated with a shape type pair.
     #[inline(always)]
-    pub fn get_task_reference_mut(&mut self, top_level_type_a: i32, top_level_type_b: i32) -> &mut CollisionTaskReference {
+    pub fn get_task_reference_mut(
+        &mut self,
+        top_level_type_a: i32,
+        top_level_type_b: i32,
+    ) -> &mut CollisionTaskReference {
         &mut self.top_level_matrix[top_level_type_a as usize][top_level_type_b as usize]
     }
 

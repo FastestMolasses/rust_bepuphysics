@@ -33,7 +33,14 @@ impl CylinderPairTester {
         point3d.x = point.x;
         point3d.y = *cap_center_by;
         point3d.z = point.y;
-        Self::project_onto_cap_a(cap_center_a, r_a, inverse_n_dot_ay, local_normal, &point3d, projected);
+        Self::project_onto_cap_a(
+            cap_center_a,
+            r_a,
+            inverse_n_dot_ay,
+            local_normal,
+            &point3d,
+            projected,
+        );
     }
 
     #[inline(always)]
@@ -55,7 +62,11 @@ impl CylinderPairTester {
         let mut projected_point = Vector3Wide::default();
         Vector3Wide::add(point, &projection_offset_b, &mut projected_point);
         let mut cap_center_a_to_projected_point = Vector3Wide::default();
-        Vector3Wide::subtract(&projected_point, cap_center_a, &mut cap_center_a_to_projected_point);
+        Vector3Wide::subtract(
+            &projected_point,
+            cap_center_a,
+            &mut cap_center_a_to_projected_point,
+        );
         Vector3Wide::dot(&cap_center_a_to_projected_point, &r_a.x, &mut projected.x);
         Vector3Wide::dot(&cap_center_a_to_projected_point, &r_a.z, &mut projected.y);
     }
@@ -162,7 +173,11 @@ impl CylinderPairTester {
         let mut r_a = Matrix3x3Wide::default();
         Matrix3x3Wide::multiply_by_transpose_without_overlap(&world_ra, &world_rb, &mut r_a);
         let mut local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &world_rb, &mut local_offset_b);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            offset_b,
+            &world_rb,
+            &mut local_offset_b,
+        );
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
 
@@ -176,21 +191,32 @@ impl CylinderPairTester {
         local_normal.z = use_fallback.select(zero_f, local_normal.z);
         let support_finder = CylinderSupportFinder;
 
-        let mut inactive_lanes = BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
+        let mut inactive_lanes =
+            BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
         let depth_threshold = -*speculative_margin;
-        let epsilon_scale =
-            a.half_length.simd_max(a.radius).simd_min(b.half_length.simd_max(b.radius));
+        let epsilon_scale = a
+            .half_length
+            .simd_max(a.radius)
+            .simd_min(b.half_length.simd_max(b.radius));
 
         let mut depth = Vector::<f32>::splat(0.0);
         let mut closest_on_b = Vector3Wide::default();
         let initial_normal = local_normal.clone();
         DepthRefiner::find_minimum_depth_with_witness(
-            b, a, &local_offset_a, &r_a,
-            &support_finder, &support_finder,
-            &initial_normal, &inactive_lanes,
+            b,
+            a,
+            &local_offset_a,
+            &r_a,
+            &support_finder,
+            &support_finder,
+            &initial_normal,
+            &inactive_lanes,
             &(epsilon_scale * Vector::<f32>::splat(1e-6)),
             &depth_threshold,
-            &mut depth, &mut local_normal, &mut closest_on_b, 25,
+            &mut depth,
+            &mut local_normal,
+            &mut closest_on_b,
+            25,
         );
 
         inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
@@ -211,7 +237,8 @@ impl CylinderPairTester {
         Vector3Wide::scale_to(&r_a.y, &cap_a_offset, &mut cap_center_a);
         let cap_center_a_tmp = cap_center_a.clone();
         Vector3Wide::add(&cap_center_a_tmp, &local_offset_a, &mut cap_center_a);
-        let cap_center_by = local_normal.y
+        let cap_center_by = local_normal
+            .y
             .simd_lt(zero_f)
             .select(-b.half_length, b.half_length);
 
@@ -234,7 +261,11 @@ impl CylinderPairTester {
         let mut extreme_a = Vector3Wide::default();
         Vector3Wide::add(&closest_on_b, &b_to_a_offset, &mut extreme_a);
         let mut extreme_a_horizontal_offset = Vector3Wide::default();
-        Vector3Wide::subtract(&extreme_a, &local_offset_a, &mut extreme_a_horizontal_offset);
+        Vector3Wide::subtract(
+            &extreme_a,
+            &local_offset_a,
+            &mut extreme_a_horizontal_offset,
+        );
         let mut vertical_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&extreme_a_horizontal_offset, &r_a.y, &mut vertical_dot);
         let mut to_remove = Vector3Wide::default();
@@ -258,7 +289,8 @@ impl CylinderPairTester {
         if use_cap_cap.simd_lt(zero_i).any() {
             // Cap-cap contact generation.
             let parallel_threshold = Vector::<f32>::splat(0.9999);
-            let inverse_parallel_interpolation_span = Vector::<f32>::splat(1.0 / (0.99995 - 0.9999));
+            let inverse_parallel_interpolation_span =
+                Vector::<f32>::splat(1.0 / (0.99995 - 0.9999));
             let abs_a_dot = n_dot_ay.abs();
             let abs_b_dot = local_normal.y.abs();
             let a_cap_not_parallel = abs_a_dot.simd_lt(parallel_threshold);
@@ -267,108 +299,183 @@ impl CylinderPairTester {
             let mut cap_contact0 = extreme_b.clone();
 
             let both_not_parallel = (a_cap_not_parallel & b_cap_not_parallel).to_int();
-            if ((!both_not_parallel) & !inactive_lanes).simd_lt(zero_i).any() {
+            if ((!both_not_parallel) & !inactive_lanes)
+                .simd_lt(zero_i)
+                .any()
+            {
                 // At least one cap is parallel; build 4-contact manifold.
                 let mut cap_center_a_on_b = Vector2Wide::default();
                 Self::project_onto_cap_b(
-                    &cap_center_by, &inverse_local_normal_y, &local_normal,
-                    &cap_center_a, &mut cap_center_a_on_b,
+                    &cap_center_by,
+                    &inverse_local_normal_y,
+                    &local_normal,
+                    &cap_center_a,
+                    &mut cap_center_a_on_b,
                 );
                 let mut horizontal_offset_length = Vector::<f32>::splat(0.0);
                 Vector2Wide::length(&cap_center_a_on_b, &mut horizontal_offset_length);
                 let inverse_horiz_offset_length = one_f / horizontal_offset_length;
                 let mut horizontal_offset_direction = Vector2Wide::default();
-                Vector2Wide::scale(&cap_center_a_on_b, &inverse_horiz_offset_length, &mut horizontal_offset_direction);
-                let use_both_parallel_fallback = horizontal_offset_length.simd_lt(Vector::<f32>::splat(1e-14));
-                horizontal_offset_direction.x = use_both_parallel_fallback.select(one_f, horizontal_offset_direction.x);
-                horizontal_offset_direction.y = use_both_parallel_fallback.select(zero_f, horizontal_offset_direction.y);
+                Vector2Wide::scale(
+                    &cap_center_a_on_b,
+                    &inverse_horiz_offset_length,
+                    &mut horizontal_offset_direction,
+                );
+                let use_both_parallel_fallback =
+                    horizontal_offset_length.simd_lt(Vector::<f32>::splat(1e-14));
+                horizontal_offset_direction.x =
+                    use_both_parallel_fallback.select(one_f, horizontal_offset_direction.x);
+                horizontal_offset_direction.y =
+                    use_both_parallel_fallback.select(zero_f, horizontal_offset_direction.y);
                 let mut initial_line_start = Vector2Wide::default();
-                Vector2Wide::scale(&horizontal_offset_direction, &b.radius, &mut initial_line_start);
+                Vector2Wide::scale(
+                    &horizontal_offset_direction,
+                    &b.radius,
+                    &mut initial_line_start,
+                );
 
                 let mut contact1_line_endpoint = Vector2Wide::default();
                 Vector2Wide::negate(&initial_line_start, &mut contact1_line_endpoint);
 
                 let mut line_start_on_a = Vector2Wide::default();
                 Self::project_onto_cap_a_2d(
-                    &cap_center_by, &cap_center_a, &r_a,
-                    &inverse_n_dot_ay, &local_normal,
-                    &initial_line_start, &mut line_start_on_a,
+                    &cap_center_by,
+                    &cap_center_a,
+                    &r_a,
+                    &inverse_n_dot_ay,
+                    &local_normal,
+                    &initial_line_start,
+                    &mut line_start_on_a,
                 );
                 let mut line_end_on_a = Vector2Wide::default();
                 Self::project_onto_cap_a_2d(
-                    &cap_center_by, &cap_center_a, &r_a,
-                    &inverse_n_dot_ay, &local_normal,
-                    &contact1_line_endpoint, &mut line_end_on_a,
+                    &cap_center_by,
+                    &cap_center_a,
+                    &r_a,
+                    &inverse_n_dot_ay,
+                    &local_normal,
+                    &contact1_line_endpoint,
+                    &mut line_end_on_a,
                 );
                 let mut line_direction_on_a = Vector2Wide::default();
                 Vector2Wide::subtract(&line_end_on_a, &line_start_on_a, &mut line_direction_on_a);
                 let mut contact1_line_direction_on_b = Vector2Wide::default();
-                Vector2Wide::subtract(&contact1_line_endpoint, &initial_line_start, &mut contact1_line_direction_on_b);
+                Vector2Wide::subtract(
+                    &contact1_line_endpoint,
+                    &initial_line_start,
+                    &mut contact1_line_direction_on_b,
+                );
                 let mut contact1_t_min_a = Vector::<f32>::splat(0.0);
                 let mut contact1_t_max_a = Vector::<f32>::splat(0.0);
                 Self::intersect_line_circle(
-                    &line_start_on_a, &line_direction_on_a, &a.radius,
-                    &mut contact1_t_min_a, &mut contact1_t_max_a,
+                    &line_start_on_a,
+                    &line_direction_on_a,
+                    &a.radius,
+                    &mut contact1_t_min_a,
+                    &mut contact1_t_max_a,
                 );
                 let first_line_t_min = contact1_t_min_a.simd_max(zero_f);
                 let first_line_t_max = contact1_t_max_a.simd_min(one_f);
                 let mut scaled_dir = Vector2Wide::default();
-                Vector2Wide::scale(&contact1_line_direction_on_b, &first_line_t_min, &mut scaled_dir);
+                Vector2Wide::scale(
+                    &contact1_line_direction_on_b,
+                    &first_line_t_min,
+                    &mut scaled_dir,
+                );
                 Vector2Wide::add(&initial_line_start, &scaled_dir, &mut cap_contact0);
                 let mut cap_contact1 = Vector2Wide::default();
-                Vector2Wide::scale(&contact1_line_direction_on_b, &first_line_t_max, &mut scaled_dir);
+                Vector2Wide::scale(
+                    &contact1_line_direction_on_b,
+                    &first_line_t_max,
+                    &mut scaled_dir,
+                );
                 Vector2Wide::add(&initial_line_start, &scaled_dir, &mut cap_contact1);
 
                 let half_f = Vector::<f32>::splat(0.5);
                 let circle_intersection_t = half_f
                     * (horizontal_offset_length
-                        + (b.radius * b.radius - a.radius * a.radius) * inverse_horiz_offset_length);
-                let second_line_start_t = horizontal_offset_length
-                    .simd_min(circle_intersection_t.simd_max(zero_f));
+                        + (b.radius * b.radius - a.radius * a.radius)
+                            * inverse_horiz_offset_length);
+                let second_line_start_t =
+                    horizontal_offset_length.simd_min(circle_intersection_t.simd_max(zero_f));
                 let mut second_line_start_on_b = Vector2Wide::default();
-                Vector2Wide::scale(&horizontal_offset_direction, &second_line_start_t, &mut second_line_start_on_b);
+                Vector2Wide::scale(
+                    &horizontal_offset_direction,
+                    &second_line_start_t,
+                    &mut second_line_start_on_b,
+                );
                 let second_line_direction_on_b = Vector2Wide {
                     x: horizontal_offset_direction.y,
                     y: -horizontal_offset_direction.x,
                 };
 
                 let mut second_line_end_on_b = Vector2Wide::default();
-                Vector2Wide::add(&second_line_start_on_b, &second_line_direction_on_b, &mut second_line_end_on_b);
+                Vector2Wide::add(
+                    &second_line_start_on_b,
+                    &second_line_direction_on_b,
+                    &mut second_line_end_on_b,
+                );
                 let mut second_line_start_on_a = Vector2Wide::default();
                 Self::project_onto_cap_a_2d(
-                    &cap_center_by, &cap_center_a, &r_a,
-                    &inverse_n_dot_ay, &local_normal,
-                    &second_line_start_on_b, &mut second_line_start_on_a,
+                    &cap_center_by,
+                    &cap_center_a,
+                    &r_a,
+                    &inverse_n_dot_ay,
+                    &local_normal,
+                    &second_line_start_on_b,
+                    &mut second_line_start_on_a,
                 );
                 let mut second_line_end_on_a = Vector2Wide::default();
                 Self::project_onto_cap_a_2d(
-                    &cap_center_by, &cap_center_a, &r_a,
-                    &inverse_n_dot_ay, &local_normal,
-                    &second_line_end_on_b, &mut second_line_end_on_a,
+                    &cap_center_by,
+                    &cap_center_a,
+                    &r_a,
+                    &inverse_n_dot_ay,
+                    &local_normal,
+                    &second_line_end_on_b,
+                    &mut second_line_end_on_a,
                 );
                 let mut second_line_direction_on_a = Vector2Wide::default();
-                Vector2Wide::subtract(&second_line_end_on_a, &second_line_start_on_a, &mut second_line_direction_on_a);
+                Vector2Wide::subtract(
+                    &second_line_end_on_a,
+                    &second_line_start_on_a,
+                    &mut second_line_direction_on_a,
+                );
 
                 let mut second_line_t_min_a = Vector::<f32>::splat(0.0);
                 let mut second_line_t_max_a = Vector::<f32>::splat(0.0);
                 Self::intersect_line_circle(
-                    &second_line_start_on_a, &second_line_direction_on_a, &a.radius,
-                    &mut second_line_t_min_a, &mut second_line_t_max_a,
+                    &second_line_start_on_a,
+                    &second_line_direction_on_a,
+                    &a.radius,
+                    &mut second_line_t_min_a,
+                    &mut second_line_t_max_a,
                 );
                 let mut second_line_t_min_b = Vector::<f32>::splat(0.0);
                 let mut second_line_t_max_b = Vector::<f32>::splat(0.0);
                 Self::intersect_line_circle(
-                    &second_line_start_on_b, &second_line_direction_on_b, &b.radius,
-                    &mut second_line_t_min_b, &mut second_line_t_max_b,
+                    &second_line_start_on_b,
+                    &second_line_direction_on_b,
+                    &b.radius,
+                    &mut second_line_t_min_b,
+                    &mut second_line_t_max_b,
                 );
                 let second_line_t_min = second_line_t_min_a.simd_max(second_line_t_min_b);
                 let second_line_t_max = second_line_t_max_a.simd_min(second_line_t_max_b);
 
                 let mut cap_contact2 = Vector2Wide::default();
                 let mut cap_contact3 = Vector2Wide::default();
-                Vector2Wide::scale(&second_line_direction_on_b, &second_line_t_min, &mut scaled_dir);
+                Vector2Wide::scale(
+                    &second_line_direction_on_b,
+                    &second_line_t_min,
+                    &mut scaled_dir,
+                );
                 Vector2Wide::add(&second_line_start_on_b, &scaled_dir, &mut cap_contact2);
-                Vector2Wide::scale(&second_line_direction_on_b, &second_line_t_max, &mut scaled_dir);
+                Vector2Wide::scale(
+                    &second_line_direction_on_b,
+                    &second_line_t_max,
+                    &mut scaled_dir,
+                );
                 Vector2Wide::add(&second_line_start_on_b, &scaled_dir, &mut cap_contact3);
 
                 // Blend in extreme point for non-parallel cases:
@@ -382,7 +489,11 @@ impl CylinderPairTester {
                 let extreme_weight = one_f - parallel_weight;
 
                 let mut manifold_center_to_extreme_b = Vector2Wide::default();
-                Vector2Wide::subtract(&extreme_b, &second_line_start_on_b, &mut manifold_center_to_extreme_b);
+                Vector2Wide::subtract(
+                    &extreme_b,
+                    &second_line_start_on_b,
+                    &mut manifold_center_to_extreme_b,
+                );
                 let replace_dot0 = horizontal_offset_direction.x * manifold_center_to_extreme_b.x
                     + horizontal_offset_direction.y * manifold_center_to_extreme_b.y;
                 let replace_dot2 = second_line_direction_on_b.x * manifold_center_to_extreme_b.x
@@ -430,8 +541,9 @@ impl CylinderPairTester {
                 Self::from_cap_b_to_3d(&cap_contact1, &cap_center_by, &mut contact1);
                 Self::from_cap_b_to_3d(&cap_contact2, &cap_center_by, &mut contact2);
                 Self::from_cap_b_to_3d(&cap_contact3, &cap_center_by, &mut contact3);
-                manifold.contact1_exists =
-                    (use_cap_cap & first_line_t_max.simd_gt(first_line_t_min).to_int()) & !both_not_parallel;
+                manifold.contact1_exists = (use_cap_cap
+                    & first_line_t_max.simd_gt(first_line_t_min).to_int())
+                    & !both_not_parallel;
                 manifold.contact2_exists = manifold.contact1_exists;
                 manifold.contact3_exists = manifold.contact1_exists
                     & second_line_t_max.simd_gt(second_line_t_min).to_int();
@@ -440,7 +552,8 @@ impl CylinderPairTester {
             manifold.contact0_exists = use_cap_cap;
         }
 
-        let use_cap_side = ((use_cap_a & !use_cap_b) | (use_cap_b & !use_cap_a)).to_int() & !inactive_lanes;
+        let use_cap_side =
+            ((use_cap_a & !use_cap_b) | (use_cap_b & !use_cap_a)).to_int() & !inactive_lanes;
         // Side normal computation (shared for cap-side and side-side).
         let mut ax = Vector::<f32>::splat(0.0);
         let mut az = Vector::<f32>::splat(0.0);
@@ -453,7 +566,11 @@ impl CylinderPairTester {
         let side_feature_normal_ax = Vector3Wide::scale(&r_a.x, &x_scale);
         let side_feature_normal_az = Vector3Wide::scale(&r_a.z, &z_scale);
         let mut side_feature_normal_a = Vector3Wide::default();
-        Vector3Wide::add(&side_feature_normal_ax, &side_feature_normal_az, &mut side_feature_normal_a);
+        Vector3Wide::add(
+            &side_feature_normal_ax,
+            &side_feature_normal_az,
+            &mut side_feature_normal_a,
+        );
         let mut side_center_a = Vector3Wide::default();
         side_center_a.x = extreme_a_horizontal_offset.x + local_offset_a.x;
         side_center_a.y = extreme_a_horizontal_offset.y + local_offset_a.y;
@@ -473,47 +590,74 @@ impl CylinderPairTester {
             side_line_end_b.z = side_center_b.z;
             let mut projected_line_start_b_on_a = Vector2Wide::default();
             Self::project_onto_cap_a(
-                &cap_center_a, &r_a, &inverse_n_dot_ay, &local_normal,
-                &side_center_b, &mut projected_line_start_b_on_a,
+                &cap_center_a,
+                &r_a,
+                &inverse_n_dot_ay,
+                &local_normal,
+                &side_center_b,
+                &mut projected_line_start_b_on_a,
             );
             let mut projected_line_start_a_on_b = Vector2Wide::default();
             Self::project_onto_cap_b(
-                &cap_center_by, &inverse_local_normal_y, &local_normal,
-                &side_center_a, &mut projected_line_start_a_on_b,
+                &cap_center_by,
+                &inverse_local_normal_y,
+                &local_normal,
+                &side_center_a,
+                &mut projected_line_start_a_on_b,
             );
             let mut projected_line_end_b_on_a = Vector2Wide::default();
             Self::project_onto_cap_a(
-                &cap_center_a, &r_a, &inverse_n_dot_ay, &local_normal,
-                &side_line_end_b, &mut projected_line_end_b_on_a,
+                &cap_center_a,
+                &r_a,
+                &inverse_n_dot_ay,
+                &local_normal,
+                &side_line_end_b,
+                &mut projected_line_end_b_on_a,
             );
             let mut projected_line_end_a_on_b = Vector2Wide::default();
             Self::project_onto_cap_b(
-                &cap_center_by, &inverse_local_normal_y, &local_normal,
-                &side_line_end_a, &mut projected_line_end_a_on_b,
+                &cap_center_by,
+                &inverse_local_normal_y,
+                &local_normal,
+                &side_line_end_a,
+                &mut projected_line_end_a_on_b,
             );
 
             let use_cap_a_i = use_cap_a.to_int();
             let mut projected_line_start = Vector2Wide::default();
             Vector2Wide::conditional_select(
-                &use_cap_a_i, &projected_line_start_b_on_a, &projected_line_start_a_on_b,
+                &use_cap_a_i,
+                &projected_line_start_b_on_a,
+                &projected_line_start_a_on_b,
                 &mut projected_line_start,
             );
             let mut projected_line_end = Vector2Wide::default();
             Vector2Wide::conditional_select(
-                &use_cap_a_i, &projected_line_end_b_on_a, &projected_line_end_a_on_b,
+                &use_cap_a_i,
+                &projected_line_end_b_on_a,
+                &projected_line_end_a_on_b,
                 &mut projected_line_end,
             );
             let radius = use_cap_a.select(a.radius, b.radius);
             let side_half_length = use_cap_a.select(b.half_length, a.half_length);
             let mut projected_line_direction = Vector2Wide::default();
-            Vector2Wide::subtract(&projected_line_end, &projected_line_start, &mut projected_line_direction);
+            Vector2Wide::subtract(
+                &projected_line_end,
+                &projected_line_start,
+                &mut projected_line_direction,
+            );
             let mut t_min = Vector::<f32>::splat(0.0);
             let mut t_max = Vector::<f32>::splat(0.0);
             Self::intersect_line_circle(
-                &projected_line_start, &projected_line_direction, &radius,
-                &mut t_min, &mut t_max,
+                &projected_line_start,
+                &projected_line_direction,
+                &radius,
+                &mut t_min,
+                &mut t_max,
             );
-            t_min = (-side_half_length).simd_max(t_min).simd_min(side_half_length);
+            t_min = (-side_half_length)
+                .simd_max(t_min)
+                .simd_min(side_half_length);
             t_max = t_max.simd_min(side_half_length);
 
             // Build contacts for both cases.
@@ -536,31 +680,43 @@ impl CylinderPairTester {
             contact1_for_cap_b.z = projected_line_start.y + t_max * projected_line_direction.y;
 
             let cap_side_contact0 = Vector3Wide::conditional_select(
-                &use_cap_a_i, &contact0_for_cap_a, &contact0_for_cap_b,
+                &use_cap_a_i,
+                &contact0_for_cap_a,
+                &contact0_for_cap_b,
             );
             let cap_side_contact1 = Vector3Wide::conditional_select(
-                &use_cap_a_i, &contact1_for_cap_a, &contact1_for_cap_b,
+                &use_cap_a_i,
+                &contact1_for_cap_a,
+                &contact1_for_cap_b,
             );
-            contact0 = Vector3Wide::conditional_select(&use_cap_side, &cap_side_contact0, &contact0);
-            contact1 = Vector3Wide::conditional_select(&use_cap_side, &cap_side_contact1, &contact1);
-            manifold.contact0_exists = use_cap_side.simd_ne(zero_i).select(neg_one, manifold.contact0_exists);
-            manifold.contact1_exists = use_cap_side.simd_ne(zero_i).select(
-                t_max.simd_gt(t_min).to_int(),
-                manifold.contact1_exists,
-            );
+            contact0 =
+                Vector3Wide::conditional_select(&use_cap_side, &cap_side_contact0, &contact0);
+            contact1 =
+                Vector3Wide::conditional_select(&use_cap_side, &cap_side_contact1, &contact1);
+            manifold.contact0_exists = use_cap_side
+                .simd_ne(zero_i)
+                .select(neg_one, manifold.contact0_exists);
+            manifold.contact1_exists = use_cap_side
+                .simd_ne(zero_i)
+                .select(t_max.simd_gt(t_min).to_int(), manifold.contact1_exists);
 
             let cap_side_feature_normal_a = Vector3Wide::conditional_select(
-                &use_cap_a_i, &cap_feature_normal_a, &side_feature_normal_a,
+                &use_cap_a_i,
+                &cap_feature_normal_a,
+                &side_feature_normal_a,
             );
             feature_normal_a = Vector3Wide::conditional_select(
-                &use_cap_side, &cap_side_feature_normal_a, &feature_normal_a,
+                &use_cap_side,
+                &cap_side_feature_normal_a,
+                &feature_normal_a,
             );
 
-            let cap_side_feature_position_a = Vector3Wide::conditional_select(
-                &use_cap_a_i, &cap_center_a, &side_center_a,
-            );
+            let cap_side_feature_position_a =
+                Vector3Wide::conditional_select(&use_cap_a_i, &cap_center_a, &side_center_a);
             feature_position_a = Vector3Wide::conditional_select(
-                &use_cap_side, &cap_side_feature_position_a, &feature_position_a,
+                &use_cap_side,
+                &cap_side_feature_position_a,
+                &feature_position_a,
             );
         }
 
@@ -571,63 +727,113 @@ impl CylinderPairTester {
             Vector3Wide::negate(&side_center_a, &mut side_center_a_neg);
             let horizontal_normal_length_squared_b =
                 local_normal.x * local_normal.x + local_normal.z * local_normal.z;
-            let inverse_horizontal_normal_length_squared_b = one_f / horizontal_normal_length_squared_b;
+            let inverse_horizontal_normal_length_squared_b =
+                one_f / horizontal_normal_length_squared_b;
             let mut contact_t_min = Vector::<f32>::splat(0.0);
             let mut contact_t_max = Vector::<f32>::splat(0.0);
             CapsuleCylinderTester::get_contact_interval_between_segments(
-                &a.half_length, &b.half_length,
-                &r_a.y, &local_normal,
+                &a.half_length,
+                &b.half_length,
+                &r_a.y,
+                &local_normal,
                 &inverse_horizontal_normal_length_squared_b,
                 &side_center_a_neg,
-                &mut contact_t_min, &mut contact_t_max,
+                &mut contact_t_min,
+                &mut contact_t_max,
             );
 
-            contact0.x = use_side_side.simd_ne(zero_i).select(extreme_b.x, contact0.x);
-            contact0.y = use_side_side.simd_ne(zero_i).select(contact_t_min, contact0.y);
-            contact0.z = use_side_side.simd_ne(zero_i).select(extreme_b.y, contact0.z);
-            contact1.x = use_side_side.simd_ne(zero_i).select(extreme_b.x, contact1.x);
-            contact1.y = use_side_side.simd_ne(zero_i).select(contact_t_max, contact1.y);
-            contact1.z = use_side_side.simd_ne(zero_i).select(extreme_b.y, contact1.z);
-            manifold.contact0_exists = use_side_side.simd_ne(zero_i).select(neg_one, manifold.contact0_exists);
+            contact0.x = use_side_side
+                .simd_ne(zero_i)
+                .select(extreme_b.x, contact0.x);
+            contact0.y = use_side_side
+                .simd_ne(zero_i)
+                .select(contact_t_min, contact0.y);
+            contact0.z = use_side_side
+                .simd_ne(zero_i)
+                .select(extreme_b.y, contact0.z);
+            contact1.x = use_side_side
+                .simd_ne(zero_i)
+                .select(extreme_b.x, contact1.x);
+            contact1.y = use_side_side
+                .simd_ne(zero_i)
+                .select(contact_t_max, contact1.y);
+            contact1.z = use_side_side
+                .simd_ne(zero_i)
+                .select(extreme_b.y, contact1.z);
+            manifold.contact0_exists = use_side_side
+                .simd_ne(zero_i)
+                .select(neg_one, manifold.contact0_exists);
             manifold.contact1_exists = use_side_side.simd_ne(zero_i).select(
                 contact_t_max.simd_gt(contact_t_min).to_int(),
                 manifold.contact1_exists,
             );
             feature_normal_a = Vector3Wide::conditional_select(
-                &use_side_side, &side_feature_normal_a, &feature_normal_a,
+                &use_side_side,
+                &side_feature_normal_a,
+                &feature_normal_a,
             );
             feature_position_a = Vector3Wide::conditional_select(
-                &use_side_side, &side_center_a, &feature_position_a,
+                &use_side_side,
+                &side_center_a,
+                &feature_position_a,
             );
         }
 
         let mut feature_normal_a_dot_local_normal = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&feature_normal_a, &local_normal, &mut feature_normal_a_dot_local_normal);
+        Vector3Wide::dot(
+            &feature_normal_a,
+            &local_normal,
+            &mut feature_normal_a_dot_local_normal,
+        );
         let inverse_feature_normal_a_dot_local_normal = one_f / feature_normal_a_dot_local_normal;
         let negative_speculative_margin = -*speculative_margin;
         Self::transform_contact(
-            &contact0, &feature_position_a, &feature_normal_a,
+            &contact0,
+            &feature_position_a,
+            &feature_normal_a,
             inverse_feature_normal_a_dot_local_normal,
-            &local_offset_b, &world_rb, negative_speculative_margin,
-            &mut manifold.offset_a0, &mut manifold.depth0, &mut manifold.contact0_exists,
+            &local_offset_b,
+            &world_rb,
+            negative_speculative_margin,
+            &mut manifold.offset_a0,
+            &mut manifold.depth0,
+            &mut manifold.contact0_exists,
         );
         Self::transform_contact(
-            &contact1, &feature_position_a, &feature_normal_a,
+            &contact1,
+            &feature_position_a,
+            &feature_normal_a,
             inverse_feature_normal_a_dot_local_normal,
-            &local_offset_b, &world_rb, negative_speculative_margin,
-            &mut manifold.offset_a1, &mut manifold.depth1, &mut manifold.contact1_exists,
+            &local_offset_b,
+            &world_rb,
+            negative_speculative_margin,
+            &mut manifold.offset_a1,
+            &mut manifold.depth1,
+            &mut manifold.contact1_exists,
         );
         Self::transform_contact(
-            &contact2, &feature_position_a, &feature_normal_a,
+            &contact2,
+            &feature_position_a,
+            &feature_normal_a,
             inverse_feature_normal_a_dot_local_normal,
-            &local_offset_b, &world_rb, negative_speculative_margin,
-            &mut manifold.offset_a2, &mut manifold.depth2, &mut manifold.contact2_exists,
+            &local_offset_b,
+            &world_rb,
+            negative_speculative_margin,
+            &mut manifold.offset_a2,
+            &mut manifold.depth2,
+            &mut manifold.contact2_exists,
         );
         Self::transform_contact(
-            &contact3, &feature_position_a, &feature_normal_a,
+            &contact3,
+            &feature_position_a,
+            &feature_normal_a,
             inverse_feature_normal_a_dot_local_normal,
-            &local_offset_b, &world_rb, negative_speculative_margin,
-            &mut manifold.offset_a3, &mut manifold.depth3, &mut manifold.contact3_exists,
+            &local_offset_b,
+            &world_rb,
+            negative_speculative_margin,
+            &mut manifold.offset_a3,
+            &mut manifold.depth3,
+            &mut manifold.contact3_exists,
         );
         Matrix3x3Wide::transform_without_overlap(&local_normal, &world_rb, &mut manifold.normal);
         manifold.feature_id0 = zero_i;

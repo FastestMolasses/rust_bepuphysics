@@ -69,11 +69,7 @@ impl ConvexHullPairTester {
         );
 
         let mut local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(
-            offset_b,
-            &r_b,
-            &mut local_offset_b,
-        );
+        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &r_b, &mut local_offset_b);
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
         let mut center_distance = zero_f;
@@ -266,8 +262,7 @@ impl ConvexHullPairTester {
                 Matrix3x3::transform(&vtmp, &slot_b_local_orientation_a, &mut edge.vertex);
                 edge.vertex += slot_local_offset_a;
                 // Note flipped cross order; local normal points from B to A.
-                edge.edge_plane_normal =
-                    slot_local_normal.cross(edge.vertex - previous_vertex_a);
+                edge.edge_plane_normal = slot_local_normal.cross(edge.vertex - previous_vertex_a);
                 previous_vertex_a = edge.vertex;
             }
 
@@ -278,8 +273,7 @@ impl ConvexHullPairTester {
             let mut candidates_buf = [ManifoldCandidateScalar::default(); 128];
             let mut candidate_count = 0usize;
 
-            let previous_index_b_init =
-                b_slot.face_vertex_indices[face_start_b + face_count_b - 1];
+            let previous_index_b_init = b_slot.face_vertex_indices[face_start_b + face_count_b - 1];
             let mut b_face_origin = Vec3::ZERO;
             Vector3Wide::read_slot(
                 &b_slot.points[previous_index_b_init.bundle_index as usize],
@@ -338,7 +332,11 @@ impl ConvexHullPairTester {
                 // Bounds on B's edge. Denominator signs are opposed; comparison flipped.
                 if latest_entry <= earliest_exit {
                     // This edge of B was actually contained in A's face.
-                    latest_entry = if latest_entry < 0.0 { 0.0 } else { latest_entry };
+                    latest_entry = if latest_entry < 0.0 {
+                        0.0
+                    } else {
+                        latest_entry
+                    };
                     earliest_exit = if earliest_exit > 1.0 {
                         1.0
                     } else {
@@ -353,9 +351,7 @@ impl ConvexHullPairTester {
                         + index_b.inner_index as usize;
                     let base_feature_id = ((start_id ^ end_id) << 8) as i32;
 
-                    if earliest_exit >= latest_entry
-                        && candidate_count < maximum_candidate_count
-                    {
+                    if earliest_exit >= latest_entry && candidate_count < maximum_candidate_count {
                         // Create max contact.
                         let point =
                             edge_offset_b * earliest_exit + previous_vertex_b - b_face_origin;

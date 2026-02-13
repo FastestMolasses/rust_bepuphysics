@@ -2,22 +2,17 @@
 
 use std::marker::PhantomData;
 
-use glam::{Quat, Vec3};
+use glam::Vec3;
 
-use crate::physics::body_properties::RigidPoseWide;
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::vector::Vector;
 use std::simd::prelude::*;
 
 use super::convex_compound_collision_task::IConvexCompoundOverlapFinder;
-use super::convex_compound_task_overlaps::{ConvexCompoundOverlaps, ConvexCompoundTaskOverlaps};
+use super::convex_compound_task_overlaps::ConvexCompoundTaskOverlaps;
 
 /// Trait for shapes that support bounding box overlap queries against their children.
 /// Covers both compound shapes (with child poses) and mesh shapes (with triangles).
@@ -62,7 +57,9 @@ pub struct ConvexCompoundOverlapFinder<TCompound: IBoundsQueryableCompound> {
     _marker: PhantomData<TCompound>,
 }
 
-impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder for ConvexCompoundOverlapFinder<TCompound> {
+impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder
+    for ConvexCompoundOverlapFinder<TCompound>
+{
     /// Finds all overlapping children for the given set of bounds-tested pairs.
     ///
     /// This uses a scalar-per-pair approach: for each pair, compute the local-space
@@ -138,7 +135,8 @@ impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder for Conve
         // Delegate to the compound's tree/child overlap finder.
         // The choice of instance here is irrelevant — all compounds of the same type
         // have the same tree structure query method.
-        let compound_ptr: *const TCompound = overlaps.subpair_queries[0i32].container as *const TCompound;
+        let compound_ptr: *const TCompound =
+            overlaps.subpair_queries[0i32].container as *const TCompound;
         let compound = &*compound_ptr;
         // Copy the subpair_queries buffer to avoid aliasing with the mutable overlaps ref.
         let subpair_queries = overlaps.subpair_queries;

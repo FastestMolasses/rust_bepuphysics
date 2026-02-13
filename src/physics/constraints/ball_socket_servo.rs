@@ -38,10 +38,7 @@ impl BallSocketServo {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_valid_servo_settings(
-                &self.servo_settings,
-                "BallSocketServo",
-            );
+            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "BallSocketServo");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
@@ -90,9 +87,17 @@ impl BallSocketServoFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut offset_a = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_a, orientation_a, &mut offset_a);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_a,
+            orientation_a,
+            &mut offset_a,
+        );
         let mut offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_b, orientation_b, &mut offset_b);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_b,
+            orientation_b,
+            &mut offset_b,
+        );
         BallSocketShared::apply_impulse(
             wsv_a,
             wsv_b,
@@ -120,9 +125,17 @@ impl BallSocketServoFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut offset_a = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_a, orientation_a, &mut offset_a);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_a,
+            orientation_a,
+            &mut offset_a,
+        );
         let mut offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_b, orientation_b, &mut offset_b);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_b,
+            orientation_b,
+            &mut offset_b,
+        );
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);

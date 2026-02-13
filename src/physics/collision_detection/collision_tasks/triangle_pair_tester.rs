@@ -96,11 +96,8 @@ impl TrianglePairTester {
         normal_candidate: &Vector3Wide,
     ) {
         let use_candidate = depth_candidate.simd_lt(*depth);
-        *normal = Vector3Wide::conditional_select(
-            &use_candidate.to_int(),
-            normal_candidate,
-            normal,
-        );
+        *normal =
+            Vector3Wide::conditional_select(&use_candidate.to_int(), normal_candidate, normal);
         *depth = depth.simd_min(*depth_candidate);
     }
 
@@ -162,16 +159,14 @@ impl TrianglePairTester {
         Vector3Wide::dot(&offset, face_normal_b, &mut distance);
         let mut candidate = ManifoldCandidate::default();
         candidate.depth = distance * *inverse_contact_normal_dot_face_normal_b;
-        let unprojected_vertex =
-            Vector3Wide::scale(contact_normal, &candidate.depth) + *vertex;
+        let unprojected_vertex = Vector3Wide::scale(contact_normal, &candidate.depth) + *vertex;
 
         let offset_on_b = unprojected_vertex - *triangle_center_b;
         Vector3Wide::dot(&offset_on_b, tangent_bx, &mut candidate.x);
         Vector3Wide::dot(&offset_on_b, tangent_by, &mut candidate.y);
         candidate.feature_id = *vertex_id;
-        let exists = (candidate.depth.simd_ge(*minimum_depth) & contained)
-            .to_int()
-            & *allow_contacts;
+        let exists =
+            (candidate.depth.simd_ge(*minimum_depth) & contained).to_int() & *allow_contacts;
         unsafe {
             ManifoldCandidateHelper::add_candidate_with_depth(
                 candidates as *mut ManifoldCandidate,
@@ -438,7 +433,9 @@ impl TrianglePairTester {
             Matrix3x3Wide::multiply_by_transpose_without_overlap(&world_rb, &world_ra, &mut r_b);
             let mut local_offset_b = Vector3Wide::default();
             Matrix3x3Wide::transform_by_transposed_without_overlap(
-                offset_b, &world_ra, &mut local_offset_b,
+                offset_b,
+                &world_ra,
+                &mut local_offset_b,
             );
             let mut b_a = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.a, &r_b, &mut b_a);
@@ -469,55 +466,167 @@ impl TrianglePairTester {
             let mut depth = Vector::<f32>::splat(0.0);
             let mut local_normal = Vector3Wide::default();
             Self::test_edge_edge(
-                &ab_a, &ab_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth, &mut local_normal,
+                &ab_a,
+                &ab_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth,
+                &mut local_normal,
             );
             let mut depth_candidate = Vector::<f32>::splat(0.0);
             let mut local_normal_candidate = Vector3Wide::default();
             Self::test_edge_edge(
-                &ab_a, &bc_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &ab_a,
+                &bc_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
             Self::test_edge_edge(
-                &ab_a, &ca_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &ab_a,
+                &ca_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
 
             // A BC x *
             Self::test_edge_edge(
-                &bc_a, &ab_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &bc_a,
+                &ab_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
             Self::test_edge_edge(
-                &bc_a, &bc_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &bc_a,
+                &bc_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
             Self::test_edge_edge(
-                &bc_a, &ca_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &bc_a,
+                &ca_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
 
             // A CA x *
             Self::test_edge_edge(
-                &ca_a, &ab_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &ca_a,
+                &ab_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
             Self::test_edge_edge(
-                &ca_a, &bc_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &ca_a,
+                &bc_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
             Self::test_edge_edge(
-                &ca_a, &ca_b, &a.a, &a.b, &a.c, &b_a, &b_b, &b_c,
-                &mut depth_candidate, &mut local_normal_candidate,
+                &ca_a,
+                &ca_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &mut depth_candidate,
+                &mut local_normal_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &local_normal_candidate);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &local_normal_candidate,
+            );
 
             // Face normals
             let mut face_normal_a = Vector3Wide::default();
@@ -528,9 +637,21 @@ impl TrianglePairTester {
                 &(Vector::<f32>::splat(1.0) / face_normal_a_length),
             );
             Self::get_depth_for_normal(
-                &a.a, &a.b, &a.c, &b_a, &b_b, &b_c, &face_normal_a, &mut depth_candidate,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &face_normal_a,
+                &mut depth_candidate,
             );
-            Self::select(&mut depth, &mut local_normal, &depth_candidate, &face_normal_a);
+            Self::select(
+                &mut depth,
+                &mut local_normal,
+                &depth_candidate,
+                &face_normal_a,
+            );
 
             let mut face_normal_b = Vector3Wide::default();
             Vector3Wide::cross_without_overlap(&ab_b, &ca_b, &mut face_normal_b);
@@ -541,7 +662,14 @@ impl TrianglePairTester {
             );
             let mut face_depth_b = Vector::<f32>::splat(0.0);
             Self::get_depth_for_normal(
-                &a.a, &a.b, &a.c, &b_a, &b_b, &b_c, &face_normal_b, &mut face_depth_b,
+                &a.a,
+                &a.b,
+                &a.c,
+                &b_a,
+                &b_b,
+                &b_c,
+                &face_normal_b,
+                &mut face_depth_b,
             );
             Self::select(&mut depth, &mut local_normal, &face_depth_b, &face_normal_b);
 
@@ -553,7 +681,8 @@ impl TrianglePairTester {
             Vector3Wide::length_squared_to(&ca_a, &mut ca_a_length_squared);
             let mut ca_b_length_squared = Vector::<f32>::splat(0.0);
             Vector3Wide::length_squared_to(&ca_b, &mut ca_b_length_squared);
-            let mut allow_contacts = BundleIndexing::create_mask_for_count_in_bundle(pair_count as usize);
+            let mut allow_contacts =
+                BundleIndexing::create_mask_for_count_in_bundle(pair_count as usize);
 
             // Calibrate normal to point from B to A.
             let center_a_to_center_b = local_triangle_center_b - local_triangle_center_a;
@@ -566,9 +695,17 @@ impl TrianglePairTester {
 
             let minimum_depth = -*speculative_margin;
             let mut local_normal_dot_face_normal_a = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&local_normal, &face_normal_a, &mut local_normal_dot_face_normal_a);
+            Vector3Wide::dot(
+                &local_normal,
+                &face_normal_a,
+                &mut local_normal_dot_face_normal_a,
+            );
             let mut local_normal_dot_face_normal_b = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&local_normal, &face_normal_b, &mut local_normal_dot_face_normal_b);
+            Vector3Wide::dot(
+                &local_normal,
+                &face_normal_b,
+                &mut local_normal_dot_face_normal_b,
+            );
             let mut epsilon_scale_a = Vector::<f32>::splat(0.0);
             let mut nondegenerate_mask_a = Vector::<i32>::splat(0);
             TriangleWide::compute_nondegenerate_triangle_mask(
@@ -636,21 +773,43 @@ impl TrianglePairTester {
             let mut flat_edge_ab_on_a = Vector2Wide::default();
             let mut flat_edge_bc_on_a = Vector2Wide::default();
             let mut flat_edge_ca_on_a = Vector2Wide::default();
-            Vector2Wide::subtract(&flat_vertex_b_on_a, &flat_vertex_a_on_a, &mut flat_edge_ab_on_a);
-            Vector2Wide::subtract(&flat_vertex_c_on_a, &flat_vertex_b_on_a, &mut flat_edge_bc_on_a);
-            Vector2Wide::subtract(&flat_vertex_a_on_a, &flat_vertex_c_on_a, &mut flat_edge_ca_on_a);
+            Vector2Wide::subtract(
+                &flat_vertex_b_on_a,
+                &flat_vertex_a_on_a,
+                &mut flat_edge_ab_on_a,
+            );
+            Vector2Wide::subtract(
+                &flat_vertex_c_on_a,
+                &flat_vertex_b_on_a,
+                &mut flat_edge_bc_on_a,
+            );
+            Vector2Wide::subtract(
+                &flat_vertex_a_on_a,
+                &flat_vertex_c_on_a,
+                &mut flat_edge_ca_on_a,
+            );
             let mut flat_edge_ab_on_b = Vector2Wide::default();
             let mut flat_edge_bc_on_b = Vector2Wide::default();
             let mut flat_edge_ca_on_b = Vector2Wide::default();
-            Vector2Wide::subtract(&flat_vertex_b_on_b, &flat_vertex_a_on_b, &mut flat_edge_ab_on_b);
-            Vector2Wide::subtract(&flat_vertex_c_on_b, &flat_vertex_b_on_b, &mut flat_edge_bc_on_b);
-            Vector2Wide::subtract(&flat_vertex_a_on_b, &flat_vertex_c_on_b, &mut flat_edge_ca_on_b);
+            Vector2Wide::subtract(
+                &flat_vertex_b_on_b,
+                &flat_vertex_a_on_b,
+                &mut flat_edge_ab_on_b,
+            );
+            Vector2Wide::subtract(
+                &flat_vertex_c_on_b,
+                &flat_vertex_b_on_b,
+                &mut flat_edge_bc_on_b,
+            );
+            Vector2Wide::subtract(
+                &flat_vertex_a_on_b,
+                &flat_vertex_c_on_b,
+                &mut flat_edge_ca_on_b,
+            );
 
             let edge_threshold = Vector::<f32>::splat(0.2);
-            let use_edge_case_for_a =
-                local_normal_dot_face_normal_a.abs().simd_lt(edge_threshold);
-            let use_edge_case_for_b =
-                local_normal_dot_face_normal_b.abs().simd_lt(edge_threshold);
+            let use_edge_case_for_a = local_normal_dot_face_normal_a.abs().simd_lt(edge_threshold);
+            let use_edge_case_for_b = local_normal_dot_face_normal_b.abs().simd_lt(edge_threshold);
             let use_face_case_for_b = !use_edge_case_for_b;
             let use_face_case_for_b =
                 (allow_contacts.simd_lt(Vector::<i32>::splat(0))) & use_face_case_for_b;
@@ -658,8 +817,7 @@ impl TrianglePairTester {
             // Build tangent basis on triangle B surface for contact parameterization.
             let tangent_bx = Vector3Wide::scale(
                 &ab_b,
-                &(Vector::<f32>::splat(1.0)
-                    / std::simd::StdFloat::sqrt(ab_b_length_squared)),
+                &(Vector::<f32>::splat(1.0) / std::simd::StdFloat::sqrt(ab_b_length_squared)),
             );
             let mut tangent_by = Vector3Wide::default();
             Vector3Wide::cross_without_overlap(&tangent_bx, &face_normal_b, &mut tangent_by);
@@ -673,28 +831,67 @@ impl TrianglePairTester {
                 let inverse_contact_normal_dot_face_normal_b =
                     Vector::<f32>::splat(1.0) / local_normal_dot_face_normal_b;
                 Self::try_add_triangle_a_vertex(
-                    &a.a, &flat_vertex_a_on_a, &Vector::<i32>::splat(0),
-                    &tangent_bx, &tangent_by, &local_triangle_center_b, &local_normal,
-                    &face_normal_b, &flat_edge_ab_on_b, &flat_edge_bc_on_b, &flat_edge_ca_on_b,
-                    &flat_vertex_a_on_b, &flat_vertex_b_on_b, &use_face_case_for_b.to_int(),
-                    &inverse_contact_normal_dot_face_normal_b, &minimum_depth,
-                    &mut buffer[0], &mut candidate_count, pair_count,
+                    &a.a,
+                    &flat_vertex_a_on_a,
+                    &Vector::<i32>::splat(0),
+                    &tangent_bx,
+                    &tangent_by,
+                    &local_triangle_center_b,
+                    &local_normal,
+                    &face_normal_b,
+                    &flat_edge_ab_on_b,
+                    &flat_edge_bc_on_b,
+                    &flat_edge_ca_on_b,
+                    &flat_vertex_a_on_b,
+                    &flat_vertex_b_on_b,
+                    &use_face_case_for_b.to_int(),
+                    &inverse_contact_normal_dot_face_normal_b,
+                    &minimum_depth,
+                    &mut buffer[0],
+                    &mut candidate_count,
+                    pair_count,
                 );
                 Self::try_add_triangle_a_vertex(
-                    &a.b, &flat_vertex_b_on_a, &Vector::<i32>::splat(1),
-                    &tangent_bx, &tangent_by, &local_triangle_center_b, &local_normal,
-                    &face_normal_b, &flat_edge_ab_on_b, &flat_edge_bc_on_b, &flat_edge_ca_on_b,
-                    &flat_vertex_a_on_b, &flat_vertex_b_on_b, &use_face_case_for_b.to_int(),
-                    &inverse_contact_normal_dot_face_normal_b, &minimum_depth,
-                    &mut buffer[0], &mut candidate_count, pair_count,
+                    &a.b,
+                    &flat_vertex_b_on_a,
+                    &Vector::<i32>::splat(1),
+                    &tangent_bx,
+                    &tangent_by,
+                    &local_triangle_center_b,
+                    &local_normal,
+                    &face_normal_b,
+                    &flat_edge_ab_on_b,
+                    &flat_edge_bc_on_b,
+                    &flat_edge_ca_on_b,
+                    &flat_vertex_a_on_b,
+                    &flat_vertex_b_on_b,
+                    &use_face_case_for_b.to_int(),
+                    &inverse_contact_normal_dot_face_normal_b,
+                    &minimum_depth,
+                    &mut buffer[0],
+                    &mut candidate_count,
+                    pair_count,
                 );
                 Self::try_add_triangle_a_vertex(
-                    &a.c, &flat_vertex_c_on_a, &Vector::<i32>::splat(2),
-                    &tangent_bx, &tangent_by, &local_triangle_center_b, &local_normal,
-                    &face_normal_b, &flat_edge_ab_on_b, &flat_edge_bc_on_b, &flat_edge_ca_on_b,
-                    &flat_vertex_a_on_b, &flat_vertex_b_on_b, &use_face_case_for_b.to_int(),
-                    &inverse_contact_normal_dot_face_normal_b, &minimum_depth,
-                    &mut buffer[0], &mut candidate_count, pair_count,
+                    &a.c,
+                    &flat_vertex_c_on_a,
+                    &Vector::<i32>::splat(2),
+                    &tangent_bx,
+                    &tangent_by,
+                    &local_triangle_center_b,
+                    &local_normal,
+                    &face_normal_b,
+                    &flat_edge_ab_on_b,
+                    &flat_edge_bc_on_b,
+                    &flat_edge_ca_on_b,
+                    &flat_vertex_a_on_b,
+                    &flat_vertex_b_on_b,
+                    &use_face_case_for_b.to_int(),
+                    &inverse_contact_normal_dot_face_normal_b,
+                    &minimum_depth,
+                    &mut buffer[0],
+                    &mut candidate_count,
+                    pair_count,
                 );
             }
 
@@ -710,13 +907,16 @@ impl TrianglePairTester {
                 let mut flat_edge_offset_bc_on_a_length_squared = Vector::<f32>::splat(0.0);
                 let mut flat_edge_offset_ca_on_a_length_squared = Vector::<f32>::splat(0.0);
                 Vector2Wide::length_squared(
-                    &flat_edge_ab_on_a, &mut flat_edge_offset_ab_on_a_length_squared,
+                    &flat_edge_ab_on_a,
+                    &mut flat_edge_offset_ab_on_a_length_squared,
                 );
                 Vector2Wide::length_squared(
-                    &flat_edge_bc_on_a, &mut flat_edge_offset_bc_on_a_length_squared,
+                    &flat_edge_bc_on_a,
+                    &mut flat_edge_offset_bc_on_a_length_squared,
                 );
                 Vector2Wide::length_squared(
-                    &flat_edge_ca_on_a, &mut flat_edge_offset_ca_on_a_length_squared,
+                    &flat_edge_ca_on_a,
+                    &mut flat_edge_offset_ca_on_a_length_squared,
                 );
                 let inverse_flat_edge_offset_ab_on_a_length_squared =
                     Vector::<f32>::splat(1.0) / flat_edge_offset_ab_on_a_length_squared;
@@ -739,46 +939,100 @@ impl TrianglePairTester {
                 Vector3Wide::dot(&local_normal, &ca_a, &mut ca_dot_normal_on_a);
 
                 Self::clip_b_edge_against_a_bounds(
-                    &flat_vertex_a_on_a, &flat_vertex_b_on_a, &flat_vertex_c_on_a,
-                    &flat_edge_ab_on_a, &flat_edge_bc_on_a, &flat_edge_ca_on_a,
+                    &flat_vertex_a_on_a,
+                    &flat_vertex_b_on_a,
+                    &flat_vertex_c_on_a,
+                    &flat_edge_ab_on_a,
+                    &flat_edge_bc_on_a,
+                    &flat_edge_ca_on_a,
                     &inverse_flat_edge_offset_ab_on_a_length_squared,
                     &inverse_flat_edge_offset_bc_on_a_length_squared,
                     &inverse_flat_edge_offset_ca_on_a_length_squared,
-                    &a_dot_normal_on_a, &b_dot_normal_on_a, &c_dot_normal_on_a,
-                    &ab_dot_normal_on_a, &bc_dot_normal_on_a, &ca_dot_normal_on_a,
-                    &flat_vertex_a_on_b, &flat_edge_ab_on_b, &b_a, &ab_b,
-                    &Vector::<i32>::splat(3), &three,
-                    &local_triangle_center_b, &tangent_bx, &tangent_by,
-                    &local_normal, &minimum_depth, still_could_use_clipping_contacts,
-                    &mut buffer[0], &mut candidate_count, pair_count,
+                    &a_dot_normal_on_a,
+                    &b_dot_normal_on_a,
+                    &c_dot_normal_on_a,
+                    &ab_dot_normal_on_a,
+                    &bc_dot_normal_on_a,
+                    &ca_dot_normal_on_a,
+                    &flat_vertex_a_on_b,
+                    &flat_edge_ab_on_b,
+                    &b_a,
+                    &ab_b,
+                    &Vector::<i32>::splat(3),
+                    &three,
+                    &local_triangle_center_b,
+                    &tangent_bx,
+                    &tangent_by,
+                    &local_normal,
+                    &minimum_depth,
+                    still_could_use_clipping_contacts,
+                    &mut buffer[0],
+                    &mut candidate_count,
+                    pair_count,
                 );
                 Self::clip_b_edge_against_a_bounds(
-                    &flat_vertex_a_on_a, &flat_vertex_b_on_a, &flat_vertex_c_on_a,
-                    &flat_edge_ab_on_a, &flat_edge_bc_on_a, &flat_edge_ca_on_a,
+                    &flat_vertex_a_on_a,
+                    &flat_vertex_b_on_a,
+                    &flat_vertex_c_on_a,
+                    &flat_edge_ab_on_a,
+                    &flat_edge_bc_on_a,
+                    &flat_edge_ca_on_a,
                     &inverse_flat_edge_offset_ab_on_a_length_squared,
                     &inverse_flat_edge_offset_bc_on_a_length_squared,
                     &inverse_flat_edge_offset_ca_on_a_length_squared,
-                    &a_dot_normal_on_a, &b_dot_normal_on_a, &c_dot_normal_on_a,
-                    &ab_dot_normal_on_a, &bc_dot_normal_on_a, &ca_dot_normal_on_a,
-                    &flat_vertex_b_on_b, &flat_edge_bc_on_b, &b_b, &bc_b,
-                    &Vector::<i32>::splat(4), &three,
-                    &local_triangle_center_b, &tangent_bx, &tangent_by,
-                    &local_normal, &minimum_depth, still_could_use_clipping_contacts,
-                    &mut buffer[0], &mut candidate_count, pair_count,
+                    &a_dot_normal_on_a,
+                    &b_dot_normal_on_a,
+                    &c_dot_normal_on_a,
+                    &ab_dot_normal_on_a,
+                    &bc_dot_normal_on_a,
+                    &ca_dot_normal_on_a,
+                    &flat_vertex_b_on_b,
+                    &flat_edge_bc_on_b,
+                    &b_b,
+                    &bc_b,
+                    &Vector::<i32>::splat(4),
+                    &three,
+                    &local_triangle_center_b,
+                    &tangent_bx,
+                    &tangent_by,
+                    &local_normal,
+                    &minimum_depth,
+                    still_could_use_clipping_contacts,
+                    &mut buffer[0],
+                    &mut candidate_count,
+                    pair_count,
                 );
                 Self::clip_b_edge_against_a_bounds(
-                    &flat_vertex_a_on_a, &flat_vertex_b_on_a, &flat_vertex_c_on_a,
-                    &flat_edge_ab_on_a, &flat_edge_bc_on_a, &flat_edge_ca_on_a,
+                    &flat_vertex_a_on_a,
+                    &flat_vertex_b_on_a,
+                    &flat_vertex_c_on_a,
+                    &flat_edge_ab_on_a,
+                    &flat_edge_bc_on_a,
+                    &flat_edge_ca_on_a,
                     &inverse_flat_edge_offset_ab_on_a_length_squared,
                     &inverse_flat_edge_offset_bc_on_a_length_squared,
                     &inverse_flat_edge_offset_ca_on_a_length_squared,
-                    &a_dot_normal_on_a, &b_dot_normal_on_a, &c_dot_normal_on_a,
-                    &ab_dot_normal_on_a, &bc_dot_normal_on_a, &ca_dot_normal_on_a,
-                    &flat_vertex_c_on_b, &flat_edge_ca_on_b, &b_c, &ca_b,
-                    &Vector::<i32>::splat(5), &three,
-                    &local_triangle_center_b, &tangent_bx, &tangent_by,
-                    &local_normal, &minimum_depth, still_could_use_clipping_contacts,
-                    &mut buffer[0], &mut candidate_count, pair_count,
+                    &a_dot_normal_on_a,
+                    &b_dot_normal_on_a,
+                    &c_dot_normal_on_a,
+                    &ab_dot_normal_on_a,
+                    &bc_dot_normal_on_a,
+                    &ca_dot_normal_on_a,
+                    &flat_vertex_c_on_b,
+                    &flat_edge_ca_on_b,
+                    &b_c,
+                    &ca_b,
+                    &Vector::<i32>::splat(5),
+                    &three,
+                    &local_triangle_center_b,
+                    &tangent_bx,
+                    &tangent_by,
+                    &local_normal,
+                    &minimum_depth,
+                    still_could_use_clipping_contacts,
+                    &mut buffer[0],
+                    &mut candidate_count,
+                    pair_count,
                 );
             }
 
@@ -812,10 +1066,14 @@ impl TrianglePairTester {
             Matrix3x3Wide::transform_without_overlap(&tangent_by, &world_ra, &mut world_tangent_by);
             let mut world_triangle_center = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(
-                &local_triangle_center_b, &world_ra, &mut world_triangle_center,
+                &local_triangle_center_b,
+                &world_ra,
+                &mut world_triangle_center,
             );
             Matrix3x3Wide::transform_without_overlap(
-                &local_normal, &world_ra, &mut manifold.normal,
+                &local_normal,
+                &world_ra,
+                &mut manifold.normal,
             );
 
             manifold.contact0_exists = manifold.contact0_exists & allow_contacts;
@@ -824,20 +1082,40 @@ impl TrianglePairTester {
             manifold.contact3_exists = manifold.contact3_exists & allow_contacts;
 
             Self::transform_contact_to_manifold(
-                &contact0, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a0, &mut manifold.depth0, &mut manifold.feature_id0,
+                &contact0,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a0,
+                &mut manifold.depth0,
+                &mut manifold.feature_id0,
             );
             Self::transform_contact_to_manifold(
-                &contact1, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a1, &mut manifold.depth1, &mut manifold.feature_id1,
+                &contact1,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a1,
+                &mut manifold.depth1,
+                &mut manifold.feature_id1,
             );
             Self::transform_contact_to_manifold(
-                &contact2, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a2, &mut manifold.depth2, &mut manifold.feature_id2,
+                &contact2,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a2,
+                &mut manifold.depth2,
+                &mut manifold.feature_id2,
             );
             Self::transform_contact_to_manifold(
-                &contact3, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a3, &mut manifold.depth3, &mut manifold.feature_id3,
+                &contact3,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a3,
+                &mut manifold.depth3,
+                &mut manifold.feature_id3,
             );
 
             // Boundary smoothing face flag. Privilege triangle B.

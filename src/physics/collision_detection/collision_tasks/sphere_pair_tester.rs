@@ -35,7 +35,11 @@ impl SpherePairTester {
 
         // The contact position relative to object A is computed as the average of the extreme points.
         let negative_offset_from_a = manifold.depth * Vector::<f32>::splat(0.5) - a.radius;
-        Vector3Wide::scale_to(&manifold.normal, &negative_offset_from_a, &mut manifold.offset_a);
+        Vector3Wide::scale_to(
+            &manifold.normal,
+            &negative_offset_from_a,
+            &mut manifold.offset_a,
+        );
         manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_int();
         manifold.feature_id = Vector::<i32>::splat(0);
     }

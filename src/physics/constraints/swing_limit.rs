@@ -1,12 +1,12 @@
+use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
+use crate::physics::constraints::inequality_helpers::InequalityHelpers;
+use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
+use crate::physics::helpers::Helpers;
 use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
-use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
-use crate::physics::constraints::inequality_helpers::InequalityHelpers;
-use crate::physics::helpers::Helpers;
-use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
@@ -45,9 +45,20 @@ impl SwingLimit {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_unit_length_vec3(self.axis_local_a, "SwingLimit", "axis_local_a");
-            ConstraintChecker::assert_unit_length_vec3(self.axis_local_b, "SwingLimit", "axis_local_b");
-            debug_assert!(self.minimum_dot >= -1.0 && self.minimum_dot <= 1.0, "SwingLimit.MinimumDot must be from -1 to 1 inclusive.");
+            ConstraintChecker::assert_unit_length_vec3(
+                self.axis_local_a,
+                "SwingLimit",
+                "axis_local_a",
+            );
+            ConstraintChecker::assert_unit_length_vec3(
+                self.axis_local_b,
+                "SwingLimit",
+                "axis_local_b",
+            );
+            debug_assert!(
+                self.minimum_dot >= -1.0 && self.minimum_dot <= 1.0,
+                "SwingLimit.MinimumDot must be from -1 to 1 inclusive."
+            );
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "SwingLimit");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
@@ -99,7 +110,11 @@ impl SwingLimitFunctions {
         Vector3Wide::add(angular_velocity_a, &velocity_change_a, &mut tmp);
         *angular_velocity_a = tmp;
         let mut negated_velocity_change_b = Vector3Wide::default();
-        Vector3Wide::scale_to(negated_impulse_to_velocity_b, csi, &mut negated_velocity_change_b);
+        Vector3Wide::scale_to(
+            negated_impulse_to_velocity_b,
+            csi,
+            &mut negated_velocity_change_b,
+        );
         Vector3Wide::subtract(angular_velocity_b, &negated_velocity_change_b, &mut tmp);
         *angular_velocity_b = tmp;
     }
@@ -122,8 +137,11 @@ impl SwingLimitFunctions {
         Helpers::find_perpendicular(axis_a, &mut fallback_jacobian);
         let mut jacobian_length_squared = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(jacobian_a, jacobian_a, &mut jacobian_length_squared);
-        let use_fallback = jacobian_length_squared.simd_lt(Vector::<f32>::splat(1e-7)).to_int();
-        *jacobian_a = Vector3Wide::conditional_select(&use_fallback, &fallback_jacobian, jacobian_a);
+        let use_fallback = jacobian_length_squared
+            .simd_lt(Vector::<f32>::splat(1e-7))
+            .to_int();
+        *jacobian_a =
+            Vector3Wide::conditional_select(&use_fallback, &fallback_jacobian, jacobian_a);
     }
 
     #[inline(always)]
@@ -142,12 +160,34 @@ impl SwingLimitFunctions {
         let mut axis_a = Vector3Wide::default();
         let mut axis_b = Vector3Wide::default();
         let mut jacobian_a = Vector3Wide::default();
-        Self::compute_jacobian(&prestep.axis_local_a, &prestep.axis_local_b, orientation_a, orientation_b, &mut axis_a, &mut axis_b, &mut jacobian_a);
+        Self::compute_jacobian(
+            &prestep.axis_local_a,
+            &prestep.axis_local_b,
+            orientation_a,
+            orientation_b,
+            &mut axis_a,
+            &mut axis_b,
+            &mut jacobian_a,
+        );
         let mut impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&jacobian_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &jacobian_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut negated_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&jacobian_a, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
-        Self::apply_impulse(&impulse_to_velocity_a, &negated_impulse_to_velocity_b, accumulated_impulses, &mut wsv_a.angular, &mut wsv_b.angular);
+        Symmetric3x3Wide::transform_without_overlap(
+            &jacobian_a,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
+        Self::apply_impulse(
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            accumulated_impulses,
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+        );
     }
 
     #[inline(always)]
@@ -168,22 +208,53 @@ impl SwingLimitFunctions {
         let mut axis_a = Vector3Wide::default();
         let mut axis_b = Vector3Wide::default();
         let mut jacobian_a = Vector3Wide::default();
-        Self::compute_jacobian(&prestep.axis_local_a, &prestep.axis_local_b, orientation_a, orientation_b, &mut axis_a, &mut axis_b, &mut jacobian_a);
+        Self::compute_jacobian(
+            &prestep.axis_local_a,
+            &prestep.axis_local_b,
+            orientation_a,
+            orientation_b,
+            &mut axis_a,
+            &mut axis_b,
+            &mut jacobian_a,
+        );
 
         let mut impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&jacobian_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &jacobian_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut negated_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&jacobian_a, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &jacobian_a,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
         let mut angular_contribution_a = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&impulse_to_velocity_a, &jacobian_a, &mut angular_contribution_a);
+        Vector3Wide::dot(
+            &impulse_to_velocity_a,
+            &jacobian_a,
+            &mut angular_contribution_a,
+        );
         let mut angular_contribution_b = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&negated_impulse_to_velocity_b, &jacobian_a, &mut angular_contribution_b);
+        Vector3Wide::dot(
+            &negated_impulse_to_velocity_b,
+            &jacobian_a,
+            &mut angular_contribution_b,
+        );
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(&prestep.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
-        let effective_mass = effective_mass_cfm_scale / (angular_contribution_a + angular_contribution_b);
+        SpringSettingsWide::compute_springiness(
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
+        let effective_mass =
+            effective_mass_cfm_scale / (angular_contribution_a + angular_contribution_b);
 
         let mut axis_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&axis_a, &axis_b, &mut axis_dot);
@@ -197,10 +268,17 @@ impl SwingLimitFunctions {
         Vector3Wide::subtract(&wsv_a.angular, &wsv_b.angular, &mut difference);
         let mut csv = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&difference, &jacobian_a, &mut csv);
-        let mut csi = effective_mass * (bias_velocity - csv) - *accumulated_impulses * softness_impulse_scale;
+        let mut csi =
+            effective_mass * (bias_velocity - csv) - *accumulated_impulses * softness_impulse_scale;
 
         InequalityHelpers::clamp_positive(accumulated_impulses, &mut csi);
-        Self::apply_impulse(&impulse_to_velocity_a, &negated_impulse_to_velocity_b, &csi, &mut wsv_a.angular, &mut wsv_b.angular);
+        Self::apply_impulse(
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            &csi,
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+        );
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

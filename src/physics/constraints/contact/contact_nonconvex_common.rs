@@ -1,6 +1,5 @@
 // Translated from BepuPhysics/Constraints/Contact/ContactNonconvexCommon.cs
 
-use crate::out;
 use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::contact::contact_convex_common::*;
@@ -80,7 +79,10 @@ impl ContactNonconvexOneBodyFunctions {
     }
 
     #[inline(always)]
-    pub fn warm_start<TPrestep: INonconvexContactPrestep, TAccumulatedImpulses: INonconvexContactAccumulatedImpulses>(
+    pub fn warm_start<
+        TPrestep: INonconvexContactPrestep,
+        TAccumulatedImpulses: INonconvexContactAccumulatedImpulses,
+    >(
         _position_a: &Vector3Wide,
         _orientation_a: &QuaternionWide,
         inertia_a: &BodyInertiaWide,
@@ -103,7 +105,10 @@ impl ContactNonconvexOneBodyFunctions {
     }
 
     #[inline(always)]
-    pub fn solve<TPrestep: INonconvexContactPrestep, TAccumulatedImpulses: INonconvexContactAccumulatedImpulses>(
+    pub fn solve<
+        TPrestep: INonconvexContactPrestep,
+        TAccumulatedImpulses: INonconvexContactAccumulatedImpulses,
+    >(
         _position_a: &Vector3Wide,
         _orientation_a: &QuaternionWide,
         inertia_a: &BodyInertiaWide,
@@ -116,7 +121,11 @@ impl ContactNonconvexOneBodyFunctions {
         //Note that, unlike convex manifolds, we simply solve every contact in sequence rather than tangent->penetration.
         //This is not for any principled reason- only simplicity. May want to reconsider later, but remember the significant change in access pattern.
         let material = prestep.get_material_properties();
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
         SpringSettingsWide::compute_springiness(
             &material.spring_settings,
             dt,
@@ -193,7 +202,10 @@ impl ContactNonconvexTwoBodyFunctions {
     }
 
     #[inline(always)]
-    pub fn warm_start<TPrestep: ITwoBodyNonconvexContactPrestep, TAccumulatedImpulses: INonconvexContactAccumulatedImpulses>(
+    pub fn warm_start<
+        TPrestep: ITwoBodyNonconvexContactPrestep,
+        TAccumulatedImpulses: INonconvexContactAccumulatedImpulses,
+    >(
         _position_a: &Vector3Wide,
         _orientation_a: &QuaternionWide,
         inertia_a: &BodyInertiaWide,
@@ -242,7 +254,10 @@ impl ContactNonconvexTwoBodyFunctions {
     }
 
     #[inline(always)]
-    pub fn solve<TPrestep: ITwoBodyNonconvexContactPrestep, TAccumulatedImpulses: INonconvexContactAccumulatedImpulses>(
+    pub fn solve<
+        TPrestep: ITwoBodyNonconvexContactPrestep,
+        TAccumulatedImpulses: INonconvexContactAccumulatedImpulses,
+    >(
         _position_a: &Vector3Wide,
         _orientation_a: &QuaternionWide,
         inertia_a: &BodyInertiaWide,
@@ -259,7 +274,11 @@ impl ContactNonconvexTwoBodyFunctions {
         //Note that, unlike convex manifolds, we simply solve every contact in sequence rather than tangent->penetration.
         let offset_b = *prestep.get_offset_b();
         let material = prestep.get_material_properties();
-        let (mut position_error_to_velocity, mut effective_mass_cfm_scale, mut softness_impulse_scale) = Default::default();
+        let (
+            mut position_error_to_velocity,
+            mut effective_mass_cfm_scale,
+            mut softness_impulse_scale,
+        ) = Default::default();
         SpringSettingsWide::compute_springiness(
             &material.spring_settings,
             dt,

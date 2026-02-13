@@ -44,7 +44,8 @@ impl<TCompound> IConvexCompoundContinuationHandler<NonconvexReduction>
         continuation_index: &mut i32,
     ) -> *mut NonconvexReduction {
         let pool = &mut *vtable.pool;
-        let (index, continuation) = (&mut *vtable.nonconvex_reductions).create_continuation(child_count, pool);
+        let (index, continuation) =
+            (&mut *vtable.nonconvex_reductions).create_continuation(child_count, pool);
         *continuation_index = index;
         continuation as *mut NonconvexReduction
     }
@@ -77,7 +78,9 @@ impl<TCompound> IConvexCompoundContinuationHandler<NonconvexReduction>
         // Get the shape data for the child.
         *child_type_b = compound_child.shape_index.type_id();
         let shapes = &*vtable.shapes;
-        let batch = shapes.get_batch(*child_type_b as usize).expect("Shape batch must exist");
+        let batch = shapes
+            .get_batch(*child_type_b as usize)
+            .expect("Shape batch must exist");
         let (shape_data, _) = batch.get_shape_data(compound_child.shape_index.index() as usize);
         *child_shape_data_b = shape_data;
 

@@ -1,7 +1,6 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/MeshPairOverlapFinder.cs
 
 use std::marker::PhantomData;
-use std::simd::prelude::*;
 
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
 use crate::physics::collidables::shape::{IHomogeneousCompoundShape, IShapeWide};
@@ -13,8 +12,8 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::compound_pair_collision_task::ICompoundPairOverlapFinder;
 use super::compound_pair_overlaps::{
@@ -78,14 +77,19 @@ impl<
             QuaternionWide::broadcast(pair.orientation_a, &mut orientation_a);
             let mut orientation_b = QuaternionWide::default();
             QuaternionWide::broadcast(pair.orientation_b, &mut orientation_b);
-            let relative_linear_velocity_a = Vector3Wide::broadcast(pair.relative_linear_velocity_a);
+            let relative_linear_velocity_a =
+                Vector3Wide::broadcast(pair.relative_linear_velocity_a);
             let angular_velocity_a = Vector3Wide::broadcast(pair.angular_velocity_a);
             let angular_velocity_b = Vector3Wide::broadcast(pair.angular_velocity_b);
             let maximum_allowed_expansion = Vector::<f32>::splat(pair.maximum_expansion);
 
             let to_local_b = QuaternionWide::conjugate(&orientation_b);
             let mut local_orientation_a = QuaternionWide::default();
-            QuaternionWide::concatenate_without_overlap(&orientation_a, &to_local_b, &mut local_orientation_a);
+            QuaternionWide::concatenate_without_overlap(
+                &orientation_a,
+                &to_local_b,
+                &mut local_orientation_a,
+            );
             let mut local_offset_b = Vector3Wide::default();
             QuaternionWide::transform_without_overlap(&offset_b, &to_local_b, &mut local_offset_b);
             let mut local_offset_a = Vector3Wide::default();
@@ -102,7 +106,10 @@ impl<
                 for inner_index in 0..count {
                     mesh_a.get_local_child_wide(
                         j + inner_index,
-                        GatherScatter::get_offset_instance_mut(&mut triangles, inner_index as usize),
+                        GatherScatter::get_offset_instance_mut(
+                            &mut triangles,
+                            inner_index as usize,
+                        ),
                     );
                 }
 
@@ -157,12 +164,9 @@ impl<
         debug_assert!(total_compound_child_count > 0);
         let mesh_b = &*(overlaps.pair_queries[0i32].container as *const TMeshB);
         let pair_queries_ptr = &overlaps.pair_queries as *const Buffer<OverlapQueryForPair>;
-        IBoundsQueryableCompound::find_local_overlaps::<CompoundPairOverlaps, ChildOverlapsCollection>(
-            mesh_b,
-            &*pair_queries_ptr,
-            pool,
-            shapes,
-            overlaps,
-        );
+        IBoundsQueryableCompound::find_local_overlaps::<
+            CompoundPairOverlaps,
+            ChildOverlapsCollection,
+        >(mesh_b, &*pair_queries_ptr, pool, shapes, overlaps);
     }
 }

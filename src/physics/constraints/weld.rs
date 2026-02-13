@@ -5,8 +5,8 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::symmetric6x6_wide::Symmetric6x6Wide;
-use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 use glam::{Quat, Vec3};
 
 pub const BATCH_TYPE_ID: i32 = 31;
@@ -26,9 +26,7 @@ impl Weld {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset, &mut target.local_offset);
         QuaternionWide::write_first(self.local_orientation, &mut target.local_orientation);
         SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
@@ -40,11 +38,12 @@ impl Weld {
         inner_index: usize,
         description: &mut Weld,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset, &mut description.local_offset);
-        QuaternionWide::read_first(&source.local_orientation, &mut description.local_orientation);
+        QuaternionWide::read_first(
+            &source.local_orientation,
+            &mut description.local_orientation,
+        );
         SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
     }
 }
@@ -95,10 +94,16 @@ impl WeldFunctions {
 
         // angularImpulseA = orientationCSI + worldOffset x offsetCSI
         let mut offset_world_impulse = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(offset, offset_csi, &mut offset_world_impulse); }
+        unsafe {
+            Vector3Wide::cross_without_overlap(offset, offset_csi, &mut offset_world_impulse);
+        }
         let angular_impulse_a = offset_world_impulse + *orientation_csi;
         let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_a, &inertia_a.inverse_inertia_tensor, &mut angular_change_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_change_a,
+        );
         velocity_a.angular = velocity_a.angular + angular_change_a;
 
         // linearImpulseB = -offsetCSI
@@ -109,7 +114,11 @@ impl WeldFunctions {
 
         // angularImpulseB = -orientationCSI
         let mut negated_angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(orientation_csi, &inertia_b.inverse_inertia_tensor, &mut negated_angular_change_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            orientation_csi,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_angular_change_b,
+        );
         Vector3Wide::subtract(&velocity_b.angular, &negated_angular_change_b, &mut tmp);
         velocity_b.angular = tmp;
     }
@@ -128,8 +137,20 @@ impl WeldFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset, orientation_a, &mut offset);
-        Self::apply_impulse(inertia_a, inertia_b, &offset, &accumulated_impulses.orientation, &accumulated_impulses.offset, wsv_a, wsv_b);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset,
+            orientation_a,
+            &mut offset,
+        );
+        Self::apply_impulse(
+            inertia_a,
+            inertia_b,
+            &offset,
+            &accumulated_impulses.orientation,
+            &accumulated_impulses.offset,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
@@ -149,13 +170,21 @@ impl WeldFunctions {
     ) {
         // Compute world-space offset
         let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset, orientation_a, &mut offset);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset,
+            orientation_a,
+            &mut offset,
+        );
 
         // Effective mass = (J * M^-1 * JT)^-1, a 6x6 matrix decomposed into blocks:
         // [A, B^T]   where A = Ia^-1 + Ib^-1 (3x3 symmetric),
         // [B,   D]   B = skew(offset) * Ia^-1, D = Ma^-1+Mb^-1 + skew(offset)*Ia^-1*skew(offset)^T
         let mut jmjt_a = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::add(&inertia_a.inverse_inertia_tensor, &inertia_b.inverse_inertia_tensor, &mut jmjt_a);
+        Symmetric3x3Wide::add(
+            &inertia_a.inverse_inertia_tensor,
+            &inertia_b.inverse_inertia_tensor,
+            &mut jmjt_a,
+        );
         let x_ab = Matrix3x3Wide::create_cross_product(&offset);
         let mut jmjt_b = Matrix3x3Wide::default();
         Symmetric3x3Wide::multiply(&inertia_a.inverse_inertia_tensor, &x_ab, &mut jmjt_b);
@@ -176,61 +205,98 @@ impl WeldFunctions {
 
         // Orientation error
         let mut target_orientation_b = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(&prestep.local_orientation, orientation_a, &mut target_orientation_b);
+        QuaternionWide::concatenate_without_overlap(
+            &prestep.local_orientation,
+            orientation_a,
+            &mut target_orientation_b,
+        );
         let conjugated_target = QuaternionWide::conjugate(&target_orientation_b);
         let mut rotation_error = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(&conjugated_target, orientation_b, &mut rotation_error);
+        QuaternionWide::concatenate_without_overlap(
+            &conjugated_target,
+            orientation_b,
+            &mut rotation_error,
+        );
         let mut rotation_error_axis = Vector3Wide::default();
         let mut rotation_error_length = Vector::<f32>::splat(0.0);
-        QuaternionWide::get_axis_angle_from_quaternion(&rotation_error, &mut rotation_error_axis, &mut rotation_error_length);
+        QuaternionWide::get_axis_angle_from_quaternion(
+            &rotation_error,
+            &mut rotation_error_axis,
+            &mut rotation_error_length,
+        );
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
         SpringSettingsWide::compute_springiness(
-            &prestep.spring_settings, dt,
-            &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale,
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
         );
-        let orientation_bias_velocity = rotation_error_axis * (rotation_error_length * position_error_to_velocity);
+        let orientation_bias_velocity =
+            rotation_error_axis * (rotation_error_length * position_error_to_velocity);
         let offset_bias_velocity = position_error * position_error_to_velocity;
 
         // CSV computation — manually inlined for performance
-        let mut orientation_csv = Vector3Wide {
+        let orientation_csv = Vector3Wide {
             x: orientation_bias_velocity.x - wsv_a.angular.x + wsv_b.angular.x,
             y: orientation_bias_velocity.y - wsv_a.angular.y + wsv_b.angular.y,
             z: orientation_bias_velocity.z - wsv_a.angular.z + wsv_b.angular.z,
         };
 
-        let mut offset_csv = Vector3Wide {
-            x: offset_bias_velocity.x - wsv_a.linear.x + wsv_b.linear.x - (wsv_a.angular.y * offset.z - wsv_a.angular.z * offset.y),
-            y: offset_bias_velocity.y - wsv_a.linear.y + wsv_b.linear.y - (wsv_a.angular.z * offset.x - wsv_a.angular.x * offset.z),
-            z: offset_bias_velocity.z - wsv_a.linear.z + wsv_b.linear.z - (wsv_a.angular.x * offset.y - wsv_a.angular.y * offset.x),
+        let offset_csv = Vector3Wide {
+            x: offset_bias_velocity.x - wsv_a.linear.x + wsv_b.linear.x
+                - (wsv_a.angular.y * offset.z - wsv_a.angular.z * offset.y),
+            y: offset_bias_velocity.y - wsv_a.linear.y + wsv_b.linear.y
+                - (wsv_a.angular.z * offset.x - wsv_a.angular.x * offset.z),
+            z: offset_bias_velocity.z - wsv_a.linear.z + wsv_b.linear.z
+                - (wsv_a.angular.x * offset.y - wsv_a.angular.y * offset.x),
         };
 
         // Solve using LDLT decomposition of the 6x6 system
         let mut orientation_csi = Vector3Wide::default();
         let mut offset_csi = Vector3Wide::default();
         Symmetric6x6Wide::ldlt_solve(
-            &orientation_csv, &offset_csv,
-            &jmjt_a, &jmjt_b, &jmjt_d,
-            &mut orientation_csi, &mut offset_csi,
+            &orientation_csv,
+            &offset_csv,
+            &jmjt_a,
+            &jmjt_b,
+            &jmjt_d,
+            &mut orientation_csi,
+            &mut offset_csi,
         );
 
         // Apply CFM scale and softness
-        orientation_csi.x = orientation_csi.x * effective_mass_cfm_scale - accumulated_impulses.orientation.x * softness_impulse_scale;
-        orientation_csi.y = orientation_csi.y * effective_mass_cfm_scale - accumulated_impulses.orientation.y * softness_impulse_scale;
-        orientation_csi.z = orientation_csi.z * effective_mass_cfm_scale - accumulated_impulses.orientation.z * softness_impulse_scale;
+        orientation_csi.x = orientation_csi.x * effective_mass_cfm_scale
+            - accumulated_impulses.orientation.x * softness_impulse_scale;
+        orientation_csi.y = orientation_csi.y * effective_mass_cfm_scale
+            - accumulated_impulses.orientation.y * softness_impulse_scale;
+        orientation_csi.z = orientation_csi.z * effective_mass_cfm_scale
+            - accumulated_impulses.orientation.z * softness_impulse_scale;
         accumulated_impulses.orientation.x += orientation_csi.x;
         accumulated_impulses.orientation.y += orientation_csi.y;
         accumulated_impulses.orientation.z += orientation_csi.z;
 
-        offset_csi.x = offset_csi.x * effective_mass_cfm_scale - accumulated_impulses.offset.x * softness_impulse_scale;
-        offset_csi.y = offset_csi.y * effective_mass_cfm_scale - accumulated_impulses.offset.y * softness_impulse_scale;
-        offset_csi.z = offset_csi.z * effective_mass_cfm_scale - accumulated_impulses.offset.z * softness_impulse_scale;
+        offset_csi.x = offset_csi.x * effective_mass_cfm_scale
+            - accumulated_impulses.offset.x * softness_impulse_scale;
+        offset_csi.y = offset_csi.y * effective_mass_cfm_scale
+            - accumulated_impulses.offset.y * softness_impulse_scale;
+        offset_csi.z = offset_csi.z * effective_mass_cfm_scale
+            - accumulated_impulses.offset.z * softness_impulse_scale;
         accumulated_impulses.offset.x += offset_csi.x;
         accumulated_impulses.offset.y += offset_csi.y;
         accumulated_impulses.offset.z += offset_csi.z;
 
-        Self::apply_impulse(inertia_a, inertia_b, &offset, &orientation_csi, &offset_csi, wsv_a, wsv_b);
+        Self::apply_impulse(
+            inertia_a,
+            inertia_b,
+            &offset,
+            &orientation_csi,
+            &offset_csi,
+            wsv_a,
+            wsv_b,
+        );
     }
 }

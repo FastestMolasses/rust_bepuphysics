@@ -1,34 +1,31 @@
 // Translated from BepuPhysics/Solver.cs
 
 use crate::physics::bodies::Bodies;
-use crate::physics::body_properties::BodyInertia;
-use crate::physics::body_set::BodyConstraintReference;
-use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
+use crate::physics::collidables::collidable_reference::CollidableMobility;
 use crate::physics::collision_detection::pair_cache::{CollidablePair, PairCache};
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_location::ConstraintLocation;
 use crate::physics::constraint_reference::ConstraintReference;
 use crate::physics::constraint_set::ConstraintSet;
+use crate::physics::constraints::constraint_description::{
+    IConstraintDescription, IFourBodyConstraintDescription, IOneBodyConstraintDescription,
+    IThreeBodyConstraintDescription, ITwoBodyConstraintDescription,
+};
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::constraints::type_processor::{ITypeProcessor, TypeProcessor};
-use crate::physics::constraints::constraint_description::{
-    IConstraintDescription, IOneBodyConstraintDescription, ITwoBodyConstraintDescription,
-    IThreeBodyConstraintDescription, IFourBodyConstraintDescription,
-};
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
-use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
+use crate::physics::pose_integrator::IPoseIntegrator;
 use crate::physics::solve_description::{SolveDescription, SubstepVelocityIterationScheduler};
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::index_set::IndexSet;
-use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::collections::quick_set::QuickSet;
+use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
-use crate::physics::pose_integrator::IPoseIntegrator;
-use std::simd::prelude::*;
 use crate::utilities::vector::Vector;
+use std::simd::prelude::*;
 
 /// Holds and solves constraints between bodies in a simulation.
 pub struct Solver {
@@ -109,7 +106,9 @@ pub struct PrimitiveComparer<T: Copy> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer<i32> for PrimitiveComparer<i32> {
+impl crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer<i32>
+    for PrimitiveComparer<i32>
+{
     #[inline(always)]
     fn hash(&self, item: &i32) -> i32 {
         crate::utilities::collections::quick_dictionary::HashHelper::rehash(*item)
@@ -166,13 +165,22 @@ impl Solver {
     }
 
     /// Sets the minimum capacity initially allocated to a new type batch of the given type.
-    pub fn set_minimum_capacity_for_type(&mut self, type_id: i32, minimum_initial_capacity_for_type: i32) {
+    pub fn set_minimum_capacity_for_type(
+        &mut self,
+        type_id: i32,
+        minimum_initial_capacity_for_type: i32,
+    ) {
         debug_assert!(type_id >= 0, "Type id must be nonnegative.");
-        debug_assert!(minimum_initial_capacity_for_type >= 0, "Capacity must be nonnegative.");
+        debug_assert!(
+            minimum_initial_capacity_for_type >= 0,
+            "Capacity must be nonnegative."
+        );
         if type_id as usize >= self.minimum_initial_capacity_per_type_batch.len() {
-            self.minimum_initial_capacity_per_type_batch.resize(type_id as usize + 1, 0);
+            self.minimum_initial_capacity_per_type_batch
+                .resize(type_id as usize + 1, 0);
         }
-        self.minimum_initial_capacity_per_type_batch[type_id as usize] = minimum_initial_capacity_for_type;
+        self.minimum_initial_capacity_per_type_batch[type_id as usize] =
+            minimum_initial_capacity_for_type;
     }
 
     /// Gets the minimum initial capacity for a given type.
@@ -182,7 +190,8 @@ impl Solver {
         if type_id as usize >= self.minimum_initial_capacity_per_type_batch.len() {
             return self.minimum_capacity_per_type_batch;
         }
-        self.minimum_initial_capacity_per_type_batch[type_id as usize].max(self.minimum_capacity_per_type_batch)
+        self.minimum_initial_capacity_per_type_batch[type_id as usize]
+            .max(self.minimum_capacity_per_type_batch)
     }
 
     /// Resets all per-type initial capacities to zero. Leaves the minimum capacity across all constraints unchanged.
@@ -205,7 +214,12 @@ impl Solver {
     }
 
     /// Counts the number of constraints in a particular type batch.
-    pub fn count_constraints_in_type_batch(&self, set_index: i32, batch_index: i32, type_batch_index: i32) -> i32 {
+    pub fn count_constraints_in_type_batch(
+        &self,
+        set_index: i32,
+        batch_index: i32,
+        type_batch_index: i32,
+    ) -> i32 {
         let set = self.sets.get(set_index);
         debug_assert!(set.allocated());
         let batch = set.batches.get(batch_index);
@@ -231,7 +245,8 @@ impl Solver {
         for set_index in 0..self.sets.len() {
             let set = self.sets.get(set_index);
             if set.allocated() {
-                let set_is_active_and_fallback_exists = set_index == 0 && set.batches.count > self.fallback_batch_threshold;
+                let set_is_active_and_fallback_exists =
+                    set_index == 0 && set.batches.count > self.fallback_batch_threshold;
                 let contiguous_batch_count = if set_is_active_and_fallback_exists {
                     self.fallback_batch_threshold
                 } else {
@@ -300,7 +315,9 @@ impl Solver {
             coarse_batch_integration_responsibilities: Buffer::default(),
             merged_constrained_body_handles: IndexSet::empty(),
             bodies_first_observed_in_batches: Buffer::default(),
-            next_constraint_integration_responsibility_job_index: std::sync::atomic::AtomicI32::new(0),
+            next_constraint_integration_responsibility_job_index: std::sync::atomic::AtomicI32::new(
+                0,
+            ),
             integration_responsibility_prepass_jobs: Vec::new(),
             job_aligned_integration_responsibilities: Buffer::default(),
             substep_context: SubstepMultithreadingContext::default(),
@@ -308,7 +325,8 @@ impl Solver {
 
         solver.resize_sets_capacity(initial_island_capacity + 1, 0);
         *solver.sets.get_mut(0) = ConstraintSet::new(pool_ref, solver.fallback_batch_threshold + 1);
-        solver.batch_referenced_handles = QuickList::with_capacity(solver.fallback_batch_threshold + 1, pool_ref);
+        solver.batch_referenced_handles =
+            QuickList::with_capacity(solver.fallback_batch_threshold + 1, pool_ref);
         solver.resize_handle_capacity(initial_capacity);
         solver
     }
@@ -319,9 +337,16 @@ impl Solver {
     /// This is the generic version matching C#'s `Solver.Register<TDescription>()`.
     /// [`DefaultTypes::register_defaults`] is called during simulation creation and registers all
     /// the built-in types. Calling `register` manually is only necessary for custom types.
-    pub fn register<TDescription: crate::physics::constraints::constraint_description::IConstraintDescription>(&mut self) {
+    pub fn register<
+        TDescription: crate::physics::constraints::constraint_description::IConstraintDescription,
+    >(
+        &mut self,
+    ) {
         let type_id = TDescription::constraint_type_id();
-        debug_assert!(type_id >= 0, "Constraint type ids should never be negative. They're used for array indexing.");
+        debug_assert!(
+            type_id >= 0,
+            "Constraint type ids should never be negative. They're used for array indexing."
+        );
         let type_id_usize = type_id as usize;
 
         // Grow the type processors array if necessary.
@@ -344,7 +369,10 @@ impl Solver {
     /// Registers a constraint type with the solver using a pre-built type processor.
     /// This is the non-generic version for cases where you already have a TypeProcessor instance.
     pub fn register_type_processor(&mut self, type_id: i32, processor: TypeProcessor) {
-        debug_assert!(type_id >= 0, "Constraint type ids should never be negative.");
+        debug_assert!(
+            type_id >= 0,
+            "Constraint type ids should never be negative."
+        );
         let type_id_usize = type_id as usize;
         if type_id_usize >= self.type_processors.len() {
             self.type_processors.resize_with(type_id_usize + 1, || None);
@@ -367,11 +395,17 @@ impl Solver {
 
     /// Gets a direct reference to the constraint associated with a handle.
     #[inline(always)]
-    pub unsafe fn get_constraint_reference(&mut self, handle: ConstraintHandle) -> ConstraintReference {
+    pub unsafe fn get_constraint_reference(
+        &mut self,
+        handle: ConstraintHandle,
+    ) -> ConstraintReference {
         debug_assert!(self.constraint_exists(handle));
         let location = *self.handle_to_constraint.get(handle.0);
-        let type_batch_ptr = self.sets.get_mut(location.set_index)
-            .batches.get_mut(location.batch_index)
+        let type_batch_ptr = self
+            .sets
+            .get_mut(location.set_index)
+            .batches
+            .get_mut(location.batch_index)
             .get_type_batch_pointer(location.type_id);
         ConstraintReference::new(type_batch_ptr, location.index_in_type_batch)
     }
@@ -392,7 +426,11 @@ impl Solver {
         } else if dynamic_handles.len() == 1 {
             let handle = dynamic_handles[0];
             for batch_index in 0..sync_count {
-                if !self.batch_referenced_handles.get(batch_index).contains(handle) {
+                if !self
+                    .batch_referenced_handles
+                    .get(batch_index)
+                    .contains(handle)
+                {
                     return batch_index;
                 }
             }
@@ -448,7 +486,11 @@ impl Solver {
     ) -> ConstraintReference {
         let self_ptr = self as *mut Self;
         let pool = &mut *(*self_ptr).pool;
-        let batch = (*self_ptr).sets.get_mut(0).batches.get_mut(target_batch_index);
+        let batch = (*self_ptr)
+            .sets
+            .get_mut(0)
+            .batches
+            .get_mut(target_batch_index);
         let bodies = &*(*self_ptr).bodies;
 
         // Include the body in the constrained kinematics set if necessary.
@@ -464,12 +506,8 @@ impl Solver {
         let type_processor = type_processors[type_id as usize].as_ref().unwrap();
         debug_assert!(type_processor.bodies_per_constraint == encoded_body_indices.len() as i32);
         let min_capacity = (*self_ptr).get_minimum_capacity_for_type(type_id);
-        let type_batch = batch.get_or_create_type_batch(
-            type_id,
-            type_processor.inner(),
-            min_capacity,
-            pool,
-        );
+        let type_batch =
+            batch.get_or_create_type_batch(type_id, type_processor.inner(), min_capacity, pool);
 
         let index_in_type_batch = if target_batch_index == (*self_ptr).fallback_batch_threshold {
             type_processor.inner().allocate_in_type_batch_for_fallback(
@@ -489,19 +527,25 @@ impl Solver {
 
         let reference = ConstraintReference::new(type_batch, index_in_type_batch);
 
-        let handles_set = (*self_ptr).batch_referenced_handles.get_mut(target_batch_index);
+        let handles_set = (*self_ptr)
+            .batch_referenced_handles
+            .get_mut(target_batch_index);
         for &dynamic_handle in dynamic_body_handles {
             handles_set.set(dynamic_handle.0, pool);
         }
 
         if target_batch_index == (*self_ptr).fallback_batch_threshold {
             let bodies_ref = &*(*self_ptr).bodies;
-            (*self_ptr).sets.get_mut(0).sequential_fallback.allocate_for_active(
-                dynamic_body_handles,
-                bodies_ref,
-                pool,
-                bodies_ref.active_set().count,
-            );
+            (*self_ptr)
+                .sets
+                .get_mut(0)
+                .sequential_fallback
+                .allocate_for_active(
+                    dynamic_body_handles,
+                    bodies_ref,
+                    pool,
+                    bodies_ref.active_set().count,
+                );
         }
 
         reference
@@ -519,7 +563,8 @@ impl Solver {
         for (i, &handle) in body_handles.iter().enumerate() {
             let location = bodies.handle_to_location.get(handle.0);
             debug_assert!(location.set_index == 0);
-            if Bodies::is_kinematic(unsafe { &(*solver_states.get(location.index)).inertia.local }) {
+            if Bodies::is_kinematic(unsafe { &(*solver_states.get(location.index)).inertia.local })
+            {
                 encoded_body_indices[i] = location.index | Bodies::KINEMATIC_MASK as i32;
             } else {
                 blocking.push(handle);
@@ -544,9 +589,12 @@ impl Solver {
             let active_count = bodies.active_set().count;
             let set = (*self_ptr).sets.get(0);
             if set.batches.count == (*self_ptr).batch_referenced_handles.span.len() {
-                (*self_ptr).batch_referenced_handles.resize((*self_ptr).batch_referenced_handles.count + 1, pool);
+                (*self_ptr)
+                    .batch_referenced_handles
+                    .resize((*self_ptr).batch_referenced_handles.count + 1, pool);
             }
-            *(*self_ptr).batch_referenced_handles.allocate_unsafely() = IndexSet::new(pool, active_count);
+            *(*self_ptr).batch_referenced_handles.allocate_unsafely() =
+                IndexSet::new(pool, active_count);
             (*self_ptr).sets.get(0).batches.count - 1
         }
     }
@@ -570,7 +618,11 @@ impl Solver {
         } else if target_batch_index < (*self_ptr).fallback_batch_threshold {
             // A non-fallback constraint batch already exists here. This may fail.
             let int_handles: Vec<i32> = dynamic_body_handles.iter().map(|h| h.0).collect();
-            if !(*self_ptr).batch_referenced_handles.get(target_batch_index).can_fit(&int_handles) {
+            if !(*self_ptr)
+                .batch_referenced_handles
+                .get(target_batch_index)
+                .can_fit(&int_handles)
+            {
                 return None;
             }
         }
@@ -587,14 +639,12 @@ impl Solver {
         let pool = &mut *(*self_ptr).pool;
         if constraint_handle.0 >= (*self_ptr).handle_to_constraint.len() {
             let old_len = (*self_ptr).handle_to_constraint.len();
-            pool.resize_to_at_least(
-                &mut (*self_ptr).handle_to_constraint,
-                old_len * 2,
-                old_len,
-            );
+            pool.resize_to_at_least(&mut (*self_ptr).handle_to_constraint, old_len * 2, old_len);
             debug_assert!(constraint_handle.0 < (*self_ptr).handle_to_constraint.len());
         }
-        let location = (*self_ptr).handle_to_constraint.get_mut(constraint_handle.0);
+        let location = (*self_ptr)
+            .handle_to_constraint
+            .get_mut(constraint_handle.0);
         location.set_index = 0;
         location.index_in_type_batch = reference.index_in_type_batch;
         location.type_id = type_id;
@@ -612,8 +662,16 @@ impl Solver {
         F: FnOnce(&mut TypeBatch, i32, i32),
     {
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(reference.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
-        apply_fn(&mut *reference.type_batch_pointer, bundle_index as i32, inner_index as i32);
+        BundleIndexing::get_bundle_indices(
+            reference.index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
+        apply_fn(
+            &mut *reference.type_batch_pointer,
+            bundle_index as i32,
+            inner_index as i32,
+        );
     }
 
     /// Internal add logic. Finds a batch for the constraint and allocates it.
@@ -624,20 +682,31 @@ impl Solver {
         apply_fn: impl FnOnce(&mut TypeBatch, i32, i32),
     ) -> ConstraintHandle {
         let mut encoded_body_indices = [0i32; 8]; // stack alloc — matches C# stackalloc
-        debug_assert!(body_handles.len() <= 8, "Body handles exceeds stack buffer size");
-        let blocking = self.get_blocking_body_handles(body_handles, &mut encoded_body_indices[..body_handles.len()]);
+        debug_assert!(
+            body_handles.len() <= 8,
+            "Body handles exceeds stack buffer size"
+        );
+        let blocking = self.get_blocking_body_handles(
+            body_handles,
+            &mut encoded_body_indices[..body_handles.len()],
+        );
 
         let batch_count = self.active_set().batches.count;
         for i in 0..=batch_count {
-            if let Some((handle, reference)) = self.try_allocate_in_batch(
-                type_id,
-                i,
-                &blocking,
-                &encoded_body_indices,
-            ) {
+            if let Some((handle, reference)) =
+                self.try_allocate_in_batch(type_id, i, &blocking, &encoded_body_indices)
+            {
                 let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-                BundleIndexing::get_bundle_indices(reference.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
-                apply_fn(&mut *reference.type_batch_pointer, bundle_index as i32, inner_index as i32);
+                BundleIndexing::get_bundle_indices(
+                    reference.index_in_type_batch as usize,
+                    &mut bundle_index,
+                    &mut inner_index,
+                );
+                apply_fn(
+                    &mut *reference.type_batch_pointer,
+                    bundle_index as i32,
+                    inner_index as i32,
+                );
                 return handle;
             }
         }
@@ -685,7 +754,10 @@ impl Solver {
                         let last_batch_index = set.batches.count - 1;
                         if set.batches.get(last_batch_index).type_batches.count == 0 {
                             set.batches.get_mut(last_batch_index).dispose(pool);
-                            (*self_ptr).batch_referenced_handles.get_mut(last_batch_index).dispose(pool);
+                            (*self_ptr)
+                                .batch_referenced_handles
+                                .get_mut(last_batch_index)
+                                .dispose(pool);
                             (*self_ptr).batch_referenced_handles.count -= 1;
                             set.batches.count -= 1;
                         } else {
@@ -698,14 +770,26 @@ impl Solver {
     }
 
     /// Removes a constraint from a batch, performing any necessary batch cleanup, but does not return the handle.
-    pub(crate) unsafe fn remove_from_batch(&mut self, batch_index: i32, type_id: i32, index_in_type_batch: i32) {
+    pub(crate) unsafe fn remove_from_batch(
+        &mut self,
+        batch_index: i32,
+        type_id: i32,
+        index_in_type_batch: i32,
+    ) {
         let self_ptr = self as *mut Self;
         let pool = &mut *(*self_ptr).pool;
         let set = (*self_ptr).sets.get_mut(0);
         let batch = set.batches.get_mut(batch_index);
 
         if batch_index == (*self_ptr).fallback_batch_threshold {
-            set.sequential_fallback.remove(self_ptr as *const Solver, pool, batch, (*self_ptr).batch_referenced_handles.get_mut(batch_index), type_id, index_in_type_batch);
+            set.sequential_fallback.remove(
+                self_ptr as *const Solver,
+                pool,
+                batch,
+                (*self_ptr).batch_referenced_handles.get_mut(batch_index),
+                type_id,
+                index_in_type_batch,
+            );
         } else {
             // Remove body handles from the batch referenced handles for this constraint.
             (*self_ptr).remove_body_handles_from_batch(batch_index, type_id, index_in_type_batch);
@@ -727,21 +811,39 @@ impl Solver {
     }
 
     /// Removes body handle references from the batch referenced handles for a constraint being removed.
-    unsafe fn remove_body_handles_from_batch(&mut self, batch_index: i32, type_id: i32, index_in_type_batch: i32) {
+    unsafe fn remove_body_handles_from_batch(
+        &mut self,
+        batch_index: i32,
+        type_id: i32,
+        index_in_type_batch: i32,
+    ) {
         let self_ptr = self as *mut Self;
         let batch = (*self_ptr).sets.get(0).batches.get(batch_index);
         let type_batch = batch.get_type_batch(type_id);
-        let bodies_per_constraint = (&(*self_ptr).type_processors)[type_id as usize].as_ref().unwrap().bodies_per_constraint;
+        let bodies_per_constraint = (&(*self_ptr).type_processors)[type_id as usize]
+            .as_ref()
+            .unwrap()
+            .bodies_per_constraint;
         let bodies = &*(*self_ptr).bodies;
-        let bytes_per_bundle = bodies_per_constraint * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32;
+        let bytes_per_bundle = bodies_per_constraint
+            * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>()
+                as i32;
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        BundleIndexing::get_bundle_indices(
+            index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
         let start_byte = bundle_index as i32 * bytes_per_bundle + inner_index as i32 * 4;
 
         let handles_set = (*self_ptr).batch_referenced_handles.get_mut(batch_index);
         for body_index_in_constraint in 0..bodies_per_constraint {
             let encoded = *(type_batch.body_references.as_ptr().add(
-                (start_byte + body_index_in_constraint * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32) as usize,
+                (start_byte
+                    + body_index_in_constraint
+                        * std::mem::size_of::<
+                            Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
+                        >() as i32) as usize,
             ) as *const i32);
             if Bodies::is_encoded_dynamic_reference(encoded) {
                 let body_index = encoded & Bodies::BODY_REFERENCE_MASK;
@@ -770,7 +872,11 @@ impl Solver {
             (*self.pair_cache).remove_reference_if_contact_constraint(handle, location.type_id);
         }
 
-        self.remove_from_batch(location.batch_index, location.type_id, location.index_in_type_batch);
+        self.remove_from_batch(
+            location.batch_index,
+            location.type_id,
+            location.index_in_type_batch,
+        );
 
         // A negative set index marks a slot in the handle->constraint mapping as unused.
         self.handle_to_constraint.get_mut(handle.0).set_index = -1;
@@ -779,24 +885,42 @@ impl Solver {
     }
 
     /// Enumerates the bodies attached to an active constraint and removes the constraint's handle from all connected body constraint reference lists.
-    unsafe fn remove_constraint_references_from_bodies(&mut self, constraint_handle: ConstraintHandle) {
+    unsafe fn remove_constraint_references_from_bodies(
+        &mut self,
+        constraint_handle: ConstraintHandle,
+    ) {
         let location = *self.handle_to_constraint.get(constraint_handle.0);
         let set = self.sets.get(location.set_index);
         let batch = set.batches.get(location.batch_index);
         let type_batch = batch.get_type_batch(location.type_id);
-        let bodies_per_constraint = self.type_processors[location.type_id as usize].as_ref().unwrap().bodies_per_constraint;
-        let bytes_per_bundle = bodies_per_constraint * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32;
+        let bodies_per_constraint = self.type_processors[location.type_id as usize]
+            .as_ref()
+            .unwrap()
+            .bodies_per_constraint;
+        let bytes_per_bundle = bodies_per_constraint
+            * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>()
+                as i32;
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        BundleIndexing::get_bundle_indices(
+            location.index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
         let start_byte = bundle_index as i32 * bytes_per_bundle + inner_index as i32 * 4;
 
         let bodies = &mut *self.bodies;
         for body_index_in_constraint in 0..bodies_per_constraint {
             let encoded = *(type_batch.body_references.as_ptr().add(
-                (start_byte + body_index_in_constraint * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32) as usize,
+                (start_byte
+                    + body_index_in_constraint
+                        * std::mem::size_of::<
+                            Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
+                        >() as i32) as usize,
             ) as *const i32);
             let body_index = encoded & Bodies::BODY_REFERENCE_MASK;
-            if bodies.remove_constraint_reference(body_index, constraint_handle) && Bodies::is_encoded_kinematic_reference(encoded) {
+            if bodies.remove_constraint_reference(body_index, constraint_handle)
+                && Bodies::is_encoded_kinematic_reference(encoded)
+            {
                 let body_handle = bodies.active_set().index_to_handle.get(body_index).0;
                 self.constrained_kinematic_handles.fast_remove(&body_handle);
             }
@@ -804,21 +928,41 @@ impl Solver {
     }
 
     /// Enumerates connected raw body references for a given constraint handle.
-    pub unsafe fn enumerate_connected_raw_body_references<E: IForEach<i32>>(&self, constraint_handle: ConstraintHandle, enumerator: &mut E) {
+    pub unsafe fn enumerate_connected_raw_body_references<E: IForEach<i32>>(
+        &self,
+        constraint_handle: ConstraintHandle,
+        enumerator: &mut E,
+    ) {
         let location = *self.handle_to_constraint.get(constraint_handle.0);
         let set = self.sets.get(location.set_index);
         let batch = set.batches.get(location.batch_index);
         let type_batch = batch.get_type_batch(location.type_id);
-        self.enumerate_connected_body_references_from_type_batch(type_batch, location.index_in_type_batch, location.type_id, enumerator, EnumerateMode::Raw);
+        self.enumerate_connected_body_references_from_type_batch(
+            type_batch,
+            location.index_in_type_batch,
+            location.type_id,
+            enumerator,
+            EnumerateMode::Raw,
+        );
     }
 
     /// Enumerates connected dynamic body references for a given constraint handle.
-    pub unsafe fn enumerate_connected_dynamic_bodies<E: IForEach<i32>>(&self, constraint_handle: ConstraintHandle, enumerator: &mut E) {
+    pub unsafe fn enumerate_connected_dynamic_bodies<E: IForEach<i32>>(
+        &self,
+        constraint_handle: ConstraintHandle,
+        enumerator: &mut E,
+    ) {
         let location = *self.handle_to_constraint.get(constraint_handle.0);
         let set = self.sets.get(location.set_index);
         let batch = set.batches.get(location.batch_index);
         let type_batch = batch.get_type_batch(location.type_id);
-        self.enumerate_connected_body_references_from_type_batch(type_batch, location.index_in_type_batch, location.type_id, enumerator, EnumerateMode::DynamicOnly);
+        self.enumerate_connected_body_references_from_type_batch(
+            type_batch,
+            location.index_in_type_batch,
+            location.type_id,
+            enumerator,
+            EnumerateMode::DynamicOnly,
+        );
     }
 
     unsafe fn enumerate_connected_body_references_from_type_batch<E: IForEach<i32>>(
@@ -829,15 +973,27 @@ impl Solver {
         enumerator: &mut E,
         mode: EnumerateMode,
     ) {
-        let bodies_per_constraint = self.type_processors[type_id as usize].as_ref().unwrap().bodies_per_constraint;
-        let bytes_per_bundle = bodies_per_constraint * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32;
+        let bodies_per_constraint = self.type_processors[type_id as usize]
+            .as_ref()
+            .unwrap()
+            .bodies_per_constraint;
+        let bytes_per_bundle = bodies_per_constraint
+            * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>()
+                as i32;
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        BundleIndexing::get_bundle_indices(
+            index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
         let start_byte = bundle_index as i32 * bytes_per_bundle + inner_index as i32 * 4;
 
         for i in 0..bodies_per_constraint {
             let raw = *(type_batch.body_references.as_ptr().add(
-                (start_byte + i * std::mem::size_of::<Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32) as usize,
+                (start_byte
+                    + i * std::mem::size_of::<
+                        Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
+                    >() as i32) as usize,
             ) as *const i32);
 
             match mode {
@@ -865,13 +1021,21 @@ impl Solver {
 
     /// Updates constraint body references when a body transitions from dynamic to kinematic.
     /// Any constraints that connect only kinematic bodies together will be removed.
-    pub(crate) unsafe fn update_references_for_body_becoming_kinematic(&mut self, body_handle: BodyHandle, body_index: i32) {
+    pub(crate) unsafe fn update_references_for_body_becoming_kinematic(
+        &mut self,
+        body_handle: BodyHandle,
+        body_index: i32,
+    ) {
         let self_ptr = self as *mut Self;
         let bodies = &*(*self_ptr).bodies;
         // bodies[bodyHandle].Kinematic in C#
         debug_assert!({
             let loc = *bodies.handle_to_location.get(body_handle.0);
-            Bodies::is_kinematic(unsafe { &(*bodies.active_set().dynamics_state.get(loc.index)).inertia.local })
+            Bodies::is_kinematic(unsafe {
+                &(*bodies.active_set().dynamics_state.get(loc.index))
+                    .inertia
+                    .local
+            })
         });
 
         // DynamicToKinematicEnumerator: simply counts dynamic body references.
@@ -901,15 +1065,24 @@ impl Solver {
             } else {
                 // The constraint survived. Update the kinematic flag for this body's reference.
                 let location = *(*self_ptr).handle_to_constraint.get(constraint_handle.0);
-                let batch = (*self_ptr).sets.get_mut(location.set_index).batches.get_mut(location.batch_index);
+                let batch = (*self_ptr)
+                    .sets
+                    .get_mut(location.set_index)
+                    .batches
+                    .get_mut(location.batch_index);
                 let type_batch = batch.get_type_batch_mut(location.type_id);
-                let bodies_per_constraint = (&(*self_ptr).type_processors)[location.type_id as usize]
+                let bodies_per_constraint = (&(*self_ptr).type_processors)
+                    [location.type_id as usize]
                     .as_ref()
                     .unwrap()
                     .bodies_per_constraint;
                 let ints_per_bundle = Vector::<i32>::LEN as i32 * bodies_per_constraint;
                 let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-                BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+                BundleIndexing::get_bundle_indices(
+                    location.index_in_type_batch as usize,
+                    &mut bundle_index,
+                    &mut inner_index,
+                );
                 let first_body_reference = type_batch.body_references.as_ptr() as *mut u32;
                 let body_ref_slot = first_body_reference.add(
                     (ints_per_bundle as usize * bundle_index)
@@ -936,18 +1109,27 @@ impl Solver {
             let mut ids_buf = [0i32; 3];
             let ids_buffer = Buffer::new(ids_buf.as_mut_ptr(), 3, -1);
             let mut allocation_ids_to_free = QuickList::<i32>::new(ids_buffer);
-            (*self_ptr).try_remove_dynamic_body_from_fallback(body_handle, body_index, &mut allocation_ids_to_free);
+            (*self_ptr).try_remove_dynamic_body_from_fallback(
+                body_handle,
+                body_index,
+                &mut allocation_ids_to_free,
+            );
             let pool = &mut *(*self_ptr).pool;
             for i in 0..allocation_ids_to_free.count {
                 pool.return_unsafely(*allocation_ids_to_free.get(i));
             }
         }
 
-        let constraints = &(*(*self_ptr).bodies).active_set().constraints.get(body_index);
+        let constraints = &(*(*self_ptr).bodies)
+            .active_set()
+            .constraints
+            .get(body_index);
         if constraints.count > 0 {
             // This body is now kinematic and constrained — add to constrained kinematics set.
             let pool = &mut *(*self_ptr).pool;
-            (*self_ptr).constrained_kinematic_handles.add(&body_handle.0, pool);
+            (*self_ptr)
+                .constrained_kinematic_handles
+                .add(&body_handle.0, pool);
         }
     }
 
@@ -971,7 +1153,11 @@ impl Solver {
 
     /// Updates constraint body references when a body transitions from kinematic to dynamic.
     /// Ensures constraints belong to appropriate batches for the new dynamic status.
-    pub(crate) unsafe fn update_references_for_body_becoming_dynamic(&mut self, body_handle: BodyHandle, body_index: i32) {
+    pub(crate) unsafe fn update_references_for_body_becoming_dynamic(
+        &mut self,
+        body_handle: BodyHandle,
+        body_index: i32,
+    ) {
         let self_ptr = self as *mut Self;
         let bodies = &*(*self_ptr).bodies;
 
@@ -997,7 +1183,8 @@ impl Solver {
                             self.index_to_handle.get(encoded_body_reference).0;
                         self.dynamic_count += 1;
                     }
-                    *self.encoded_body_indices.add(self.encoded_count as usize) = encoded_body_reference;
+                    *self.encoded_body_indices.add(self.encoded_count as usize) =
+                        encoded_body_reference;
                     self.encoded_count += 1;
                 }
             }
@@ -1017,7 +1204,10 @@ impl Solver {
                 encoded_body_indices: encoded_body_indices_buf.as_mut_ptr(),
                 encoded_count: 0,
             };
-            (*self_ptr).enumerate_connected_raw_body_references(constraint.connecting_constraint_handle, &mut enumerator);
+            (*self_ptr).enumerate_connected_raw_body_references(
+                constraint.connecting_constraint_handle,
+                &mut enumerator,
+            );
 
             // Since we haven't updated the constraint reference to this body's kinematicity yet,
             // it was not included in the dynamicBodyHandles. Include it here.
@@ -1025,21 +1215,31 @@ impl Solver {
             enumerator.dynamic_count += 1;
 
             // Remove the kinematic flag from the body's encoded index.
-            encoded_body_indices_buf[constraint.body_index_in_constraint as usize] &= Bodies::BODY_REFERENCE_MASK;
+            encoded_body_indices_buf[constraint.body_index_in_constraint as usize] &=
+                Bodies::BODY_REFERENCE_MASK;
 
-            let dynamic_handles_slice: Vec<BodyHandle> = dynamic_body_handles_buf[..enumerator.dynamic_count as usize]
+            let dynamic_handles_slice: Vec<BodyHandle> = dynamic_body_handles_buf
+                [..enumerator.dynamic_count as usize]
                 .iter()
                 .map(|&v| BodyHandle(v))
                 .collect();
             let encoded_slice = &encoded_body_indices_buf[..enumerator.encoded_count as usize];
 
-            let (synchronized_batch_count, fallback_exists) = (*self_ptr).get_synchronized_batch_count();
-            let constraint_location = *(*self_ptr).handle_to_constraint.get(constraint.connecting_constraint_handle.0);
+            let (synchronized_batch_count, fallback_exists) =
+                (*self_ptr).get_synchronized_batch_count();
+            let constraint_location = *(*self_ptr)
+                .handle_to_constraint
+                .get(constraint.connecting_constraint_handle.0);
 
             let mut target_batch_index = -1i32;
             for batch_index in 0..synchronized_batch_count {
-                let dynamic_handle_ints: Vec<i32> = dynamic_handles_slice.iter().map(|h| h.0).collect();
-                if (*self_ptr).batch_referenced_handles.get(batch_index).can_fit(&dynamic_handle_ints) {
+                let dynamic_handle_ints: Vec<i32> =
+                    dynamic_handles_slice.iter().map(|h| h.0).collect();
+                if (*self_ptr)
+                    .batch_referenced_handles
+                    .get(batch_index)
+                    .can_fit(&dynamic_handle_ints)
+                {
                     debug_assert!(
                         batch_index != constraint_location.batch_index,
                         "It should not be possible for a newly dynamic reference to insert itself into the same batch."
@@ -1057,8 +1257,14 @@ impl Solver {
             }
 
             // Perform the transfer.
-            let batch = (*self_ptr).sets.get(0).batches.get(constraint_location.batch_index);
-            let type_batch_index = *batch.type_index_to_type_batch_index.get(constraint_location.type_id);
+            let batch = (*self_ptr)
+                .sets
+                .get(0)
+                .batches
+                .get(constraint_location.batch_index);
+            let type_batch_index = *batch
+                .type_index_to_type_batch_index
+                .get(constraint_location.type_id);
             let type_batch = (*self_ptr)
                 .sets
                 .get_mut(0)
@@ -1082,29 +1288,52 @@ impl Solver {
             );
         }
 
-        let constraints = &(*(*self_ptr).bodies).active_set().constraints.get(body_index);
+        let constraints = &(*(*self_ptr).bodies)
+            .active_set()
+            .constraints
+            .get(body_index);
         if constraints.count > 0 {
-            (*self_ptr).constrained_kinematic_handles.fast_remove(&body_handle.0);
+            (*self_ptr)
+                .constrained_kinematic_handles
+                .fast_remove(&body_handle.0);
         }
     }
 
     /// Changes the body references of all constraints associated with a body in response to its movement into a new slot.
-    pub(crate) unsafe fn update_for_body_memory_move(&mut self, original_body_index: i32, new_body_location: i32) {
+    pub(crate) unsafe fn update_for_body_memory_move(
+        &mut self,
+        original_body_index: i32,
+        new_body_location: i32,
+    ) {
         if self.update_constraints_for_body_memory_move(original_body_index, new_body_location) {
-            self.active_set_mut().sequential_fallback.update_for_dynamic_body_memory_move(original_body_index, new_body_location);
+            self.active_set_mut()
+                .sequential_fallback
+                .update_for_dynamic_body_memory_move(original_body_index, new_body_location);
         }
     }
 
-    unsafe fn update_constraints_for_body_memory_move(&mut self, original_index: i32, new_index: i32) -> bool {
+    unsafe fn update_constraints_for_body_memory_move(
+        &mut self,
+        original_index: i32,
+        new_index: i32,
+    ) -> bool {
         let self_ptr = self as *mut Self;
         let bodies = &*(*self_ptr).bodies;
         let list = &bodies.active_set().constraints.get(original_index);
         let mut body_should_be_present_in_fallback = false;
         for i in 0..list.count {
             let constraint = list.get(i);
-            let constraint_location = *(*self_ptr).handle_to_constraint.get(constraint.connecting_constraint_handle.0);
-            let type_proc = (&(*self_ptr).type_processors)[constraint_location.type_id as usize].as_ref().unwrap();
-            let batch = (*self_ptr).sets.get_mut(0).batches.get_mut(constraint_location.batch_index);
+            let constraint_location = *(*self_ptr)
+                .handle_to_constraint
+                .get(constraint.connecting_constraint_handle.0);
+            let type_proc = (&(*self_ptr).type_processors)[constraint_location.type_id as usize]
+                .as_ref()
+                .unwrap();
+            let batch = (*self_ptr)
+                .sets
+                .get_mut(0)
+                .batches
+                .get_mut(constraint_location.batch_index);
             let type_batch = batch.get_type_batch_mut(constraint_location.type_id);
             let body_is_kinematic = type_proc.inner().update_for_body_memory_move(
                 type_batch,
@@ -1112,7 +1341,9 @@ impl Solver {
                 constraint.body_index_in_constraint,
                 new_index,
             );
-            if !body_is_kinematic && constraint_location.batch_index == (*self_ptr).fallback_batch_threshold {
+            if !body_is_kinematic
+                && constraint_location.batch_index == (*self_ptr).fallback_batch_threshold
+            {
                 body_should_be_present_in_fallback = true;
             }
         }
@@ -1194,7 +1425,13 @@ impl Solver {
         let set = self.sets.get(location.set_index);
         let batch = set.batches.get(location.batch_index);
         let type_batch = batch.get_type_batch(location.type_id);
-        self.enumerate_connected_body_references_from_type_batch(type_batch, location.index_in_type_batch, location.type_id, enumerator, EnumerateMode::Decoded);
+        self.enumerate_connected_body_references_from_type_batch(
+            type_batch,
+            location.index_in_type_batch,
+            location.type_id,
+            enumerator,
+            EnumerateMode::Decoded,
+        );
     }
 
     /// Enumerates connected dynamic bodies from a type batch (decoded, dynamic only).
@@ -1221,14 +1458,26 @@ impl Solver {
     ) {
         let location = *self.handle_to_constraint.get(constraint_handle.0);
         let set = self.sets.get(location.set_index);
-        let type_batch = set.batches.get(location.batch_index).get_type_batch(location.type_id);
-        debug_assert!(location.index_in_type_batch >= 0 && location.index_in_type_batch < type_batch.constraint_count);
-        let type_processor = self.type_processors[location.type_id as usize].as_ref().unwrap();
+        let type_batch = set
+            .batches
+            .get(location.batch_index)
+            .get_type_batch(location.type_id);
+        debug_assert!(
+            location.index_in_type_batch >= 0
+                && location.index_in_type_batch < type_batch.constraint_count
+        );
+        let type_processor = self.type_processors[location.type_id as usize]
+            .as_ref()
+            .unwrap();
         let constrained_dof = type_processor.constrained_degrees_of_freedom;
         let vector_width = crate::utilities::vector::VECTOR_WIDTH;
         let bundle_size_in_floats = constrained_dof as usize * vector_width;
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        BundleIndexing::get_bundle_indices(
+            location.index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
         let mut impulse_address = (type_batch.accumulated_impulses.as_ptr() as *const f32)
             .add(bundle_index * bundle_size_in_floats + inner_index);
         enumerator.loop_body(*impulse_address);
@@ -1239,13 +1488,19 @@ impl Solver {
     }
 
     /// Computes the squared magnitude of accumulated impulses for a constraint.
-    pub unsafe fn get_accumulated_impulse_magnitude_squared(&self, constraint_handle: ConstraintHandle) -> f32 {
+    pub unsafe fn get_accumulated_impulse_magnitude_squared(
+        &self,
+        constraint_handle: ConstraintHandle,
+    ) -> f32 {
         let location = *self.handle_to_constraint.get(constraint_handle.0);
-        let type_processor = self.type_processors[location.type_id as usize].as_ref().unwrap();
+        let type_processor = self.type_processors[location.type_id as usize]
+            .as_ref()
+            .unwrap();
         let dof = type_processor.constrained_degrees_of_freedom;
         debug_assert!(dof <= 16, "Constrained DOF exceeds stack buffer size");
         let mut impulses = [0.0f32; 16];
-        let mut collector = crate::physics::handy_enumerators::FloatCollector::new(impulses.as_mut_ptr());
+        let mut collector =
+            crate::physics::handy_enumerators::FloatCollector::new(impulses.as_mut_ptr());
         self.enumerate_accumulated_impulses(constraint_handle, &mut collector);
         let mut sum_of_squares = 0.0f32;
         for i in 0..dof as usize {
@@ -1255,8 +1510,12 @@ impl Solver {
     }
 
     /// Computes the magnitude of accumulated impulses for a constraint.
-    pub unsafe fn get_accumulated_impulse_magnitude(&self, constraint_handle: ConstraintHandle) -> f32 {
-        self.get_accumulated_impulse_magnitude_squared(constraint_handle).sqrt()
+    pub unsafe fn get_accumulated_impulse_magnitude(
+        &self,
+        constraint_handle: ConstraintHandle,
+    ) -> f32 {
+        self.get_accumulated_impulse_magnitude_squared(constraint_handle)
+            .sqrt()
     }
 
     /// Gets the description of a constraint given a constraint reference.
@@ -1265,9 +1524,19 @@ impl Solver {
         reference: &ConstraintReference,
     ) -> TDescription {
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(reference.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
-        debug_assert!((*reference.type_batch_pointer).type_id == TDescription::constraint_type_id());
-        TDescription::build_description(&*reference.type_batch_pointer, bundle_index as i32, inner_index as i32)
+        BundleIndexing::get_bundle_indices(
+            reference.index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
+        debug_assert!(
+            (*reference.type_batch_pointer).type_id == TDescription::constraint_type_id()
+        );
+        TDescription::build_description(
+            &*reference.type_batch_pointer,
+            bundle_index as i32,
+            inner_index as i32,
+        )
     }
 
     /// Gets the description of a constraint given a constraint handle.
@@ -1277,24 +1546,41 @@ impl Solver {
     ) -> TDescription {
         let location = *self.handle_to_constraint.get(handle.0);
         debug_assert!(TDescription::constraint_type_id() == location.type_id);
-        let type_batch = self.sets.get(location.set_index)
-            .batches.get(location.batch_index)
+        let type_batch = self
+            .sets
+            .get(location.set_index)
+            .batches
+            .get(location.batch_index)
             .get_type_batch(location.type_id);
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(location.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
+        BundleIndexing::get_bundle_indices(
+            location.index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
         TDescription::build_description(type_batch, bundle_index as i32, inner_index as i32)
     }
 
     /// Applies a description to a constraint without waking, using handle lookup.
-    pub unsafe fn apply_description_without_waking_by_handle<TDescription: IConstraintDescription>(
+    pub unsafe fn apply_description_without_waking_by_handle<
+        TDescription: IConstraintDescription,
+    >(
         &mut self,
         handle: ConstraintHandle,
         description: &TDescription,
     ) {
         let reference = self.get_constraint_reference(handle);
         let (mut bundle_index, mut inner_index) = (0usize, 0usize);
-        BundleIndexing::get_bundle_indices(reference.index_in_type_batch as usize, &mut bundle_index, &mut inner_index);
-        description.apply_description(&mut *reference.type_batch_pointer, bundle_index as i32, inner_index as i32);
+        BundleIndexing::get_bundle_indices(
+            reference.index_in_type_batch as usize,
+            &mut bundle_index,
+            &mut inner_index,
+        );
+        description.apply_description(
+            &mut *reference.type_batch_pointer,
+            bundle_index as i32,
+            inner_index as i32,
+        );
     }
 
     /// Applies a description to a constraint, waking the affected island first.
@@ -1316,9 +1602,13 @@ impl Solver {
         description: &TDescription,
     ) -> ConstraintHandle {
         let body_handles = [body_handle];
-        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
-            description.apply_description(batch, bundle_index, inner_index);
-        })
+        self.add(
+            &body_handles,
+            TDescription::constraint_type_id(),
+            |batch, bundle_index, inner_index| {
+                description.apply_description(batch, bundle_index, inner_index);
+            },
+        )
     }
 
     /// Adds a two-body constraint using a typed description.
@@ -1329,9 +1619,13 @@ impl Solver {
         description: &TDescription,
     ) -> ConstraintHandle {
         let body_handles = [body_handle_a, body_handle_b];
-        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
-            description.apply_description(batch, bundle_index, inner_index);
-        })
+        self.add(
+            &body_handles,
+            TDescription::constraint_type_id(),
+            |batch, bundle_index, inner_index| {
+                description.apply_description(batch, bundle_index, inner_index);
+            },
+        )
     }
 
     /// Adds a three-body constraint using a typed description.
@@ -1343,9 +1637,13 @@ impl Solver {
         description: &TDescription,
     ) -> ConstraintHandle {
         let body_handles = [body_handle_a, body_handle_b, body_handle_c];
-        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
-            description.apply_description(batch, bundle_index, inner_index);
-        })
+        self.add(
+            &body_handles,
+            TDescription::constraint_type_id(),
+            |batch, bundle_index, inner_index| {
+                description.apply_description(batch, bundle_index, inner_index);
+            },
+        )
     }
 
     /// Adds a four-body constraint using a typed description.
@@ -1358,14 +1656,22 @@ impl Solver {
         description: &TDescription,
     ) -> ConstraintHandle {
         let body_handles = [body_handle_a, body_handle_b, body_handle_c, body_handle_d];
-        self.add(&body_handles, TDescription::constraint_type_id(), |batch, bundle_index, inner_index| {
-            description.apply_description(batch, bundle_index, inner_index);
-        })
+        self.add(
+            &body_handles,
+            TDescription::constraint_type_id(),
+            |batch, bundle_index, inner_index| {
+                description.apply_description(batch, bundle_index, inner_index);
+            },
+        )
     }
 
     // --- Capacity management ---
 
-    pub fn ensure_solver_capacities(&mut self, body_handle_capacity: i32, constraint_handle_capacity: i32) {
+    pub fn ensure_solver_capacities(
+        &mut self,
+        body_handle_capacity: i32,
+        constraint_handle_capacity: i32,
+    ) {
         let self_ptr = self as *mut Self;
         unsafe {
             let pool = &mut *(*self_ptr).pool;
@@ -1378,11 +1684,17 @@ impl Solver {
                 );
             }
             let bodies = &*(*self_ptr).bodies;
-            let target = (bodies.handle_pool.highest_possibly_claimed_id() + 1).max(body_handle_capacity);
+            let target =
+                (bodies.handle_pool.highest_possibly_claimed_id() + 1).max(body_handle_capacity);
             for i in 0..(*self_ptr).sets.get(0).batches.count {
-                (*self_ptr).batch_referenced_handles.get_mut(i).ensure_capacity(target, pool);
+                (*self_ptr)
+                    .batch_referenced_handles
+                    .get_mut(i)
+                    .ensure_capacity(target, pool);
             }
-            (*self_ptr).constrained_kinematic_handles.ensure_capacity(body_handle_capacity, pool);
+            (*self_ptr)
+                .constrained_kinematic_handles
+                .ensure_capacity(body_handle_capacity, pool);
         }
     }
 
@@ -1396,33 +1708,53 @@ impl Solver {
                 constraint_handle_capacity,
                 copy_count,
             );
-            for i in ((*self_ptr).handle_pool.highest_possibly_claimed_id() + 1)..(*self_ptr).handle_to_constraint.len() {
+            for i in ((*self_ptr).handle_pool.highest_possibly_claimed_id() + 1)
+                ..(*self_ptr).handle_to_constraint.len()
+            {
                 (*self_ptr).handle_to_constraint.get_mut(i).set_index = -1;
             }
         }
     }
 
-    pub fn resize_solver_capacities(&mut self, body_handle_capacity: i32, constraint_handle_capacity: i32) {
+    pub fn resize_solver_capacities(
+        &mut self,
+        body_handle_capacity: i32,
+        constraint_handle_capacity: i32,
+    ) {
         let self_ptr = self as *mut Self;
         unsafe {
             let pool = &mut *(*self_ptr).pool;
             let target_constraint = BufferPool::get_capacity_for_count::<ConstraintLocation>(
-                constraint_handle_capacity.max((*self_ptr).handle_pool.highest_possibly_claimed_id() + 1),
+                constraint_handle_capacity
+                    .max((*self_ptr).handle_pool.highest_possibly_claimed_id() + 1),
             );
             if (*self_ptr).handle_to_constraint.len() != target_constraint {
                 (*self_ptr).resize_handle_capacity(target_constraint);
             }
             let bodies = &*(*self_ptr).bodies;
-            let target_handles = (bodies.handle_pool.highest_possibly_claimed_id() + 1).max(body_handle_capacity);
+            let target_handles =
+                (bodies.handle_pool.highest_possibly_claimed_id() + 1).max(body_handle_capacity);
             for i in 0..(*self_ptr).sets.get(0).batches.count {
-                (*self_ptr).batch_referenced_handles.get_mut(i).resize(target_handles, pool);
+                (*self_ptr)
+                    .batch_referenced_handles
+                    .get_mut(i)
+                    .resize(target_handles, pool);
             }
-            let target_kinematic = (*self_ptr).constrained_kinematic_handles.count.max(body_handle_capacity);
-            (*self_ptr).constrained_kinematic_handles.resize(target_kinematic, pool);
+            let target_kinematic = (*self_ptr)
+                .constrained_kinematic_handles
+                .count
+                .max(body_handle_capacity);
+            (*self_ptr)
+                .constrained_kinematic_handles
+                .resize(target_kinematic, pool);
         }
     }
 
-    pub(crate) fn resize_sets_capacity(&mut self, sets_capacity: i32, potentially_allocated_count: i32) {
+    pub(crate) fn resize_sets_capacity(
+        &mut self,
+        sets_capacity: i32,
+        potentially_allocated_count: i32,
+    ) {
         let pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<ConstraintSet>(sets_capacity);
         if self.sets.len() != target {
@@ -1430,7 +1762,9 @@ impl Solver {
             // ConstraintSet doesn't implement Copy, so we use manual buffer management.
             // Take a new buffer and copy the existing data via raw pointer copy.
             let mut new_sets: Buffer<ConstraintSet> = pool.take_at_least(target);
-            let copy_count = potentially_allocated_count.min(old_capacity).min(new_sets.len());
+            let copy_count = potentially_allocated_count
+                .min(old_capacity)
+                .min(new_sets.len());
             if copy_count > 0 {
                 unsafe {
                     std::ptr::copy_nonoverlapping(
@@ -1445,7 +1779,8 @@ impl Solver {
             }
             self.sets = new_sets;
             if old_capacity < self.sets.len() {
-                self.sets.clear(old_capacity, self.sets.len() - old_capacity);
+                self.sets
+                    .clear(old_capacity, self.sets.len() - old_capacity);
             }
         }
     }
@@ -1506,7 +1841,10 @@ impl Solver {
             let pool = &mut *(*self_ptr).pool;
             let batch_count = (*self_ptr).sets.get(0).batches.count;
             for batch_index in 0..batch_count {
-                (*self_ptr).batch_referenced_handles.get_mut(batch_index).dispose(pool);
+                (*self_ptr)
+                    .batch_referenced_handles
+                    .get_mut(batch_index)
+                    .dispose(pool);
             }
             (*self_ptr).constrained_kinematic_handles.clear();
             (*self_ptr).batch_referenced_handles.clear();
@@ -1528,7 +1866,10 @@ impl Solver {
             let pool = &mut *(*self_ptr).pool;
             let batch_count = (*self_ptr).sets.get(0).batches.count;
             for i in 0..batch_count {
-                (*self_ptr).batch_referenced_handles.get_mut(i).dispose(pool);
+                (*self_ptr)
+                    .batch_referenced_handles
+                    .get_mut(i)
+                    .dispose(pool);
             }
             (*self_ptr).batch_referenced_handles.dispose(pool);
             (*self_ptr).constrained_kinematic_handles.dispose(pool);
@@ -1564,7 +1905,12 @@ pub(crate) struct SolverSyncStage {
 }
 
 impl SolverSyncStage {
-    pub fn new(claims: Buffer<i32>, work_block_start_index: i32, stage_type: SolverStageType, batch_index: i32) -> Self {
+    pub fn new(
+        claims: Buffer<i32>,
+        work_block_start_index: i32,
+        stage_type: SolverStageType,
+        batch_index: i32,
+    ) -> Self {
         Self {
             claims,
             batch_index,
@@ -1573,7 +1919,11 @@ impl SolverSyncStage {
         }
     }
 
-    pub fn new_no_batch(claims: Buffer<i32>, work_block_start_index: i32, stage_type: SolverStageType) -> Self {
+    pub fn new_no_batch(
+        claims: Buffer<i32>,
+        work_block_start_index: i32,
+        stage_type: SolverStageType,
+    ) -> Self {
         Self::new(claims, work_block_start_index, stage_type, -1)
     }
 }
@@ -1602,16 +1952,16 @@ pub(crate) struct IntegrationWorkBlock {
 #[repr(C)]
 pub(crate) struct SubstepMultithreadingContext {
     // --- Frequently read, rarely written (offsets 0..112) ---
-    pub stages: Buffer<SolverSyncStage>,           // offset 0  (16 bytes)
+    pub stages: Buffer<SolverSyncStage>, // offset 0  (16 bytes)
     pub incremental_update_blocks: Buffer<WorkBlock>, // offset 16 (16 bytes)
     pub kinematic_integration_blocks: Buffer<IntegrationWorkBlock>, // offset 32 (16 bytes)
-    pub constraint_blocks: Buffer<WorkBlock>,       // offset 48 (16 bytes)
-    pub constraint_batch_boundaries: Buffer<i32>,   // offset 64 (16 bytes)
-    pub dt: f32,                                    // offset 80
-    pub inverse_dt: f32,                            // offset 84
-    pub worker_count: i32,                          // offset 88
-    pub highest_velocity_iteration_count: i32,      // offset 92
-    pub velocity_iteration_counts: Buffer<i32>,     // offset 96 (16 bytes)
+    pub constraint_blocks: Buffer<WorkBlock>, // offset 48 (16 bytes)
+    pub constraint_batch_boundaries: Buffer<i32>, // offset 64 (16 bytes)
+    pub dt: f32,                         // offset 80
+    pub inverse_dt: f32,                 // offset 84
+    pub worker_count: i32,               // offset 88
+    pub highest_velocity_iteration_count: i32, // offset 92
+    pub velocity_iteration_counts: Buffer<i32>, // offset 96 (16 bytes)
 
     // Padding to push SyncIndex to a separate cache line (offset 256)
     _pad0: [u8; 256 - 112],
@@ -1619,7 +1969,7 @@ pub(crate) struct SubstepMultithreadingContext {
     /// Monotonically increasing index of executed stages during a frame.
     /// Written by the main thread via Volatile.Write; read by workers via Volatile.Read.
     /// Uses UnsafeCell for mixed atomic/plain access pattern.
-    pub sync_index: std::cell::UnsafeCell<i32>,     // offset 256
+    pub sync_index: std::cell::UnsafeCell<i32>, // offset 256
 
     // Padding to push CompletedWorkBlockCount to another cache line (offset 384)
     _pad1: [u8; 384 - 260],
@@ -1661,10 +2011,15 @@ impl ISolverStageFunction for WarmStartStageFunction {
         let ctx = &(*self.solver).substep_context;
         let block = ctx.constraint_blocks.get(block_index);
         let active_set = (*solver).sets.get_mut(0);
-        let type_batch = active_set.batches.get_mut(block.batch_index)
-            .type_batches.get_mut(block.type_batch_index);
+        let type_batch = active_set
+            .batches
+            .get_mut(block.batch_index)
+            .type_batches
+            .get_mut(block.type_batch_index);
         let type_id = type_batch.type_id;
-        let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
+        let processor = (&(*solver).type_processors)[type_id as usize]
+            .as_ref()
+            .unwrap();
         let allow_pose_integration = self.substep_index > 0;
         (*self.solver).warm_start_block(
             worker_index,
@@ -1694,14 +2049,23 @@ impl ISolverStageFunction for SolveStageFunction {
         let ctx = &(*self.solver).substep_context;
         let block = ctx.constraint_blocks.get(block_index);
         let active_set = (*solver).sets.get_mut(0);
-        let type_batch = active_set.batches.get_mut(block.batch_index)
-            .type_batches.get_mut(block.type_batch_index);
+        let type_batch = active_set
+            .batches
+            .get_mut(block.batch_index)
+            .type_batches
+            .get_mut(block.type_batch_index);
         let type_id = type_batch.type_id;
-        let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
+        let processor = (&(*solver).type_processors)[type_id as usize]
+            .as_ref()
+            .unwrap();
         let bodies = &*(*solver).bodies;
         processor.inner().solve(
-            type_batch, bodies, self.dt, self.inverse_dt,
-            block.start_bundle, block.end,
+            type_batch,
+            bodies,
+            self.dt,
+            self.inverse_dt,
+            block.start_bundle,
+            block.end,
         );
         let _ = worker_index;
     }
@@ -1720,14 +2084,23 @@ impl ISolverStageFunction for IncrementalUpdateStageFunction {
         let ctx = &(*self.solver).substep_context;
         let block = ctx.incremental_update_blocks.get(block_index);
         let active_set = (*solver).sets.get_mut(0);
-        let type_batch = active_set.batches.get_mut(block.batch_index)
-            .type_batches.get_mut(block.type_batch_index);
+        let type_batch = active_set
+            .batches
+            .get_mut(block.batch_index)
+            .type_batches
+            .get_mut(block.type_batch_index);
         let type_id = type_batch.type_id;
-        let processor = (&(*solver).type_processors)[type_id as usize].as_ref().unwrap();
+        let processor = (&(*solver).type_processors)[type_id as usize]
+            .as_ref()
+            .unwrap();
         let bodies = &*(*solver).bodies;
         processor.inner().incrementally_update_for_substep(
-            type_batch, bodies, self.dt, self.inverse_dt,
-            block.start_bundle, block.end,
+            type_batch,
+            bodies,
+            self.dt,
+            self.inverse_dt,
+            block.start_bundle,
+            block.end,
         );
         let _ = worker_index;
     }
@@ -1781,9 +2154,13 @@ pub(crate) trait ITypeBatchSolveFilter {
 pub(crate) struct MainSolveFilter;
 impl ITypeBatchSolveFilter for MainSolveFilter {
     #[inline(always)]
-    fn include_fallback_batch_for_work_blocks(&self) -> bool { false }
+    fn include_fallback_batch_for_work_blocks(&self) -> bool {
+        false
+    }
     #[inline(always)]
-    fn allow_type(&self, _type_id: i32) -> bool { true }
+    fn allow_type(&self, _type_id: i32) -> bool {
+        true
+    }
 }
 
 /// Filter for incremental update — only types with incremental substep updates, includes fallback.
@@ -1792,7 +2169,9 @@ pub(crate) struct IncrementalUpdateForSubstepFilter<'a> {
 }
 impl<'a> ITypeBatchSolveFilter for IncrementalUpdateForSubstepFilter<'a> {
     #[inline(always)]
-    fn include_fallback_batch_for_work_blocks(&self) -> bool { true }
+    fn include_fallback_batch_for_work_blocks(&self) -> bool {
+        true
+    }
     #[inline(always)]
     fn allow_type(&self, type_id: i32) -> bool {
         if let Some(ref tp) = self.type_processors[type_id as usize] {
@@ -1840,35 +2219,57 @@ impl Solver {
         if batch_index == 0 {
             let no_flags: Buffer<IndexSet> = Buffer::default();
             type_processor.warm_start(
-                type_batch, bodies, &no_flags,
+                type_batch,
+                bodies,
+                &no_flags,
                 self.pose_integrator.map(|p| &*p),
                 BatchIntegrationMode::Always,
                 allow_pose_integration,
-                dt, inverse_dt,
-                start_bundle, end_bundle,
+                dt,
+                inverse_dt,
+                start_bundle,
+                end_bundle,
                 worker_index,
             );
         } else {
-            if *self.coarse_batch_integration_responsibilities.get(batch_index).get(type_batch_index) {
-                let flags = self.integration_flags.get(batch_index).get(type_batch_index);
+            if *self
+                .coarse_batch_integration_responsibilities
+                .get(batch_index)
+                .get(type_batch_index)
+            {
+                let flags = self
+                    .integration_flags
+                    .get(batch_index)
+                    .get(type_batch_index);
                 type_processor.warm_start(
-                    type_batch, bodies, flags,
+                    type_batch,
+                    bodies,
+                    flags,
                     self.pose_integrator.map(|p| &*p),
                     BatchIntegrationMode::Conditional,
                     allow_pose_integration,
-                    dt, inverse_dt,
-                    start_bundle, end_bundle,
+                    dt,
+                    inverse_dt,
+                    start_bundle,
+                    end_bundle,
                     worker_index,
                 );
             } else {
-                let flags = self.integration_flags.get(batch_index).get(type_batch_index);
+                let flags = self
+                    .integration_flags
+                    .get(batch_index)
+                    .get(type_batch_index);
                 type_processor.warm_start(
-                    type_batch, bodies, flags,
+                    type_batch,
+                    bodies,
+                    flags,
                     self.pose_integrator.map(|p| &*p),
                     BatchIntegrationMode::Never,
                     allow_pose_integration,
-                    dt, inverse_dt,
-                    start_bundle, end_bundle,
+                    dt,
+                    inverse_dt,
+                    start_bundle,
+                    end_bundle,
                     worker_index,
                 );
             }
@@ -1912,7 +2313,9 @@ impl Solver {
         sync_stages_per_substep: i32,
     ) -> i32 {
         if substep_index == 1 {
-            if self.pose_integrator.map_or(false, |pi| unsafe { (*pi).integrate_velocity_for_kinematics() }) {
+            if self.pose_integrator.map_or(false, |pi| unsafe {
+                (*pi).integrate_velocity_for_kinematics()
+            }) {
                 2
             } else {
                 0
@@ -1931,7 +2334,7 @@ impl Solver {
             let ctx = &self.substep_context;
             lookback += synchronized_batch_count
                 * (ctx.highest_velocity_iteration_count
-                    - unsafe { *ctx.velocity_iteration_counts.get((substep_index - 1)) });
+                    - unsafe { *ctx.velocity_iteration_counts.get(substep_index - 1) });
         }
         lookback
     }
@@ -1991,14 +2394,20 @@ impl Solver {
         loop {
             let claim_ptr = claims.get_ptr(work_block_index) as *mut i32;
             let atomic = AtomicI32::from_ptr(claim_ptr);
-            if atomic.compare_exchange(
-                previous_sync_index,
-                sync_index,
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            ).is_ok()
+            if atomic
+                .compare_exchange(
+                    previous_sync_index,
+                    sync_index,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
             {
-                stage_function.execute(self_ptr, available_blocks_start_index + work_block_index, worker_index);
+                stage_function.execute(
+                    self_ptr,
+                    available_blocks_start_index + work_block_index,
+                    worker_index,
+                );
                 locally_completed_count += 1;
                 work_block_index += 1;
                 if work_block_index >= claims.len() as i32 {
@@ -2017,14 +2426,20 @@ impl Solver {
             }
             let claim_ptr = claims.get_ptr(work_block_index) as *mut i32;
             let atomic = AtomicI32::from_ptr(claim_ptr);
-            if atomic.compare_exchange(
-                previous_sync_index,
-                sync_index,
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            ).is_ok()
+            if atomic
+                .compare_exchange(
+                    previous_sync_index,
+                    sync_index,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
             {
-                stage_function.execute(self_ptr, available_blocks_start_index + work_block_index, worker_index);
+                stage_function.execute(
+                    self_ptr,
+                    available_blocks_start_index + work_block_index,
+                    worker_index,
+                );
                 locally_completed_count += 1;
                 work_block_index -= 1;
             } else {
@@ -2057,8 +2472,6 @@ impl Solver {
 
         let self_ptr = self as *const Self as *mut Self;
         let ctx = &(*self_ptr).substep_context;
-
-
 
         if available_blocks_count == 1 {
             // Single work block — just execute directly, no need to notify workers.
@@ -2122,31 +2535,41 @@ impl Solver {
 
         // Compute per-batch starting positions for constraint work blocks.
         let mut batch_starts_storage = vec![0i32; batch_count as usize];
-        let (synchronized_batch_count, _fallback_exists) = (*self_ptr).get_synchronized_batch_count();
+        let (synchronized_batch_count, _fallback_exists) =
+            (*self_ptr).get_synchronized_batch_count();
         for batch_index in 0..synchronized_batch_count {
             let batch_offset = if batch_index > 0 {
-                *ctx.constraint_batch_boundaries.get((batch_index - 1))
+                *ctx.constraint_batch_boundaries.get(batch_index - 1)
             } else {
                 0
             };
-            let batch_count_blocks = *ctx.constraint_batch_boundaries.get(batch_index) - batch_offset;
-            batch_starts_storage[batch_index as usize] =
-                Self::get_uniformly_distributed_start(worker_index, batch_count_blocks, worker_count, 0);
+            let batch_count_blocks =
+                *ctx.constraint_batch_boundaries.get(batch_index) - batch_offset;
+            batch_starts_storage[batch_index as usize] = Self::get_uniformly_distributed_start(
+                worker_index,
+                batch_count_blocks,
+                worker_count,
+                0,
+            );
         }
 
-        debug_assert!(batch_count > 0, "Don't dispatch if there are no constraints.");
+        debug_assert!(
+            batch_count > 0,
+            "Don't dispatch if there are no constraints."
+        );
 
         let incremental_update_stage = IncrementalUpdateStageFunction {
             dt: ctx.dt,
             inverse_dt: ctx.inverse_dt,
             solver: self_ptr,
         };
-        let mut integrate_constrained_kinematics_stage = IntegrateConstrainedKinematicsStageFunction {
-            dt: ctx.dt,
-            inverse_dt: ctx.inverse_dt,
-            substep_index: 0,
-            solver: self_ptr,
-        };
+        let mut integrate_constrained_kinematics_stage =
+            IntegrateConstrainedKinematicsStageFunction {
+                dt: ctx.dt,
+                inverse_dt: ctx.inverse_dt,
+                substep_index: 0,
+                solver: self_ptr,
+            };
         let mut warmstart_stage = WarmStartStageFunction {
             dt: ctx.dt,
             inverse_dt: ctx.inverse_dt,
@@ -2159,7 +2582,8 @@ impl Solver {
             solver: self_ptr,
         };
 
-        let maximum_sync_stages_per_substep = 2 + synchronized_batch_count * (1 + ctx.highest_velocity_iteration_count);
+        let maximum_sync_stages_per_substep =
+            2 + synchronized_batch_count * (1 + ctx.highest_velocity_iteration_count);
 
         if worker_index == 0 {
             // ---- Main orchestrator thread ----
@@ -2175,7 +2599,11 @@ impl Solver {
                         worker_index,
                         incremental_update_worker_start,
                         &(*self_ptr).substep_context.stages.get(0),
-                        (*self_ptr).get_previous_sync_index_for_incremental_update(substep_index, sync_index, maximum_sync_stages_per_substep),
+                        (*self_ptr).get_previous_sync_index_for_incremental_update(
+                            substep_index,
+                            sync_index,
+                            maximum_sync_stages_per_substep,
+                        ),
                         sync_index,
                     );
                 }
@@ -2183,7 +2611,9 @@ impl Solver {
                 sync_index += 1;
 
                 // Integrate constrained kinematics.
-                let integrate_velocity_for_kinematics = (*self_ptr).pose_integrator.map_or(false, |pi| (*pi).integrate_velocity_for_kinematics());
+                let integrate_velocity_for_kinematics = (*self_ptr)
+                    .pose_integrator
+                    .map_or(false, |pi| (*pi).integrate_velocity_for_kinematics());
                 if substep_index > 0 || integrate_velocity_for_kinematics {
                     integrate_constrained_kinematics_stage.substep_index = substep_index;
                     (*self_ptr).execute_main_stage(
@@ -2191,22 +2621,30 @@ impl Solver {
                         worker_index,
                         kinematic_integration_worker_start,
                         &(*self_ptr).substep_context.stages.get(1),
-                        (*self_ptr).get_previous_sync_index_for_integrate_constrained_kinematics(substep_index, sync_index, maximum_sync_stages_per_substep),
+                        (*self_ptr).get_previous_sync_index_for_integrate_constrained_kinematics(
+                            substep_index,
+                            sync_index,
+                            maximum_sync_stages_per_substep,
+                        ),
                         sync_index,
                     );
                 }
 
                 // Warm start.
                 warmstart_stage.substep_index = substep_index;
-                let warm_start_lookback = (*self_ptr).get_warm_start_lookback(substep_index, synchronized_batch_count);
+                let warm_start_lookback =
+                    (*self_ptr).get_warm_start_lookback(substep_index, synchronized_batch_count);
                 for batch_index in 0..synchronized_batch_count {
                     sync_index += 1;
                     (*self_ptr).execute_main_stage(
                         &warmstart_stage,
                         worker_index,
                         batch_starts_storage[batch_index as usize],
-                        &(*self_ptr).substep_context.stages.get((batch_index + 2)),
-                        Self::get_previous_sync_index_for_warm_start(sync_index, warm_start_lookback),
+                        &(*self_ptr).substep_context.stages.get(batch_index + 2),
+                        Self::get_previous_sync_index_for_warm_start(
+                            sync_index,
+                            warm_start_lookback,
+                        ),
                         sync_index,
                     );
                 }
@@ -2223,13 +2661,19 @@ impl Solver {
                         let type_id = type_batch.type_id;
                         let bundle_count = type_batch.bundle_count() as i32;
                         let processor = (&(*self_ptr).type_processors)[type_id as usize]
-                            .as_ref().unwrap();
+                            .as_ref()
+                            .unwrap();
                         (*self_ptr).warm_start_block(
-                            0, fallback_batch_threshold, j,
-                            0, bundle_count,
-                            type_batch, processor.inner(),
+                            0,
+                            fallback_batch_threshold,
+                            j,
+                            0,
+                            bundle_count,
+                            type_batch,
+                            processor.inner(),
                             allow_pose_integration,
-                            ctx.dt, ctx.inverse_dt,
+                            ctx.dt,
+                            ctx.inverse_dt,
                         );
                     }
                 }
@@ -2243,8 +2687,11 @@ impl Solver {
                             &solve_stage,
                             worker_index,
                             batch_starts_storage[batch_index as usize],
-                            &(*self_ptr).substep_context.stages.get((batch_index + 2)),
-                            Self::get_previous_sync_index_for_solve(sync_index, synchronized_batch_count),
+                            &(*self_ptr).substep_context.stages.get(batch_index + 2),
+                            Self::get_previous_sync_index_for_solve(
+                                sync_index,
+                                synchronized_batch_count,
+                            ),
                             sync_index,
                         );
                     }
@@ -2259,7 +2706,9 @@ impl Solver {
                             let type_id = type_batch.type_id;
                             let bundle_count = type_batch.bundle_count() as i32;
                             (&(*self_ptr).type_processors)[type_id as usize]
-                                .as_ref().unwrap().inner()
+                                .as_ref()
+                                .unwrap()
+                                .inner()
                                 .solve(type_batch, bodies, ctx.dt, ctx.inverse_dt, 0, bundle_count);
                         }
                     }
@@ -2301,7 +2750,10 @@ impl Solver {
                     substep_index += 1;
                 }
 
-                let stage = (*self_ptr).substep_context.stages.get(sync_index_in_substep);
+                let stage = (*self_ptr)
+                    .substep_context
+                    .stages
+                    .get(sync_index_in_substep);
                 let completed_ptr = ctx.completed_work_block_count.get();
 
                 match stage.stage_type {
@@ -2312,7 +2764,11 @@ impl Solver {
                             incremental_update_worker_start,
                             0,
                             &stage.claims,
-                            (*self_ptr).get_previous_sync_index_for_incremental_update(substep_index, sync_index, maximum_sync_stages_per_substep),
+                            (*self_ptr).get_previous_sync_index_for_incremental_update(
+                                substep_index,
+                                sync_index,
+                                maximum_sync_stages_per_substep,
+                            ),
                             sync_index,
                             completed_ptr,
                         );
@@ -2325,21 +2781,30 @@ impl Solver {
                             kinematic_integration_worker_start,
                             0,
                             &stage.claims,
-                            (*self_ptr).get_previous_sync_index_for_integrate_constrained_kinematics(substep_index, sync_index, maximum_sync_stages_per_substep),
+                            (*self_ptr)
+                                .get_previous_sync_index_for_integrate_constrained_kinematics(
+                                    substep_index,
+                                    sync_index,
+                                    maximum_sync_stages_per_substep,
+                                ),
                             sync_index,
                             completed_ptr,
                         );
                     }
                     SolverStageType::WarmStart => {
                         warmstart_stage.substep_index = substep_index;
-                        let warm_start_lookback = (*self_ptr).get_warm_start_lookback(substep_index, synchronized_batch_count);
+                        let warm_start_lookback = (*self_ptr)
+                            .get_warm_start_lookback(substep_index, synchronized_batch_count);
                         (*self_ptr).execute_worker_stage(
                             &warmstart_stage,
                             worker_index,
                             batch_starts_storage[stage.batch_index as usize],
                             stage.work_block_start_index,
                             &stage.claims,
-                            Self::get_previous_sync_index_for_warm_start(sync_index, warm_start_lookback),
+                            Self::get_previous_sync_index_for_warm_start(
+                                sync_index,
+                                warm_start_lookback,
+                            ),
                             sync_index,
                             completed_ptr,
                         );
@@ -2351,7 +2816,10 @@ impl Solver {
                             batch_starts_storage[stage.batch_index as usize],
                             stage.work_block_start_index,
                             &stage.claims,
-                            Self::get_previous_sync_index_for_solve(sync_index, synchronized_batch_count),
+                            Self::get_previous_sync_index_for_solve(
+                                sync_index,
+                                synchronized_batch_count,
+                            ),
                             sync_index,
                             completed_ptr,
                         );
@@ -2369,7 +2837,9 @@ impl Solver {
         maximum_block_size_in_bundles: i32,
         target_block_count: i32,
     ) -> Buffer<IntegrationWorkBlock> {
-        let bundle_count = BundleIndexing::get_bundle_count(self.constrained_kinematic_handles.count as usize) as i32;
+        let bundle_count =
+            BundleIndexing::get_bundle_count(self.constrained_kinematic_handles.count as usize)
+                as i32;
         if bundle_count > 0 {
             let mut target_bundles_per_block = bundle_count / target_block_count;
             if target_bundles_per_block < minimum_block_size_in_bundles {
@@ -2378,7 +2848,8 @@ impl Solver {
             if target_bundles_per_block > maximum_block_size_in_bundles {
                 target_bundles_per_block = maximum_block_size_in_bundles;
             }
-            let block_count = (bundle_count + target_bundles_per_block - 1) / target_bundles_per_block;
+            let block_count =
+                (bundle_count + target_bundles_per_block - 1) / target_bundles_per_block;
             let bundles_per_block = bundle_count / block_count;
             let remainder = bundle_count - bundles_per_block * block_count;
             let mut previous_end = 0;
@@ -2421,7 +2892,8 @@ impl Solver {
             batch_count = sync_count;
         }
 
-        let mut work_blocks: QuickList<WorkBlock> = QuickList::with_capacity(target_blocks_per_batch * batch_count, pool);
+        let mut work_blocks: QuickList<WorkBlock> =
+            QuickList::with_capacity(target_blocks_per_batch * batch_count, pool);
         let mut batch_boundaries: Buffer<i32> = pool.take(batch_count);
         let inverse_minimum_block_size = 1.0f32 / minimum_block_size_in_bundles as f32;
         let inverse_maximum_block_size = 1.0f32 / maximum_block_size_in_bundles as f32;
@@ -2442,12 +2914,15 @@ impl Solver {
                 }
                 let tb_bundle_count = type_batch.bundle_count() as i32;
                 let type_batch_size_fraction = tb_bundle_count as f32 / bundle_count as f32;
-                let type_batch_maximum_block_count = tb_bundle_count as f32 * inverse_minimum_block_size;
-                let type_batch_minimum_block_count = tb_bundle_count as f32 * inverse_maximum_block_size;
+                let type_batch_maximum_block_count =
+                    tb_bundle_count as f32 * inverse_minimum_block_size;
+                let type_batch_minimum_block_count =
+                    tb_bundle_count as f32 * inverse_maximum_block_size;
                 let type_batch_block_count = 1i32.max(
                     type_batch_maximum_block_count.min(
-                        type_batch_minimum_block_count.max(target_blocks_per_batch as f32 * type_batch_size_fraction)
-                    ) as i32
+                        type_batch_minimum_block_count
+                            .max(target_blocks_per_batch as f32 * type_batch_size_fraction),
+                    ) as i32,
                 );
                 let mut previous_end = 0;
                 let base_block_size = tb_bundle_count / type_batch_block_count;
@@ -2518,18 +2993,21 @@ impl Solver {
             target_blocks_per_batch,
             &main_filter,
         );
-        let (incremental_blocks, mut incremental_update_batch_boundaries) = (*self_ptr).build_work_blocks(
-            &mut *(*self_ptr).pool,
-            MINIMUM_BLOCK_SIZE_IN_BUNDLES,
-            MAXIMUM_BLOCK_SIZE_IN_BUNDLES,
-            target_blocks_per_batch,
-            &incremental_filter,
-        );
+        let (incremental_blocks, mut incremental_update_batch_boundaries) = (*self_ptr)
+            .build_work_blocks(
+                &mut *(*self_ptr).pool,
+                MINIMUM_BLOCK_SIZE_IN_BUNDLES,
+                MAXIMUM_BLOCK_SIZE_IN_BUNDLES,
+                target_blocks_per_batch,
+                &incremental_filter,
+            );
         (&mut *(*self_ptr).pool).return_buffer(&mut incremental_update_batch_boundaries);
 
         let ctx = &mut (*self_ptr).substep_context;
         ctx.constraint_blocks = constraint_blocks.span.slice_count(constraint_blocks.count);
-        ctx.incremental_update_blocks = incremental_blocks.span.slice_count(incremental_blocks.count);
+        ctx.incremental_update_blocks = incremental_blocks
+            .span
+            .slice_count(incremental_blocks.count);
         ctx.constraint_batch_boundaries = constraint_batch_boundaries;
         ctx.kinematic_integration_blocks = self.build_kinematic_integration_work_blocks(
             MINIMUM_BLOCK_SIZE_IN_BUNDLES,
@@ -2540,10 +3018,12 @@ impl Solver {
         let ctx = &mut (*self_ptr).substep_context;
         *ctx.sync_index.get_mut() = 0;
 
-        let total_constraint_batch_work_block_count = if ctx.constraint_batch_boundaries.len() == 0 {
+        let total_constraint_batch_work_block_count = if ctx.constraint_batch_boundaries.len() == 0
+        {
             0
         } else {
-            *ctx.constraint_batch_boundaries.get(ctx.constraint_batch_boundaries.len() - 1)
+            *ctx.constraint_batch_boundaries
+                .get(ctx.constraint_batch_boundaries.len() - 1)
         };
         let total_claim_count = incremental_blocks.count
             + ctx.kinematic_integration_blocks.len()
@@ -2553,15 +3033,14 @@ impl Solver {
 
         ctx.highest_velocity_iteration_count = 0;
         for i in 0..ctx.velocity_iteration_counts.len() {
-            ctx.highest_velocity_iteration_count = ctx.highest_velocity_iteration_count.max(
-                *ctx.velocity_iteration_counts.get(i),
-            );
+            ctx.highest_velocity_iteration_count = ctx
+                .highest_velocity_iteration_count
+                .max(*ctx.velocity_iteration_counts.get(i));
         }
 
         let pool = &mut *self.pool;
-        ctx.stages = pool.take(
-            2 + stages_per_iteration * (1 + ctx.highest_velocity_iteration_count),
-        );
+        ctx.stages =
+            pool.take(2 + stages_per_iteration * (1 + ctx.highest_velocity_iteration_count));
 
         // Allocate claims buffer, initialized to 0 to match initial sync index.
         let mut claims: Buffer<i32> = pool.take(total_claim_count);
@@ -2594,9 +3073,10 @@ impl Solver {
             let batch_start = if batch_index == 0 {
                 0
             } else {
-                *ctx.constraint_batch_boundaries.get((batch_index - 1))
+                *ctx.constraint_batch_boundaries.get(batch_index - 1)
             };
-            let work_blocks_in_batch = *ctx.constraint_batch_boundaries.get(batch_index) - batch_start;
+            let work_blocks_in_batch =
+                *ctx.constraint_batch_boundaries.get(batch_index) - batch_start;
             *ctx.stages.get_mut(stage_index) = SolverSyncStage::new(
                 claims.slice_offset(claim_start, work_blocks_in_batch),
                 batch_start,
@@ -2616,9 +3096,10 @@ impl Solver {
                 let batch_start = if batch_index == 0 {
                     0
                 } else {
-                    *ctx.constraint_batch_boundaries.get((batch_index - 1))
+                    *ctx.constraint_batch_boundaries.get(batch_index - 1)
                 };
-                let work_blocks_in_batch = *ctx.constraint_batch_boundaries.get(batch_index) - batch_start;
+                let work_blocks_in_batch =
+                    *ctx.constraint_batch_boundaries.get(batch_index) - batch_start;
                 *ctx.stages.get_mut(stage_index) = SolverSyncStage::new(
                     claims.slice_offset(claim_start, work_blocks_in_batch),
                     batch_start,
@@ -2635,11 +3116,16 @@ impl Solver {
         if active_batch_count > 0 {
             // Pass the solver pointer through unmanaged_context so the worker fn can access it.
             let self_ptr = self as *mut Self;
-            fn solve_worker_fn(worker_index: i32, _dispatcher: &dyn crate::utilities::thread_dispatcher::IThreadDispatcher) {
+            fn solve_worker_fn(
+                worker_index: i32,
+                _dispatcher: &dyn crate::utilities::thread_dispatcher::IThreadDispatcher,
+            ) {
                 // The solver pointer is stored in the dispatcher's unmanaged context.
                 let ctx = _dispatcher.unmanaged_context();
                 let solver = ctx as *mut Solver;
-                unsafe { (*solver).solve_worker(worker_index); }
+                unsafe {
+                    (*solver).solve_worker(worker_index);
+                }
             }
             thread_dispatcher.dispatch_workers(
                 solve_worker_fn,
@@ -2655,7 +3141,11 @@ impl Solver {
         pool.return_buffer(&mut self.substep_context.stages);
         pool.return_buffer(&mut self.substep_context.constraint_batch_boundaries);
         pool.return_buffer(&mut self.substep_context.incremental_update_blocks);
-        if self.substep_context.kinematic_integration_blocks.allocated() {
+        if self
+            .substep_context
+            .kinematic_integration_blocks
+            .allocated()
+        {
             pool.return_buffer(&mut self.substep_context.kinematic_integration_blocks);
         }
         pool.return_buffer(&mut self.substep_context.constraint_blocks);
@@ -2679,15 +3169,22 @@ impl Solver {
     ) -> bool {
         let first_observed_for_batch = &*self.bodies_first_observed_in_batches.get(batch_index);
         // Use raw pointer to get mutable access to integration flags (safe: we guarantee exclusive access by design)
-        let integration_flags_ptr = self.integration_flags.as_ptr()
-            .add(batch_index as usize) as *mut Buffer<Buffer<IndexSet>>;
+        let integration_flags_ptr = self.integration_flags.as_ptr().add(batch_index as usize)
+            as *mut Buffer<Buffer<IndexSet>>;
         let integration_flags_for_type_batch = (*integration_flags_ptr)
-            .as_mut_ptr().add(type_batch_index as usize);
+            .as_mut_ptr()
+            .add(type_batch_index as usize);
         let active_set = self.sets.get(0);
-        let type_batch = active_set.batches.get(batch_index).type_batches.get(type_batch_index);
+        let type_batch = active_set
+            .batches
+            .get(batch_index)
+            .type_batches
+            .get(type_batch_index);
         let type_batch_body_references = type_batch.body_references.as_ptr() as *const i32;
         let bodies_per_constraint_in_type_batch = self.type_processors[type_batch.type_id as usize]
-            .as_ref().unwrap().bodies_per_constraint;
+            .as_ref()
+            .unwrap()
+            .bodies_per_constraint;
         let vector_width = crate::utilities::vector::VECTOR_WIDTH as i32;
         let ints_per_bundle = vector_width * bodies_per_constraint_in_type_batch;
         let bundle_start_index = constraint_start / vector_width;
@@ -2697,12 +3194,16 @@ impl Solver {
 
         for bundle_index in bundle_start_index..bundle_end_index {
             let bundle_start_index_in_constraints = bundle_index * vector_width;
-            let count_in_bundle = (type_batch.constraint_count - bundle_start_index_in_constraints).min(vector_width);
-            let bundle_body_references_start = type_batch_body_references.add((bundle_index * ints_per_bundle) as usize);
+            let count_in_bundle =
+                (type_batch.constraint_count - bundle_start_index_in_constraints).min(vector_width);
+            let bundle_body_references_start =
+                type_batch_body_references.add((bundle_index * ints_per_bundle) as usize);
 
             for body_index_in_constraint in 0..bodies_per_constraint_in_type_batch {
-                let integration_flags_for_body = (*integration_flags_for_type_batch).get_mut(body_index_in_constraint);
-                let bundle_start = bundle_body_references_start.add((body_index_in_constraint * vector_width) as usize);
+                let integration_flags_for_body =
+                    (*integration_flags_for_type_batch).get_mut(body_index_in_constraint);
+                let bundle_start = bundle_body_references_start
+                    .add((body_index_in_constraint * vector_width) as usize);
 
                 for bundle_inner_index in 0..count_in_bundle {
                     let raw_body_index = *bundle_start.add(bundle_inner_index as usize);
@@ -2722,24 +3223,34 @@ impl Solver {
                             // For fallback batch: must also be the *earliest* constraint slot for this body.
                             let mut earliest_index: u64 = u64::MAX;
                             let constraints_for_body = body_active_set.constraints.get(body_index);
-                            let fallback_batch = active_set.batches.get(self.fallback_batch_threshold);
+                            let fallback_batch =
+                                active_set.batches.get(self.fallback_batch_threshold);
                             for ci in 0..constraints_for_body.count {
                                 let constraint_ref = constraints_for_body.span.get(ci);
-                                let location = self.handle_to_constraint.get(constraint_ref.connecting_constraint_handle.0);
-                                let tbi = *fallback_batch.type_index_to_type_batch_index.get(location.type_id);
-                                let candidate = ((tbi as u64) << 32) | (location.index_in_type_batch as u32 as u64);
+                                let location = self
+                                    .handle_to_constraint
+                                    .get(constraint_ref.connecting_constraint_handle.0);
+                                let tbi = *fallback_batch
+                                    .type_index_to_type_batch_index
+                                    .get(location.type_id);
+                                let candidate = ((tbi as u64) << 32)
+                                    | (location.index_in_type_batch as u32 as u64);
                                 if candidate < earliest_index {
                                     earliest_index = candidate;
                                 }
                             }
-                            let index_in_type_batch = bundle_start_index_in_constraints + bundle_inner_index;
-                            let current_slot = ((type_batch_index as u64) << 32) | (index_in_type_batch as u32 as u64);
+                            let index_in_type_batch =
+                                bundle_start_index_in_constraints + bundle_inner_index;
+                            let current_slot = ((type_batch_index as u64) << 32)
+                                | (index_in_type_batch as u32 as u64);
                             if current_slot == earliest_index {
                                 integration_flags_for_body.add_unsafely(index_in_type_batch);
                             }
                         } else {
                             // Not a fallback: being contained in the observed set is sufficient.
-                            integration_flags_for_body.add_unsafely(bundle_start_index_in_constraints + bundle_inner_index);
+                            integration_flags_for_body.add_unsafely(
+                                bundle_start_index_in_constraints + bundle_inner_index,
+                            );
                         }
                     }
                 }
@@ -2788,8 +3299,11 @@ impl Solver {
                 for type_batch_index in 0..type_batch_count {
                     let type_batch = batch.type_batches.get(type_batch_index);
                     let bodies_per_constraint = self.type_processors[type_batch.type_id as usize]
-                        .as_ref().unwrap().bodies_per_constraint;
-                    let mut flags_for_type_batch: Buffer<IndexSet> = pool.take(bodies_per_constraint);
+                        .as_ref()
+                        .unwrap()
+                        .bodies_per_constraint;
+                    let mut flags_for_type_batch: Buffer<IndexSet> =
+                        pool.take(bodies_per_constraint);
                     for body_index_in_constraint in 0..bodies_per_constraint {
                         *flags_for_type_batch.get_mut(body_index_in_constraint) =
                             IndexSet::new(pool, type_batch.constraint_count);
@@ -2798,7 +3312,9 @@ impl Solver {
                 }
 
                 *self.integration_flags.get_mut(batch_index) = flags_for_batch;
-                *self.coarse_batch_integration_responsibilities.get_mut(batch_index) = coarse_for_batch;
+                *self
+                    .coarse_batch_integration_responsibilities
+                    .get_mut(batch_index) = coarse_for_batch;
             }
 
             // Build bodiesFirstObservedInBatches by computing which body handles appear in each batch
@@ -2811,8 +3327,15 @@ impl Solver {
             // Copy batch 0's handles to initialize the merged set
             if self.batch_referenced_handles.count > 0 {
                 let batch0_flags = &self.batch_referenced_handles.get(0).flags;
-                let copy_len = batch0_flags.len().min(self.merged_constrained_body_handles.flags.len());
-                batch0_flags.copy_to(0, &mut self.merged_constrained_body_handles.flags, 0, copy_len);
+                let copy_len = batch0_flags
+                    .len()
+                    .min(self.merged_constrained_body_handles.flags.len());
+                batch0_flags.copy_to(
+                    0,
+                    &mut self.merged_constrained_body_handles.flags,
+                    0,
+                    copy_len,
+                );
                 self.merged_constrained_body_handles.flags.clear(
                     copy_len,
                     self.merged_constrained_body_handles.flags.len() - copy_len,
@@ -2823,33 +3346,51 @@ impl Solver {
             self.bodies_first_observed_in_batches = pool.take(self.batch_referenced_handles.count);
             *self.bodies_first_observed_in_batches.get_mut(0) = IndexSet::empty();
 
-            let mut batch_has_any_integration_responsibilities: Buffer<bool> = pool.take(self.batch_referenced_handles.count);
+            let mut batch_has_any_integration_responsibilities: Buffer<bool> =
+                pool.take(self.batch_referenced_handles.count);
 
             for batch_index in 1..self.bodies_first_observed_in_batches.len() {
                 let batch_handles = &self.batch_referenced_handles.get(batch_index);
-                let bundle_count = self.merged_constrained_body_handles.flags.len().min(batch_handles.flags.len());
+                let bundle_count = self
+                    .merged_constrained_body_handles
+                    .flags
+                    .len()
+                    .min(batch_handles.flags.len());
                 // Allocate without zeroing — every bundle will be fully assigned
                 let first_observed_flags: Buffer<u64> = pool.take(bundle_count);
-                *self.bodies_first_observed_in_batches.get_mut(batch_index) = IndexSet { flags: first_observed_flags };
+                *self.bodies_first_observed_in_batches.get_mut(batch_index) = IndexSet {
+                    flags: first_observed_flags,
+                };
             }
 
             // Compute firstObserved and merge. No multithreading — typically microseconds.
             for batch_index in 1..batch_count {
                 let batch_handles = &self.batch_referenced_handles.get(batch_index);
                 let first_observed = self.bodies_first_observed_in_batches.get_mut(batch_index);
-                let flag_bundle_count = self.merged_constrained_body_handles.flags.len().min(batch_handles.flags.len());
+                let flag_bundle_count = self
+                    .merged_constrained_body_handles
+                    .flags
+                    .len()
+                    .min(batch_handles.flags.len());
 
                 let mut horizontal_merge: u64 = 0;
                 for flag_bundle_index in 0..flag_bundle_count {
-                    let merge_bundle = *self.merged_constrained_body_handles.flags.get(flag_bundle_index);
+                    let merge_bundle = *self
+                        .merged_constrained_body_handles
+                        .flags
+                        .get(flag_bundle_index);
                     let batch_bundle = *batch_handles.flags.get(flag_bundle_index);
-                    *self.merged_constrained_body_handles.flags.get_mut(flag_bundle_index) = merge_bundle | batch_bundle;
+                    *self
+                        .merged_constrained_body_handles
+                        .flags
+                        .get_mut(flag_bundle_index) = merge_bundle | batch_bundle;
                     // If this batch contains a body, and the merged set does not, then it's first observed in this batch
                     let first_observed_bundle = !merge_bundle & batch_bundle;
                     horizontal_merge |= first_observed_bundle;
                     *first_observed.flags.get_mut(flag_bundle_index) = first_observed_bundle;
                 }
-                *batch_has_any_integration_responsibilities.get_mut(batch_index) = horizontal_merge != 0;
+                *batch_has_any_integration_responsibilities.get_mut(batch_index) =
+                    horizontal_merge != 0;
             }
 
             // Compute per-constraint integration responsibilities (single-threaded path)
@@ -2859,33 +3400,57 @@ impl Solver {
                     // Initialize coarse to false for batches with no responsibilities
                     let batch = (*active_set_ptr).batches.get(i);
                     for j in 0..batch.type_batches.count {
-                        *self.coarse_batch_integration_responsibilities.get_mut(i).get_mut(j) = false;
+                        *self
+                            .coarse_batch_integration_responsibilities
+                            .get_mut(i)
+                            .get_mut(j) = false;
                     }
                     continue;
                 }
                 let batch = (*active_set_ptr).batches.get(i);
                 for j in 0..batch.type_batches.count {
                     let type_batch = batch.type_batches.get(j);
-                    let has_responsibilities = self.compute_integration_responsibilities_for_constraint_region(
-                        i, j, 0, type_batch.constraint_count, false,
-                    );
-                    *self.coarse_batch_integration_responsibilities.get_mut(i).get_mut(j) = has_responsibilities;
+                    let has_responsibilities = self
+                        .compute_integration_responsibilities_for_constraint_region(
+                            i,
+                            j,
+                            0,
+                            type_batch.constraint_count,
+                            false,
+                        );
+                    *self
+                        .coarse_batch_integration_responsibilities
+                        .get_mut(i)
+                        .get_mut(j) = has_responsibilities;
                 }
             }
-            if fallback_exists && *batch_has_any_integration_responsibilities.get(self.fallback_batch_threshold) {
+            if fallback_exists
+                && *batch_has_any_integration_responsibilities.get(self.fallback_batch_threshold)
+            {
                 let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
                 for j in 0..batch.type_batches.count {
                     let type_batch = batch.type_batches.get(j);
-                    let has_responsibilities = self.compute_integration_responsibilities_for_constraint_region(
-                        self.fallback_batch_threshold, j, 0, type_batch.constraint_count, true,
-                    );
-                    *self.coarse_batch_integration_responsibilities.get_mut(self.fallback_batch_threshold).get_mut(j) = has_responsibilities;
+                    let has_responsibilities = self
+                        .compute_integration_responsibilities_for_constraint_region(
+                            self.fallback_batch_threshold,
+                            j,
+                            0,
+                            type_batch.constraint_count,
+                            true,
+                        );
+                    *self
+                        .coarse_batch_integration_responsibilities
+                        .get_mut(self.fallback_batch_threshold)
+                        .get_mut(j) = has_responsibilities;
                 }
             } else if fallback_exists {
                 // Initialize coarse to false for fallback batch with no responsibilities
                 let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
                 for j in 0..batch.type_batches.count {
-                    *self.coarse_batch_integration_responsibilities.get_mut(self.fallback_batch_threshold).get_mut(j) = false;
+                    *self
+                        .coarse_batch_integration_responsibilities
+                        .get_mut(self.fallback_batch_threshold)
+                        .get_mut(j) = false;
                 }
             }
 
@@ -2893,25 +3458,34 @@ impl Solver {
 
             // Dispose bodiesFirstObservedInBatches (no longer needed after responsibilities computed)
             debug_assert!(
-                !self.bodies_first_observed_in_batches.get(0).flags.allocated(),
+                !self
+                    .bodies_first_observed_in_batches
+                    .get(0)
+                    .flags
+                    .allocated(),
                 "First batch's slot should be empty"
             );
             for batch_index in 1..self.bodies_first_observed_in_batches.len() {
-                self.bodies_first_observed_in_batches.get_mut(batch_index).dispose(pool);
+                self.bodies_first_observed_in_batches
+                    .get_mut(batch_index)
+                    .dispose(pool);
             }
             pool.return_buffer(&mut self.bodies_first_observed_in_batches);
 
             // Add the constrained kinematics to the merged constrained body handles.
             for i in 0..self.constrained_kinematic_handles.count {
-                self.merged_constrained_body_handles.add_unsafely(
-                    *self.constrained_kinematic_handles.span.get(i),
-                );
+                self.merged_constrained_body_handles
+                    .add_unsafely(*self.constrained_kinematic_handles.span.get(i));
             }
 
             // Return a copy of the merged handles (caller owns it)
             let result_len = self.merged_constrained_body_handles.flags.len();
-            let mut result = IndexSet { flags: pool.take(result_len) };
-            self.merged_constrained_body_handles.flags.copy_to(0, &mut result.flags, 0, result_len);
+            let mut result = IndexSet {
+                flags: pool.take(result_len),
+            };
+            self.merged_constrained_body_handles
+                .flags
+                .copy_to(0, &mut result.flags, 0, result_len);
             result
         } else {
             IndexSet::empty()
@@ -2932,12 +3506,17 @@ impl Solver {
                 for type_batch_index in 0..flags_for_batch.len() {
                     let flags_for_type_batch = flags_for_batch.get_mut(type_batch_index);
                     for body_index_in_constraint in 0..flags_for_type_batch.len() {
-                        flags_for_type_batch.get_mut(body_index_in_constraint).dispose(pool);
+                        flags_for_type_batch
+                            .get_mut(body_index_in_constraint)
+                            .dispose(pool);
                     }
                     pool.return_buffer(flags_for_type_batch);
                 }
                 pool.return_buffer(flags_for_batch);
-                pool.return_buffer(self.coarse_batch_integration_responsibilities.get_mut(batch_index));
+                pool.return_buffer(
+                    self.coarse_batch_integration_responsibilities
+                        .get_mut(batch_index),
+                );
             }
             pool.return_buffer(&mut self.integration_flags);
             pool.return_buffer(&mut self.coarse_batch_integration_responsibilities);
@@ -3009,9 +3588,14 @@ impl Solver {
                         let pi = &*pi_ptr;
                         let handles = &(*self_ptr).constrained_kinematic_handles;
                         let handle_buf = handles.span.slice_count(handles.count);
-                        let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
+                        let bundle_count =
+                            BundleIndexing::get_bundle_count(handles.count as usize) as i32;
                         pi.integrate_kinematic_poses_and_velocities_dispatch(
-                            &handle_buf, 0, bundle_count, substep_dt, 0,
+                            &handle_buf,
+                            0,
+                            bundle_count,
+                            substep_dt,
+                            0,
                         );
                     }
                 } else {
@@ -3021,9 +3605,14 @@ impl Solver {
                         if pi.integrate_velocity_for_kinematics() {
                             let handles = &(*self_ptr).constrained_kinematic_handles;
                             let handle_buf = handles.span.slice_count(handles.count);
-                            let bundle_count = BundleIndexing::get_bundle_count(handles.count as usize) as i32;
+                            let bundle_count =
+                                BundleIndexing::get_bundle_count(handles.count as usize) as i32;
                             pi.integrate_kinematic_velocities_dispatch(
-                                &handle_buf, 0, bundle_count, substep_dt, 0,
+                                &handle_buf,
+                                0,
+                                bundle_count,
+                                substep_dt,
+                                0,
                             );
                         }
                     }
@@ -3042,11 +3631,16 @@ impl Solver {
                             .as_ref()
                             .unwrap();
                         (*self_ptr).warm_start_block(
-                            0, i, j,
-                            0, bundle_count,
-                            type_batch, processor.inner(),
+                            0,
+                            i,
+                            j,
+                            0,
+                            bundle_count,
+                            type_batch,
+                            processor.inner(),
                             allow_pose_integration,
-                            substep_dt, inverse_dt,
+                            substep_dt,
+                            inverse_dt,
                         );
                     }
                 }
@@ -3066,14 +3660,7 @@ impl Solver {
                                 .as_ref()
                                 .unwrap()
                                 .inner()
-                                .solve(
-                                    type_batch,
-                                    bodies,
-                                    substep_dt,
-                                    inverse_dt,
-                                    0,
-                                    bundle_count,
-                                );
+                                .solve(type_batch, bodies, substep_dt, inverse_dt, 0, bundle_count);
                         }
                     }
                 }

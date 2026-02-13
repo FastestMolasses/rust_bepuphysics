@@ -2,7 +2,6 @@
 
 use crate::physics::constraints::contact::contact_convex_common::*;
 use crate::physics::constraints::contact::contact_nonconvex_common::*;
-use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 
 // ============================================================================

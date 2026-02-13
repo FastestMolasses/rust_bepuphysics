@@ -15,8 +15,8 @@ impl Tree {
             unsafe {
                 let last = self.node_count;
                 // Swap last node for removed node.
-                let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
-                    .add(node_index as usize);
+                let node =
+                    &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
                 *node = *self.nodes.get(last);
                 let meta_ptr = self.metanodes.as_ptr() as *mut super::node::Metanode;
                 let metanode = &mut *meta_ptr.add(node_index as usize);
@@ -38,8 +38,7 @@ impl Tree {
                         self.metanodes.get_mut(child.index).parent = node_index;
                     } else {
                         // It's a leaf node. It needs to have its pointers updated.
-                        *self.leaves.get_mut(Self::encode(child.index)) =
-                            Leaf::new(node_index, i);
+                        *self.leaves.get_mut(Self::encode(child.index)) = Leaf::new(node_index, i);
                     }
                 }
             }
@@ -106,10 +105,8 @@ impl Tree {
 
             // Remove the leaf from this node.
             let surviving_child_index_in_node = leaf.child_index() ^ 1;
-            let surviving_child = *Self::node_child(
-                self.nodes.get(node_index),
-                surviving_child_index_in_node,
-            );
+            let surviving_child =
+                *Self::node_child(self.nodes.get(node_index), surviving_child_index_in_node);
 
             // Check to see if this node should collapse.
             if metanode.parent >= 0 {

@@ -43,14 +43,22 @@ impl LinearAxisLimit {
     ) {
         #[cfg(debug_assertions)]
         {
-            debug_assert!(self.maximum_offset >= self.minimum_offset, "LinearAxisLimit.maximum_offset must be >= minimum_offset");
-            ConstraintChecker::assert_unit_length_vec3(self.local_axis, "LinearAxisLimit", "local_axis");
-            ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "LinearAxisLimit");
+            debug_assert!(
+                self.maximum_offset >= self.minimum_offset,
+                "LinearAxisLimit.maximum_offset must be >= minimum_offset"
+            );
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_axis,
+                "LinearAxisLimit",
+                "local_axis",
+            );
+            ConstraintChecker::assert_valid_spring_settings(
+                &self.spring_settings,
+                "LinearAxisLimit",
+            );
         }
 
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
         Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
         Vector3Wide::write_first(self.local_axis, &mut target.local_plane_normal);
@@ -67,9 +75,7 @@ impl LinearAxisLimit {
         inner_index: usize,
         description: &mut LinearAxisLimit,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
         Vector3Wide::read_first(&source.local_plane_normal, &mut description.local_axis);
@@ -115,7 +121,11 @@ impl LinearAxisLimitFunctions {
         Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
         Matrix3x3Wide::transform_without_overlap(local_plane_normal, &orientation_matrix_a, normal);
         let mut anchor_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(local_offset_a, &orientation_matrix_a, &mut anchor_a);
+        Matrix3x3Wide::transform_without_overlap(
+            local_offset_a,
+            &orientation_matrix_a,
+            &mut anchor_a,
+        );
         let mut offset_b = Vector3Wide::default();
         QuaternionWide::transform_without_overlap(local_offset_b, orientation_b, &mut offset_b);
         let mut anchor_b = Vector3Wide::default();
@@ -163,16 +173,41 @@ impl LinearAxisLimitFunctions {
         let mut angular_ja = Vector3Wide::default();
         let mut angular_jb = Vector3Wide::default();
         Self::compute_jacobians(
-            &ab, orientation_a, orientation_b,
-            &prestep.local_plane_normal, &prestep.local_offset_a, &prestep.local_offset_b,
-            &prestep.minimum_offset, &prestep.maximum_offset,
-            &mut _error, &mut normal, &mut angular_ja, &mut angular_jb,
+            &ab,
+            orientation_a,
+            orientation_b,
+            &prestep.local_plane_normal,
+            &prestep.local_offset_a,
+            &prestep.local_offset_b,
+            &prestep.minimum_offset,
+            &prestep.maximum_offset,
+            &mut _error,
+            &mut normal,
+            &mut angular_ja,
+            &mut angular_jb,
         );
         let mut angular_impulse_to_velocity_a = Vector3Wide::default();
         let mut angular_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_ja, &inertia_a.inverse_inertia_tensor, &mut angular_impulse_to_velocity_a);
-        Symmetric3x3Wide::transform_without_overlap(&angular_jb, &inertia_b.inverse_inertia_tensor, &mut angular_impulse_to_velocity_b);
-        LinearAxisServoFunctions::apply_impulse(&normal, &angular_impulse_to_velocity_a, &angular_impulse_to_velocity_b, inertia_a, inertia_b, accumulated_impulses, wsv_a, wsv_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_ja,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_impulse_to_velocity_a,
+        );
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_jb,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_impulse_to_velocity_b,
+        );
+        LinearAxisServoFunctions::apply_impulse(
+            &normal,
+            &angular_impulse_to_velocity_a,
+            &angular_impulse_to_velocity_b,
+            inertia_a,
+            inertia_b,
+            accumulated_impulses,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     pub fn solve(
@@ -196,27 +231,52 @@ impl LinearAxisLimitFunctions {
         let mut angular_ja = Vector3Wide::default();
         let mut angular_jb = Vector3Wide::default();
         Self::compute_jacobians(
-            &ab, orientation_a, orientation_b,
-            &prestep.local_plane_normal, &prestep.local_offset_a, &prestep.local_offset_b,
-            &prestep.minimum_offset, &prestep.maximum_offset,
-            &mut error, &mut normal, &mut angular_ja, &mut angular_jb,
+            &ab,
+            orientation_a,
+            orientation_b,
+            &prestep.local_plane_normal,
+            &prestep.local_offset_a,
+            &prestep.local_offset_b,
+            &prestep.minimum_offset,
+            &prestep.maximum_offset,
+            &mut error,
+            &mut normal,
+            &mut angular_ja,
+            &mut angular_jb,
         );
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(&prestep.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+        SpringSettingsWide::compute_springiness(
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
 
         let mut angular_impulse_to_velocity_a = Vector3Wide::default();
         let mut angular_impulse_to_velocity_b = Vector3Wide::default();
         let mut effective_mass = Vector::<f32>::splat(0.0);
         LinearAxisServoFunctions::compute_effective_mass(
-            &angular_ja, &angular_jb, inertia_a, inertia_b, &effective_mass_cfm_scale,
-            &mut angular_impulse_to_velocity_a, &mut angular_impulse_to_velocity_b, &mut effective_mass,
+            &angular_ja,
+            &angular_jb,
+            inertia_a,
+            inertia_b,
+            &effective_mass_cfm_scale,
+            &mut angular_impulse_to_velocity_a,
+            &mut angular_impulse_to_velocity_b,
+            &mut effective_mass,
         );
 
         let mut bias_velocity = Vector::<f32>::splat(0.0);
-        InequalityHelpers::compute_bias_velocity(error, &position_error_to_velocity, inverse_dt, &mut bias_velocity);
+        InequalityHelpers::compute_bias_velocity(
+            error,
+            &position_error_to_velocity,
+            inverse_dt,
+            &mut bias_velocity,
+        );
 
         // csv = dot(wsvA.Linear - wsvB.Linear, normal) + dot(wsvA.Angular, angularJA) + dot(wsvB.Angular, angularJB)
         let mut linear_diff = Vector3Wide::default();
@@ -226,10 +286,20 @@ impl LinearAxisLimitFunctions {
         let csv_angular_b = Vector3Wide::dot_val(&wsv_b.angular, &angular_jb);
         let csv = csv_linear + csv_angular_a + csv_angular_b;
 
-        let mut csi = effective_mass * (bias_velocity - csv) - *accumulated_impulses * softness_impulse_scale;
+        let mut csi =
+            effective_mass * (bias_velocity - csv) - *accumulated_impulses * softness_impulse_scale;
 
         InequalityHelpers::clamp_positive(accumulated_impulses, &mut csi);
-        LinearAxisServoFunctions::apply_impulse(&normal, &angular_impulse_to_velocity_a, &angular_impulse_to_velocity_b, inertia_a, inertia_b, &csi, wsv_a, wsv_b);
+        LinearAxisServoFunctions::apply_impulse(
+            &normal,
+            &angular_impulse_to_velocity_a,
+            &angular_impulse_to_velocity_b,
+            inertia_a,
+            inertia_b,
+            &csi,
+            wsv_a,
+            wsv_b,
+        );
     }
 }
 

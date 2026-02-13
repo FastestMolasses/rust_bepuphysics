@@ -101,7 +101,10 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
             // This table index is taken. Is this the specified element?
             // Remember to decode the object index.
             *element_index -= 1;
-            if self.equality_comparer.equals(&self.span[*element_index], element) {
+            if self
+                .equality_comparer
+                .equals(&self.span[*element_index], element)
+            {
                 return true;
             }
             *table_index = (*table_index + 1) & self.table_mask;
@@ -176,7 +179,8 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
     /// Resizes the internal buffers.
     pub fn resize(&mut self, new_size: i32, pool: &mut impl UnmanagedMemoryPool) {
         let mut new_span = pool.take_at_least::<T>(new_size);
-        let table_capacity = (new_span.len() << self.table_power_offset).max(1 << self.table_power_offset);
+        let table_capacity =
+            (new_span.len() << self.table_power_offset).max(1 << self.table_power_offset);
         let mut new_table = pool.take_at_least::<i32>(table_capacity);
 
         // Clear the new table
@@ -251,7 +255,8 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
 
             let candidate_element_index = move_candidate_index - 1;
             let desired_index = HashHelper::rehash(
-                self.equality_comparer.hash(&self.span[candidate_element_index]),
+                self.equality_comparer
+                    .hash(&self.span[candidate_element_index]),
             ) & self.table_mask;
 
             // Would this element be closer to its actual index if moved to the gap?

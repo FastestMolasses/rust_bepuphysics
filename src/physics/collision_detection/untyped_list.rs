@@ -27,7 +27,11 @@ impl Default for UntypedList {
 impl UntypedList {
     /// Creates a new untyped list with the given element size and initial capacity.
     #[inline(always)]
-    pub fn new(element_size_in_bytes: i32, initial_capacity_in_elements: i32, pool: &mut BufferPool) -> Self {
+    pub fn new(
+        element_size_in_bytes: i32,
+        initial_capacity_in_elements: i32,
+        pool: &mut BufferPool,
+    ) -> Self {
         let buffer = pool.take_at_least(initial_capacity_in_elements * element_size_in_bytes);
         Self {
             buffer,
@@ -130,9 +134,10 @@ impl UntypedList {
         if !self.buffer.allocated() {
             // This didn't exist at all before; create a new entry for this type.
             self.element_size_in_bytes = element_size_in_bytes;
-            self.buffer = pool.take_at_least(
-                i32::max(new_size, minimum_element_count * element_size_in_bytes),
-            );
+            self.buffer = pool.take_at_least(i32::max(
+                new_size,
+                minimum_element_count * element_size_in_bytes,
+            ));
         } else {
             debug_assert!(element_size_in_bytes == self.element_size_in_bytes);
             if new_size > self.buffer.len() {
@@ -159,14 +164,23 @@ impl UntypedList {
 
     /// Allocates an element of type T.
     #[inline(always)]
-    pub unsafe fn allocate_typed<T>(&mut self, minimum_element_count: i32, pool: &mut BufferPool) -> i32 {
+    pub unsafe fn allocate_typed<T>(
+        &mut self,
+        minimum_element_count: i32,
+        pool: &mut BufferPool,
+    ) -> i32 {
         let element_size_in_bytes = mem::size_of::<T>() as i32;
         self.allocate(element_size_in_bytes, minimum_element_count, pool)
     }
 
     /// Adds an element of type T to the list, returning the byte index.
     #[inline(always)]
-    pub unsafe fn add<T: Copy>(&mut self, data: &T, minimum_count: i32, pool: &mut BufferPool) -> i32 {
+    pub unsafe fn add<T: Copy>(
+        &mut self,
+        data: &T,
+        minimum_count: i32,
+        pool: &mut BufferPool,
+    ) -> i32 {
         let byte_index = self.allocate_typed::<T>(minimum_count, pool);
         *(self.buffer.as_mut_ptr().add(byte_index as usize) as *mut T) = *data;
         byte_index

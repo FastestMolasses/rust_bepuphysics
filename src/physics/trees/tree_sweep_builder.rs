@@ -34,7 +34,9 @@ impl RefComparer<i32> for IndexMapComparer {
         unsafe {
             let centroid_a = *self.centroids.add(*a as usize);
             let centroid_b = *self.centroids.add(*b as usize);
-            centroid_a.partial_cmp(&centroid_b).unwrap_or(Ordering::Equal)
+            centroid_a
+                .partial_cmp(&centroid_b)
+                .unwrap_or(Ordering::Equal)
         }
     }
 }
@@ -59,7 +61,12 @@ impl Tree {
         let comparer = IndexMapComparer {
             centroids: centroids as *const f32,
         };
-        Quicksort::sort_keys(std::slice::from_raw_parts_mut(index_map, count as usize), 0, count - 1, &comparer);
+        Quicksort::sort_keys(
+            std::slice::from_raw_parts_mut(index_map, count as usize),
+            0,
+            count - 1,
+            &comparer,
+        );
 
         // Search for the best split.
         // Sweep across from low to high, caching the merged size at each point.
@@ -269,8 +276,7 @@ impl Tree {
         // Re-borrow node after potential recursive calls
         let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
         if leaf_count_b > 1 {
-            node.b.index =
-                self.create_sweep_builder_node(-1, 1, leaves, split_index, leaf_count_b);
+            node.b.index = self.create_sweep_builder_node(-1, 1, leaves, split_index, leaf_count_b);
         } else {
             debug_assert_eq!(leaf_count_b, 1);
             let leaf_index = *leaves.index_map.add(split_index as usize);
@@ -299,7 +305,7 @@ impl Tree {
             // No need to do any sorting. This node can fit every remaining subtree.
             let children = &mut (*(self.nodes.as_ptr() as *mut super::node::Node)
                 .add(node_index as usize))
-                .a as *mut NodeChild;
+            .a as *mut NodeChild;
             for i in 0..count {
                 let leaf_index = *leaves.index_map.add((i + start) as usize);
                 *self.leaves.get_mut(leaf_index) = Leaf::new(node_index, i);

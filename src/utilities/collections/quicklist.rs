@@ -127,10 +127,7 @@ impl<T: Copy> QuickList<T> {
     /// Adds an element to the list without checking capacity.
     #[inline(always)]
     pub fn add_unsafely(&mut self, element: T) {
-        debug_assert!(
-            self.count < self.span.len(),
-            "Adding would exceed capacity"
-        );
+        debug_assert!(self.count < self.span.len(), "Adding would exceed capacity");
         self.span[self.count] = element;
         self.count += 1;
     }
@@ -403,7 +400,9 @@ impl<T: Copy> QuickList<T> {
 
     /// Gets the index of the first element matching a predicate.
     #[inline(always)]
-    pub fn index_of_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+    pub fn index_of_predicate<
+        TPredicate: crate::utilities::collections::predicate::Predicate<T>,
+    >(
         &self,
         predicate: &TPredicate,
     ) -> i32 {
@@ -427,7 +426,9 @@ impl<T: Copy> QuickList<T> {
 
     /// Removes the first element matching a predicate. Does not preserve order.
     #[inline(always)]
-    pub fn fast_remove_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+    pub fn fast_remove_predicate<
+        TPredicate: crate::utilities::collections::predicate::Predicate<T>,
+    >(
         &mut self,
         predicate: &TPredicate,
     ) -> bool {
@@ -442,7 +443,9 @@ impl<T: Copy> QuickList<T> {
 
     /// Checks if any element matches a predicate.
     #[inline(always)]
-    pub fn contains_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+    pub fn contains_predicate<
+        TPredicate: crate::utilities::collections::predicate::Predicate<T>,
+    >(
         &self,
         predicate: &TPredicate,
     ) -> bool {

@@ -64,7 +64,15 @@ impl CapsuleCylinderTester {
         let mut p = Vector3Wide::default();
         let mut clamped = Vector3Wide::default();
         for _i in 0..12 {
-            Self::bounce(line_origin, line_direction, t, b, &radius_squared, &mut p, &mut clamped);
+            Self::bounce(
+                line_origin,
+                line_direction,
+                t,
+                b,
+                &radius_squared,
+                &mut p,
+                &mut clamped,
+            );
             let mut conservative_new_t = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&clamped, line_direction, &mut conservative_new_t);
             conservative_new_t = min.simd_max(max.simd_min(conservative_new_t - origin_dot));
@@ -78,9 +86,19 @@ impl CapsuleCylinderTester {
             min_bound = moved_up.select(conservative_new_t, min_bound);
             max_bound = moved_up.select(max_bound, conservative_new_t);
             let new_t = Vector::<f32>::splat(0.5) * (min_bound + max_bound);
-            *t = lane_deactivated.simd_lt(Vector::<i32>::splat(0)).select(*t, new_t);
+            *t = lane_deactivated
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(*t, new_t);
         }
-        Self::bounce(line_origin, line_direction, t, b, &radius_squared, &mut p, &mut clamped);
+        Self::bounce(
+            line_origin,
+            line_direction,
+            t,
+            b,
+            &radius_squared,
+            &mut p,
+            &mut clamped,
+        );
         Vector3Wide::subtract(&p, &clamped, offset_from_cylinder_to_line_segment);
     }
 
@@ -102,16 +120,21 @@ impl CapsuleCylinderTester {
         Vector3Wide::dot(da, local_offset_b, &mut da_offset_b);
         let db_offset_b = local_offset_b.y;
         let dadb = da.y;
-        *ta = (da_offset_b - db_offset_b * dadb) / (Vector::<f32>::splat(1.0) - dadb * dadb).simd_max(Vector::<f32>::splat(1e-15));
+        *ta = (da_offset_b - db_offset_b * dadb)
+            / (Vector::<f32>::splat(1.0) - dadb * dadb).simd_max(Vector::<f32>::splat(1e-15));
         *tb = *ta * dadb - db_offset_b;
 
         let absdadb = dadb.abs();
         let b_onto_a_offset = *b_half_length * absdadb;
         let a_onto_b_offset = *a_half_length * absdadb;
-        *ta_min = (-*a_half_length).simd_max((*a_half_length).simd_min(da_offset_b - b_onto_a_offset));
-        *ta_max = (*a_half_length).simd_min((-*a_half_length).simd_max(da_offset_b + b_onto_a_offset));
-        *tb_min = (-*b_half_length).simd_max((*b_half_length).simd_min(-a_onto_b_offset - db_offset_b));
-        *tb_max = (*b_half_length).simd_min((-*b_half_length).simd_max(a_onto_b_offset - db_offset_b));
+        *ta_min =
+            (-*a_half_length).simd_max((*a_half_length).simd_min(da_offset_b - b_onto_a_offset));
+        *ta_max =
+            (*a_half_length).simd_min((-*a_half_length).simd_max(da_offset_b + b_onto_a_offset));
+        *tb_min =
+            (-*b_half_length).simd_max((*b_half_length).simd_min(-a_onto_b_offset - db_offset_b));
+        *tb_max =
+            (*b_half_length).simd_min((-*b_half_length).simd_max(a_onto_b_offset - db_offset_b));
         *ta = (*ta).simd_max(*ta_min).simd_min(*ta_max);
         *tb = (*tb).simd_max(*tb_min).simd_min(*tb_max);
     }
@@ -134,7 +157,18 @@ impl CapsuleCylinderTester {
         let mut tb = Vector::<f32>::splat(0.0);
         let mut tb_min = Vector::<f32>::splat(0.0);
         let mut tb_max = Vector::<f32>::splat(0.0);
-        Self::get_closest_points_between_segments(axis_a, offset_b, a_half_length, b_half_length, &mut ta, &mut ta_min, &mut ta_max, &mut tb, &mut tb_min, &mut tb_max);
+        Self::get_closest_points_between_segments(
+            axis_a,
+            offset_b,
+            a_half_length,
+            b_half_length,
+            &mut ta,
+            &mut ta_min,
+            &mut ta_max,
+            &mut tb,
+            &mut tb_min,
+            &mut tb_max,
+        );
 
         // Rate coplanarity based on the angle between the capsule axis and the plane defined by the side and contact normal.
         // Since db is (0,1,0), db x normal is just (normal.Z, 0, -normal.X).
@@ -143,12 +177,11 @@ impl CapsuleCylinderTester {
 
         const LOWER_THRESHOLD: f32 = 0.02 * 0.02;
         const UPPER_THRESHOLD: f32 = 0.15 * 0.15;
-        let interval_weight = Vector::<f32>::splat(0.0).simd_max(
-            Vector::<f32>::splat(1.0).simd_min(
+        let interval_weight =
+            Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0).simd_min(
                 (Vector::<f32>::splat(UPPER_THRESHOLD) - squared_angle)
                     * Vector::<f32>::splat(1.0 / (UPPER_THRESHOLD - LOWER_THRESHOLD)),
-            ),
-        );
+            ));
         let weighted_tb = tb - tb * interval_weight;
         *contact_t_min = interval_weight * tb_min + weighted_tb;
         *contact_t_max = interval_weight * tb_max + weighted_tb;
@@ -175,36 +208,71 @@ impl CapsuleCylinderTester {
         Matrix3x3Wide::multiply_by_transpose_without_overlap(&world_r_a, &world_r_b, &mut r_a);
         let capsule_axis = r_a.y;
         let mut local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &world_r_b, &mut local_offset_b);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            offset_b,
+            &world_r_b,
+            &mut local_offset_b,
+        );
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
 
-        let inactive_lanes = BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
+        let inactive_lanes =
+            BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
         let mut t = Vector::<f32>::splat(0.0);
         let mut local_normal = Vector3Wide::default();
-        Self::get_closest_point_between_line_segment_and_cylinder(&local_offset_a, &capsule_axis, &a.half_length, b, &inactive_lanes, &mut t, &mut local_normal);
+        Self::get_closest_point_between_line_segment_and_cylinder(
+            &local_offset_a,
+            &capsule_axis,
+            &a.half_length,
+            b,
+            &inactive_lanes,
+            &mut t,
+            &mut local_normal,
+        );
         let mut dist_from_cyl_to_seg_sq = Vector::<f32>::splat(0.0);
         Vector3Wide::length_squared_to(&local_normal, &mut dist_from_cyl_to_seg_sq);
-        let internal_line_segment_intersected = dist_from_cyl_to_seg_sq.simd_lt(Vector::<f32>::splat(1e-12));
+        let internal_line_segment_intersected =
+            dist_from_cyl_to_seg_sq.simd_lt(Vector::<f32>::splat(1e-12));
         let dist_from_cyl_to_seg = StdFloat::sqrt(dist_from_cyl_to_seg_sq);
-        local_normal = Vector3Wide::scale(&local_normal, &(Vector::<f32>::splat(1.0) / dist_from_cyl_to_seg));
-        let mut depth = internal_line_segment_intersected.select(Vector::<f32>::splat(f32::MAX), -dist_from_cyl_to_seg);
+        local_normal = Vector3Wide::scale(
+            &local_normal,
+            &(Vector::<f32>::splat(1.0) / dist_from_cyl_to_seg),
+        );
+        let mut depth = internal_line_segment_intersected
+            .select(Vector::<f32>::splat(f32::MAX), -dist_from_cyl_to_seg);
         let negative_margin = -*speculative_margin;
-        let mut inactive_lanes = (depth + a.radius).simd_lt(negative_margin).to_int() | inactive_lanes;
+        let mut inactive_lanes =
+            (depth + a.radius).simd_lt(negative_margin).to_int() | inactive_lanes;
 
-        if (internal_line_segment_intersected.to_int() & !inactive_lanes).simd_lt(Vector::<i32>::splat(0)).any() {
+        if (internal_line_segment_intersected.to_int() & !inactive_lanes)
+            .simd_lt(Vector::<i32>::splat(0))
+            .any()
+        {
             // At least one lane is deeply intersecting; examine other normals.
-            let mut capsule_axis_dot_y = Vector::<f32>::splat(0.0);
+            let capsule_axis_dot_y = Vector::<f32>::splat(0.0);
             let _ = capsule_axis.y; // db = (0,1,0)
-            let endpoint_vs_cap_depth = b.half_length + (capsule_axis.y * a.half_length).abs() - local_offset_a.y.abs();
-            let use_endpoint_cap_depth = internal_line_segment_intersected.to_int() & endpoint_vs_cap_depth.simd_lt(depth).to_int();
-            depth = use_endpoint_cap_depth.simd_lt(Vector::<i32>::splat(0)).select(endpoint_vs_cap_depth, depth);
-            local_normal.x = use_endpoint_cap_depth.simd_lt(Vector::<i32>::splat(0)).select(Vector::<f32>::splat(0.0), local_normal.x);
-            local_normal.y = use_endpoint_cap_depth.simd_lt(Vector::<i32>::splat(0)).select(
-                local_offset_a.y.simd_gt(Vector::<f32>::splat(0.0)).select(Vector::<f32>::splat(1.0), Vector::<f32>::splat(-1.0)),
-                local_normal.y,
-            );
-            local_normal.z = use_endpoint_cap_depth.simd_lt(Vector::<i32>::splat(0)).select(Vector::<f32>::splat(0.0), local_normal.z);
+            let endpoint_vs_cap_depth =
+                b.half_length + (capsule_axis.y * a.half_length).abs() - local_offset_a.y.abs();
+            let use_endpoint_cap_depth = internal_line_segment_intersected.to_int()
+                & endpoint_vs_cap_depth.simd_lt(depth).to_int();
+            depth = use_endpoint_cap_depth
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(endpoint_vs_cap_depth, depth);
+            local_normal.x = use_endpoint_cap_depth
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(Vector::<f32>::splat(0.0), local_normal.x);
+            local_normal.y = use_endpoint_cap_depth
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(
+                    local_offset_a
+                        .y
+                        .simd_gt(Vector::<f32>::splat(0.0))
+                        .select(Vector::<f32>::splat(1.0), Vector::<f32>::splat(-1.0)),
+                    local_normal.y,
+                );
+            local_normal.z = use_endpoint_cap_depth
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(Vector::<f32>::splat(0.0), local_normal.z);
 
             let mut ta = Vector::<f32>::splat(0.0);
             let mut ta_min = Vector::<f32>::splat(0.0);
@@ -212,7 +280,18 @@ impl CapsuleCylinderTester {
             let mut tb = Vector::<f32>::splat(0.0);
             let mut tb_min = Vector::<f32>::splat(0.0);
             let mut tb_max = Vector::<f32>::splat(0.0);
-            Self::get_closest_points_between_segments(&capsule_axis, &local_offset_b, &a.half_length, &b.half_length, &mut ta, &mut ta_min, &mut ta_max, &mut tb, &mut tb_min, &mut tb_max);
+            Self::get_closest_points_between_segments(
+                &capsule_axis,
+                &local_offset_b,
+                &a.half_length,
+                &b.half_length,
+                &mut ta,
+                &mut ta_min,
+                &mut ta_max,
+                &mut tb,
+                &mut tb_min,
+                &mut tb_max,
+            );
 
             // offset = da * ta - (db * tb + offsetB); db = (0,1,0)
             let mut closest_a = Vector3Wide::default();
@@ -225,22 +304,46 @@ impl CapsuleCylinderTester {
             let inverse_distance = Vector::<f32>::splat(1.0) / distance;
             let mut internal_edge_normal = Vector3Wide::scale(&offset, &inverse_distance);
             let use_fallback = distance.simd_lt(Vector::<f32>::splat(1e-7));
-            internal_edge_normal.x = use_fallback.select(Vector::<f32>::splat(1.0), internal_edge_normal.x);
-            internal_edge_normal.y = use_fallback.select(Vector::<f32>::splat(0.0), internal_edge_normal.y);
-            internal_edge_normal.z = use_fallback.select(Vector::<f32>::splat(0.0), internal_edge_normal.z);
+            internal_edge_normal.x =
+                use_fallback.select(Vector::<f32>::splat(1.0), internal_edge_normal.x);
+            internal_edge_normal.y =
+                use_fallback.select(Vector::<f32>::splat(0.0), internal_edge_normal.y);
+            internal_edge_normal.z =
+                use_fallback.select(Vector::<f32>::splat(0.0), internal_edge_normal.z);
 
             let mut center_separation_along_normal = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&local_offset_a, &internal_edge_normal, &mut center_separation_along_normal);
+            Vector3Wide::dot(
+                &local_offset_a,
+                &internal_edge_normal,
+                &mut center_separation_along_normal,
+            );
             let cylinder_contribution = (b.half_length * internal_edge_normal.y).abs()
-                + b.radius * StdFloat::sqrt((Vector::<f32>::splat(1.0) - internal_edge_normal.y * internal_edge_normal.y).simd_max(Vector::<f32>::splat(0.0)));
+                + b.radius
+                    * StdFloat::sqrt(
+                        (Vector::<f32>::splat(1.0)
+                            - internal_edge_normal.y * internal_edge_normal.y)
+                            .simd_max(Vector::<f32>::splat(0.0)),
+                    );
             let mut capsule_axis_dot_normal = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&capsule_axis, &internal_edge_normal, &mut capsule_axis_dot_normal);
+            Vector3Wide::dot(
+                &capsule_axis,
+                &internal_edge_normal,
+                &mut capsule_axis_dot_normal,
+            );
             let capsule_contribution = capsule_axis_dot_normal.abs() * a.half_length;
-            let internal_edge_depth = cylinder_contribution + capsule_contribution - center_separation_along_normal;
+            let internal_edge_depth =
+                cylinder_contribution + capsule_contribution - center_separation_along_normal;
 
-            let use_internal_edge_depth = internal_line_segment_intersected.to_int() & internal_edge_depth.simd_lt(depth).to_int();
-            depth = use_internal_edge_depth.simd_lt(Vector::<i32>::splat(0)).select(internal_edge_depth, depth);
-            local_normal = Vector3Wide::conditional_select(&use_internal_edge_depth, &internal_edge_normal, &local_normal);
+            let use_internal_edge_depth = internal_line_segment_intersected.to_int()
+                & internal_edge_depth.simd_lt(depth).to_int();
+            depth = use_internal_edge_depth
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(internal_edge_depth, depth);
+            local_normal = Vector3Wide::conditional_select(
+                &use_internal_edge_depth,
+                &internal_edge_normal,
+                &local_normal,
+            );
         }
 
         // All of the above excluded capsule radius. Include it now.
@@ -252,10 +355,16 @@ impl CapsuleCylinderTester {
         }
 
         // Determine which contacts to produce: cap or side.
-        let use_cap_contacts = (!inactive_lanes) & local_normal.y.abs().simd_gt(Vector::<f32>::splat(0.70710678118)).to_int();
+        let use_cap_contacts = (!inactive_lanes)
+            & local_normal
+                .y
+                .abs()
+                .simd_gt(Vector::<f32>::splat(0.70710678118))
+                .to_int();
 
         // First, assume non-cap (side) contacts.
-        let inverse_horizontal_normal_length_squared = Vector::<f32>::splat(1.0) / (local_normal.x * local_normal.x + local_normal.z * local_normal.z);
+        let inverse_horizontal_normal_length_squared = Vector::<f32>::splat(1.0)
+            / (local_normal.x * local_normal.x + local_normal.z * local_normal.z);
         let scale_val = b.radius * StdFloat::sqrt(inverse_horizontal_normal_length_squared);
         let cylinder_segment_offset_x = local_normal.x * scale_val;
         let cylinder_segment_offset_z = local_normal.z * scale_val;
@@ -266,7 +375,16 @@ impl CapsuleCylinderTester {
         };
         let mut contact_t_min = Vector::<f32>::splat(0.0);
         let mut contact_t_max = Vector::<f32>::splat(0.0);
-        Self::get_contact_interval_between_segments(&a.half_length, &b.half_length, &capsule_axis, &local_normal, &inverse_horizontal_normal_length_squared, &a_to_side_segment_center, &mut contact_t_min, &mut contact_t_max);
+        Self::get_contact_interval_between_segments(
+            &a.half_length,
+            &b.half_length,
+            &capsule_axis,
+            &local_normal,
+            &inverse_horizontal_normal_length_squared,
+            &a_to_side_segment_center,
+            &mut contact_t_min,
+            &mut contact_t_max,
+        );
 
         let mut contact0 = Vector3Wide {
             x: cylinder_segment_offset_x,
@@ -279,11 +397,17 @@ impl CapsuleCylinderTester {
             z: cylinder_segment_offset_z,
         };
 
-        let mut contact_count = (contact_t_max - contact_t_min).abs().simd_lt(b.half_length * Vector::<f32>::splat(1e-5)).select(Vector::<i32>::splat(1), Vector::<i32>::splat(2));
+        let mut contact_count = (contact_t_max - contact_t_min)
+            .abs()
+            .simd_lt(b.half_length * Vector::<f32>::splat(1e-5))
+            .select(Vector::<i32>::splat(1), Vector::<i32>::splat(2));
 
         if use_cap_contacts.simd_lt(Vector::<i32>::splat(0)).any() {
             // At least one lane requires cap contacts.
-            let cap_height = local_normal.y.simd_gt(Vector::<f32>::splat(0.0)).select(b.half_length, -b.half_length);
+            let cap_height = local_normal
+                .y
+                .simd_gt(Vector::<f32>::splat(0.0))
+                .select(b.half_length, -b.half_length);
             let inverse_normal_y = Vector::<f32>::splat(1.0) / local_normal.y;
             let mut endpoint_offset = Vector3Wide::default();
             Vector3Wide::scale_to(&capsule_axis, &a.half_length, &mut endpoint_offset);
@@ -309,7 +433,11 @@ impl CapsuleCylinderTester {
             };
             // Intersect the projected line segment with the cap circle at origin with radius b.radius.
             let mut projected_offset = Vector2Wide::default();
-            Vector2Wide::subtract(&projected_positive, &projected_negative, &mut projected_offset);
+            Vector2Wide::subtract(
+                &projected_positive,
+                &projected_negative,
+                &mut projected_offset,
+            );
             let mut coefficient_c = Vector::<f32>::splat(0.0);
             Vector2Wide::dot(&projected_negative, &projected_negative, &mut coefficient_c);
             coefficient_c = coefficient_c - b.radius * b.radius;
@@ -318,10 +446,18 @@ impl CapsuleCylinderTester {
             let mut coefficient_a = Vector::<f32>::splat(0.0);
             Vector2Wide::dot(&projected_offset, &projected_offset, &mut coefficient_a);
             let inverse_a = Vector::<f32>::splat(1.0) / coefficient_a;
-            let t_offset_val = StdFloat::sqrt((coefficient_b * coefficient_b - coefficient_a * coefficient_c).simd_max(Vector::<f32>::splat(0.0))) * inverse_a;
+            let t_offset_val =
+                StdFloat::sqrt(
+                    (coefficient_b * coefficient_b - coefficient_a * coefficient_c)
+                        .simd_max(Vector::<f32>::splat(0.0)),
+                ) * inverse_a;
             let t_base = -coefficient_b * inverse_a;
-            let mut t_min_cap = (t_base - t_offset_val).simd_max(Vector::<f32>::splat(0.0)).simd_min(Vector::<f32>::splat(1.0));
-            let mut t_max_cap = (t_base + t_offset_val).simd_max(Vector::<f32>::splat(0.0)).simd_min(Vector::<f32>::splat(1.0));
+            let mut t_min_cap = (t_base - t_offset_val)
+                .simd_max(Vector::<f32>::splat(0.0))
+                .simd_min(Vector::<f32>::splat(1.0));
+            let mut t_max_cap = (t_base + t_offset_val)
+                .simd_max(Vector::<f32>::splat(0.0))
+                .simd_min(Vector::<f32>::splat(1.0));
             let use_fallback_cap = coefficient_a.abs().simd_lt(Vector::<f32>::splat(1e-12));
             t_min_cap = use_fallback_cap.select(Vector::<f32>::splat(0.0), t_min_cap);
             t_max_cap = use_fallback_cap.select(Vector::<f32>::splat(0.0), t_max_cap);
@@ -335,20 +471,33 @@ impl CapsuleCylinderTester {
                 y: cap_height,
                 z: t_max_cap * projected_offset.y + projected_negative.y,
             };
-            let cap_contact_count = (t_max_cap - t_min_cap).simd_gt(Vector::<f32>::splat(1e-5)).select(Vector::<i32>::splat(2), Vector::<i32>::splat(1));
-            contact_count = use_cap_contacts.simd_lt(Vector::<i32>::splat(0)).select(cap_contact_count, contact_count);
+            let cap_contact_count = (t_max_cap - t_min_cap)
+                .simd_gt(Vector::<f32>::splat(1e-5))
+                .select(Vector::<i32>::splat(2), Vector::<i32>::splat(1));
+            contact_count = use_cap_contacts
+                .simd_lt(Vector::<i32>::splat(0))
+                .select(cap_contact_count, contact_count);
             contact0 = Vector3Wide::conditional_select(&use_cap_contacts, &cap_contact0, &contact0);
             contact1 = Vector3Wide::conditional_select(&use_cap_contacts, &cap_contact1, &contact1);
         }
 
         // Per-contact depth. Project contact on B along normal to face of A.
         let mut capsule_tangent = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(&local_normal, &capsule_axis, &mut capsule_tangent) };
+        unsafe {
+            Vector3Wide::cross_without_overlap(&local_normal, &capsule_axis, &mut capsule_tangent)
+        };
         let mut face_normal_a = Vector3Wide::default();
-        unsafe { Vector3Wide::cross_without_overlap(&capsule_tangent, &capsule_axis, &mut face_normal_a) };
+        unsafe {
+            Vector3Wide::cross_without_overlap(&capsule_tangent, &capsule_axis, &mut face_normal_a)
+        };
         let mut face_normal_a_dot_local_normal = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&face_normal_a, &local_normal, &mut face_normal_a_dot_local_normal);
-        let inverse_face_normal_a_dot_local_normal = Vector::<f32>::splat(1.0) / face_normal_a_dot_local_normal;
+        Vector3Wide::dot(
+            &face_normal_a,
+            &local_normal,
+            &mut face_normal_a_dot_local_normal,
+        );
+        let inverse_face_normal_a_dot_local_normal =
+            Vector::<f32>::splat(1.0) / face_normal_a_dot_local_normal;
         let offset0 = contact0 + local_offset_b;
         let offset1 = contact1 + local_offset_b;
         let mut t0 = Vector::<f32>::splat(0.0);
@@ -360,10 +509,14 @@ impl CapsuleCylinderTester {
         manifold.depth0 = a.radius + t0;
         manifold.depth1 = a.radius + t1;
 
-        let collapse = face_normal_a_dot_local_normal.abs().simd_lt(Vector::<f32>::splat(1e-7));
+        let collapse = face_normal_a_dot_local_normal
+            .abs()
+            .simd_lt(Vector::<f32>::splat(1e-7));
         manifold.depth0 = collapse.select(depth, manifold.depth0);
         let contact0_valid = manifold.depth0.simd_ge(negative_margin);
-        let contact1_valid = contact_count.simd_eq(Vector::<i32>::splat(2)).to_int() & (!collapse.to_int()) & manifold.depth1.simd_ge(negative_margin).to_int();
+        let contact1_valid = contact_count.simd_eq(Vector::<i32>::splat(2)).to_int()
+            & (!collapse.to_int())
+            & manifold.depth1.simd_ge(negative_margin).to_int();
         manifold.contact0_exists = (!inactive_lanes) & contact0_valid.to_int();
         manifold.contact1_exists = (!inactive_lanes) & contact1_valid;
 

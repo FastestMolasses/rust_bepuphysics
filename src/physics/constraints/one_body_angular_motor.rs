@@ -123,26 +123,14 @@ impl OneBodyAngularMotorFunctions {
         let mut diff = Vector3Wide::default();
         Vector3Wide::subtract(&prestep.target_velocity, &wsv_a.angular, &mut diff);
         let mut csi = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
-            &diff,
-            &unsoftened_effective_mass,
-            &mut csi,
-        );
+        Symmetric3x3Wide::transform_without_overlap(&diff, &unsoftened_effective_mass, &mut csi);
         let scaled_csi = csi * effective_mass_cfm_scale;
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);
 
-        ServoSettingsWide::clamp_impulse_3d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
+        ServoSettingsWide::clamp_impulse_3d(&maximum_impulse, accumulated_impulses, &mut csi);
 
-        Self::apply_impulse(
-            &mut wsv_a.angular,
-            &inertia_a.inverse_inertia_tensor,
-            &csi,
-        );
+        Self::apply_impulse(&mut wsv_a.angular, &inertia_a.inverse_inertia_tensor, &csi);
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

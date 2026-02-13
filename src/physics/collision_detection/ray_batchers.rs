@@ -94,7 +94,7 @@ pub trait IBroadPhaseSweepTester {
 }
 
 /// Helps test the broad phase's active and static trees with a custom leaf tester.
-/// Currently uses per-ray traversal via BroadPhase::ray_cast. 
+/// Currently uses per-ray traversal via BroadPhase::ray_cast.
 /// A future optimization would use the batched RayBatcher for SIMD ray streaming.
 pub struct BroadPhaseRayBatcher<'a, TRayTester: IBroadPhaseRayTester> {
     broad_phase: *const BroadPhase,
@@ -103,8 +103,16 @@ pub struct BroadPhaseRayBatcher<'a, TRayTester: IBroadPhaseRayTester> {
 }
 
 impl<'a, TRayTester: IBroadPhaseRayTester> BroadPhaseRayBatcher<'a, TRayTester> {
-    pub fn new(pool: *mut BufferPool, broad_phase: *const BroadPhase, ray_tester: &'a mut TRayTester) -> Self {
-        Self { broad_phase, pool, ray_tester }
+    pub fn new(
+        pool: *mut BufferPool,
+        broad_phase: *const BroadPhase,
+        ray_tester: &'a mut TRayTester,
+    ) -> Self {
+        Self {
+            broad_phase,
+            pool,
+            ray_tester,
+        }
     }
 
     /// Adds a ray to the batcher. Tests immediately via per-ray traversal.

@@ -77,19 +77,13 @@ impl Tree {
             // The root is partial.
             unsafe {
                 let nodes_ptr = self.nodes.as_ptr() as *mut Node;
-                let leaf_child = Self::node_child_mut(
-                    &mut *nodes_ptr,
-                    self.leaf_count,
-                );
+                let leaf_child = Self::node_child_mut(&mut *nodes_ptr, self.leaf_count);
                 // Reinterpret BoundingBox as NodeChild (both are 32 bytes, same min/max layout).
                 let bounds_as_child = &*(&bounds as *const BoundingBox as *const NodeChild);
                 *leaf_child = *bounds_as_child;
                 let leaf_count = self.leaf_count;
                 let leaf_index = self.add_leaf(0, leaf_count);
-                let leaf_child = Self::node_child_mut(
-                    &mut *nodes_ptr,
-                    leaf_count,
-                );
+                let leaf_child = Self::node_child_mut(&mut *nodes_ptr, leaf_count);
                 leaf_child.index = Self::encode(leaf_index);
                 leaf_child.leaf_count = 1;
                 return leaf_index;
@@ -112,8 +106,8 @@ impl Tree {
             }
 
             unsafe {
-                let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
-                    .add(node_index as usize);
+                let node =
+                    &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
 
                 // Choose whichever child requires less bounds expansion.
                 let mut merged_a = MaybeUninit::<BoundingBox4>::uninit();
@@ -278,8 +272,7 @@ impl Tree {
                     );
                     root.a = merged.assume_init();
                     root.a.index = node_index_to_replace;
-                    root.a.leaf_count =
-                        node_to_replace.a.leaf_count + node_to_replace.b.leaf_count;
+                    root.a.leaf_count = node_to_replace.a.leaf_count + node_to_replace.b.leaf_count;
                     root.b = child_to_shift_up;
 
                     *self.metanodes.get_mut(node_index_to_replace) = Metanode {
@@ -346,8 +339,7 @@ impl Tree {
                     );
                     root.b = merged.assume_init();
                     root.b.index = node_index_to_replace;
-                    root.b.leaf_count =
-                        node_to_replace.a.leaf_count + node_to_replace.b.leaf_count;
+                    root.b.leaf_count = node_to_replace.a.leaf_count + node_to_replace.b.leaf_count;
                     root.a = child_to_shift_up;
 
                     *self.metanodes.get_mut(node_index_to_replace) = Metanode {

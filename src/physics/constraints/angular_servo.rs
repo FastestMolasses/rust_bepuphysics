@@ -41,10 +41,7 @@ impl AngularServo {
                 "AngularServo",
                 "target_relative_rotation_local_a",
             );
-            ConstraintChecker::assert_valid_servo_settings(
-                &self.servo_settings,
-                "AngularServo",
-            );
+            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "AngularServo");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         QuaternionWide::write_first(
@@ -91,7 +88,11 @@ impl AngularServoFunctions {
         csi: &Vector3Wide,
     ) {
         let mut velocity_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(csi, impulse_to_velocity_a, &mut velocity_change_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            csi,
+            impulse_to_velocity_a,
+            &mut velocity_change_a,
+        );
         let mut tmp = Vector3Wide::default();
         Vector3Wide::add(angular_velocity_a, &velocity_change_a, &mut tmp);
         *angular_velocity_a = tmp;
@@ -182,7 +183,10 @@ impl AngularServoFunctions {
             &mut unsoftened_inverse_effective_mass,
         );
         let mut unsoftened_effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::invert(&unsoftened_inverse_effective_mass, &mut unsoftened_effective_mass);
+        Symmetric3x3Wide::invert(
+            &unsoftened_inverse_effective_mass,
+            &mut unsoftened_effective_mass,
+        );
         // Note effective mass is not directly scaled by CFM scale; instead scale the CSI.
 
         let mut clamped_bias_velocity = Vector3Wide::default();
@@ -212,11 +216,7 @@ impl AngularServoFunctions {
         Vector3Wide::subtract(&csi, &softness_component, &mut tmp);
         csi = tmp;
 
-        ServoSettingsWide::clamp_impulse_3d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
+        ServoSettingsWide::clamp_impulse_3d(&maximum_impulse, accumulated_impulses, &mut csi);
 
         Self::apply_impulse(
             &mut wsv_a.angular,

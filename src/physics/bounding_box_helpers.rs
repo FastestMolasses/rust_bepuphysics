@@ -228,10 +228,7 @@ impl BoundingBoxHelpers {
         maximum_radius: f32,
         maximum_angular_expansion: f32,
     ) -> f32 {
-        let a = math_helper::min(
-            angular_velocity_magnitude * dt,
-            std::f32::consts::FRAC_PI_3,
-        );
+        let a = math_helper::min(angular_velocity_magnitude * dt, std::f32::consts::FRAC_PI_3);
         let a2 = a * a;
         let a4 = a2 * a2;
         let a6 = a4 * a2;
@@ -282,8 +279,10 @@ impl BoundingBoxHelpers {
         ));
 
         let maximum_allowed_expansion_broadcasted = Vec3::splat(maximum_allowed_expansion);
-        *min_expansion = (-maximum_allowed_expansion_broadcasted).max(*min_expansion - angular_expansion);
-        *max_expansion = maximum_allowed_expansion_broadcasted.min(*max_expansion + angular_expansion);
+        *min_expansion =
+            (-maximum_allowed_expansion_broadcasted).max(*min_expansion - angular_expansion);
+        *max_expansion =
+            maximum_allowed_expansion_broadcasted.min(*max_expansion + angular_expansion);
     }
 
     /// Expands min/max bounding box using linear and angular velocities (scalar).
@@ -336,11 +335,7 @@ impl BoundingBoxHelpers {
 
     /// Expands bounding box by an expansion vector (scalar).
     #[inline(always)]
-    pub fn expand_bounding_box_by_expansion(
-        expansion: Vec3,
-        min: &mut Vec3,
-        max: &mut Vec3,
-    ) {
+    pub fn expand_bounding_box_by_expansion(expansion: Vec3, min: &mut Vec3, max: &mut Vec3) {
         let min_expansion = expansion.min(Vec3::ZERO);
         let max_expansion = expansion.max(Vec3::ZERO);
         *min += min_expansion;
@@ -370,13 +365,24 @@ impl BoundingBoxHelpers {
             sweep,
         );
         let mut local_offset_b = Vec3::ZERO;
-        quaternion_ex::transform_without_overlap(offset_b, inverse_orientation_b, &mut local_offset_b);
+        quaternion_ex::transform_without_overlap(
+            offset_b,
+            inverse_orientation_b,
+            &mut local_offset_b,
+        );
         let mut local_orientation_a = Quat::IDENTITY;
-        quaternion_ex::concatenate_without_overlap(orientation_a, inverse_orientation_b, &mut local_orientation_a);
+        quaternion_ex::concatenate_without_overlap(
+            orientation_a,
+            inverse_orientation_b,
+            &mut local_orientation_a,
+        );
 
         let mut maximum_radius_a = 0f32;
         let mut maximum_angular_expansion_a = 0f32;
-        shape_a.compute_angular_expansion_data(&mut maximum_radius_a, &mut maximum_angular_expansion_a);
+        shape_a.compute_angular_expansion_data(
+            &mut maximum_radius_a,
+            &mut maximum_angular_expansion_a,
+        );
         let angular_expansion_a = Self::get_angular_bounds_expansion(
             velocity_a.angular.length(),
             dt,
@@ -423,9 +429,17 @@ impl BoundingBoxHelpers {
             sweep,
         );
         let mut local_offset_b = Vec3::ZERO;
-        quaternion_ex::transform_without_overlap(offset_b, inverse_orientation_b, &mut local_offset_b);
+        quaternion_ex::transform_without_overlap(
+            offset_b,
+            inverse_orientation_b,
+            &mut local_offset_b,
+        );
         let mut orientation_a_local_to_b = Quat::IDENTITY;
-        quaternion_ex::concatenate_without_overlap(orientation_a, inverse_orientation_b, &mut orientation_a_local_to_b);
+        quaternion_ex::concatenate_without_overlap(
+            orientation_a,
+            inverse_orientation_b,
+            &mut orientation_a_local_to_b,
+        );
         let mut pose_a_rotated_into_b_local_space = RigidPose::default();
         Compound::get_rotated_child_pose_from_pose(
             local_pose,
@@ -436,14 +450,17 @@ impl BoundingBoxHelpers {
 
         let mut maximum_radius_a = 0f32;
         let mut maximum_angular_expansion_a = 0f32;
-        shapes.get_batch(shape_index.type_id() as usize).unwrap().compute_bounds_with_angular_data(
-            shape_index.index() as usize,
-            pose_a_rotated_into_b_local_space.orientation,
-            &mut maximum_radius_a,
-            &mut maximum_angular_expansion_a,
-            min,
-            max,
-        );
+        shapes
+            .get_batch(shape_index.type_id() as usize)
+            .unwrap()
+            .compute_bounds_with_angular_data(
+                shape_index.index() as usize,
+                pose_a_rotated_into_b_local_space.orientation,
+                &mut maximum_radius_a,
+                &mut maximum_angular_expansion_a,
+                min,
+                max,
+            );
         // Object A could rotate around its center.
         let worst_case_radius_a = local_pose.position.length();
         let angular_expansion_a = Self::get_angular_bounds_expansion(

@@ -23,10 +23,7 @@ impl SolveDescription {
     pub const DEFAULT_FALLBACK_BATCH_THRESHOLD: i32 = 64;
 
     fn validate_description(&self) {
-        assert!(
-            self.substep_count >= 1,
-            "Substep count must be positive."
-        );
+        assert!(self.substep_count >= 1, "Substep count must be positive.");
         assert!(
             self.velocity_iteration_count >= 1,
             "Velocity iteration count must be positive."

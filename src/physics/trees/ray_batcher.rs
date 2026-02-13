@@ -3,8 +3,8 @@
 //! This module provides types for batching multiple rays together for more efficient
 //! broad-phase traversal through the tree structure.
 
-use glam::Vec3;
 use crate::utilities::memory::{buffer::Buffer, buffer_pool::BufferPool};
+use glam::Vec3;
 
 /// Raw ray data containing origin, direction, and an identifier.
 #[repr(C)]
@@ -104,7 +104,8 @@ impl RaySourceTrait for RaySource {
         );
         let remapped_index = *self.ray_pointers.offset(ray_index as isize);
         let ray = self.rays.offset(remapped_index as isize);
-        let maximum_t = &mut (*self.tree_rays.offset(remapped_index as isize)).maximum_t as *mut f32;
+        let maximum_t =
+            &mut (*self.tree_rays.offset(remapped_index as isize)).maximum_t as *mut f32;
         (ray, maximum_t)
     }
 }
@@ -207,10 +208,14 @@ impl RayBatcher {
     /// * `ray_capacity` - Maximum number of rays that can be batched.
     /// * `tree_depth_for_preallocation` - Depth of tree to preallocate stack space for.
     #[inline(always)]
-    pub fn new(pool: &mut BufferPool, ray_capacity: i32, tree_depth_for_preallocation: i32) -> Self {
+    pub fn new(
+        pool: &mut BufferPool,
+        ray_capacity: i32,
+        tree_depth_for_preallocation: i32,
+    ) -> Self {
         // Calculate stack size based on tree depth and ray capacity
         let stack_size = ray_capacity * 4; // Conservative estimate
-        
+
         Self {
             stack_pointer_a0: 0,
             stack_pointer_a1: 0,

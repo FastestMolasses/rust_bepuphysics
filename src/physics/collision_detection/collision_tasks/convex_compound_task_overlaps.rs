@@ -1,8 +1,10 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ConvexCompoundTaskOverlaps.cs
 
+use super::compound_pair_overlaps::{
+    ICollisionTaskOverlaps, ICollisionTaskSubpairOverlaps, OverlapQueryForPair,
+};
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use super::compound_pair_overlaps::{ICollisionTaskSubpairOverlaps, ICollisionTaskOverlaps, OverlapQueryForPair};
 
 /// Stores the overlap results for a single convex-compound pair.
 /// Contains a list of child indices that overlap with the convex shape.
@@ -25,7 +27,11 @@ impl ConvexCompoundOverlaps {
     #[inline(always)]
     pub fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
         if self.count == self.overlaps.len() {
-            let new_size = if self.overlaps.len() == 0 { 4 } else { self.overlaps.len() * 2 };
+            let new_size = if self.overlaps.len() == 0 {
+                4
+            } else {
+                self.overlaps.len() * 2
+            };
             pool.resize(&mut self.overlaps, new_size, self.count);
         }
         let index = self.count as usize;

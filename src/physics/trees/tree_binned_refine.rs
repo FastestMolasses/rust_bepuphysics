@@ -264,7 +264,9 @@ impl Tree {
         centroid_bounding_box.max = centroid_bounding_box.min;
 
         for i in 1..count {
-            let centroid = &*resources.centroids.add(*local_index_map.add(i as usize) as usize);
+            let centroid = &*resources
+                .centroids
+                .add(*local_index_map.add(i as usize) as usize);
             centroid_bounding_box.min = centroid_bounding_box.min.min(*centroid);
             centroid_bounding_box.max = centroid_bounding_box.max.max(*centroid);
         }
@@ -286,12 +288,20 @@ impl Tree {
             *leaf_count_b = 0;
             for i in 0..*split_index {
                 let idx = *local_index_map.add(i as usize);
-                BoundingBox::create_merged_boxes(*a, *resources.bounding_boxes.add(idx as usize), a);
+                BoundingBox::create_merged_boxes(
+                    *a,
+                    *resources.bounding_boxes.add(idx as usize),
+                    a,
+                );
                 *leaf_count_a += *resources.leaf_counts.add(idx as usize);
             }
             for i in *split_index..count {
                 let idx = *local_index_map.add(i as usize);
-                BoundingBox::create_merged_boxes(*b, *resources.bounding_boxes.add(idx as usize), b);
+                BoundingBox::create_merged_boxes(
+                    *b,
+                    *resources.bounding_boxes.add(idx as usize),
+                    b,
+                );
                 *leaf_count_b += *resources.leaf_counts.add(idx as usize);
             }
             *split_index += start;
@@ -301,9 +311,21 @@ impl Tree {
         let bin_count = MAXIMUM_BIN_COUNT.min((count as f32 * 0.25).max(2.0) as i32);
 
         let inverse_bin_size = Vec3::new(
-            if span.x > EPSILON { bin_count as f32 / span.x } else { 0.0 },
-            if span.y > EPSILON { bin_count as f32 / span.y } else { 0.0 },
-            if span.z > EPSILON { bin_count as f32 / span.z } else { 0.0 },
+            if span.x > EPSILON {
+                bin_count as f32 / span.x
+            } else {
+                0.0
+            },
+            if span.y > EPSILON {
+                bin_count as f32 / span.y
+            } else {
+                0.0
+            },
+            if span.z > EPSILON {
+                bin_count as f32 / span.z
+            } else {
+                0.0
+            },
         );
         let maximum_bin_index = Vec3::splat((bin_count - 1) as f32);
 
@@ -323,7 +345,8 @@ impl Tree {
         // Allocate subtrees to bins for all axes simultaneously.
         for i in 0..count {
             let subtree_index = *local_index_map.add(i as usize);
-            let bin_indices = ((*resources.centroids.add(subtree_index as usize) - centroid_bounding_box.min)
+            let bin_indices = ((*resources.centroids.add(subtree_index as usize)
+                - centroid_bounding_box.min)
                 * inverse_bin_size)
                 .min(maximum_bin_index);
             let x = bin_indices.x as i32;
@@ -408,31 +431,52 @@ impl Tree {
         for i in (1..=last_index).rev() {
             let a_index = (i - 1) as usize;
             let iu = i as usize;
-            BoundingBox::create_merged_boxes(b_merged_x, *resources.bin_bounding_boxes_x.add(iu), &mut b_merged_x);
-            BoundingBox::create_merged_boxes(b_merged_y, *resources.bin_bounding_boxes_y.add(iu), &mut b_merged_y);
-            BoundingBox::create_merged_boxes(b_merged_z, *resources.bin_bounding_boxes_z.add(iu), &mut b_merged_z);
+            BoundingBox::create_merged_boxes(
+                b_merged_x,
+                *resources.bin_bounding_boxes_x.add(iu),
+                &mut b_merged_x,
+            );
+            BoundingBox::create_merged_boxes(
+                b_merged_y,
+                *resources.bin_bounding_boxes_y.add(iu),
+                &mut b_merged_y,
+            );
+            BoundingBox::create_merged_boxes(
+                b_merged_z,
+                *resources.bin_bounding_boxes_z.add(iu),
+                &mut b_merged_z,
+            );
             b_leaf_count_x += *resources.bin_leaf_counts_x.add(iu);
             b_leaf_count_y += *resources.bin_leaf_counts_y.add(iu);
             b_leaf_count_z += *resources.bin_leaf_counts_z.add(iu);
 
-            let cost_candidate_x = if b_leaf_count_x > 0 && *resources.a_leaf_counts_x.add(a_index) > 0 {
+            let cost_candidate_x = if b_leaf_count_x > 0
+                && *resources.a_leaf_counts_x.add(a_index) > 0
+            {
                 let metric_a = Self::compute_bounds_metric_bb(&*resources.a_merged_x.add(a_index));
                 let metric_b = Self::compute_bounds_metric_bb(&b_merged_x);
-                *resources.a_leaf_counts_x.add(a_index) as f32 * metric_a + b_leaf_count_x as f32 * metric_b
+                *resources.a_leaf_counts_x.add(a_index) as f32 * metric_a
+                    + b_leaf_count_x as f32 * metric_b
             } else {
                 f32::MAX
             };
-            let cost_candidate_y = if b_leaf_count_y > 0 && *resources.a_leaf_counts_y.add(a_index) > 0 {
+            let cost_candidate_y = if b_leaf_count_y > 0
+                && *resources.a_leaf_counts_y.add(a_index) > 0
+            {
                 let metric_a = Self::compute_bounds_metric_bb(&*resources.a_merged_y.add(a_index));
                 let metric_b = Self::compute_bounds_metric_bb(&b_merged_y);
-                *resources.a_leaf_counts_y.add(a_index) as f32 * metric_a + b_leaf_count_y as f32 * metric_b
+                *resources.a_leaf_counts_y.add(a_index) as f32 * metric_a
+                    + b_leaf_count_y as f32 * metric_b
             } else {
                 f32::MAX
             };
-            let cost_candidate_z = if b_leaf_count_z > 0 && *resources.a_leaf_counts_z.add(a_index) > 0 {
+            let cost_candidate_z = if b_leaf_count_z > 0
+                && *resources.a_leaf_counts_z.add(a_index) > 0
+            {
                 let metric_a = Self::compute_bounds_metric_bb(&*resources.a_merged_z.add(a_index));
                 let metric_b = Self::compute_bounds_metric_bb(&b_merged_z);
-                *resources.a_leaf_counts_z.add(a_index) as f32 * metric_a + b_leaf_count_z as f32 * metric_b
+                *resources.a_leaf_counts_z.add(a_index) as f32 * metric_a
+                    + b_leaf_count_z as f32 * metric_b
             } else {
                 f32::MAX
             };
@@ -471,9 +515,18 @@ impl Tree {
         }
 
         let (best_bin_subtree_counts, best_subtree_bin_indices) = match best_axis {
-            0 => (resources.bin_subtree_counts_x, resources.subtree_bin_indices_x),
-            1 => (resources.bin_subtree_counts_y, resources.subtree_bin_indices_y),
-            _ => (resources.bin_subtree_counts_z, resources.subtree_bin_indices_z),
+            0 => (
+                resources.bin_subtree_counts_x,
+                resources.subtree_bin_indices_x,
+            ),
+            1 => (
+                resources.bin_subtree_counts_y,
+                resources.subtree_bin_indices_y,
+            ),
+            _ => (
+                resources.bin_subtree_counts_z,
+                resources.subtree_bin_indices_z,
+            ),
         };
 
         // Rebuild the index map.
@@ -489,9 +542,10 @@ impl Tree {
         for i in 0..count {
             let index = *best_subtree_bin_indices.add(i as usize);
             let second_pass = &mut *resources.bin_subtree_counts_second_pass.add(index as usize);
-            *resources.temp_index_map.add(
-                (*resources.bin_start_indices.add(index as usize) + *second_pass) as usize,
-            ) = *local_index_map.add(i as usize);
+            *resources
+                .temp_index_map
+                .add((*resources.bin_start_indices.add(index as usize) + *second_pass) as usize) =
+                *local_index_map.add(i as usize);
             *second_pass += 1;
         }
 
@@ -630,7 +684,8 @@ impl Tree {
         next_internal_node_index_to_use: &mut i32,
     ) {
         debug_assert!(subtrees.count > 1);
-        let internal_node = &mut *(self.nodes.as_ptr() as *mut Node).add(internal_node_index as usize);
+        let internal_node =
+            &mut *(self.nodes.as_ptr() as *mut Node).add(internal_node_index as usize);
         let internal_node_children = &mut internal_node.a as *mut NodeChild;
         for i in 0..2i32 {
             let child = &mut *internal_node_children.add(i as usize);
@@ -775,10 +830,8 @@ impl Tree {
                 } else {
                     // Leaf node.
                     let leaf = &*self.leaves.get(Self::encode(subtree_ref));
-                    let owning_child = Self::node_child(
-                        &*self.nodes.get(leaf.node_index()),
-                        leaf.child_index(),
-                    );
+                    let owning_child =
+                        Self::node_child(&*self.nodes.get(leaf.node_index()), leaf.child_index());
                     let target_bounds = &mut *resources.bounding_boxes.add(i as usize);
                     target_bounds.min = owning_child.min;
                     target_bounds.max = owning_child.max;

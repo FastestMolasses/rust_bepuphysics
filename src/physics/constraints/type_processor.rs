@@ -29,7 +29,12 @@ impl<'a> IForEach<i32> for ActiveKinematicFlaggedBodyHandleCollector<'a> {
         unsafe {
             if Bodies::is_encoded_dynamic_reference(encoded_body_index) {
                 let count = *self.dynamic_count;
-                *self.dynamic_body_handles.add(count) = self.bodies.active_set().index_to_handle.get(encoded_body_index).0;
+                *self.dynamic_body_handles.add(count) = self
+                    .bodies
+                    .active_set()
+                    .index_to_handle
+                    .get(encoded_body_index)
+                    .0;
                 *self.dynamic_count = count + 1;
             }
             *self.encoded_body_indices.add(self.index_count) = encoded_body_index;
@@ -58,7 +63,8 @@ unsafe fn copy_lane_raw(
 ) {
     let count = crate::utilities::vector::VECTOR_WIDTH;
     // size_in_ints = (bundle_size_bytes >> 2) & !vector_mask
-    let size_in_ints = (bundle_size_bytes >> 2) & !crate::utilities::bundle_indexing::BundleIndexing::vector_mask();
+    let size_in_ints = (bundle_size_bytes >> 2)
+        & !crate::utilities::bundle_indexing::BundleIndexing::vector_mask();
 
     let source_base = (source_bundle as *const i32).add(source_inner);
     let target_base = (target_bundle as *mut i32).add(target_inner);
@@ -213,29 +219,45 @@ pub trait ITypeProcessor {
 
             let (mut source_bundle, mut source_inner) = (0usize, 0usize);
             crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
-                index_in_type_batch as usize, &mut source_bundle, &mut source_inner,
+                index_in_type_batch as usize,
+                &mut source_bundle,
+                &mut source_inner,
             );
             let (mut target_bundle, mut target_inner) = (0usize, 0usize);
             crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
-                target_reference.index_in_type_batch as usize, &mut target_bundle, &mut target_inner,
+                target_reference.index_in_type_batch as usize,
+                &mut target_bundle,
+                &mut target_inner,
             );
 
             let target_type_batch = &mut *target_reference.type_batch_pointer;
 
             // Copy prestep data
             copy_lane_raw(
-                source_type_batch.prestep_data.as_ptr().add(source_bundle as usize * prestep_size as usize),
+                source_type_batch
+                    .prestep_data
+                    .as_ptr()
+                    .add(source_bundle as usize * prestep_size as usize),
                 source_inner,
-                target_type_batch.prestep_data.as_mut_ptr().add(target_bundle as usize * prestep_size as usize),
+                target_type_batch
+                    .prestep_data
+                    .as_mut_ptr()
+                    .add(target_bundle as usize * prestep_size as usize),
                 target_inner,
                 prestep_size as usize,
             );
 
             // Copy accumulated impulses
             copy_lane_raw(
-                source_type_batch.accumulated_impulses.as_ptr().add(source_bundle as usize * accum_size as usize),
+                source_type_batch
+                    .accumulated_impulses
+                    .as_ptr()
+                    .add(source_bundle as usize * accum_size as usize),
                 source_inner,
-                target_type_batch.accumulated_impulses.as_mut_ptr().add(target_bundle as usize * accum_size as usize),
+                target_type_batch
+                    .accumulated_impulses
+                    .as_mut_ptr()
+                    .add(target_bundle as usize * accum_size as usize),
                 target_inner,
                 accum_size as usize,
             );
@@ -267,7 +289,10 @@ pub trait ITypeProcessor {
             let bodies_per_constraint = self.bodies_per_constraint() as usize;
             let mut dynamic_body_handles = [0i32; 8]; // stack alloc — matches C# stackalloc
             let mut encoded_body_indices = [0i32; 8];
-            debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
+            debug_assert!(
+                bodies_per_constraint <= 8,
+                "Bodies per constraint exceeds stack buffer size"
+            );
             let mut dynamic_count = 0usize;
             let bodies_ref = &*bodies;
 
@@ -284,10 +309,11 @@ pub trait ITypeProcessor {
                 },
             );
 
-            let dynamic_handles: &[crate::physics::handles::BodyHandle] = std::slice::from_raw_parts(
-                dynamic_body_handles.as_ptr() as *const crate::physics::handles::BodyHandle,
-                dynamic_count,
-            );
+            let dynamic_handles: &[crate::physics::handles::BodyHandle] =
+                std::slice::from_raw_parts(
+                    dynamic_body_handles.as_ptr() as *const crate::physics::handles::BodyHandle,
+                    dynamic_count,
+                );
 
             self.transfer_constraint(
                 source_type_batch,
@@ -323,13 +349,16 @@ pub trait ITypeProcessor {
             let vector_len = crate::utilities::vector::VECTOR_WIDTH;
             let body_refs_base = type_batch.body_references.as_mut_ptr() as *mut i32;
             let vector_size_bytes = vector_len * std::mem::size_of::<i32>();
-            let bundle_offset = bundle_index * self.bodies_per_constraint() as usize * vector_size_bytes;
+            let bundle_offset =
+                bundle_index * self.bodies_per_constraint() as usize * vector_size_bytes;
             let lane_offset = inner_index + body_index_in_constraint as usize * vector_len;
-            let reference_location = &mut *body_refs_base.add(bundle_offset / std::mem::size_of::<i32>() + lane_offset);
+            let reference_location =
+                &mut *body_refs_base.add(bundle_offset / std::mem::size_of::<i32>() + lane_offset);
 
             // Preserve the old kinematic mask so the caller doesn't have to re-query.
             let is_kinematic = Bodies::is_encoded_kinematic_reference(*reference_location);
-            *reference_location = new_body_location | (*reference_location & Bodies::KINEMATIC_MASK as i32);
+            *reference_location =
+                new_body_location | (*reference_location & Bodies::KINEMATIC_MASK as i32);
             is_kinematic
         }
     }
@@ -407,7 +436,9 @@ pub trait ITypeProcessor {
         &self,
         type_batch: &mut TypeBatch,
         bodies: &crate::physics::bodies::Bodies,
-        integration_flags: &crate::utilities::memory::buffer::Buffer<crate::utilities::collections::index_set::IndexSet>,
+        integration_flags: &crate::utilities::memory::buffer::Buffer<
+            crate::utilities::collections::index_set::IndexSet,
+        >,
         pose_integrator: Option<&dyn crate::physics::pose_integrator::IPoseIntegrator>,
         batch_integration_mode: crate::physics::constraints::batch_integration_mode::BatchIntegrationMode,
         allow_pose_integration: bool,
@@ -418,7 +449,19 @@ pub trait ITypeProcessor {
         worker_index: i32,
     ) {
         // Default: no-op. Concrete implementations will override.
-        let _ = (type_batch, bodies, integration_flags, pose_integrator, batch_integration_mode, allow_pose_integration, dt, inverse_dt, start_bundle, exclusive_end_bundle, worker_index);
+        let _ = (
+            type_batch,
+            bodies,
+            integration_flags,
+            pose_integrator,
+            batch_integration_mode,
+            allow_pose_integration,
+            dt,
+            inverse_dt,
+            start_bundle,
+            exclusive_end_bundle,
+            worker_index,
+        );
     }
 
     /// Solves the constraint velocity iteration for the given bundle range.
@@ -432,7 +475,14 @@ pub trait ITypeProcessor {
         exclusive_end_bundle: i32,
     ) {
         // Default: no-op. Concrete implementations will override.
-        let _ = (type_batch, bodies, dt, inverse_dt, start_bundle, exclusive_end_bundle);
+        let _ = (
+            type_batch,
+            bodies,
+            dt,
+            inverse_dt,
+            start_bundle,
+            exclusive_end_bundle,
+        );
     }
 
     /// Performs an incremental update for substeps beyond the first.
@@ -448,7 +498,14 @@ pub trait ITypeProcessor {
     ) {
         // Default: debug fail, should not be called unless the type supports it.
         debug_assert!(false, "An incremental update was scheduled for a type batch that does not have a contact data update implementation.");
-        let _ = (type_batch, bodies, dt, inverse_dt, start_bundle, exclusive_end_bundle);
+        let _ = (
+            type_batch,
+            bodies,
+            dt,
+            inverse_dt,
+            start_bundle,
+            exclusive_end_bundle,
+        );
     }
 }
 

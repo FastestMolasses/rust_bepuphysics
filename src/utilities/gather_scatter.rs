@@ -1,7 +1,6 @@
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::vector::{optimal_lanes, Vector};
 use std::mem;
-use std::ptr;
 
 pub struct GatherScatter;
 
@@ -55,24 +54,38 @@ impl GatherScatter {
         let mut offset = count;
         // 8-wide unroll empirically chosen to match C#.
         while offset + count * 8 <= size_in_ints {
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
         }
         if offset + 4 * count <= size_in_ints {
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
         }
         if offset + 2 * count <= size_in_ints {
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
-            *target_base.add(offset) = *source_base.add(offset); offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
+            *target_base.add(offset) = *source_base.add(offset);
+            offset += count;
         }
         if offset + count <= size_in_ints {
             *target_base.add(offset) = *source_base.add(offset);
@@ -109,7 +122,7 @@ impl GatherScatter {
 
     /// Gets a mutable reference to a shifted bundle container.
     #[inline(always)]
-    pub unsafe fn get_offset_instance_mut<T>(bundle_container: &mut T, slot_index: usize) -> &mut T 
+    pub unsafe fn get_offset_instance_mut<T>(bundle_container: &mut T, slot_index: usize) -> &mut T
     where
         T: Copy,
     {
@@ -131,7 +144,7 @@ impl GatherScatter {
 
     /// Gets a mutable reference to the first element in the vector reference.
     #[inline(always)]
-    pub unsafe fn get_first_mut<T>(vector: &mut Vector<T>) -> &mut T 
+    pub unsafe fn get_first_mut<T>(vector: &mut Vector<T>) -> &mut T
     where
         T: Copy + std::simd::SimdElement,
         std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,

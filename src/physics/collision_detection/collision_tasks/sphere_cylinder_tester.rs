@@ -30,10 +30,16 @@ impl SphereCylinderTester {
     ) {
         // Clamp the sphere position to the cylinder's volume.
         let mut cylinder_local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, orientation_matrix_b, &mut cylinder_local_offset_b);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            offset_b,
+            orientation_matrix_b,
+            &mut cylinder_local_offset_b,
+        );
         Vector3Wide::negate(&cylinder_local_offset_b, cylinder_local_offset_a);
-        *horizontal_offset_length = StdFloat::sqrt(cylinder_local_offset_a.x * cylinder_local_offset_a.x
-            + cylinder_local_offset_a.z * cylinder_local_offset_a.z);
+        *horizontal_offset_length = StdFloat::sqrt(
+            cylinder_local_offset_a.x * cylinder_local_offset_a.x
+                + cylinder_local_offset_a.z * cylinder_local_offset_a.z,
+        );
         *inverse_horizontal_offset_length = Vector::<f32>::splat(1.0) / *horizontal_offset_length;
         let horizontal_clamp_multiplier = b.radius * *inverse_horizontal_offset_length;
         let horizontal_clamp_required = horizontal_offset_length.simd_gt(b.radius);
@@ -42,7 +48,9 @@ impl SphereCylinderTester {
             cylinder_local_offset_a.x * horizontal_clamp_multiplier,
             cylinder_local_offset_a.x,
         );
-        let clamped_y = b.half_length.simd_min((-b.half_length).simd_max(cylinder_local_offset_a.y));
+        let clamped_y = b
+            .half_length
+            .simd_min((-b.half_length).simd_max(cylinder_local_offset_a.y));
         let clamped_z = horizontal_clamp_required.select(
             cylinder_local_offset_a.z * horizontal_clamp_multiplier,
             cylinder_local_offset_a.z,
@@ -53,8 +61,16 @@ impl SphereCylinderTester {
             y: clamped_y,
             z: clamped_z,
         };
-        Vector3Wide::add(&clamped, &cylinder_local_offset_b, sphere_to_closest_local_b);
-        Matrix3x3Wide::transform_without_overlap(sphere_to_closest_local_b, orientation_matrix_b, sphere_to_closest);
+        Vector3Wide::add(
+            &clamped,
+            &cylinder_local_offset_b,
+            sphere_to_closest_local_b,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            sphere_to_closest_local_b,
+            orientation_matrix_b,
+            sphere_to_closest,
+        );
     }
 
     /// Tests sphere vs cylinder collision (one orientation for the cylinder).
@@ -92,7 +108,8 @@ impl SphereCylinderTester {
         let use_depth_y = depth_y.simd_le(horizontal_depth);
         let use_top_cap_normal = cylinder_local_offset_a.y.simd_gt(Vector::<f32>::splat(0.0));
 
-        let use_horizontal_fallback = horizontal_offset_length.simd_le(b.radius * Vector::<f32>::splat(1e-5));
+        let use_horizontal_fallback =
+            horizontal_offset_length.simd_le(b.radius * Vector::<f32>::splat(1e-5));
         let zero = Vector::<f32>::splat(0.0);
         let one = Vector::<f32>::splat(1.0);
         let neg_one = Vector::<f32>::splat(-1.0);
@@ -100,12 +117,18 @@ impl SphereCylinderTester {
         let local_internal_normal = Vector3Wide {
             x: use_depth_y.select(
                 zero,
-                use_horizontal_fallback.select(one, cylinder_local_offset_a.x * inverse_horizontal_offset_length),
+                use_horizontal_fallback.select(
+                    one,
+                    cylinder_local_offset_a.x * inverse_horizontal_offset_length,
+                ),
             ),
             y: use_depth_y.select(use_top_cap_normal.select(one, neg_one), zero),
             z: use_depth_y.select(
                 zero,
-                use_horizontal_fallback.select(zero, cylinder_local_offset_a.z * inverse_horizontal_offset_length),
+                use_horizontal_fallback.select(
+                    zero,
+                    cylinder_local_offset_a.z * inverse_horizontal_offset_length,
+                ),
             ),
         };
 
@@ -114,7 +137,11 @@ impl SphereCylinderTester {
         // Normal points from B to A by convention (negate).
         let neg_inv_distance = Vector::<f32>::splat(-1.0) / contact_distance;
         let mut local_external_normal = Vector3Wide::default();
-        Vector3Wide::scale_to(&sphere_to_contact_local_b, &neg_inv_distance, &mut local_external_normal);
+        Vector3Wide::scale_to(
+            &sphere_to_contact_local_b,
+            &neg_inv_distance,
+            &mut local_external_normal,
+        );
 
         // Can't rely on the external normal if the sphere is too close to the surface.
         let use_internal = contact_distance.simd_lt(Vector::<f32>::splat(1e-7));
@@ -124,7 +151,11 @@ impl SphereCylinderTester {
             &local_external_normal,
         );
 
-        Matrix3x3Wide::transform_without_overlap(&local_normal, &orientation_matrix_b, &mut manifold.normal);
+        Matrix3x3Wide::transform_without_overlap(
+            &local_normal,
+            &orientation_matrix_b,
+            &mut manifold.normal,
+        );
 
         manifold.feature_id = Vector::<i32>::splat(0);
         manifold.depth = use_internal.select(

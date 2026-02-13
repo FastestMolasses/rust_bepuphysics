@@ -76,7 +76,8 @@ impl BodySet {
         self.count += 1;
         *self.index_to_handle.get_mut(index) = handle;
         // Collidable's broad phase index is left unset. The Bodies collection is responsible for attaching that data.
-        *self.constraints.get_mut(index) = QuickList::with_capacity(minimum_constraint_capacity, pool);
+        *self.constraints.get_mut(index) =
+            QuickList::with_capacity(minimum_constraint_capacity, pool);
         self.apply_description_by_index(index, body_description);
         index
     }
@@ -229,7 +230,11 @@ impl BodySet {
     }
 
     /// Checks if a body is constrained by a specific constraint.
-    pub fn body_is_constrained_by(&self, body_index: i32, constraint_handle: ConstraintHandle) -> bool {
+    pub fn body_is_constrained_by(
+        &self,
+        body_index: i32,
+        constraint_handle: ConstraintHandle,
+    ) -> bool {
         let list = self.constraints.get(body_index);
         for i in 0..list.count {
             if list[i].connecting_constraint_handle.0 == constraint_handle.0 {
@@ -254,7 +259,8 @@ impl BodySet {
         unsafe {
             let old_ptr = self.constraints.as_ptr();
             let old_len = self.constraints.len();
-            let mut new_buf = pool.take_at_least::<QuickList<BodyConstraintReference>>(target_body_capacity);
+            let mut new_buf =
+                pool.take_at_least::<QuickList<BodyConstraintReference>>(target_body_capacity);
             let copy_count = self.count.min(old_len);
             if copy_count > 0 && !old_ptr.is_null() {
                 std::ptr::copy_nonoverlapping(old_ptr, new_buf.as_mut_ptr(), copy_count as usize);

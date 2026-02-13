@@ -64,7 +64,8 @@ pub trait SweepTask {
         hit_normal: &mut Vec3,
     ) -> bool {
         debug_assert!(
-            (shape_type_a == self.shape_type_index_a() && shape_type_b == self.shape_type_index_b())
+            (shape_type_a == self.shape_type_index_a()
+                && shape_type_b == self.shape_type_index_b())
                 || (shape_type_a == self.shape_type_index_b()
                     && shape_type_b == self.shape_type_index_a()),
             "Sweep type requirements not met."
@@ -167,7 +168,8 @@ pub trait SweepTask {
         hit_normal: &mut Vec3,
     ) -> bool {
         debug_assert!(
-            (shape_type_a == self.shape_type_index_a() && shape_type_b == self.shape_type_index_b())
+            (shape_type_a == self.shape_type_index_a()
+                && shape_type_b == self.shape_type_index_b())
                 || (shape_type_a == self.shape_type_index_b()
                     && shape_type_b == self.shape_type_index_a()),
             "Types must match expected types."
@@ -285,7 +287,8 @@ impl SweepTaskRegistry {
         if top_level_type_b as usize >= self.top_level_matrix[top_level_type_a as usize].len() {
             return None;
         }
-        let task_index = self.top_level_matrix[top_level_type_a as usize][top_level_type_b as usize];
+        let task_index =
+            self.top_level_matrix[top_level_type_a as usize][top_level_type_b as usize];
         if task_index < 0 {
             return None;
         }

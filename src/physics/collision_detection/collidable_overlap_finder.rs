@@ -64,8 +64,8 @@ type DispatchFn = unsafe fn(
 
 /// Context for the MT overlap worker function.
 struct OverlapWorkerContext {
-    self_test: *mut u8,       // *mut MultithreadedSelfTest<SelfOverlapHandler>
-    intertree_test: *mut u8,  // *mut MultithreadedIntertreeTest<IntertreeOverlapHandler>
+    self_test: *mut u8,      // *mut MultithreadedSelfTest<SelfOverlapHandler>
+    intertree_test: *mut u8, // *mut MultithreadedIntertreeTest<IntertreeOverlapHandler>
     narrow_phase: *mut u8,
     self_job_count: i32,
     total_job_count: i32,
@@ -76,12 +76,20 @@ struct OverlapWorkerContext {
     flush_worker: unsafe fn(*mut u8, i32),
 }
 
-unsafe fn execute_self_job_impl<TCallbacks: INarrowPhaseCallbacks>(ctx: *mut u8, job_index: i32, worker_index: i32) {
+unsafe fn execute_self_job_impl<TCallbacks: INarrowPhaseCallbacks>(
+    ctx: *mut u8,
+    job_index: i32,
+    worker_index: i32,
+) {
     let test = &mut *(ctx as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>);
     test.execute_job(job_index, worker_index);
 }
 
-unsafe fn execute_intertree_job_impl<TCallbacks: INarrowPhaseCallbacks>(ctx: *mut u8, job_index: i32, worker_index: i32) {
+unsafe fn execute_intertree_job_impl<TCallbacks: INarrowPhaseCallbacks>(
+    ctx: *mut u8,
+    job_index: i32,
+    worker_index: i32,
+) {
     let test = &mut *(ctx as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>);
     test.execute_job(job_index, worker_index);
 }
@@ -96,11 +104,16 @@ fn overlap_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
     unsafe {
         let ctx = &*(dispatcher.unmanaged_context() as *const OverlapWorkerContext);
         loop {
-            let job_index = AtomicI32::from_ptr(ctx.next_job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
+            let job_index =
+                AtomicI32::from_ptr(ctx.next_job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
             if job_index < ctx.self_job_count {
                 (ctx.execute_self_job)(ctx.self_test, job_index, worker_index);
             } else if job_index < ctx.total_job_count {
-                (ctx.execute_intertree_job)(ctx.intertree_test, job_index - ctx.self_job_count, worker_index);
+                (ctx.execute_intertree_job)(
+                    ctx.intertree_test,
+                    job_index - ctx.self_job_count,
+                    worker_index,
+                );
             } else {
                 break;
             }
@@ -146,15 +159,24 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
             let mut self_test = MultithreadedSelfTest::new(pool);
             self_test.prepare_jobs(&bp.active_tree, self_handlers, thread_count);
             let mut intertree_test = MultithreadedIntertreeTest::new(pool);
-            intertree_test.prepare_jobs(&bp.active_tree, &bp.static_tree, intertree_handlers, thread_count);
+            intertree_test.prepare_jobs(
+                &bp.active_tree,
+                &bp.static_tree,
+                intertree_handlers,
+                thread_count,
+            );
 
             let self_job_count = self_test.job_count();
             let intertree_job_count = intertree_test.job_count();
             let total_job_count = self_job_count + intertree_job_count;
 
             let mut ctx = OverlapWorkerContext {
-                self_test: &mut self_test as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>> as *mut u8,
-                intertree_test: &mut intertree_test as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>> as *mut u8,
+                self_test: &mut self_test
+                    as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>
+                    as *mut u8,
+                intertree_test: &mut intertree_test
+                    as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>
+                    as *mut u8,
                 narrow_phase: narrow_phase_ptr,
                 self_job_count,
                 total_job_count,

@@ -1,11 +1,11 @@
+use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
+use crate::physics::constraints::center_distance_constraint::CenterDistanceConstraintFunctions;
+use crate::physics::constraints::inequality_helpers::InequalityHelpers;
+use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::math_helper;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
-use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
-use crate::physics::constraints::inequality_helpers::InequalityHelpers;
-use crate::physics::constraints::center_distance_constraint::CenterDistanceConstraintFunctions;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
 
@@ -23,7 +23,11 @@ pub struct CenterDistanceLimit {
 
 impl CenterDistanceLimit {
     #[inline(always)]
-    pub fn new(minimum_distance: f32, maximum_distance: f32, spring_settings: SpringSettings) -> Self {
+    pub fn new(
+        minimum_distance: f32,
+        maximum_distance: f32,
+        spring_settings: SpringSettings,
+    ) -> Self {
         Self {
             minimum_distance,
             maximum_distance,
@@ -39,10 +43,19 @@ impl CenterDistanceLimit {
     ) {
         #[cfg(debug_assertions)]
         {
-            debug_assert!(self.minimum_distance >= 0.0, "CenterDistanceLimit.MinimumDistance must be nonnegative.");
-            debug_assert!(self.maximum_distance >= 0.0, "CenterDistanceLimit.MaximumDistance must be nonnegative.");
+            debug_assert!(
+                self.minimum_distance >= 0.0,
+                "CenterDistanceLimit.MinimumDistance must be nonnegative."
+            );
+            debug_assert!(
+                self.maximum_distance >= 0.0,
+                "CenterDistanceLimit.MaximumDistance must be nonnegative."
+            );
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "CenterDistanceLimit");
+            ConstraintChecker::assert_valid_spring_settings(
+                &self.spring_settings,
+                "CenterDistanceLimit",
+            );
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         unsafe {
@@ -59,8 +72,10 @@ impl CenterDistanceLimit {
         description: &mut Self,
     ) {
         let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        description.minimum_distance = unsafe { *GatherScatter::get_first(&source.minimum_distance) };
-        description.maximum_distance = unsafe { *GatherScatter::get_first(&source.maximum_distance) };
+        description.minimum_distance =
+            unsafe { *GatherScatter::get_first(&source.minimum_distance) };
+        description.maximum_distance =
+            unsafe { *GatherScatter::get_first(&source.maximum_distance) };
         SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
     }
 }
@@ -97,7 +112,10 @@ impl CenterDistanceLimitFunctions {
         jacobian_a.z = use_fallback.select(Vector::<f32>::splat(0.0), jacobian_a.z);
 
         // If the current distance is closer to the minimum, calibrate for the minimum. Otherwise, calibrate for the maximum.
-        *use_minimum = (*distance - *minimum_distance).abs().simd_lt((*distance - *maximum_distance).abs()).to_int();
+        *use_minimum = (*distance - *minimum_distance)
+            .abs()
+            .simd_lt((*distance - *maximum_distance).abs())
+            .to_int();
         let mut negated_jacobian = Vector3Wide::default();
         Vector3Wide::negate(jacobian_a, &mut negated_jacobian);
         *jacobian_a = Vector3Wide::conditional_select(use_minimum, &negated_jacobian, jacobian_a);
@@ -177,17 +195,25 @@ impl CenterDistanceLimitFunctions {
             &mut softness_impulse_scale,
         );
         // Jacobian is just the unit length direction, so the effective mass is simple:
-        let effective_mass = effective_mass_cfm_scale / (inertia_a.inverse_mass + inertia_b.inverse_mass);
+        let effective_mass =
+            effective_mass_cfm_scale / (inertia_a.inverse_mass + inertia_b.inverse_mass);
 
         let error = use_minimum.simd_lt(Vector::<i32>::splat(0)).select(
             prestep.minimum_distance - distance,
             distance - prestep.maximum_distance,
         );
         let mut bias_velocity = Vector::<f32>::splat(0.0);
-        InequalityHelpers::compute_bias_velocity(error, &position_error_to_velocity, inverse_dt, &mut bias_velocity);
-        let csv = Vector3Wide::dot_val(&wsv_a.linear, &jacobian_a) - Vector3Wide::dot_val(&wsv_b.linear, &jacobian_a);
+        InequalityHelpers::compute_bias_velocity(
+            error,
+            &position_error_to_velocity,
+            inverse_dt,
+            &mut bias_velocity,
+        );
+        let csv = Vector3Wide::dot_val(&wsv_a.linear, &jacobian_a)
+            - Vector3Wide::dot_val(&wsv_b.linear, &jacobian_a);
         // csi = projection.BiasImpulse - accumulatedImpulse * projection.SoftnessImpulseScale - csv
-        let mut csi = -*accumulated_impulse * softness_impulse_scale - effective_mass * (csv - bias_velocity);
+        let mut csi =
+            -*accumulated_impulse * softness_impulse_scale - effective_mass * (csv - bias_velocity);
         InequalityHelpers::clamp_positive(accumulated_impulse, &mut csi);
 
         CenterDistanceConstraintFunctions::apply_impulse(

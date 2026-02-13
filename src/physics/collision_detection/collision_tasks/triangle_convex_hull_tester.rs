@@ -244,11 +244,11 @@ impl TriangleConvexHullTester {
         Vector3Wide::dot(&edge_plane_ca, &closest_to_c, &mut extreme_ca_test);
         // Triangle normal is minimal if hull center is inside + above triangle AND extreme point
         // is inside triangle edges.
-        let triangle_normal_is_minimal =
-            (hull_inside_triangle_edge_planes & (!hull_below_plane.to_int()))
-                & extreme_ab_test.simd_le(zero_f).to_int()
-                & extreme_bc_test.simd_le(zero_f).to_int()
-                & extreme_ca_test.simd_le(zero_f).to_int();
+        let triangle_normal_is_minimal = (hull_inside_triangle_edge_planes
+            & (!hull_below_plane.to_int()))
+            & extreme_ab_test.simd_le(zero_f).to_int()
+            & extreme_bc_test.simd_le(zero_f).to_int()
+            & extreme_ca_test.simd_le(zero_f).to_int();
 
         let depth_threshold = -*speculative_margin;
         let skip_depth_refine = triangle_normal_is_minimal | inactive_lanes;
@@ -460,27 +460,23 @@ impl TriangleConvexHullTester {
 
             let mut slot_triangle_tangent_x = Vec3::ZERO;
             let mut slot_triangle_tangent_y = Vec3::ZERO;
-            Vector3Wide::read_slot(&triangle_tangent_x, slot_index, &mut slot_triangle_tangent_x);
-            Vector3Wide::read_slot(&triangle_tangent_y, slot_index, &mut slot_triangle_tangent_y);
+            Vector3Wide::read_slot(
+                &triangle_tangent_x,
+                slot_index,
+                &mut slot_triangle_tangent_x,
+            );
+            Vector3Wide::read_slot(
+                &triangle_tangent_y,
+                slot_index,
+                &mut slot_triangle_tangent_y,
+            );
 
             let mut slot_ab_edge_plane = Vec3::ZERO;
             let mut slot_bc_edge_plane = Vec3::ZERO;
             let mut slot_ca_edge_plane = Vec3::ZERO;
-            Vector3Wide::read_slot(
-                &ab_edge_plane_on_hull,
-                slot_index,
-                &mut slot_ab_edge_plane,
-            );
-            Vector3Wide::read_slot(
-                &bc_edge_plane_on_hull,
-                slot_index,
-                &mut slot_bc_edge_plane,
-            );
-            Vector3Wide::read_slot(
-                &ca_edge_plane_on_hull,
-                slot_index,
-                &mut slot_ca_edge_plane,
-            );
+            Vector3Wide::read_slot(&ab_edge_plane_on_hull, slot_index, &mut slot_ab_edge_plane);
+            Vector3Wide::read_slot(&bc_edge_plane_on_hull, slot_index, &mut slot_bc_edge_plane);
+            Vector3Wide::read_slot(&ca_edge_plane_on_hull, slot_index, &mut slot_ca_edge_plane);
 
             // Get last vertex of face as initial previous.
             let previous_index_init = hull.face_vertex_indices[face_start + face_count - 1];

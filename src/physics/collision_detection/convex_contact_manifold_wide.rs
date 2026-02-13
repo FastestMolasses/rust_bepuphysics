@@ -1,8 +1,8 @@
 // Translated from BepuPhysics/CollisionDetection/ConvexContactManifoldWide.cs
 
+use super::contact_manifold::ConvexContactManifold;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use super::contact_manifold::ConvexContactManifold;
 
 /// Trait for SIMD-wide contact manifold types used in collision detection.
 pub trait IContactManifoldWide {
@@ -32,7 +32,8 @@ impl IContactManifoldWide for Convex1ContactManifoldWide {
         let mut flipped_offset_b = Vector3Wide::default();
         Vector3Wide::negate(offset_b, &mut flipped_offset_b);
         self.normal = Vector3Wide::conditional_select(flip_mask, &flipped_normal, &self.normal);
-        self.offset_a = Vector3Wide::conditional_select(flip_mask, &flipped_contact_position, &self.offset_a);
+        self.offset_a =
+            Vector3Wide::conditional_select(flip_mask, &flipped_contact_position, &self.offset_a);
         *offset_b = Vector3Wide::conditional_select(flip_mask, &flipped_offset_b, offset_b);
     }
 
@@ -100,7 +101,8 @@ impl IContactManifoldWide for Convex2ContactManifoldWide {
         }
         if self.contact1_exists[0] < 0 {
             unsafe {
-                let contact = &mut *(&mut target.contact0 as *mut _ as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
+                let contact = &mut *(&mut target.contact0 as *mut _
+                    as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
                 contact.offset.x = self.offset_a1.x[0];
@@ -178,7 +180,8 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
         }
         unsafe {
             if self.contact1_exists[0] < 0 {
-                let contact = &mut *(&mut target.contact0 as *mut _ as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
+                let contact = &mut *(&mut target.contact0 as *mut _
+                    as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
                 contact.offset.x = self.offset_a1.x[0];
@@ -188,7 +191,8 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
                 contact.feature_id = self.feature_id1[0];
             }
             if self.contact2_exists[0] < 0 {
-                let contact = &mut *(&mut target.contact0 as *mut _ as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
+                let contact = &mut *(&mut target.contact0 as *mut _
+                    as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
                 contact.offset.x = self.offset_a2.x[0];
@@ -198,7 +202,8 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
                 contact.feature_id = self.feature_id2[0];
             }
             if self.contact3_exists[0] < 0 {
-                let contact = &mut *(&mut target.contact0 as *mut _ as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
+                let contact = &mut *(&mut target.contact0 as *mut _
+                    as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
                 contact.offset.x = self.offset_a3.x[0];

@@ -89,7 +89,10 @@ impl AffineTransform {
     #[inline(always)]
     pub fn invert_rigid(transform: &Self, inverse: &mut Self) {
         unsafe {
-            Matrix3x3::transpose(&transform.linear_transform as *const _, &mut inverse.linear_transform);
+            Matrix3x3::transpose(
+                &transform.linear_transform as *const _,
+                &mut inverse.linear_transform,
+            );
         }
         Matrix3x3::transform(
             &transform.translation,

@@ -92,20 +92,38 @@ impl BoxTriangleTester {
 
         // A.X x edgeB
         let (mut depth, mut ln_x, mut ln_y, mut ln_z) = Self::test_box_edge_against_triangle_edge(
-            &tri_edge_offset.y, &tri_edge_offset.z,
-            &tri_center.y, &tri_center.z,
-            &y2, &z2,
-            &a.half_height, &a.half_length,
-            &va.y, &va.z, &vb.y, &vb.z, &vc.y, &vc.z,
+            &tri_edge_offset.y,
+            &tri_edge_offset.z,
+            &tri_center.y,
+            &tri_center.z,
+            &y2,
+            &z2,
+            &a.half_height,
+            &a.half_length,
+            &va.y,
+            &va.z,
+            &vb.y,
+            &vb.z,
+            &vc.y,
+            &vc.z,
         );
 
         // A.Y x edgeB (swizzle: Y,X,Z -> depth, normalY, normalX, normalZ)
         let (dc, nc_y, nc_x, nc_z) = Self::test_box_edge_against_triangle_edge(
-            &tri_edge_offset.x, &tri_edge_offset.z,
-            &tri_center.x, &tri_center.z,
-            &x2, &z2,
-            &a.half_width, &a.half_length,
-            &va.x, &va.z, &vb.x, &vb.z, &vc.x, &vc.z,
+            &tri_edge_offset.x,
+            &tri_edge_offset.z,
+            &tri_center.x,
+            &tri_center.z,
+            &x2,
+            &z2,
+            &a.half_width,
+            &a.half_length,
+            &va.x,
+            &va.z,
+            &vb.x,
+            &vb.z,
+            &vc.x,
+            &vc.z,
         );
         let use_y = dc.simd_lt(depth);
         depth = depth.simd_min(dc);
@@ -115,11 +133,20 @@ impl BoxTriangleTester {
 
         // A.Z x edgeB (swizzle: Z,X,Y -> depth, normalZ, normalX, normalY)
         let (dc, nc_z, nc_x2, nc_y2) = Self::test_box_edge_against_triangle_edge(
-            &tri_edge_offset.x, &tri_edge_offset.y,
-            &tri_center.x, &tri_center.y,
-            &x2, &y2,
-            &a.half_width, &a.half_height,
-            &va.x, &va.y, &vb.x, &vb.y, &vc.x, &vc.y,
+            &tri_edge_offset.x,
+            &tri_edge_offset.y,
+            &tri_center.x,
+            &tri_center.y,
+            &x2,
+            &y2,
+            &a.half_width,
+            &a.half_height,
+            &va.x,
+            &va.y,
+            &vb.x,
+            &vb.y,
+            &vc.x,
+            &vc.y,
         );
         let use_z = dc.simd_lt(depth);
         depth = depth.simd_min(dc);
@@ -127,7 +154,14 @@ impl BoxTriangleTester {
         ln_y = use_z.select(nc_y2, ln_y);
         ln_z = use_z.select(nc_z, ln_z);
 
-        (depth, Vector3Wide { x: ln_x, y: ln_y, z: ln_z })
+        (
+            depth,
+            Vector3Wide {
+                x: ln_x,
+                y: ln_y,
+                z: ln_z,
+            },
+        )
     }
 
     #[inline(always)]
@@ -177,7 +211,11 @@ impl BoxTriangleTester {
         Vector3Wide::dot(&offset, triangle_tangent_y, &mut candidate.y);
         candidate.feature_id = *feature_id;
         ManifoldCandidateHelper::add_candidate(
-            candidates, candidate_count, &candidate, exists, pair_count,
+            candidates,
+            candidate_count,
+            &candidate,
+            exists,
+            pair_count,
         );
     }
 
@@ -190,16 +228,22 @@ impl BoxTriangleTester {
     ) -> (Vector<f32>, Vector<f32>) {
         let mut distance0 = Vector::<f32>::splat(0.0);
         let mut distance1 = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(tri_edge_start_to_box_edge_anchor0, box_edge_plane_normal, &mut distance0);
-        Vector3Wide::dot(tri_edge_start_to_box_edge_anchor1, box_edge_plane_normal, &mut distance1);
+        Vector3Wide::dot(
+            tri_edge_start_to_box_edge_anchor0,
+            box_edge_plane_normal,
+            &mut distance0,
+        );
+        Vector3Wide::dot(
+            tri_edge_start_to_box_edge_anchor1,
+            box_edge_plane_normal,
+            &mut distance1,
+        );
         let mut velocity = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(box_edge_plane_normal, edge_direction, &mut velocity);
         let inverse_velocity = Vector::<f32>::splat(1.0) / velocity;
 
-        let edge_start_is_inside =
-            (distance0 * distance1).simd_le(Vector::<f32>::splat(0.0));
-        let dont_use_fallback =
-            velocity.abs().simd_gt(Vector::<f32>::splat(1e-15));
+        let edge_start_is_inside = (distance0 * distance1).simd_le(Vector::<f32>::splat(0.0));
+        let dont_use_fallback = velocity.abs().simd_gt(Vector::<f32>::splat(1e-15));
         let t0 = distance0 * inverse_velocity;
         let t1 = distance1 * inverse_velocity;
         let large_negative = Vector::<f32>::splat(-f32::MAX);
@@ -235,14 +279,19 @@ impl BoxTriangleTester {
         let tri_edge_start_to_v00 = *box_vertex00 - *edge_start;
         let tri_edge_start_to_v11 = *box_vertex11 - *edge_start;
         let (min_x, max_x) = Self::clip_triangle_edge_against_planes(
-            edge_direction, &tri_edge_start_to_v00, &tri_edge_start_to_v11, edge_plane_normal_x,
+            edge_direction,
+            &tri_edge_start_to_v00,
+            &tri_edge_start_to_v11,
+            edge_plane_normal_x,
         );
         let (min_y, max_y) = Self::clip_triangle_edge_against_planes(
-            edge_direction, &tri_edge_start_to_v00, &tri_edge_start_to_v11, edge_plane_normal_y,
+            edge_direction,
+            &tri_edge_start_to_v00,
+            &tri_edge_start_to_v11,
+            edge_plane_normal_y,
         );
         let min = min_x.simd_max(min_y);
-        let max = Vector::<f32>::splat(1.0)
-            .simd_min(max_x.simd_min(max_y));
+        let max = Vector::<f32>::splat(1.0).simd_min(max_x.simd_min(max_y));
         let min_location = *edge_start + Vector3Wide::scale(edge_direction, &min);
         let max_location = *edge_start + Vector3Wide::scale(edge_direction, &max);
 
@@ -257,8 +306,15 @@ impl BoxTriangleTester {
             & min.simd_lt(one_f).to_int()
             & min.simd_gt(zero_f).to_int();
         Self::add(
-            &min_location, triangle_center, triangle_tangent_x, triangle_tangent_y,
-            edge_id, &min_exists, candidates, candidate_count, pair_count,
+            &min_location,
+            triangle_center,
+            triangle_tangent_x,
+            triangle_tangent_y,
+            edge_id,
+            &min_exists,
+            candidates,
+            candidate_count,
+            pair_count,
         );
 
         let max_exists = *allow_contacts
@@ -267,21 +323,33 @@ impl BoxTriangleTester {
             & max.simd_le(one_f).to_int()
             & max.simd_ge(zero_f).to_int();
         Self::add(
-            &max_location, triangle_center, triangle_tangent_x, triangle_tangent_y,
-            &(*edge_id + Vector::<i32>::splat(8)), &max_exists,
-            candidates, candidate_count, pair_count,
+            &max_location,
+            triangle_center,
+            triangle_tangent_x,
+            triangle_tangent_y,
+            &(*edge_id + Vector::<i32>::splat(8)),
+            &max_exists,
+            candidates,
+            candidate_count,
+            pair_count,
         );
     }
 
     #[inline(always)]
     unsafe fn clip_triangle_edges_against_box_face(
-        va: &Vector3Wide, vb: &Vector3Wide, vc: &Vector3Wide,
+        va: &Vector3Wide,
+        vb: &Vector3Wide,
+        vc: &Vector3Wide,
         triangle_center: &Vector3Wide,
         triangle_tangent_x: &Vector3Wide,
         triangle_tangent_y: &Vector3Wide,
-        ab: &Vector3Wide, bc: &Vector3Wide, ca: &Vector3Wide,
-        box_vertex00: &Vector3Wide, box_vertex11: &Vector3Wide,
-        box_tangent_x: &Vector3Wide, box_tangent_y: &Vector3Wide,
+        ab: &Vector3Wide,
+        bc: &Vector3Wide,
+        ca: &Vector3Wide,
+        box_vertex00: &Vector3Wide,
+        box_vertex11: &Vector3Wide,
+        box_tangent_x: &Vector3Wide,
+        box_tangent_y: &Vector3Wide,
         contact_normal: &Vector3Wide,
         allow_contacts: &Vector<i32>,
         candidates: *mut ManifoldCandidate,
@@ -295,31 +363,62 @@ impl BoxTriangleTester {
 
         let base_id = Vector::<i32>::splat(4);
         Self::clip_triangle_edge_against_box_face(
-            va, ab, &base_id, box_vertex00, box_vertex11,
-            &edge_plane_normal_x, &edge_plane_normal_y,
-            triangle_center, triangle_tangent_x, triangle_tangent_y,
-            allow_contacts, candidates, candidate_count, pair_count,
+            va,
+            ab,
+            &base_id,
+            box_vertex00,
+            box_vertex11,
+            &edge_plane_normal_x,
+            &edge_plane_normal_y,
+            triangle_center,
+            triangle_tangent_x,
+            triangle_tangent_y,
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
         Self::clip_triangle_edge_against_box_face(
-            vb, bc, &(base_id + Vector::<i32>::splat(1)),
-            box_vertex00, box_vertex11,
-            &edge_plane_normal_x, &edge_plane_normal_y,
-            triangle_center, triangle_tangent_x, triangle_tangent_y,
-            allow_contacts, candidates, candidate_count, pair_count,
+            vb,
+            bc,
+            &(base_id + Vector::<i32>::splat(1)),
+            box_vertex00,
+            box_vertex11,
+            &edge_plane_normal_x,
+            &edge_plane_normal_y,
+            triangle_center,
+            triangle_tangent_x,
+            triangle_tangent_y,
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
         Self::clip_triangle_edge_against_box_face(
-            vc, ca, &(base_id + Vector::<i32>::splat(2)),
-            box_vertex00, box_vertex11,
-            &edge_plane_normal_x, &edge_plane_normal_y,
-            triangle_center, triangle_tangent_x, triangle_tangent_y,
-            allow_contacts, candidates, candidate_count, pair_count,
+            vc,
+            ca,
+            &(base_id + Vector::<i32>::splat(2)),
+            box_vertex00,
+            box_vertex11,
+            &edge_plane_normal_x,
+            &edge_plane_normal_y,
+            triangle_center,
+            triangle_tangent_x,
+            triangle_tangent_y,
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
     }
 
     #[inline(always)]
     unsafe fn add_box_vertex(
-        va: &Vector3Wide, vb: &Vector3Wide, v: &Vector3Wide,
-        triangle_normal: &Vector3Wide, contact_normal: &Vector3Wide,
+        va: &Vector3Wide,
+        vb: &Vector3Wide,
+        v: &Vector3Wide,
+        triangle_normal: &Vector3Wide,
+        contact_normal: &Vector3Wide,
         inverse_normal_dot: &Vector<f32>,
         ab_edge_plane_normal: &Vector3Wide,
         bc_edge_plane_normal: &Vector3Wide,
@@ -335,11 +434,12 @@ impl BoxTriangleTester {
     ) {
         let point_on_tri_to_box_vertex = *v - *va;
         let mut plane_distance = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(triangle_normal, &point_on_tri_to_box_vertex, &mut plane_distance);
-        let offset = Vector3Wide::scale(
-            contact_normal,
-            &(plane_distance * *inverse_normal_dot),
+        Vector3Wide::dot(
+            triangle_normal,
+            &point_on_tri_to_box_vertex,
+            &mut plane_distance,
         );
+        let offset = Vector3Wide::scale(contact_normal, &(plane_distance * *inverse_normal_dot));
         let v_on_plane = *v - offset;
 
         let a_to_v = v_on_plane - *va;
@@ -358,17 +458,31 @@ impl BoxTriangleTester {
             & ca_dot.simd_ge(zero).to_int();
 
         Self::add(
-            &v_on_plane, triangle_center, triangle_x, triangle_y,
-            feature_id, &contained, candidates, candidate_count, pair_count,
+            &v_on_plane,
+            triangle_center,
+            triangle_x,
+            triangle_y,
+            feature_id,
+            &contained,
+            candidates,
+            candidate_count,
+            pair_count,
         );
     }
 
     #[inline(always)]
     unsafe fn add_box_vertices(
-        va: &Vector3Wide, vb: &Vector3Wide,
-        ab: &Vector3Wide, bc: &Vector3Wide, ca: &Vector3Wide,
-        triangle_normal: &Vector3Wide, contact_normal: &Vector3Wide,
-        v00: &Vector3Wide, v01: &Vector3Wide, v10: &Vector3Wide, v11: &Vector3Wide,
+        va: &Vector3Wide,
+        vb: &Vector3Wide,
+        ab: &Vector3Wide,
+        bc: &Vector3Wide,
+        ca: &Vector3Wide,
+        triangle_normal: &Vector3Wide,
+        contact_normal: &Vector3Wide,
+        v00: &Vector3Wide,
+        v01: &Vector3Wide,
+        v10: &Vector3Wide,
+        v11: &Vector3Wide,
         triangle_center: &Vector3Wide,
         triangle_x: &Vector3Wide,
         triangle_y: &Vector3Wide,
@@ -398,28 +512,80 @@ impl BoxTriangleTester {
         Vector3Wide::cross_without_overlap(ca, triangle_normal, &mut ca_edge_plane_normal);
 
         Self::add_box_vertex(
-            va, vb, v00, triangle_normal, contact_normal, &inverse_normal_dot,
-            &ab_edge_plane_normal, &bc_edge_plane_normal, &ca_edge_plane_normal,
-            triangle_center, triangle_x, triangle_y, base_feature_id,
-            allow_contacts, candidates, candidate_count, pair_count,
+            va,
+            vb,
+            v00,
+            triangle_normal,
+            contact_normal,
+            &inverse_normal_dot,
+            &ab_edge_plane_normal,
+            &bc_edge_plane_normal,
+            &ca_edge_plane_normal,
+            triangle_center,
+            triangle_x,
+            triangle_y,
+            base_feature_id,
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
         Self::add_box_vertex(
-            va, vb, v01, triangle_normal, contact_normal, &inverse_normal_dot,
-            &ab_edge_plane_normal, &bc_edge_plane_normal, &ca_edge_plane_normal,
-            triangle_center, triangle_x, triangle_y, &(*base_feature_id + *feature_id_y),
-            allow_contacts, candidates, candidate_count, pair_count,
+            va,
+            vb,
+            v01,
+            triangle_normal,
+            contact_normal,
+            &inverse_normal_dot,
+            &ab_edge_plane_normal,
+            &bc_edge_plane_normal,
+            &ca_edge_plane_normal,
+            triangle_center,
+            triangle_x,
+            triangle_y,
+            &(*base_feature_id + *feature_id_y),
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
         Self::add_box_vertex(
-            va, vb, v10, triangle_normal, contact_normal, &inverse_normal_dot,
-            &ab_edge_plane_normal, &bc_edge_plane_normal, &ca_edge_plane_normal,
-            triangle_center, triangle_x, triangle_y, &(*base_feature_id + *feature_id_x),
-            allow_contacts, candidates, candidate_count, pair_count,
+            va,
+            vb,
+            v10,
+            triangle_normal,
+            contact_normal,
+            &inverse_normal_dot,
+            &ab_edge_plane_normal,
+            &bc_edge_plane_normal,
+            &ca_edge_plane_normal,
+            triangle_center,
+            triangle_x,
+            triangle_y,
+            &(*base_feature_id + *feature_id_x),
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
         Self::add_box_vertex(
-            va, vb, v11, triangle_normal, contact_normal, &inverse_normal_dot,
-            &ab_edge_plane_normal, &bc_edge_plane_normal, &ca_edge_plane_normal,
-            triangle_center, triangle_x, triangle_y, &(*base_feature_id + *feature_id_x + *feature_id_y),
-            allow_contacts, candidates, candidate_count, pair_count,
+            va,
+            vb,
+            v11,
+            triangle_normal,
+            contact_normal,
+            &inverse_normal_dot,
+            &ab_edge_plane_normal,
+            &bc_edge_plane_normal,
+            &ca_edge_plane_normal,
+            triangle_center,
+            triangle_x,
+            triangle_y,
+            &(*base_feature_id + *feature_id_x + *feature_id_y),
+            allow_contacts,
+            candidates,
+            candidate_count,
+            pair_count,
         );
     }
 
@@ -461,7 +627,9 @@ impl BoxTriangleTester {
             Matrix3x3Wide::multiply_by_transpose_without_overlap(&world_rb, &world_ra, &mut r_b);
             let mut local_offset_b = Vector3Wide::default();
             Matrix3x3Wide::transform_by_transposed_without_overlap(
-                offset_b, &world_ra, &mut local_offset_b,
+                offset_b,
+                &world_ra,
+                &mut local_offset_b,
             );
 
             // Transform triangle vertices to box A's local space
@@ -475,23 +643,39 @@ impl BoxTriangleTester {
             Matrix3x3Wide::transform_without_overlap(&b.c, &r_b, &mut vc);
             vc = vc + local_offset_b;
 
-            let local_triangle_center = Vector3Wide::scale(
-                &(va + vb + vc),
-                &Vector::<f32>::splat(1.0 / 3.0),
-            );
+            let local_triangle_center =
+                Vector3Wide::scale(&(va + vb + vc), &Vector::<f32>::splat(1.0 / 3.0));
 
             let ab = vb - va;
             let bc = vc - vb;
             let ca = va - vc;
 
             // Test edge-edge axes
-            let (mut depth, mut local_normal) =
-                Self::test_box_edges_against_triangle_edge(a, &ab, &local_triangle_center, &va, &vb, &vc);
-            let (dc, nc) =
-                Self::test_box_edges_against_triangle_edge(a, &bc, &local_triangle_center, &va, &vb, &vc);
+            let (mut depth, mut local_normal) = Self::test_box_edges_against_triangle_edge(
+                a,
+                &ab,
+                &local_triangle_center,
+                &va,
+                &vb,
+                &vc,
+            );
+            let (dc, nc) = Self::test_box_edges_against_triangle_edge(
+                a,
+                &bc,
+                &local_triangle_center,
+                &va,
+                &vb,
+                &vc,
+            );
             Self::select_vec(&mut depth, &mut local_normal, &dc, &nc);
-            let (dc, nc) =
-                Self::test_box_edges_against_triangle_edge(a, &ca, &local_triangle_center, &va, &vb, &vc);
+            let (dc, nc) = Self::test_box_edges_against_triangle_edge(
+                a,
+                &ca,
+                &local_triangle_center,
+                &va,
+                &vb,
+                &vc,
+            );
             Self::select_vec(&mut depth, &mut local_normal, &dc, &nc);
 
             // Test face normals of A
@@ -499,22 +683,46 @@ impl BoxTriangleTester {
             let one_f = Vector::<f32>::splat(1.0);
             let neg_one = Vector::<f32>::splat(-1.0);
 
-            let x_normal_sign = local_triangle_center.x
+            let x_normal_sign = local_triangle_center
+                .x
                 .simd_lt(zero_f)
                 .select(one_f, neg_one);
-            let y_normal_sign = local_triangle_center.y
+            let y_normal_sign = local_triangle_center
+                .y
                 .simd_lt(zero_f)
                 .select(one_f, neg_one);
-            let z_normal_sign = local_triangle_center.z
+            let z_normal_sign = local_triangle_center
+                .z
                 .simd_lt(zero_f)
                 .select(one_f, neg_one);
 
             let face_ax_depth = Self::get_depth_for_interval(&a.half_width, &va.x, &vb.x, &vc.x);
             let face_ay_depth = Self::get_depth_for_interval(&a.half_height, &va.y, &vb.y, &vc.y);
             let face_az_depth = Self::get_depth_for_interval(&a.half_length, &va.z, &vb.z, &vc.z);
-            Self::select_components(&mut depth, &mut local_normal, &face_ax_depth, &x_normal_sign, &zero_f, &zero_f);
-            Self::select_components(&mut depth, &mut local_normal, &face_ay_depth, &zero_f, &y_normal_sign, &zero_f);
-            Self::select_components(&mut depth, &mut local_normal, &face_az_depth, &zero_f, &zero_f, &z_normal_sign);
+            Self::select_components(
+                &mut depth,
+                &mut local_normal,
+                &face_ax_depth,
+                &x_normal_sign,
+                &zero_f,
+                &zero_f,
+            );
+            Self::select_components(
+                &mut depth,
+                &mut local_normal,
+                &face_ay_depth,
+                &zero_f,
+                &y_normal_sign,
+                &zero_f,
+            );
+            Self::select_components(
+                &mut depth,
+                &mut local_normal,
+                &face_az_depth,
+                &zero_f,
+                &zero_f,
+                &z_normal_sign,
+            );
 
             // Test triangle face normal
             let mut triangle_normal = Vector3Wide::default();
@@ -525,7 +733,11 @@ impl BoxTriangleTester {
 
             // Calibrate to point from B to A
             let mut triangle_plane_offset = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&triangle_normal, &local_triangle_center, &mut triangle_plane_offset);
+            Vector3Wide::dot(
+                &triangle_normal,
+                &local_triangle_center,
+                &mut triangle_plane_offset,
+            );
             let neg_triangle_normal = Vector3Wide {
                 x: -triangle_normal.x,
                 y: -triangle_normal.y,
@@ -533,13 +745,20 @@ impl BoxTriangleTester {
             };
             let should_negate = triangle_plane_offset.simd_gt(zero_f).to_int();
             let calibrated_triangle_normal = Vector3Wide::conditional_select(
-                &should_negate, &neg_triangle_normal, &triangle_normal,
+                &should_negate,
+                &neg_triangle_normal,
+                &triangle_normal,
             );
             let triangle_face_depth = triangle_normal.x.abs() * a.half_width
                 + triangle_normal.y.abs() * a.half_height
                 + triangle_normal.z.abs() * a.half_length
                 - triangle_plane_offset.abs();
-            Self::select_vec(&mut depth, &mut local_normal, &triangle_face_depth, &calibrated_triangle_normal);
+            Self::select_vec(
+                &mut depth,
+                &mut local_normal,
+                &triangle_face_depth,
+                &calibrated_triangle_normal,
+            );
 
             // Active lanes, degeneracy, backface rejection
             let active_lanes = BundleIndexing::create_mask_for_count_in_bundle(pair_count as usize);
@@ -551,14 +770,21 @@ impl BoxTriangleTester {
             let mut triangle_epsilon_scale = Vector::<f32>::splat(0.0);
             let mut nondegenerate_mask = Vector::<i32>::splat(0);
             TriangleWide::compute_nondegenerate_triangle_mask(
-                &ab_length_squared, &ca_length_squared, &triangle_normal_length,
-                &mut triangle_epsilon_scale, &mut nondegenerate_mask,
+                &ab_length_squared,
+                &ca_length_squared,
+                &triangle_normal_length,
+                &mut triangle_epsilon_scale,
+                &mut nondegenerate_mask,
             );
 
             let mut normal_dot = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&local_normal, &triangle_normal, &mut normal_dot);
             let allow_contacts = nondegenerate_mask
-                & normal_dot.simd_ge(Vector::<f32>::splat(TriangleWide::BACKFACE_NORMAL_DOT_REJECTION_THRESHOLD)).to_int()
+                & normal_dot
+                    .simd_ge(Vector::<f32>::splat(
+                        TriangleWide::BACKFACE_NORMAL_DOT_REJECTION_THRESHOLD,
+                    ))
+                    .to_int()
                 & depth.simd_ge(minimum_depth).to_int()
                 & active_lanes;
 
@@ -597,25 +823,17 @@ impl BoxTriangleTester {
             box_tangent_y.z = use_ay_f.select(one_f, zero_f);
 
             let mut box_face_normal = Vector3Wide::default();
-            box_face_normal.x = use_ax_f.select(
-                normal_is_negative_x.select(one_f, neg_one),
-                zero_f,
-            );
-            box_face_normal.y = use_ay_f.select(
-                normal_is_negative_y.select(one_f, neg_one),
-                zero_f,
-            );
-            box_face_normal.z = use_az_f.select(
-                normal_is_negative_z.select(one_f, neg_one),
-                zero_f,
-            );
+            box_face_normal.x =
+                use_ax_f.select(normal_is_negative_x.select(one_f, neg_one), zero_f);
+            box_face_normal.y =
+                use_ay_f.select(normal_is_negative_y.select(one_f, neg_one), zero_f);
+            box_face_normal.z =
+                use_az_f.select(normal_is_negative_z.select(one_f, neg_one), zero_f);
 
             let half_extent_x = use_ax_f.select(a.half_length, a.half_width);
             let half_extent_y = use_ay_f.select(a.half_length, a.half_height);
-            let half_extent_z = use_ax_f.select(
-                a.half_width,
-                use_ay_f.select(a.half_height, a.half_length),
-            );
+            let half_extent_z =
+                use_ax_f.select(a.half_width, use_ay_f.select(a.half_height, a.half_length));
             let box_face_center = Vector3Wide::scale(&box_face_normal, &half_extent_z);
 
             // Feature IDs
@@ -627,24 +845,36 @@ impl BoxTriangleTester {
             let axis_id_tangent_x = use_ax_i.select(local_z_id, local_x_id);
             let axis_id_tangent_y = use_ay_i.select(local_z_id, local_y_id);
             let axis_id_normal = use_ax_i.select(
-                normal_is_negative_x.to_int().simd_lt(Vector::<i32>::splat(0)).select(local_x_id, Vector::<i32>::splat(0)),
+                normal_is_negative_x
+                    .to_int()
+                    .simd_lt(Vector::<i32>::splat(0))
+                    .select(local_x_id, Vector::<i32>::splat(0)),
                 use_ay_i.select(
-                    normal_is_negative_y.to_int().simd_lt(Vector::<i32>::splat(0)).select(local_y_id, Vector::<i32>::splat(0)),
-                    normal_is_negative_z.to_int().simd_lt(Vector::<i32>::splat(0)).select(local_z_id, Vector::<i32>::splat(0)),
+                    normal_is_negative_y
+                        .to_int()
+                        .simd_lt(Vector::<i32>::splat(0))
+                        .select(local_y_id, Vector::<i32>::splat(0)),
+                    normal_is_negative_z
+                        .to_int()
+                        .simd_lt(Vector::<i32>::splat(0))
+                        .select(local_z_id, Vector::<i32>::splat(0)),
                 ),
             );
 
-            let epsilon_scale = a.half_width
+            let epsilon_scale = a
+                .half_width
                 .simd_max(a.half_height.simd_max(a.half_length))
                 .simd_min(triangle_epsilon_scale);
 
             // Triangle tangent frame
-            let tri_tangent_x = Vector3Wide::scale(
-                &ab,
-                &(one_f / StdFloat::sqrt(ab_length_squared)),
-            );
+            let tri_tangent_x =
+                Vector3Wide::scale(&ab, &(one_f / StdFloat::sqrt(ab_length_squared)));
             let mut tri_tangent_y = Vector3Wide::default();
-            Vector3Wide::cross_without_overlap(&tri_tangent_x, &triangle_normal, &mut tri_tangent_y);
+            Vector3Wide::cross_without_overlap(
+                &tri_tangent_x,
+                &triangle_normal,
+                &mut tri_tangent_y,
+            );
 
             // Allocate candidates (up to 6)
             let mut candidate_buffer = [ManifoldCandidate::default(); 6];
@@ -662,21 +892,49 @@ impl BoxTriangleTester {
             let box_vertex11 = positive_x + box_edge_offset_y;
 
             Self::add_box_vertices(
-                &va, &vb, &ab, &bc, &ca, &triangle_normal, &local_normal,
-                &box_vertex00, &box_vertex01, &box_vertex10, &box_vertex11,
-                &local_triangle_center, &tri_tangent_x, &tri_tangent_y,
-                &axis_id_normal, &axis_id_tangent_x, &axis_id_tangent_y,
-                &allow_contacts, candidates, &mut candidate_count, pair_count,
+                &va,
+                &vb,
+                &ab,
+                &bc,
+                &ca,
+                &triangle_normal,
+                &local_normal,
+                &box_vertex00,
+                &box_vertex01,
+                &box_vertex10,
+                &box_vertex11,
+                &local_triangle_center,
+                &tri_tangent_x,
+                &tri_tangent_y,
+                &axis_id_normal,
+                &axis_id_tangent_x,
+                &axis_id_tangent_y,
+                &allow_contacts,
+                candidates,
+                &mut candidate_count,
+                pair_count,
             );
 
             // Triangle edges against box face
             Self::clip_triangle_edges_against_box_face(
-                &va, &vb, &vc,
-                &local_triangle_center, &tri_tangent_x, &tri_tangent_y,
-                &ab, &bc, &ca,
-                &box_vertex00, &box_vertex11,
-                &box_tangent_x, &box_tangent_y, &local_normal,
-                &allow_contacts, candidates, &mut candidate_count, pair_count,
+                &va,
+                &vb,
+                &vc,
+                &local_triangle_center,
+                &tri_tangent_x,
+                &tri_tangent_y,
+                &ab,
+                &bc,
+                &ca,
+                &box_vertex00,
+                &box_vertex11,
+                &box_tangent_x,
+                &box_tangent_y,
+                &local_normal,
+                &allow_contacts,
+                candidates,
+                &mut candidate_count,
+                pair_count,
             );
 
             // Reduce to 4 contacts
@@ -711,28 +969,64 @@ impl BoxTriangleTester {
 
             // Transform contacts to world space
             let mut world_tangent_bx = Vector3Wide::default();
-            Matrix3x3Wide::transform_without_overlap(&tri_tangent_x, &world_ra, &mut world_tangent_bx);
+            Matrix3x3Wide::transform_without_overlap(
+                &tri_tangent_x,
+                &world_ra,
+                &mut world_tangent_bx,
+            );
             let mut world_tangent_by = Vector3Wide::default();
-            Matrix3x3Wide::transform_without_overlap(&tri_tangent_y, &world_ra, &mut world_tangent_by);
+            Matrix3x3Wide::transform_without_overlap(
+                &tri_tangent_y,
+                &world_ra,
+                &mut world_tangent_by,
+            );
             let mut world_triangle_center = Vector3Wide::default();
-            Matrix3x3Wide::transform_without_overlap(&local_triangle_center, &world_ra, &mut world_triangle_center);
-            Matrix3x3Wide::transform_without_overlap(&local_normal, &world_ra, &mut manifold.normal);
+            Matrix3x3Wide::transform_without_overlap(
+                &local_triangle_center,
+                &world_ra,
+                &mut world_triangle_center,
+            );
+            Matrix3x3Wide::transform_without_overlap(
+                &local_normal,
+                &world_ra,
+                &mut manifold.normal,
+            );
 
             Self::transform_contact_to_manifold(
-                &contact0, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a0, &mut manifold.depth0, &mut manifold.feature_id0,
+                &contact0,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a0,
+                &mut manifold.depth0,
+                &mut manifold.feature_id0,
             );
             Self::transform_contact_to_manifold(
-                &contact1, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a1, &mut manifold.depth1, &mut manifold.feature_id1,
+                &contact1,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a1,
+                &mut manifold.depth1,
+                &mut manifold.feature_id1,
             );
             Self::transform_contact_to_manifold(
-                &contact2, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a2, &mut manifold.depth2, &mut manifold.feature_id2,
+                &contact2,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a2,
+                &mut manifold.depth2,
+                &mut manifold.feature_id2,
             );
             Self::transform_contact_to_manifold(
-                &contact3, &world_triangle_center, &world_tangent_bx, &world_tangent_by,
-                &mut manifold.offset_a3, &mut manifold.depth3, &mut manifold.feature_id3,
+                &contact3,
+                &world_triangle_center,
+                &world_tangent_bx,
+                &world_tangent_by,
+                &mut manifold.offset_a3,
+                &mut manifold.depth3,
+                &mut manifold.feature_id3,
             );
 
             // Face collision flag for mesh boundary smoothing

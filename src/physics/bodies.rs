@@ -1,7 +1,7 @@
 // Translated from BepuPhysics/Bodies.cs and BepuPhysics/Bodies_GatherScatter.cs (constants only)
 
 use crate::physics::body_description::BodyDescription;
-use crate::physics::body_properties::{BodyDynamics, BodyInertia, BodyInertiaWide, RigidPose};
+use crate::physics::body_properties::{BodyInertia, BodyInertiaWide, RigidPose};
 use crate::physics::body_set::{BodyConstraintReference, BodySet};
 use crate::physics::collidables::collidable::Collidable;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
@@ -168,9 +168,7 @@ impl Bodies {
 
     /// Has locked inertia (all inverse inertia tensor components zero).
     #[inline(always)]
-    pub fn has_locked_inertia(
-        inertia: &crate::utilities::symmetric3x3::Symmetric3x3,
-    ) -> bool {
+    pub fn has_locked_inertia(inertia: &crate::utilities::symmetric3x3::Symmetric3x3) -> bool {
         inertia.xx == 0.0
             && inertia.yx == 0.0
             && inertia.yy == 0.0
@@ -201,12 +199,7 @@ impl Bodies {
         let min_cap = self.minimum_constraint_capacity_per_body;
         let pool_ptr = self.pool;
         let pool = unsafe { &mut *pool_ptr };
-        let index = self.sets.get_mut(0).add(
-            description,
-            handle,
-            min_cap,
-            pool,
-        );
+        let index = self.sets.get_mut(0).add(description, handle, min_cap, pool);
         *self.handle_to_location.get_mut(handle_index) = BodyMemoryLocation {
             set_index: 0,
             index,
@@ -215,9 +208,20 @@ impl Bodies {
         if description.collidable.shape.exists() {
             // Use raw pointer to avoid double mutable borrow of self.
             let collidable_ptr = self.sets.get_mut(0).collidables.get_mut(index) as *mut Collidable;
-            unsafe { self.add_collidable_to_broad_phase(handle, &description.pose, &description.local_inertia, &mut *collidable_ptr); }
+            unsafe {
+                self.add_collidable_to_broad_phase(
+                    handle,
+                    &description.pose,
+                    &description.local_inertia,
+                    &mut *collidable_ptr,
+                );
+            }
         } else {
-            self.sets.get_mut(0).collidables.get_mut(index).broad_phase_index = -1;
+            self.sets
+                .get_mut(0)
+                .collidables
+                .get_mut(index)
+                .broad_phase_index = -1;
         }
         handle
     }
@@ -248,8 +252,12 @@ impl Bodies {
         let min_cap = self.minimum_constraint_capacity_per_body;
         let pool_ptr = self.pool;
         let pool = unsafe { &mut *pool_ptr };
-        self.sets.get_mut(0)
-            .remove_constraint_reference(body_index, constraint_handle, min_cap, pool)
+        self.sets.get_mut(0).remove_constraint_reference(
+            body_index,
+            constraint_handle,
+            min_cap,
+            pool,
+        )
     }
 
     /// Checks whether a body handle is currently registered.
@@ -295,8 +303,7 @@ impl Bodies {
             if handle_to_location.len() > old_capacity {
                 // Initialize new slots to -1 (0xFF bytes).
                 unsafe {
-                    let ptr = handle_to_location.as_mut_ptr().add(old_capacity as usize)
-                        as *mut u8;
+                    let ptr = handle_to_location.as_mut_ptr().add(old_capacity as usize) as *mut u8;
                     let count = (handle_to_location.len() - old_capacity) as usize
                         * std::mem::size_of::<BodyMemoryLocation>();
                     std::ptr::write_bytes(ptr, 0xFF, count);
@@ -348,7 +355,8 @@ impl Bodies {
         if self.sets.get(0).index_to_handle.len() != target_body_capacity {
             let pool_ptr = self.pool;
             let pool = unsafe { &mut *pool_ptr };
-            self.sets.get_mut(0)
+            self.sets
+                .get_mut(0)
                 .internal_resize(target_body_capacity, pool);
         }
         let highest = self.handle_pool.highest_possibly_claimed_id() + 1;
@@ -356,7 +364,11 @@ impl Bodies {
             BufferPool::get_capacity_for_count::<i32>(capacity.max(highest));
         if self.handle_to_location.len() != target_handle_capacity {
             let pool_ptr = self.pool;
-            Self::resize_handles_impl(unsafe { &mut *pool_ptr }, &mut self.handle_to_location, target_handle_capacity);
+            Self::resize_handles_impl(
+                unsafe { &mut *pool_ptr },
+                &mut self.handle_to_location,
+                target_handle_capacity,
+            );
         }
     }
 
@@ -390,7 +402,11 @@ impl Bodies {
         }
         if self.handle_to_location.len() < capacity {
             let pool_ptr = self.pool;
-            Self::resize_handles_impl(unsafe { &mut *pool_ptr }, &mut self.handle_to_location, capacity);
+            Self::resize_handles_impl(
+                unsafe { &mut *pool_ptr },
+                &mut self.handle_to_location,
+                capacity,
+            );
         }
     }
 
@@ -434,7 +450,10 @@ impl Bodies {
             set.index_to_handle.get(location.index).0 == handle.0,
             "Handle->index must match index->handle map."
         );
-        debug_assert!(self.body_exists(handle), "Body must exist according to the body_exists test.");
+        debug_assert!(
+            self.body_exists(handle),
+            "Body must exist according to the body_exists test."
+        );
     }
 
     /// Alias for `is_kinematic` that takes a reference. In C# this was a separate
@@ -456,9 +475,17 @@ impl Bodies {
             shapes.update_bounds(pose, &collidable.shape, &mut body_bounds);
             let broad_phase = unsafe { &mut *self.broad_phase };
             if location.set_index == 0 {
-                broad_phase.update_active_bounds(collidable.broad_phase_index, body_bounds.min, body_bounds.max);
+                broad_phase.update_active_bounds(
+                    collidable.broad_phase_index,
+                    body_bounds.min,
+                    body_bounds.max,
+                );
             } else {
-                broad_phase.update_static_bounds(collidable.broad_phase_index, body_bounds.min, body_bounds.max);
+                broad_phase.update_static_bounds(
+                    collidable.broad_phase_index,
+                    body_bounds.min,
+                    body_bounds.max,
+                );
             }
         }
     }
@@ -475,7 +502,11 @@ impl Bodies {
             "If we're changing kinematic state, we should have already awoken the body."
         );
         if previously_kinematic != currently_kinematic {
-            let collidable = *self.sets.get(location.set_index).collidables.get(location.index);
+            let collidable = *self
+                .sets
+                .get(location.set_index)
+                .collidables
+                .get(location.index);
             if collidable.shape.exists() {
                 // Update the mobility encoded in the broad phase leaf.
                 let mobility = if currently_kinematic {
@@ -485,19 +516,27 @@ impl Bodies {
                 };
                 let broad_phase = unsafe { &mut *self.broad_phase };
                 if location.set_index == 0 {
-                    *broad_phase.active_leaves.get_mut(collidable.broad_phase_index) =
+                    *broad_phase
+                        .active_leaves
+                        .get_mut(collidable.broad_phase_index) =
                         CollidableReference::from_body(mobility, handle);
                 } else {
-                    *broad_phase.static_leaves.get_mut(collidable.broad_phase_index) =
+                    *broad_phase
+                        .static_leaves
+                        .get_mut(collidable.broad_phase_index) =
                         CollidableReference::from_body(mobility, handle);
                 }
             }
             // Update solver constraint references for kinematic state change.
             let solver = unsafe { &mut *self.solver };
             if currently_kinematic {
-                unsafe { solver.update_references_for_body_becoming_kinematic(handle, location.index); }
+                unsafe {
+                    solver.update_references_for_body_becoming_kinematic(handle, location.index);
+                }
             } else {
-                unsafe { solver.update_references_for_body_becoming_dynamic(handle, location.index); }
+                unsafe {
+                    solver.update_references_for_body_becoming_dynamic(handle, location.index);
+                }
             }
         }
     }
@@ -513,8 +552,16 @@ impl Bodies {
             if new_shape.exists() {
                 // Add a collidable to the simulation for the new shape.
                 let state = *self.sets.get(0).dynamics_state.get(active_body_index);
-                let collidable_ptr = self.sets.get_mut(0).collidables.get_mut(active_body_index) as *mut Collidable;
-                unsafe { self.add_collidable_to_broad_phase(handle, &state.motion.pose, &state.inertia.local, &mut *collidable_ptr); }
+                let collidable_ptr =
+                    self.sets.get_mut(0).collidables.get_mut(active_body_index) as *mut Collidable;
+                unsafe {
+                    self.add_collidable_to_broad_phase(
+                        handle,
+                        &state.motion.pose,
+                        &state.inertia.local,
+                        &mut *collidable_ptr,
+                    );
+                }
             } else {
                 // Remove the now-unused collidable from the simulation.
                 self.remove_collidable_from_broad_phase(active_body_index);
@@ -529,7 +576,9 @@ impl Bodies {
         let location = *self.handle_to_location.get(handle.0);
         if location.set_index > 0 {
             // Body is inactive — wake it up.
-            unsafe { (*self.awakener).awaken_body(handle); }
+            unsafe {
+                (*self.awakener).awaken_body(handle);
+            }
         }
         let location = *self.handle_to_location.get(handle.0);
         let set = self.sets.get_mut(location.set_index);
@@ -538,7 +587,12 @@ impl Bodies {
         let now_kinematic = Self::is_kinematic(local_inertia);
         inertias.local = *local_inertia;
         inertias.world = BodyInertia::default();
-        self.update_for_kinematic_state_change(handle, &location, previously_kinematic, now_kinematic);
+        self.update_for_kinematic_state_change(
+            handle,
+            &location,
+            previously_kinematic,
+            now_kinematic,
+        );
     }
 
     /// Changes the shape of a body. Properly handles the transition between shapeless and shapeful.
@@ -546,10 +600,15 @@ impl Bodies {
     pub fn set_shape(&mut self, handle: BodyHandle, new_shape: TypedIndex) {
         let location = *self.handle_to_location.get(handle.0);
         if location.set_index > 0 {
-            unsafe { (*self.awakener).awaken_body(handle); }
+            unsafe {
+                (*self.awakener).awaken_body(handle);
+            }
         }
         let location = *self.handle_to_location.get(handle.0);
-        debug_assert!(location.set_index == 0, "We should be working with an active shape.");
+        debug_assert!(
+            location.set_index == 0,
+            "We should be working with an active shape."
+        );
         let set = self.sets.get_mut(0);
         let collidable = set.collidables.get_mut(location.index);
         let old_shape = collidable.shape;
@@ -563,16 +622,29 @@ impl Bodies {
         self.validate_existing_handle(handle);
         let location = *self.handle_to_location.get(handle.0);
         if location.set_index > 0 {
-            unsafe { (*self.awakener).awaken_body(handle); }
+            unsafe {
+                (*self.awakener).awaken_body(handle);
+            }
         }
         let location = *self.handle_to_location.get(handle.0);
         let set = self.sets.get_mut(location.set_index);
         let old_shape = set.collidables.get(location.index).shape;
         let now_kinematic = Self::is_kinematic(&description.local_inertia);
-        let previously_kinematic = Self::is_kinematic(&set.dynamics_state.get(location.index).inertia.local);
+        let previously_kinematic =
+            Self::is_kinematic(&set.dynamics_state.get(location.index).inertia.local);
         set.apply_description_by_index(location.index, description);
-        self.update_for_shape_change(handle, location.index, old_shape, description.collidable.shape);
-        self.update_for_kinematic_state_change(handle, &location, previously_kinematic, now_kinematic);
+        self.update_for_shape_change(
+            handle,
+            location.index,
+            old_shape,
+            description.collidable.shape,
+        );
+        self.update_for_kinematic_state_change(
+            handle,
+            &location,
+            previously_kinematic,
+            now_kinematic,
+        );
         self.update_bounds(handle);
     }
 
@@ -587,13 +659,22 @@ impl Bodies {
         // Remove constraints first.
         let constraints_count = self.sets.get(0).constraints.get(active_body_index).count;
         for i in (0..constraints_count).rev() {
-            let constraint_handle =
-                self.sets.get(0).constraints.get(active_body_index).span.get(i).connecting_constraint_handle;
-            unsafe { (*self.solver).remove(constraint_handle); }
+            let constraint_handle = self
+                .sets
+                .get(0)
+                .constraints
+                .get(active_body_index)
+                .span
+                .get(i)
+                .connecting_constraint_handle;
+            unsafe {
+                (*self.solver).remove(constraint_handle);
+            }
         }
         let pool_ptr = self.pool;
         let pool = unsafe { &mut *pool_ptr };
-        self.sets.get_mut(0)
+        self.sets
+            .get_mut(0)
             .constraints
             .get_mut(active_body_index)
             .dispose(pool);
@@ -624,7 +705,9 @@ impl Bodies {
             &mut moved_body_handle,
         );
         if body_moved {
-            unsafe { (*self.solver).update_for_body_memory_move(moved_body_index, active_body_index); }
+            unsafe {
+                (*self.solver).update_for_body_memory_move(moved_body_index, active_body_index);
+            }
             self.handle_to_location.get_mut(moved_body_handle.0).index = active_body_index;
         }
         handle
@@ -633,7 +716,9 @@ impl Bodies {
     /// Removes a body from the simulation by its handle.
     pub fn remove(&mut self, handle: BodyHandle) {
         self.validate_existing_handle(handle);
-        unsafe { (*self.awakener).awaken_body(handle); }
+        unsafe {
+            (*self.awakener).awaken_body(handle);
+        }
         let index = self.handle_to_location.get(handle.0).index;
         self.remove_at(index);
     }
@@ -657,8 +742,11 @@ impl Bodies {
             CollidableMobility::Dynamic
         };
         let broad_phase = unsafe { &mut *self.broad_phase };
-        collidable.broad_phase_index =
-            broad_phase.add_active(CollidableReference::from_body(mobility, handle), &body_bounds.min, &body_bounds.max);
+        collidable.broad_phase_index = broad_phase.add_active(
+            CollidableReference::from_body(mobility, handle),
+            &body_bounds.min,
+            &body_bounds.max,
+        );
     }
 
     fn remove_collidable_from_broad_phase(&mut self, active_body_index: i32) {
@@ -669,7 +757,10 @@ impl Bodies {
         if broad_phase.remove_active_at(removed_broad_phase_index, &mut moved_leaf) {
             // Whatever takes the body's place in the broad phase is also an active body.
             debug_assert!(moved_leaf.mobility() != CollidableMobility::Static);
-            self.update_collidable_broad_phase_index(moved_leaf.body_handle(), removed_broad_phase_index);
+            self.update_collidable_broad_phase_index(
+                moved_leaf.body_handle(),
+                removed_broad_phase_index,
+            );
         }
     }
 
@@ -693,7 +784,9 @@ impl Bodies {
     /// # Safety
     /// The body handle must be valid.
     #[inline(always)]
-    pub unsafe fn enumerate_connected_bodies<E: crate::utilities::for_each_ref::IForEach<BodyHandle>>(
+    pub unsafe fn enumerate_connected_bodies<
+        E: crate::utilities::for_each_ref::IForEach<BodyHandle>,
+    >(
         &self,
         body_handle: BodyHandle,
         enumerator: &mut E,
@@ -709,12 +802,15 @@ impl Bodies {
                 source_body_index: i32,
                 bodies: &'a Bodies,
             }
-            impl<E: crate::utilities::for_each_ref::IForEach<BodyHandle>> crate::utilities::for_each_ref::IForEach<i32> for ActiveEnumerator<'_, E> {
+            impl<E: crate::utilities::for_each_ref::IForEach<BodyHandle>>
+                crate::utilities::for_each_ref::IForEach<i32> for ActiveEnumerator<'_, E>
+            {
                 #[inline(always)]
                 fn loop_body(&mut self, encoded_body_index: i32) {
                     let body_index = encoded_body_index & Bodies::BODY_REFERENCE_MASK;
                     if self.source_body_index != body_index {
-                        let handle = unsafe { *self.bodies.active_set().index_to_handle.get(body_index) };
+                        let handle =
+                            unsafe { *self.bodies.active_set().index_to_handle.get(body_index) };
                         self.inner.loop_body(handle);
                     }
                 }
@@ -738,7 +834,9 @@ impl Bodies {
                 inner: &'a mut E,
                 source_body_handle: BodyHandle,
             }
-            impl<E: crate::utilities::for_each_ref::IForEach<BodyHandle>> crate::utilities::for_each_ref::IForEach<i32> for InactiveEnumerator<'_, E> {
+            impl<E: crate::utilities::for_each_ref::IForEach<BodyHandle>>
+                crate::utilities::for_each_ref::IForEach<i32> for InactiveEnumerator<'_, E>
+            {
                 #[inline(always)]
                 fn loop_body(&mut self, connected_body_handle: i32) {
                     if self.source_body_handle.0 != connected_body_handle {
@@ -763,21 +861,29 @@ impl Bodies {
 
     /// Enumerates connected body indices for an active body.
     /// Reports decoded body indices of all bodies connected via constraints, excluding the source body itself.
-    /// 
+    ///
     /// # Safety
     /// The active_body_index must be a valid index into the active set.
-    pub(crate) unsafe fn enumerate_connected_body_indices<E: crate::utilities::for_each_ref::IForEach<i32>>(
+    pub(crate) unsafe fn enumerate_connected_body_indices<
+        E: crate::utilities::for_each_ref::IForEach<i32>,
+    >(
         &self,
         active_body_index: i32,
         enumerator: &mut E,
     ) {
         let list = self.active_set().constraints.get(active_body_index);
 
-        struct ActiveConstraintBodyIndicesEnumerator<'a, E: crate::utilities::for_each_ref::IForEach<i32>> {
+        struct ActiveConstraintBodyIndicesEnumerator<
+            'a,
+            E: crate::utilities::for_each_ref::IForEach<i32>,
+        > {
             inner: &'a mut E,
             source_body_index: i32,
         }
-        impl<E: crate::utilities::for_each_ref::IForEach<i32>> crate::utilities::for_each_ref::IForEach<i32> for ActiveConstraintBodyIndicesEnumerator<'_, E> {
+        impl<E: crate::utilities::for_each_ref::IForEach<i32>>
+            crate::utilities::for_each_ref::IForEach<i32>
+            for ActiveConstraintBodyIndicesEnumerator<'_, E>
+        {
             #[inline(always)]
             fn loop_body(&mut self, connected_body_index: i32) {
                 if self.source_body_index != connected_body_index {

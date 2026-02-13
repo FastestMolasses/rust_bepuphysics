@@ -11,7 +11,11 @@ use glam::{Quat, Vec3};
 use std::marker::PhantomData;
 
 /// Abstraction for finding sweep overlaps between a convex shape and a compound.
-pub trait IConvexCompoundSweepOverlapFinder<TShapeA: IConvexShape, TCompoundB: IBoundsQueryableCompound> {
+pub trait IConvexCompoundSweepOverlapFinder<
+    TShapeA: IConvexShape,
+    TCompoundB: IBoundsQueryableCompound,
+>
+{
     unsafe fn find_overlaps(
         shape_a: &TShapeA,
         orientation_a: Quat,
@@ -27,7 +31,10 @@ pub trait IConvexCompoundSweepOverlapFinder<TShapeA: IConvexShape, TCompoundB: I
     );
 }
 
-pub struct ConvexCompoundSweepOverlapFinder<TShapeA: IConvexShape, TCompoundB: IBoundsQueryableCompound> {
+pub struct ConvexCompoundSweepOverlapFinder<
+    TShapeA: IConvexShape,
+    TCompoundB: IBoundsQueryableCompound,
+> {
     _phantom: PhantomData<(TShapeA, TCompoundB)>,
 }
 

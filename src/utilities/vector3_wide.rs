@@ -1,5 +1,5 @@
-use crate::{out_unsafe, utilities::gather_scatter::GatherScatter};
 use crate::utilities::vector::Vector;
+use crate::{out_unsafe, utilities::gather_scatter::GatherScatter};
 use glam::Vec3;
 use std::{
     ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub},

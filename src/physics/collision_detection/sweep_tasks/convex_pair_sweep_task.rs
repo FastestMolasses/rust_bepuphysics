@@ -3,10 +3,10 @@
 use crate::physics::body_properties::{BodyVelocity, RigidPose, RigidPoseWide};
 use crate::physics::collidables::compound::Compound;
 use crate::physics::collidables::shape::{IConvexShape, IShapeWide};
+use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::sweep_task_registry::{SweepTask, SweepTaskRegistry};
 use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::physics::pose_integration::PoseIntegration;
-use crate::physics::collidables::shapes::Shapes;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_ex;
 use crate::utilities::quaternion_wide::QuaternionWide;
@@ -72,7 +72,14 @@ fn get_sample_times(t0: f32, t1: f32, samples: &mut Vector<f32>) {
     }
 }
 
-trait ISweepModifier<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexShape, TShapeWideB: IShapeWide<TShapeB>, TPairDistanceTester> {
+trait ISweepModifier<
+    TShapeA: IConvexShape,
+    TShapeWideA: IShapeWide<TShapeA>,
+    TShapeB: IConvexShape,
+    TShapeWideB: IShapeWide<TShapeB>,
+    TPairDistanceTester,
+>
+{
     fn get_sphere_cast_interval(
         &mut self,
         offset_b: Vec3,
@@ -128,8 +135,13 @@ trait ISweepModifier<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TS
 
 struct UnoffsetSweep;
 
-impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexShape, TShapeWideB: IShapeWide<TShapeB>, TPairDistanceTester>
-    ISweepModifier<TShapeA, TShapeWideA, TShapeB, TShapeWideB, TPairDistanceTester>
+impl<
+        TShapeA: IConvexShape,
+        TShapeWideA: IShapeWide<TShapeA>,
+        TShapeB: IConvexShape,
+        TShapeWideB: IShapeWide<TShapeB>,
+        TPairDistanceTester,
+    > ISweepModifier<TShapeA, TShapeWideA, TShapeB, TShapeWideB, TPairDistanceTester>
     for UnoffsetSweep
 {
     #[inline(always)]
@@ -167,8 +179,18 @@ impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexSh
 
         // Integrate orientations to sample locations.
         let half_samples = *samples * Vector::<f32>::splat(0.5);
-        PoseIntegration::integrate_orientation_wide(initial_orientation_a, angular_a, &half_samples, sample_orientation_a);
-        PoseIntegration::integrate_orientation_wide(initial_orientation_b, angular_b, &half_samples, sample_orientation_b);
+        PoseIntegration::integrate_orientation_wide(
+            initial_orientation_a,
+            angular_a,
+            &half_samples,
+            sample_orientation_a,
+        );
+        PoseIntegration::integrate_orientation_wide(
+            initial_orientation_b,
+            angular_b,
+            &half_samples,
+            sample_orientation_b,
+        );
     }
 
     #[inline(always)]
@@ -230,8 +252,13 @@ struct OffsetSweep {
     angular_velocity_direction_b: Vec3,
 }
 
-impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexShape, TShapeWideB: IShapeWide<TShapeB>, TPairDistanceTester>
-    ISweepModifier<TShapeA, TShapeWideA, TShapeB, TShapeWideB, TPairDistanceTester>
+impl<
+        TShapeA: IConvexShape,
+        TShapeWideA: IShapeWide<TShapeA>,
+        TShapeB: IConvexShape,
+        TShapeWideB: IShapeWide<TShapeB>,
+        TPairDistanceTester,
+    > ISweepModifier<TShapeA, TShapeWideA, TShapeB, TShapeWideB, TPairDistanceTester>
     for OffsetSweep
 {
     #[inline(always)]
@@ -253,7 +280,11 @@ impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexSh
             &mut integrated_pose,
         );
         let mut child_offset = Vec3::ZERO;
-        quaternion_ex::transform_into(self.local_pose_a.position, integrated_pose.orientation, &mut child_offset);
+        quaternion_ex::transform_into(
+            self.local_pose_a.position,
+            integrated_pose.orientation,
+            &mut child_offset,
+        );
         *hit_location = *hit_location + integrated_pose.position + child_offset;
     }
 
@@ -284,16 +315,36 @@ impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexSh
         let mut local_poses_a = RigidPoseWide::default();
         RigidPoseWide::broadcast(&self.local_pose_a, &mut local_poses_a);
         let mut integrated_orientation_a = QuaternionWide::default();
-        PoseIntegration::integrate_orientation_wide(initial_orientation_a, angular_a, &half_samples, &mut integrated_orientation_a);
+        PoseIntegration::integrate_orientation_wide(
+            initial_orientation_a,
+            angular_a,
+            &half_samples,
+            &mut integrated_orientation_a,
+        );
         let mut child_position_a = Vector3Wide::default();
-        Compound::get_rotated_child_pose_wide(&local_poses_a, &integrated_orientation_a, &mut child_position_a, sample_orientation_a);
+        Compound::get_rotated_child_pose_wide(
+            &local_poses_a,
+            &integrated_orientation_a,
+            &mut child_position_a,
+            sample_orientation_a,
+        );
 
         let mut local_poses_b = RigidPoseWide::default();
         RigidPoseWide::broadcast(&self.local_pose_b, &mut local_poses_b);
         let mut integrated_orientation_b = QuaternionWide::default();
-        PoseIntegration::integrate_orientation_wide(initial_orientation_b, angular_b, &half_samples, &mut integrated_orientation_b);
+        PoseIntegration::integrate_orientation_wide(
+            initial_orientation_b,
+            angular_b,
+            &half_samples,
+            &mut integrated_orientation_b,
+        );
         let mut child_position_b = Vector3Wide::default();
-        Compound::get_rotated_child_pose_wide(&local_poses_b, &integrated_orientation_b, &mut child_position_b, sample_orientation_b);
+        Compound::get_rotated_child_pose_wide(
+            &local_poses_b,
+            &integrated_orientation_b,
+            &mut child_position_b,
+            sample_orientation_b,
+        );
 
         let mut net_offset_b = Vector3Wide::default();
         Vector3Wide::subtract(&child_position_b, &child_position_a, &mut net_offset_b);
@@ -321,11 +372,19 @@ impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexSh
         hit_location: &mut Vec3,
     ) -> bool {
         let mut r_a = Vec3::ZERO;
-        quaternion_ex::transform_without_overlap(self.local_pose_a.position, orientation_a, &mut r_a);
+        quaternion_ex::transform_without_overlap(
+            self.local_pose_a.position,
+            orientation_a,
+            &mut r_a,
+        );
         let tangent_a = r_a.cross(angular_velocity_a);
         self.tangent_speed_a = tangent_a.length();
         let mut r_b = Vec3::ZERO;
-        quaternion_ex::transform_without_overlap(self.local_pose_b.position, orientation_b, &mut r_b);
+        quaternion_ex::transform_without_overlap(
+            self.local_pose_b.position,
+            orientation_b,
+            &mut r_b,
+        );
         let tangent_b = r_b.cross(angular_velocity_b);
         self.tangent_speed_b = tangent_b.length();
         self.twice_radius_a = 2.0 * self.local_pose_a.position.length();
@@ -369,14 +428,16 @@ impl<TShapeA: IConvexShape, TShapeWideA: IShapeWide<TShapeA>, TShapeB: IConvexSh
         Vector3Wide::broadcast_to(self.angular_velocity_direction_a, &mut direction_a);
         let mut dot_a = Vector::<f32>::default();
         Vector3Wide::dot(normal, &direction_a, &mut dot_a);
-        let scale_a = (Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0) - dot_a * dot_a)).sqrt();
+        let scale_a =
+            (Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0) - dot_a * dot_a)).sqrt();
         *velocity_contribution_a = Vector::<f32>::splat(self.tangent_speed_a) * scale_a;
         *maximum_displacement_a = Vector::<f32>::splat(self.twice_radius_a) * scale_a;
         let mut direction_b = Vector3Wide::default();
         Vector3Wide::broadcast_to(self.angular_velocity_direction_b, &mut direction_b);
         let mut dot_b = Vector::<f32>::default();
         Vector3Wide::dot(normal, &direction_b, &mut dot_b);
-        let scale_b = (Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0) - dot_b * dot_b)).sqrt();
+        let scale_b =
+            (Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0) - dot_b * dot_b)).sqrt();
         *velocity_contribution_b = Vector::<f32>::splat(self.tangent_speed_b) * scale_b;
         *maximum_displacement_b = Vector::<f32>::splat(self.twice_radius_b) * scale_b;
     }
@@ -414,12 +475,20 @@ unsafe fn sweep<
     let mut wide_b = TShapeWideB::default();
     if wide_a.internal_allocation_size() > 0 {
         let mut memory = vec![0u8; wide_a.internal_allocation_size()];
-        wide_a.initialize(&crate::utilities::memory::buffer::Buffer::new(memory.as_mut_ptr(), memory.len() as i32, -1));
+        wide_a.initialize(&crate::utilities::memory::buffer::Buffer::new(
+            memory.as_mut_ptr(),
+            memory.len() as i32,
+            -1,
+        ));
         std::mem::forget(memory);
     }
     if wide_b.internal_allocation_size() > 0 {
         let mut memory = vec![0u8; wide_b.internal_allocation_size()];
-        wide_b.initialize(&crate::utilities::memory::buffer::Buffer::new(memory.as_mut_ptr(), memory.len() as i32, -1));
+        wide_b.initialize(&crate::utilities::memory::buffer::Buffer::new(
+            memory.as_mut_ptr(),
+            memory.len() as i32,
+            -1,
+        ));
         std::mem::forget(memory);
     }
     wide_a.broadcast(shape_a);
@@ -490,10 +559,18 @@ unsafe fn sweep<
     let mut next0 = *t0;
     let mut next1 = *t1;
     sweep_modifier.construct_samples(
-        *t0, *t1,
-        &wide_linear_velocity_b, &wide_angular_velocity_a, &wide_angular_velocity_b,
-        &initial_offset_b, &initial_orientation_a, &initial_orientation_b,
-        &mut samples, &mut sample_offset_b, &mut sample_orientation_a, &mut sample_orientation_b,
+        *t0,
+        *t1,
+        &wide_linear_velocity_b,
+        &wide_angular_velocity_a,
+        &wide_angular_velocity_b,
+        &initial_offset_b,
+        &initial_orientation_a,
+        &initial_orientation_b,
+        &mut samples,
+        &mut sample_offset_b,
+        &mut sample_orientation_a,
+        &mut sample_orientation_b,
     );
 
     let mut intersection_encountered = false;
@@ -518,7 +595,11 @@ unsafe fn sweep<
         );
 
         let mut linear_velocity_along_normal = Vector::<f32>::default();
-        Vector3Wide::dot(&normals, &wide_linear_velocity_b, &mut linear_velocity_along_normal);
+        Vector3Wide::dot(
+            &normals,
+            &wide_linear_velocity_b,
+            &mut linear_velocity_along_normal,
+        );
         let mut nonlinear_velocity_contribution_a = Vector::<f32>::default();
         let mut nonlinear_maximum_displacement_a = Vector::<f32>::default();
         let mut nonlinear_velocity_contribution_b = Vector::<f32>::default();
@@ -532,23 +613,36 @@ unsafe fn sweep<
         );
 
         let zero = Vector::<f32>::splat(0.0);
-        let a_worst_case_distances = zero.simd_max(distances - max_angular_expansion_a - nonlinear_maximum_displacement_a);
+        let a_worst_case_distances =
+            zero.simd_max(distances - max_angular_expansion_a - nonlinear_maximum_displacement_a);
         let angular_displacement_b = max_angular_expansion_b + nonlinear_maximum_displacement_b;
         let b_worst_case_distances = zero.simd_max(distances - angular_displacement_b);
-        let both_worst_case_distances = zero.simd_max(a_worst_case_distances - angular_displacement_b);
+        let both_worst_case_distances =
+            zero.simd_max(a_worst_case_distances - angular_displacement_b);
         let division_guard = Vector::<f32>::splat(1e-15);
-        let both_worst_case_next_time = both_worst_case_distances / division_guard.simd_max(linear_velocity_along_normal);
+        let both_worst_case_next_time =
+            both_worst_case_distances / division_guard.simd_max(linear_velocity_along_normal);
         let angular_contribution_a = nonlinear_velocity_contribution_a + tangent_speed_a;
         let angular_contribution_b = nonlinear_velocity_contribution_b + tangent_speed_b;
-        let a_worst_case_next_time = a_worst_case_distances / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_b);
-        let b_worst_case_next_time = b_worst_case_distances / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_a);
-        let best_case_next_time = distances / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_a + angular_contribution_b);
+        let a_worst_case_next_time = a_worst_case_distances
+            / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_b);
+        let b_worst_case_next_time = b_worst_case_distances
+            / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_a);
+        let best_case_next_time = distances
+            / division_guard.simd_max(
+                linear_velocity_along_normal + angular_contribution_a + angular_contribution_b,
+            );
         let time_to_next = both_worst_case_next_time
             .simd_max(a_worst_case_next_time)
             .simd_max(b_worst_case_next_time.simd_max(best_case_next_time));
-        let a_worst_case_previous_time = a_worst_case_distances / division_guard.simd_max(angular_contribution_b - linear_velocity_along_normal);
-        let b_worst_case_previous_time = b_worst_case_distances / division_guard.simd_max(angular_contribution_a - linear_velocity_along_normal);
-        let best_case_previous_time = distances / division_guard.simd_max(angular_contribution_a + angular_contribution_b - linear_velocity_along_normal);
+        let a_worst_case_previous_time = a_worst_case_distances
+            / division_guard.simd_max(angular_contribution_b - linear_velocity_along_normal);
+        let b_worst_case_previous_time = b_worst_case_distances
+            / division_guard.simd_max(angular_contribution_a - linear_velocity_along_normal);
+        let best_case_previous_time = distances
+            / division_guard.simd_max(
+                angular_contribution_a + angular_contribution_b - linear_velocity_along_normal,
+            );
         let time_to_previous = (-both_worst_case_next_time)
             .simd_max(a_worst_case_previous_time)
             .simd_max(b_worst_case_previous_time.simd_max(best_case_previous_time));
@@ -614,7 +708,10 @@ unsafe fn sweep<
         if interval_span < 0.0
             || (intersection_encountered && interval_span < convergence_threshold)
             || interval_span >= previous_interval_span
-            || { iteration_index += 1; iteration_index } >= maximum_iteration_count
+            || {
+                iteration_index += 1;
+                iteration_index
+            } >= maximum_iteration_count
         {
             break;
         }
@@ -644,10 +741,18 @@ unsafe fn sweep<
         }
 
         sweep_modifier.construct_samples(
-            sample0, sample1,
-            &wide_linear_velocity_b, &wide_angular_velocity_a, &wide_angular_velocity_b,
-            &initial_offset_b, &initial_orientation_a, &initial_orientation_b,
-            &mut samples, &mut sample_offset_b, &mut sample_orientation_a, &mut sample_orientation_b,
+            sample0,
+            sample1,
+            &wide_linear_velocity_b,
+            &wide_angular_velocity_a,
+            &wide_angular_velocity_b,
+            &initial_offset_b,
+            &initial_orientation_a,
+            &initial_orientation_b,
+            &mut samples,
+            &mut sample_offset_b,
+            &mut sample_orientation_a,
+            &mut sample_orientation_b,
         );
     }
     sweep_modifier.adjust_hit_location(orientation_a, velocity_a, *t0, hit_location);
@@ -658,7 +763,13 @@ unsafe fn sweep<
 pub struct ConvexPairSweepTask<TShapeA, TShapeWideA, TShapeB, TShapeWideB, TPairDistanceTester> {
     shape_type_index_a: i32,
     shape_type_index_b: i32,
-    _phantom: PhantomData<(TShapeA, TShapeWideA, TShapeB, TShapeWideB, TPairDistanceTester)>,
+    _phantom: PhantomData<(
+        TShapeA,
+        TShapeWideA,
+        TShapeB,
+        TShapeWideB,
+        TPairDistanceTester,
+    )>,
 }
 
 impl<

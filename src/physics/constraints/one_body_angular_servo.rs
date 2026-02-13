@@ -57,9 +57,11 @@ impl OneBodyAngularServo {
         inner_index: usize,
         description: &mut OneBodyAngularServo,
     ) {
-        let source =
-            unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        QuaternionWide::read_first(&source.target_orientation, &mut description.target_orientation);
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
+        QuaternionWide::read_first(
+            &source.target_orientation,
+            &mut description.target_orientation,
+        );
         SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
         ServoSettingsWide::read_first(&source.servo_settings, &mut description.servo_settings);
     }
@@ -167,16 +169,8 @@ impl OneBodyAngularServoFunctions {
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);
 
-        ServoSettingsWide::clamp_impulse_3d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
-        Self::apply_impulse(
-            &inertia_a.inverse_inertia_tensor,
-            &csi,
-            &mut wsv_a.angular,
-        );
+        ServoSettingsWide::clamp_impulse_3d(&maximum_impulse, accumulated_impulses, &mut csi);
+        Self::apply_impulse(&inertia_a.inverse_inertia_tensor, &csi, &mut wsv_a.angular);
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

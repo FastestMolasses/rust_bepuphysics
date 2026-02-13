@@ -2,19 +2,19 @@ use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
-use crate::utilities::vector::Vector;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_ex;
-use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::quaternion_ex;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 
+use super::ray::RayWide;
+use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use super::shape::{IShape, IConvexShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
-use super::ray::RayWide;
 
 /// Collision shape representing a cylinder.
 #[repr(C)]
@@ -239,16 +239,12 @@ impl IShapeWide<Cylinder> for CylinderWide {
         let zero = Vector::<f32>::splat(0.0);
         let mut squared = Vector3Wide::default();
         Vector3Wide::subtract_from_scalar(&one, &yy, &mut squared);
-        max.x = (self.half_length * y.x).abs()
-            + (squared.x.simd_max(zero)).sqrt() * self.radius;
-        max.y = (self.half_length * y.y).abs()
-            + (squared.y.simd_max(zero)).sqrt() * self.radius;
-        max.z = (self.half_length * y.z).abs()
-            + (squared.z.simd_max(zero)).sqrt() * self.radius;
+        max.x = (self.half_length * y.x).abs() + (squared.x.simd_max(zero)).sqrt() * self.radius;
+        max.y = (self.half_length * y.y).abs() + (squared.y.simd_max(zero)).sqrt() * self.radius;
+        max.z = (self.half_length * y.z).abs() + (squared.z.simd_max(zero)).sqrt() * self.radius;
         Vector3Wide::negate(max, min);
 
-        *maximum_radius =
-            (self.half_length * self.half_length + self.radius * self.radius).sqrt();
+        *maximum_radius = (self.half_length * self.half_length + self.radius * self.radius).sqrt();
         *maximum_angular_expansion = *maximum_radius - self.half_length.simd_min(self.radius);
     }
 
@@ -304,46 +300,37 @@ impl IShapeWide<Cylinder> for CylinderWide {
         let cylinder_intersected = (b.simd_le(Vector::<f32>::splat(0.0))
             | c.simd_le(Vector::<f32>::splat(0.0)))
             & discriminant.simd_ge(Vector::<f32>::splat(0.0));
-        let cylinder_t =
-            ((-b - discriminant.sqrt()) / a).simd_max(-t_offset);
+        let cylinder_t = ((-b - discriminant.sqrt()) / a).simd_max(-t_offset);
         let mut cylinder_hit_location = Vector3Wide::default();
         Vector3Wide::scale_to(&d, &cylinder_t, &mut o_offset);
         Vector3Wide::add(&o, &o_offset, &mut cylinder_hit_location);
         let inverse_radius = Vector::<f32>::splat(1.0) / self.radius;
         let cylinder_normal_x = cylinder_hit_location.x * inverse_radius;
         let cylinder_normal_z = cylinder_hit_location.z * inverse_radius;
-        let use_cylinder = cylinder_hit_location
-            .y
-            .simd_ge(-self.half_length)
+        let use_cylinder = cylinder_hit_location.y.simd_ge(-self.half_length)
             & cylinder_hit_location.y.simd_le(self.half_length);
 
         // Disc cap intersection.
-        let disc_y = (
-            (cylinder_hit_location.y.simd_gt(self.half_length) & ray_isnt_parallel)
-            | (d.y.simd_le(Vector::<f32>::splat(0.0)) & !ray_isnt_parallel)
-        )
-        .select(self.half_length, -self.half_length);
+        let disc_y = ((cylinder_hit_location.y.simd_gt(self.half_length) & ray_isnt_parallel)
+            | (d.y.simd_le(Vector::<f32>::splat(0.0)) & !ray_isnt_parallel))
+            .select(self.half_length, -self.half_length);
 
-        let within_discs_or_toward = o
-            .y
-            .abs()
-            .simd_le(self.half_length)
-            | (o.y * d.y).simd_lt(Vector::<f32>::splat(0.0));
+        let within_discs_or_toward =
+            o.y.abs().simd_le(self.half_length) | (o.y * d.y).simd_lt(Vector::<f32>::splat(0.0));
 
         let cap_t = (disc_y - o.y) / d.y;
         let hit_location_x = o.x + d.x * cap_t;
         let hit_location_z = o.z + d.z * cap_t;
-        let cap_hit_within_radius =
-            (hit_location_x * hit_location_x + hit_location_z * hit_location_z)
-                .simd_le(radius_squared);
+        let cap_hit_within_radius = (hit_location_x * hit_location_x
+            + hit_location_z * hit_location_z)
+            .simd_le(radius_squared);
         let hit_cap = within_discs_or_toward & cap_hit_within_radius;
 
         let zero = Vector::<f32>::splat(0.0);
         let one = Vector::<f32>::splat(1.0);
         let neg_one = Vector::<f32>::splat(-1.0);
 
-        *t = (t_offset
-            + use_cylinder.select(cylinder_t, hit_cap.select(cap_t, zero)))
+        *t = (t_offset + use_cylinder.select(cylinder_t, hit_cap.select(cap_t, zero)))
             * inverse_d_length;
 
         let cap_uses_upward = d.y.simd_lt(zero);
@@ -386,7 +373,12 @@ impl ISupportFinder<Cylinder, CylinderWide> for CylinderSupportFinder {
             &mut local_direction,
         );
         let mut local_support = Vector3Wide::default();
-        self.compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        self.compute_local_support(
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
+        );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 
@@ -399,9 +391,11 @@ impl ISupportFinder<Cylinder, CylinderWide> for CylinderSupportFinder {
         support: &mut Vector3Wide,
     ) {
         let zero = Vector::<f32>::splat(0.0);
-        support.y = direction.y.simd_gt(zero).select(shape.half_length, -shape.half_length);
-        let horizontal_length =
-            (direction.x * direction.x + direction.z * direction.z).sqrt();
+        support.y = direction
+            .y
+            .simd_gt(zero)
+            .select(shape.half_length, -shape.half_length);
+        let horizontal_length = (direction.x * direction.x + direction.z * direction.z).sqrt();
         let normalize_scale = shape.radius / horizontal_length;
         let use_horizontal = horizontal_length.simd_gt(Vector::<f32>::splat(1e-8));
         support.x = use_horizontal.select(direction.x * normalize_scale, zero);
@@ -427,9 +421,11 @@ impl DepthRefinerSupportFinder<CylinderWide> for CylinderSupportFinder {
         support: &mut Vector3Wide,
     ) {
         let zero = Vector::<f32>::splat(0.0);
-        support.y = direction.y.simd_gt(zero).select(shape.half_length, -shape.half_length);
-        let horizontal_length =
-            (direction.x * direction.x + direction.z * direction.z).sqrt();
+        support.y = direction
+            .y
+            .simd_gt(zero)
+            .select(shape.half_length, -shape.half_length);
+        let horizontal_length = (direction.x * direction.x + direction.z * direction.z).sqrt();
         let normalize_scale = shape.radius / horizontal_length;
         let use_horizontal = horizontal_length.simd_gt(Vector::<f32>::splat(1e-8));
         support.x = use_horizontal.select(direction.x * normalize_scale, zero);
@@ -451,7 +447,12 @@ impl DepthRefinerSupportFinder<CylinderWide> for CylinderSupportFinder {
             &mut local_direction,
         );
         let mut local_support = Vector3Wide::default();
-        <Self as DepthRefinerSupportFinder<CylinderWide>>::compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        <Self as DepthRefinerSupportFinder<CylinderWide>>::compute_local_support(
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
+        );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }

@@ -57,7 +57,11 @@ impl CapsuleConvexHullTester {
         let mut center_distance = zero_f;
         Vector3Wide::length_into(&local_offset_a, &mut center_distance);
         let mut initial_normal = Vector3Wide::default();
-        Vector3Wide::scale_to(&local_offset_a, &(one_f / center_distance), &mut initial_normal);
+        Vector3Wide::scale_to(
+            &local_offset_a,
+            &(one_f / center_distance),
+            &mut initial_normal,
+        );
         let use_initial_fallback = center_distance.simd_lt(Vector::<f32>::splat(1e-8));
         initial_normal.x = use_initial_fallback.select(zero_f, initial_normal.x);
         initial_normal.y = use_initial_fallback.select(one_f, initial_normal.y);
@@ -220,7 +224,9 @@ impl CapsuleConvexHullTester {
         let t_entry = latest_entry_numerator_bundle / latest_entry_denominator_bundle;
         let t_exit = earliest_exit_numerator_bundle / earliest_exit_denominator_bundle;
         let negated_half_length = -a.half_length;
-        let t_entry = t_entry.simd_max(negated_half_length).simd_min(a.half_length);
+        let t_entry = t_entry
+            .simd_max(negated_half_length)
+            .simd_min(a.half_length);
         let t_exit = t_exit.simd_max(negated_half_length).simd_min(a.half_length);
 
         let local_offset0 = Vector3Wide::scale(&local_capsule_axis, &t_entry);
@@ -228,7 +234,11 @@ impl CapsuleConvexHullTester {
 
         // Compute depth per contact.
         let mut a_to_point_on_hull_face = Vector3Wide::default();
-        Vector3Wide::add(&local_offset_b, &closest_on_hull, &mut a_to_point_on_hull_face);
+        Vector3Wide::add(
+            &local_offset_b,
+            &closest_on_hull,
+            &mut a_to_point_on_hull_face,
+        );
 
         let mut depth_denominator = zero_f;
         Vector3Wide::dot(&face_normal_bundle, &local_normal, &mut depth_denominator);

@@ -133,8 +133,7 @@ impl PoseIntegration {
                 math_helper::cos(half_angle),
             );
             // Note that the input and output may overlap.
-            *integrated_orientation =
-                quaternion_ex::concatenate(orientation, q);
+            *integrated_orientation = quaternion_ex::concatenate(orientation, q);
             quaternion_ex::normalize_into(integrated_orientation);
         } else {
             *integrated_orientation = orientation;
@@ -196,9 +195,12 @@ impl PoseIntegration {
         let use_new_velocity = angular_velocity.x.abs().simd_lt(infinity)
             & angular_velocity.y.abs().simd_lt(infinity)
             & angular_velocity.z.abs().simd_lt(infinity);
-        angular_velocity.x = use_new_velocity.select(angular_velocity.x, previous_angular_velocity.x);
-        angular_velocity.y = use_new_velocity.select(angular_velocity.y, previous_angular_velocity.y);
-        angular_velocity.z = use_new_velocity.select(angular_velocity.z, previous_angular_velocity.z);
+        angular_velocity.x =
+            use_new_velocity.select(angular_velocity.x, previous_angular_velocity.x);
+        angular_velocity.y =
+            use_new_velocity.select(angular_velocity.y, previous_angular_velocity.y);
+        angular_velocity.z =
+            use_new_velocity.select(angular_velocity.z, previous_angular_velocity.z);
     }
 
     /// Approximately conserves angular momentum by updating the angular velocity according to the change in orientation.
@@ -213,7 +215,10 @@ impl PoseIntegration {
         // This just avoids the need for quite a bit of complexity around keeping the world inertias buffer updated with adds/removes/moves and other state changes that we can't easily track.
         // Also, even if it were cached, the memory bandwidth requirements of loading another inertia tensor would hurt multithreaded scaling enough to eliminate any performance advantage.
         let mut previous_orientation_matrix = Matrix3x3Wide::default();
-        Matrix3x3Wide::create_from_quaternion(previous_orientation, &mut previous_orientation_matrix);
+        Matrix3x3Wide::create_from_quaternion(
+            previous_orientation,
+            &mut previous_orientation_matrix,
+        );
 
         let mut local_previous_angular_velocity = Vector3Wide::default();
         Matrix3x3Wide::transform_by_transposed_without_overlap(
@@ -283,13 +288,18 @@ impl PoseIntegration {
             &mut local_angular_momentum,
         );
 
-        let residual = *dt * Vector3Wide::cross_new(&local_angular_momentum, &local_angular_velocity);
+        let residual =
+            *dt * Vector3Wide::cross_new(&local_angular_momentum, &local_angular_velocity);
 
         let skew_momentum = Matrix3x3Wide::create_cross_product(&local_angular_momentum);
         let skew_velocity = Matrix3x3Wide::create_cross_product(&local_angular_velocity);
         let transformed_skew_velocity = skew_velocity * local_inertia_tensor;
         let mut change_over_dt = Matrix3x3Wide::default();
-        Matrix3x3Wide::subtract(&transformed_skew_velocity, &skew_momentum, &mut change_over_dt);
+        Matrix3x3Wide::subtract(
+            &transformed_skew_velocity,
+            &skew_momentum,
+            &mut change_over_dt,
+        );
         let mut change = Matrix3x3Wide::default();
         Matrix3x3Wide::scale(&change_over_dt, dt, &mut change);
         let jacobian = local_inertia_tensor + change;
@@ -304,7 +314,11 @@ impl PoseIntegration {
         local_angular_velocity = updated;
 
         let previous_velocity = *angular_velocity;
-        Matrix3x3Wide::transform(&local_angular_velocity, &orientation_matrix, angular_velocity);
+        Matrix3x3Wide::transform(
+            &local_angular_velocity,
+            &orientation_matrix,
+            angular_velocity,
+        );
         Self::fallback_if_inertia_incompatible(&previous_velocity, angular_velocity);
     }
 

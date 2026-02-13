@@ -38,7 +38,11 @@ impl IPairDistanceTester<CapsuleWide, CylinderWide> for CapsuleCylinderDistanceT
         );
         let capsule_axis = QuaternionWide::transform_unit_y(local_orientation_a);
         let mut local_offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(offset_b, &inverse_orientation_b, &mut local_offset_b);
+        QuaternionWide::transform_without_overlap(
+            offset_b,
+            &inverse_orientation_b,
+            &mut local_offset_b,
+        );
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
 
@@ -57,7 +61,11 @@ impl IPairDistanceTester<CapsuleWide, CylinderWide> for CapsuleCylinderDistanceT
         Vector3Wide::length_into(&offset_from_cylinder_to_line_segment, distance);
         let inv_dist = Vector::<f32>::splat(1.0) / *distance;
         let mut local_normal = Vector3Wide::default();
-        Vector3Wide::scale_to(&offset_from_cylinder_to_line_segment, &inv_dist, &mut local_normal);
+        Vector3Wide::scale_to(
+            &offset_from_cylinder_to_line_segment,
+            &inv_dist,
+            &mut local_normal,
+        );
         *distance = *distance - a.radius;
         *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
         QuaternionWide::transform_without_overlap(&local_normal, orientation_b, normal);

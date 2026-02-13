@@ -82,12 +82,16 @@ impl Job {
 
         // Initialize fields through raw pointer writes to avoid creating references
         // to uninitialized memory.
-        std::ptr::addr_of_mut!((*job_ptr).tasks)
-            .write(Buffer::new(tasks_ptr, source_tasks.len() as i32, raw_buffer.id()));
+        std::ptr::addr_of_mut!((*job_ptr).tasks).write(Buffer::new(
+            tasks_ptr,
+            source_tasks.len() as i32,
+            raw_buffer.id(),
+        ));
         std::ptr::addr_of_mut!((*job_ptr).tag).write(tag);
         std::ptr::addr_of_mut!((*job_ptr).previous).write(std::ptr::null_mut());
         std::ptr::addr_of_mut!((*job_ptr)._padding1).write([0u8; 128]);
-        std::ptr::addr_of_mut!((*job_ptr).counter).write(UnsafeCell::new(source_tasks.len() as i32));
+        std::ptr::addr_of_mut!((*job_ptr).counter)
+            .write(UnsafeCell::new(source_tasks.len() as i32));
         std::ptr::addr_of_mut!((*job_ptr)._padding2).write([0u8; 128]);
 
         // Copy tasks into the buffer

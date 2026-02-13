@@ -87,8 +87,8 @@ impl PowerPool {
         );
 
         // Allocate aligned memory for the block
-        let layout =
-            Layout::from_size_align(self.block_size as usize, BLOCK_ALIGNMENT).expect("Invalid layout");
+        let layout = Layout::from_size_align(self.block_size as usize, BLOCK_ALIGNMENT)
+            .expect("Invalid layout");
         let ptr = alloc::alloc(layout);
         if ptr.is_null() {
             alloc::handle_alloc_error(layout);
@@ -99,8 +99,7 @@ impl PowerPool {
     }
 
     fn ensure_capacity(&mut self, capacity: i32) {
-        let needed_block_count =
-            (capacity as f64 / self.block_size as f64).ceil() as i32;
+        let needed_block_count = (capacity as f64 / self.block_size as f64).ceil() as i32;
         if self.block_count < needed_block_count {
             if needed_block_count as usize > self.blocks.len() {
                 self.resize(needed_block_count as usize);
@@ -362,7 +361,12 @@ impl BufferPool {
     }
 
     /// Resizes a typed buffer to the smallest size available in the pool which contains the target size.
-    pub fn resize_to_at_least<T: Copy>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32) {
+    pub fn resize_to_at_least<T: Copy>(
+        &mut self,
+        buffer: &mut Buffer<T>,
+        target_size: i32,
+        copy_count: i32,
+    ) {
         debug_assert!(
             copy_count <= target_size && copy_count <= buffer.len(),
             "Can't copy more elements than exist in the source or target buffers."
@@ -477,7 +481,12 @@ impl super::unmanaged_mempool::UnmanagedMemoryPool for BufferPool {
     }
 
     #[inline(always)]
-    fn resize_to_at_least<T: Copy>(&mut self, buffer: &mut Buffer<T>, target_size: i32, copy_count: i32) {
+    fn resize_to_at_least<T: Copy>(
+        &mut self,
+        buffer: &mut Buffer<T>,
+        target_size: i32,
+        copy_count: i32,
+    ) {
         BufferPool::resize_to_at_least(self, buffer, target_size, copy_count)
     }
 

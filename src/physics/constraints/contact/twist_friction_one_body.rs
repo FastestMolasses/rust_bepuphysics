@@ -19,8 +19,7 @@ impl TwistFrictionOneBody {
         corrective_impulse: &Vector<f32>,
         wsv_a: &mut BodyVelocityWide,
     ) {
-        let world_corrective_impulse_a =
-            Vector3Wide::scale(angular_jacobian_a, corrective_impulse);
+        let world_corrective_impulse_a = Vector3Wide::scale(angular_jacobian_a, corrective_impulse);
         let mut world_corrective_velocity_a = Vector3Wide::default();
         Symmetric3x3Wide::transform_without_overlap(
             &world_corrective_impulse_a,
@@ -28,11 +27,7 @@ impl TwistFrictionOneBody {
             &mut world_corrective_velocity_a,
         );
         let temp = wsv_a.angular;
-        Vector3Wide::add(
-            &temp,
-            &world_corrective_velocity_a,
-            &mut wsv_a.angular,
-        );
+        Vector3Wide::add(&temp, &world_corrective_velocity_a, &mut wsv_a.angular);
     }
 
     #[inline(always)]

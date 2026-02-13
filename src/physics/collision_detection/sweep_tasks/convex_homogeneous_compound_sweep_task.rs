@@ -3,9 +3,11 @@
 use crate::physics::body_properties::{BodyVelocity, RigidPose};
 use crate::physics::collidables::shape::{IConvexShape, IHomogeneousCompoundShape, IShapeWide};
 use crate::physics::collidables::shapes::Shapes;
-use crate::physics::collision_detection::sweep_task_registry::{ISweepFilter, SweepTask, SweepTaskRegistry};
-use crate::physics::collision_detection::sweep_tasks::convex_compound_sweep_overlap_finder::IConvexCompoundSweepOverlapFinder;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
+use crate::physics::collision_detection::sweep_task_registry::{
+    ISweepFilter, SweepTask, SweepTaskRegistry,
+};
+use crate::physics::collision_detection::sweep_tasks::convex_compound_sweep_overlap_finder::IConvexCompoundSweepOverlapFinder;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
 use std::marker::PhantomData;
@@ -20,7 +22,14 @@ pub struct ConvexHomogeneousCompoundSweepTask<
 > {
     shape_type_index_a: i32,
     shape_type_index_b: i32,
-    _phantom: PhantomData<(TConvex, TConvexWide, TCompound, TChildType, TChildTypeWide, TOverlapFinder)>,
+    _phantom: PhantomData<(
+        TConvex,
+        TConvexWide,
+        TCompound,
+        TChildType,
+        TChildTypeWide,
+        TOverlapFinder,
+    )>,
 }
 
 impl<
@@ -30,7 +39,15 @@ impl<
         TChildType: IConvexShape + 'static,
         TChildTypeWide: IShapeWide<TChildType> + 'static,
         TOverlapFinder: IConvexCompoundSweepOverlapFinder<TConvex, TCompound> + 'static,
-    > ConvexHomogeneousCompoundSweepTask<TConvex, TConvexWide, TCompound, TChildType, TChildTypeWide, TOverlapFinder>
+    >
+    ConvexHomogeneousCompoundSweepTask<
+        TConvex,
+        TConvexWide,
+        TCompound,
+        TChildType,
+        TChildTypeWide,
+        TOverlapFinder,
+    >
 {
     pub fn new() -> Self {
         Self {
@@ -49,7 +66,14 @@ impl<
         TChildTypeWide: IShapeWide<TChildType> + 'static,
         TOverlapFinder: IConvexCompoundSweepOverlapFinder<TConvex, TCompound> + 'static,
     > SweepTask
-    for ConvexHomogeneousCompoundSweepTask<TConvex, TConvexWide, TCompound, TChildType, TChildTypeWide, TOverlapFinder>
+    for ConvexHomogeneousCompoundSweepTask<
+        TConvex,
+        TConvexWide,
+        TCompound,
+        TChildType,
+        TChildTypeWide,
+        TOverlapFinder,
+    >
 {
     fn shape_type_index_a(&self) -> i32 {
         self.shape_type_index_a
@@ -114,9 +138,17 @@ impl<
             let convex = &*(shape_data_a as *const TConvex);
             let mut overlaps = Default::default();
             TOverlapFinder::find_overlaps(
-                convex, orientation_a, velocity_a,
-                compound, offset_b, orientation_b, velocity_b,
-                maximum_t, &*shapes, &mut *pool, &mut overlaps,
+                convex,
+                orientation_a,
+                velocity_a,
+                compound,
+                offset_b,
+                orientation_b,
+                velocity_b,
+                maximum_t,
+                &*shapes,
+                &mut *pool,
+                &mut overlaps,
             );
             let filter_ref = &**(filter as *const *const dyn ISweepFilter);
             for i in 0..overlaps.count {
@@ -140,10 +172,25 @@ impl<
                     let mut hit_location_candidate = Vec3::ZERO;
                     let mut hit_normal_candidate = Vec3::ZERO;
                     if task.sweep(
-                        shape_data_a, self.shape_type_index_a, &identity_pose, orientation_a, velocity_a,
-                        child_shape.as_ptr() as *const u8, TChildType::type_id(), &child_pose, offset_b, orientation_b, velocity_b,
-                        maximum_t, minimum_progression, convergence_threshold, maximum_iteration_count,
-                        &mut t0_candidate, &mut t1_candidate, &mut hit_location_candidate, &mut hit_normal_candidate,
+                        shape_data_a,
+                        self.shape_type_index_a,
+                        &identity_pose,
+                        orientation_a,
+                        velocity_a,
+                        child_shape.as_ptr() as *const u8,
+                        TChildType::type_id(),
+                        &child_pose,
+                        offset_b,
+                        orientation_b,
+                        velocity_b,
+                        maximum_t,
+                        minimum_progression,
+                        convergence_threshold,
+                        maximum_iteration_count,
+                        &mut t0_candidate,
+                        &mut t1_candidate,
+                        &mut hit_location_candidate,
+                        &mut hit_normal_candidate,
                     ) {
                         if t1_candidate < *t1 {
                             *t0 = t0_candidate;

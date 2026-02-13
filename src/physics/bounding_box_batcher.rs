@@ -1,16 +1,20 @@
 // Translated from BepuPhysics/BoundingBoxBatcher.cs (namespace BepuPhysics)
 
-use crate::physics::body_properties::{BodyVelocity, MotionState, RigidPose};
 use crate::physics::bodies::Bodies;
+use crate::physics::body_properties::{BodyVelocity, MotionState, RigidPose};
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
 use crate::physics::collidables::collidable::Collidable;
-use crate::physics::collidables::shape::{IConvexShape, IDisposableShape, INonConvexBounds, ICompoundShape};
-use crate::physics::collidables::shapes::{ConvexShapeBatch, HomogeneousCompoundShapeBatch, CompoundShapeBatch, ShapeBatch, Shapes};
+use crate::physics::collidables::shape::{
+    ICompoundShape, IConvexShape, IDisposableShape, INonConvexBounds,
+};
+use crate::physics::collidables::shapes::{
+    CompoundShapeBatch, ConvexShapeBatch, HomogeneousCompoundShapeBatch, ShapeBatch, Shapes,
+};
 use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::collision_detection::broad_phase::BroadPhase;
+use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::vector::Vector;
 #[allow(unused_imports)]
 use crate::utilities::vector3_wide::Vector3Wide;
@@ -207,7 +211,10 @@ impl BoundingBoxBatcher {
 
                 let mut maximum_radius = 0.0f32;
                 let mut maximum_angular_expansion = 0.0f32;
-                shape.compute_angular_expansion_data(&mut maximum_radius, &mut maximum_angular_expansion);
+                shape.compute_angular_expansion_data(
+                    &mut maximum_radius,
+                    &mut maximum_angular_expansion,
+                );
 
                 let angular_bounds_expansion = BoundingBoxHelpers::get_angular_bounds_expansion(
                     motion_state.velocity.angular.length(),
@@ -215,14 +222,18 @@ impl BoundingBoxBatcher {
                     maximum_radius,
                     maximum_angular_expansion,
                 );
-                let mut speculative_margin = motion_state.velocity.linear.length() * self.dt + angular_bounds_expansion;
+                let mut speculative_margin =
+                    motion_state.velocity.linear.length() * self.dt + angular_bounds_expansion;
 
                 let collidable = active_set.collidables.get_mut(continuation.body_index());
                 speculative_margin = speculative_margin
                     .max(collidable.minimum_speculative_margin)
                     .min(collidable.maximum_speculative_margin);
 
-                let maximum_allowed_expansion = if collidable.continuity.allow_expansion_beyond_speculative_margin() {
+                let maximum_allowed_expansion = if collidable
+                    .continuity
+                    .allow_expansion_beyond_speculative_margin()
+                {
                     f32::MAX
                 } else {
                     speculative_margin
@@ -241,13 +252,22 @@ impl BoundingBoxBatcher {
                 min_expansion = min_expansion.max(-max_exp_vec);
                 max_expansion = max_expansion.min(max_exp_vec);
 
-                let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
+                let (min_ptr, max_ptr) =
+                    broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
 
                 if continuation.compound_child() {
-                    collidable.speculative_margin = collidable.speculative_margin.max(speculative_margin);
+                    collidable.speculative_margin =
+                        collidable.speculative_margin.max(speculative_margin);
                     let new_min = motion_state.pose.position + (min + min_expansion);
                     let new_max = motion_state.pose.position + (max + max_expansion);
-                    BoundingBox::create_merged(*min_ptr, *max_ptr, new_min, new_max, &mut *min_ptr, &mut *max_ptr);
+                    BoundingBox::create_merged(
+                        *min_ptr,
+                        *max_ptr,
+                        new_min,
+                        new_max,
+                        &mut *min_ptr,
+                        &mut *max_ptr,
+                    );
                 } else {
                     collidable.speculative_margin = speculative_margin;
                     *min_ptr = motion_state.pose.position + (min + min_expansion);
@@ -265,9 +285,13 @@ impl BoundingBoxBatcher {
     pub unsafe fn execute_homogeneous_compound_batch<TShape>(
         &mut self,
         shape_batch: &HomogeneousCompoundShapeBatch<TShape>,
-    )
-    where
-        TShape: IDisposableShape + INonConvexBounds + crate::physics::collidables::shape::IShape + Copy + Default + 'static,
+    ) where
+        TShape: IDisposableShape
+            + INonConvexBounds
+            + crate::physics::collidables::shape::IShape
+            + Copy
+            + Default
+            + 'static,
     {
         let batch = self.batches.get(shape_batch.type_id() as i32);
         let bodies = &mut *self.bodies;
@@ -301,13 +325,17 @@ impl BoundingBoxBatcher {
                 maximum_radius,
                 maximum_angular_expansion,
             );
-            let mut speculative_margin = motion_state.velocity.linear.length() * self.dt + angular_bounds_expansion;
+            let mut speculative_margin =
+                motion_state.velocity.linear.length() * self.dt + angular_bounds_expansion;
             speculative_margin = speculative_margin
                 .max(collidable.minimum_speculative_margin)
                 .min(collidable.maximum_speculative_margin);
             collidable.speculative_margin = speculative_margin;
 
-            let maximum_allowed_expansion = if collidable.continuity.allow_expansion_beyond_speculative_margin() {
+            let maximum_allowed_expansion = if collidable
+                .continuity
+                .allow_expansion_beyond_speculative_margin()
+            {
                 f32::MAX
             } else {
                 speculative_margin
@@ -326,7 +354,8 @@ impl BoundingBoxBatcher {
             min_expansion = min_expansion.max(-max_exp_vec);
             max_expansion = max_expansion.min(max_exp_vec);
 
-            let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
+            let (min_ptr, max_ptr) =
+                broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
             *min_ptr = motion_state.pose.position + (min + min_expansion);
             *max_ptr = motion_state.pose.position + (max + max_expansion);
         }
@@ -338,9 +367,9 @@ impl BoundingBoxBatcher {
     pub unsafe fn execute_compound_batch<TShape>(
         &mut self,
         shape_batch: &CompoundShapeBatch<TShape>,
-    )
-    where
-        TShape: ICompoundShape + crate::physics::collidables::shape::IShape + Copy + Default + 'static,
+    ) where
+        TShape:
+            ICompoundShape + crate::physics::collidables::shape::IShape + Copy + Default + 'static,
     {
         let batcher_ptr = self as *mut BoundingBoxBatcher;
         let batch = self.batches.get(shape_batch.type_id() as i32);
@@ -356,7 +385,8 @@ impl BoundingBoxBatcher {
 
             // Initialize bounds to empty and speculative margin to 0 — children will merge into these.
             collidable.speculative_margin = 0.0;
-            let (min_ptr, max_ptr) = broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
+            let (min_ptr, max_ptr) =
+                broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
             *min_ptr = Vec3::splat(f32::MAX);
             *max_ptr = Vec3::splat(-f32::MAX);
 

@@ -104,7 +104,11 @@ impl NonconvexReduction {
         target_manifold: *mut NonconvexContactManifold,
     ) {
         let candidate = *remaining_candidates.get(index);
-        Self::add_contact(&*children.get(candidate.child_index), candidate.contact_index, target_manifold);
+        Self::add_contact(
+            &*children.get(candidate.child_index),
+            candidate.contact_index,
+            target_manifold,
+        );
         remaining_candidates.fast_remove_at(index);
     }
 
@@ -162,7 +166,8 @@ impl NonconvexReduction {
         for i in 0..self.child_count {
             let child = &*self.children.get(i);
             for j in 0..child.manifold.count {
-                let position = &(*(&child.manifold.contact0 as *const ConvexContact).add(j as usize)).offset;
+                let position =
+                    &(*(&child.manifold.contact0 as *const ConvexContact).add(j as usize)).offset;
                 let extent = position.dot(extent_axis);
                 if extent < minimum_extent {
                     minimum_extent = extent;
@@ -174,9 +179,10 @@ impl NonconvexReduction {
         for i in 0..self.child_count {
             let child = &*self.children.get(i);
             for j in 0..child.manifold.count {
-                let distance_squared = ((*(&child.manifold.contact0 as *const ConvexContact).add(j as usize)).offset
-                    - minimum_extent_position)
-                    .length_squared();
+                let distance_squared =
+                    ((*(&child.manifold.contact0 as *const ConvexContact).add(j as usize)).offset
+                        - minimum_extent_position)
+                        .length_squared();
                 if distance_squared > maximum_distance_squared {
                     maximum_distance_squared = distance_squared;
                 }
@@ -187,13 +193,15 @@ impl NonconvexReduction {
         let mut initial_best_score_index: i32 = 0;
         let maximum_allocated_candidate_count = self.child_count * 4;
         const HEAP_ALLOCATION_THRESHOLD: i32 = 8192;
-        let mut remaining_contacts_buffer: Buffer<RemainingCandidate>;
+        let remaining_contacts_buffer: Buffer<RemainingCandidate>;
         let heap_allocated = maximum_allocated_candidate_count > HEAP_ALLOCATION_THRESHOLD;
         if heap_allocated {
             remaining_contacts_buffer = pool.take(maximum_allocated_candidate_count);
         } else {
             // Use a Vec for stack-like allocation in Rust (C# uses stackalloc)
-            let mut vec = Vec::<RemainingCandidate>::with_capacity(maximum_allocated_candidate_count as usize);
+            let mut vec = Vec::<RemainingCandidate>::with_capacity(
+                maximum_allocated_candidate_count as usize,
+            );
             vec.set_len(maximum_allocated_candidate_count as usize);
             remaining_contacts_buffer = Buffer::new(
                 vec.as_mut_ptr(),
@@ -207,7 +215,8 @@ impl NonconvexReduction {
         for child_index in 0..self.child_count {
             let child = &*self.children.get(child_index);
             for contact_index in 0..child.manifold.count {
-                let contact = &*(&child.manifold.contact0 as *const ConvexContact).add(contact_index as usize);
+                let contact = &*(&child.manifold.contact0 as *const ConvexContact)
+                    .add(contact_index as usize);
                 let candidate_score: f32;
                 if contact.depth >= 0.0 {
                     let extent = contact.offset.dot(extent_axis) - minimum_extent;
@@ -226,7 +235,10 @@ impl NonconvexReduction {
             }
         }
 
-        debug_assert!(remaining_contacts.count > 0, "This function should only be called when there are populated manifolds.");
+        debug_assert!(
+            remaining_contacts.count > 0,
+            "This function should only be called when there are populated manifolds."
+        );
 
         Self::use_contact(
             &mut remaining_contacts,
@@ -321,7 +333,8 @@ impl NonconvexReduction {
                 sample_populated_child_index = i;
                 for j in 0..child.manifold.count {
                     // Push all contacts into the space of the parent object.
-                    let contact = &mut *(&mut child.manifold.contact0 as *mut ConvexContact).add(j as usize);
+                    let contact =
+                        &mut *(&mut child.manifold.contact0 as *mut ConvexContact).add(j as usize);
                     contact.offset = contact.offset + child.offset_a;
                 }
             }
@@ -378,7 +391,9 @@ impl NonconvexReduction {
     /// Records an untested child as having zero contacts.
     #[inline(always)]
     pub unsafe fn on_untested_child_completed(&mut self, report: &PairContinuation) {
-        (*self.children.get_mut(report.child_index())).manifold.count = 0;
+        (*self.children.get_mut(report.child_index()))
+            .manifold
+            .count = 0;
         self.completed_child_count += 1;
     }
 

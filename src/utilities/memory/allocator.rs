@@ -92,7 +92,10 @@ impl Allocator {
         let initial_id = self.allocation_keys[allocation_index];
 
         loop {
-            let allocation = self.allocations.get(&self.allocation_keys[allocation_index]).unwrap();
+            let allocation = self
+                .allocations
+                .get(&self.allocation_keys[allocation_index])
+                .unwrap();
             let next_allocation_id = allocation.next;
             let next_allocation = self.allocations.get(&next_allocation_id).unwrap();
 
@@ -112,7 +115,11 @@ impl Allocator {
             }
 
             // Move to next
-            allocation_index = self.allocation_keys.iter().position(|&k| k == next_allocation_id).unwrap();
+            allocation_index = self
+                .allocation_keys
+                .iter()
+                .position(|&k| k == next_allocation_id)
+                .unwrap();
 
             if self.allocation_keys[allocation_index] == initial_id {
                 return false;
@@ -129,16 +136,22 @@ impl Allocator {
     /// # Returns
     /// Starting index of the allocated memory if successful, None otherwise.
     pub fn allocate(&mut self, id: u64, size: i64) -> Option<i64> {
-        debug_assert!(!self.allocations.contains_key(&id), "Id must not already be present.");
+        debug_assert!(
+            !self.allocations.contains_key(&id),
+            "Id must not already be present."
+        );
 
         if self.allocations.is_empty() {
             if size <= self.capacity {
-                self.allocations.insert(id, Allocation {
-                    start: 0,
-                    end: size,
-                    next: id,
-                    previous: id,
-                });
+                self.allocations.insert(
+                    id,
+                    Allocation {
+                        start: 0,
+                        end: size,
+                        next: id,
+                        previous: id,
+                    },
+                );
                 self.allocation_keys.push(id);
                 self.search_start_index = 0;
                 return Some(0);
@@ -162,7 +175,13 @@ impl Allocator {
                 // Wrapped around
                 if self.capacity - allocation.end >= size {
                     let output_start = allocation.end;
-                    self.add_allocation(id, output_start, output_start + size, current_id, allocation.next);
+                    self.add_allocation(
+                        id,
+                        output_start,
+                        output_start + size,
+                        current_id,
+                        allocation.next,
+                    );
                     return Some(output_start);
                 }
                 if next_allocation.start >= size {
@@ -173,7 +192,13 @@ impl Allocator {
                 // In order
                 if next_allocation.start - allocation.end >= size {
                     let output_start = allocation.end;
-                    self.add_allocation(id, output_start, output_start + size, current_id, allocation.next);
+                    self.add_allocation(
+                        id,
+                        output_start,
+                        output_start + size,
+                        current_id,
+                        allocation.next,
+                    );
                     return Some(output_start);
                 }
             }
@@ -193,12 +218,15 @@ impl Allocator {
 
         self.search_start_index = self.allocation_keys.len();
         self.allocation_keys.push(id);
-        self.allocations.insert(id, Allocation {
-            start,
-            end,
-            next: next_id,
-            previous: previous_id,
-        });
+        self.allocations.insert(
+            id,
+            Allocation {
+                start,
+                end,
+                next: next_id,
+                previous: previous_id,
+            },
+        );
     }
 
     /// Removes the memory associated with the id from the pool.
@@ -220,7 +248,9 @@ impl Allocator {
             }
 
             // Update search start index
-            self.search_start_index = self.allocation_keys.iter()
+            self.search_start_index = self
+                .allocation_keys
+                .iter()
                 .position(|&k| k == allocation.previous)
                 .unwrap_or(0);
 
@@ -274,7 +304,9 @@ impl Allocator {
                 let mut previous_end: i64 = 0;
 
                 for i in 0..self.allocations.len() {
-                    self.search_start_index = self.allocation_keys.iter()
+                    self.search_start_index = self
+                        .allocation_keys
+                        .iter()
                         .position(|&k| k == current_id)
                         .unwrap_or(0);
 
@@ -317,7 +349,10 @@ impl Allocator {
         let old_start = allocation.start;
         let current_size = allocation.end - allocation.start;
 
-        debug_assert!(size != current_size, "Why are you calling resize if the new size is the same?");
+        debug_assert!(
+            size != current_size,
+            "Why are you calling resize if the new size is the same?"
+        );
 
         if size < current_size {
             // Shrinking - just move the endpoint
@@ -327,7 +362,10 @@ impl Allocator {
 
         // Growing - requires reallocation
         let success = self.deallocate(id);
-        debug_assert!(success, "Deallocation of existing allocation should succeed.");
+        debug_assert!(
+            success,
+            "Deallocation of existing allocation should succeed."
+        );
 
         if let Some(new_start) = self.allocate(id, size) {
             Some((old_start, new_start))
@@ -346,4 +384,3 @@ impl Allocator {
         self.search_start_index = 0;
     }
 }
-

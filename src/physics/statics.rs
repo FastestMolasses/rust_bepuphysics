@@ -1,21 +1,21 @@
 // Translated from BepuPhysics/Statics.cs
 
 use crate::physics::bodies::Bodies;
-use crate::physics::collision_detection::broad_phase::BroadPhase;
-use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::collidable::ContinuousDetection;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collidables::typed_index::TypedIndex;
+use crate::physics::collision_detection::broad_phase::BroadPhase;
 use crate::physics::handles::{BodyHandle, StaticHandle};
+use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::static_description::StaticDescription;
 use crate::utilities::bounding_box::BoundingBox;
+use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::for_each_ref::IBreakableForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
-use crate::utilities::collections::quicklist::QuickList;
-use crate::utilities::for_each_ref::IBreakableForEach;
 
 /// Stores data for a static collidable in the simulation.
 /// Statics can be posed and collide, but have no velocity and no dynamic behavior.
@@ -66,7 +66,9 @@ impl StaticChangeAwakeningFilter for DefaultAwakeningFilter {
         unsafe {
             let location = *bodies.handle_to_location.get(body_handle.0);
             let set = bodies.sets.get(location.set_index);
-            !Bodies::is_kinematic_unsafe_gc_hole(&set.dynamics_state.get(location.index).inertia.local)
+            !Bodies::is_kinematic_unsafe_gc_hole(
+                &set.dynamics_state.get(location.index).inertia.local,
+            )
         }
     }
 }
@@ -154,8 +156,8 @@ impl Statics {
         // Initialize newly allocated handle→index slots to -1.
         if self.handle_to_index.len() > old_h2i_len || count < self.handle_to_index.len() {
             let start = count;
-            let byte_count = ((self.handle_to_index.len() - start) as usize)
-                * std::mem::size_of::<i32>();
+            let byte_count =
+                ((self.handle_to_index.len() - start) as usize) * std::mem::size_of::<i32>();
             if byte_count > 0 {
                 unsafe {
                     let ptr = self.handle_to_index.as_mut_ptr().add(start as usize) as *mut u8;
@@ -181,8 +183,7 @@ impl Statics {
         debug_assert!(handle.0 >= 0, "Handles must be nonnegative.");
         let idx = *self.handle_to_index.get(handle.0);
         debug_assert!(
-            idx >= 0
-                && self.index_to_handle.get(idx).0 == handle.0,
+            idx >= 0 && self.index_to_handle.get(idx).0 == handle.0,
             "Mappings are out of sync."
         );
     }
@@ -259,8 +260,8 @@ impl Statics {
             pool.resize_to_at_least(&mut self.handle_to_index, new_cap, old_len);
             unsafe {
                 let ptr = self.handle_to_index.as_mut_ptr().add(old_len as usize) as *mut u8;
-                let count = ((self.handle_to_index.len() - old_len) as usize)
-                    * std::mem::size_of::<i32>();
+                let count =
+                    ((self.handle_to_index.len() - old_len) as usize) * std::mem::size_of::<i32>();
                 std::ptr::write_bytes(ptr, 0xFF, count);
             }
         }
@@ -274,8 +275,11 @@ impl Statics {
         let mut bounds = BoundingBox::default();
         shapes.update_bounds(&s.pose, &s.shape, &mut bounds);
         let broad_phase = unsafe { &mut *self.broad_phase };
-        self.statics_buffer.get_mut(index).broad_phase_index =
-            broad_phase.add_static(CollidableReference::from_static(handle), &bounds.min, &bounds.max);
+        self.statics_buffer.get_mut(index).broad_phase_index = broad_phase.add_static(
+            CollidableReference::from_static(handle),
+            &bounds.min,
+            &bounds.max,
+        );
         // Awaken sleeping bodies near the new static's bounds.
         unsafe {
             self.awaken_bodies_in_bounds(&bounds, &DefaultAwakeningFilter);
@@ -312,8 +316,7 @@ impl Statics {
                 if leaf.mobility() != CollidableMobility::Static {
                     let body_handle = leaf.body_handle();
                     let location = unsafe { *self.bodies.handle_to_location.get(body_handle.0) };
-                    if location.set_index > 0
-                        && self.filter.should_awaken(body_handle, self.bodies)
+                    if location.set_index > 0 && self.filter.should_awaken(body_handle, self.bodies)
                     {
                         // This is a sleeping body that passes the filter — add its set index.
                         self.sleeping_sets.add(location.set_index, self.pool);
@@ -331,7 +334,9 @@ impl Statics {
                 filter,
             };
             // Query the static tree for overlapping leaves.
-            broad_phase.static_tree.get_overlaps(*bounds, &mut collector);
+            broad_phase
+                .static_tree
+                .get_overlaps(*bounds, &mut collector);
         }
 
         if sleeping_sets.count > 0 {
@@ -386,11 +391,15 @@ impl Statics {
             // Update the collidable->leaf index pointer for the leaf that was moved.
             if moved_leaf.mobility() == CollidableMobility::Static {
                 // This is a static collidable.
-                self.get_direct_reference_mut(moved_leaf.static_handle()).broad_phase_index = removed_broad_phase_index;
+                self.get_direct_reference_mut(moved_leaf.static_handle())
+                    .broad_phase_index = removed_broad_phase_index;
             } else {
                 // This is a sleeping body.
                 let bodies = unsafe { &mut *self.bodies };
-                bodies.update_collidable_broad_phase_index(moved_leaf.body_handle(), removed_broad_phase_index);
+                bodies.update_collidable_broad_phase_index(
+                    moved_leaf.body_handle(),
+                    removed_broad_phase_index,
+                );
             }
         }
 
@@ -448,7 +457,7 @@ impl Statics {
         }
     }
 
-    /// Applies a new description to an existing static. 
+    /// Applies a new description to an existing static.
     /// Sleeping bodies near old and new bounds are forced active.
     pub fn apply_description(&mut self, handle: StaticHandle, description: &StaticDescription) {
         self.validate_existing_handle(handle);
@@ -488,7 +497,8 @@ impl Statics {
 
     /// Gets the current description of a static by handle (returned by value).
     pub fn get_description_value(&self, handle: StaticHandle) -> StaticDescription {
-        let mut desc = StaticDescription::with_discrete(RigidPose::default(), TypedIndex::default());
+        let mut desc =
+            StaticDescription::with_discrete(RigidPose::default(), TypedIndex::default());
         self.get_description(handle, &mut desc);
         desc
     }
@@ -498,8 +508,7 @@ impl Statics {
         self.count = 0;
         unsafe {
             let ptr = self.handle_to_index.as_mut_ptr() as *mut u8;
-            let count =
-                self.handle_to_index.len() as usize * std::mem::size_of::<i32>();
+            let count = self.handle_to_index.len() as usize * std::mem::size_of::<i32>();
             std::ptr::write_bytes(ptr, 0xFF, count);
         }
         self.handle_pool.clear();

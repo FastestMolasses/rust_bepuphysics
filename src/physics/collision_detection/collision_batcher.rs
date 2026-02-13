@@ -1,12 +1,16 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionBatcher.cs
 
 use crate::physics::body_properties::BodyVelocity;
+use crate::physics::collidables::sphere::Sphere;
 use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::collision_detection::collision_batcher_continuations::{
-    BatcherContinuations, CollisionContinuationType, ICollisionTestContinuation, PairContinuation,
+    BatcherContinuations, CollisionContinuationType, PairContinuation,
 };
 use crate::physics::collision_detection::collision_task_registry::{
     BatcherVtable, CollisionTaskPairType, CollisionTaskRegistry,
+};
+use crate::physics::collision_detection::collision_tasks::pair_types::{
+    SphereIncludingPair, SpherePair,
 };
 use crate::physics::collision_detection::compound_mesh_reduction::CompoundMeshReduction;
 use crate::physics::collision_detection::contact_manifold::{
@@ -14,11 +18,7 @@ use crate::physics::collision_detection::contact_manifold::{
 };
 use crate::physics::collision_detection::mesh_reduction::MeshReduction;
 use crate::physics::collision_detection::nonconvex_reduction::{FlushResult, NonconvexReduction};
-use crate::physics::collision_detection::collision_tasks::pair_types::{
-    SpherePair, SphereIncludingPair,
-};
 use crate::physics::collision_detection::untyped_list::UntypedList;
-use crate::physics::collidables::sphere::Sphere;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
@@ -200,16 +200,26 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         let shapes = &*self.shapes;
         let shape_type_a = shape_index_a.type_id();
         let shape_type_b = shape_index_b.type_id();
-        let batch_a = shapes.get_batch(shape_type_a as usize).expect("shape batch A must exist");
-        let batch_b = shapes.get_batch(shape_type_b as usize).expect("shape batch B must exist");
+        let batch_a = shapes
+            .get_batch(shape_type_a as usize)
+            .expect("shape batch A must exist");
+        let batch_b = shapes
+            .get_batch(shape_type_b as usize)
+            .expect("shape batch B must exist");
         let (shape_a, _size_a) = batch_a.get_shape_data(shape_index_a.index() as usize);
         let (shape_b, _size_b) = batch_b.get_shape_data(shape_index_b.index() as usize);
         self.add_directly(
-            shape_type_a, shape_type_b,
-            shape_a, shape_b,
-            offset_b, orientation_a, orientation_b,
-            velocity_a, velocity_b,
-            speculative_margin, maximum_expansion,
+            shape_type_a,
+            shape_type_b,
+            shape_a,
+            shape_b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            velocity_a,
+            velocity_b,
+            speculative_margin,
+            maximum_expansion,
             &continuation,
         );
     }
@@ -479,10 +489,8 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             // Use raw pointer to avoid double-mutable-borrow since batch borrows from self.batches
             let batch_ptr = batch as *mut CollisionBatch;
             let vtable = self.make_vtable();
-            type_matrix.tasks[reference.task_index as usize].execute_batch(
-                &mut (*batch_ptr).pairs,
-                &vtable,
-            );
+            type_matrix.tasks[reference.task_index as usize]
+                .execute_batch(&mut (*batch_ptr).pairs, &vtable);
             (*batch_ptr).pairs.count = 0;
             (*batch_ptr).pairs.byte_count = 0;
             (*batch_ptr).shapes.byte_count = 0;
@@ -539,18 +547,23 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
     ) {
         let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
         batcher.add_directly(
-            shape_type_a, shape_type_b, shape_a, shape_b,
-            offset_b, orientation_a, orientation_b,
-            velocity_a, velocity_b, speculative_margin, maximum_expansion,
+            shape_type_a,
+            shape_type_b,
+            shape_a,
+            shape_b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            velocity_a,
+            velocity_b,
+            speculative_margin,
+            maximum_expansion,
             pair_continuation,
         );
     }
 
     /// Type-erased trampoline for `process_empty_result`.
-    unsafe fn process_empty_result_trampoline(
-        batcher: *mut u8,
-        continuation: &PairContinuation,
-    ) {
+    unsafe fn process_empty_result_trampoline(batcher: *mut u8, continuation: &PairContinuation) {
         let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
         batcher.process_empty_result(continuation);
     }
@@ -572,7 +585,9 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         child_b: i32,
     ) -> bool {
         let batcher = &mut *(batcher as *mut CollisionBatcher<TCallbacks>);
-        batcher.callbacks.allow_collision_testing(pair_id, child_a, child_b)
+        batcher
+            .callbacks
+            .allow_collision_testing(pair_id, child_a, child_b)
     }
 
     /// Reports the result of a convex collision test to the callbacks and, if necessary, to any continuations for postprocessing.
@@ -597,27 +612,48 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             unsafe {
                 match continuation.continuation_type() {
                     CollisionContinuationType::NonconvexReduction => {
-                        let slot = &mut *self.nonconvex_reductions.continuations.get_mut(continuation.index());
+                        let slot = &mut *self
+                            .nonconvex_reductions
+                            .continuations
+                            .get_mut(continuation.index());
                         slot.on_child_completed(continuation, manifold);
-                        if let Some(flush_result) = slot.try_flush(continuation.pair_id, &mut *self.pool) {
+                        if let Some(flush_result) =
+                            slot.try_flush(continuation.pair_id, &mut *self.pool)
+                        {
                             self.report_flush_result(continuation.pair_id, flush_result);
-                            self.nonconvex_reductions.id_pool.return_id(continuation.index(), &mut *self.pool);
+                            self.nonconvex_reductions
+                                .id_pool
+                                .return_id(continuation.index(), &mut *self.pool);
                         }
                     }
                     CollisionContinuationType::MeshReduction => {
-                        let slot = &mut *self.mesh_reductions.continuations.get_mut(continuation.index());
+                        let slot = &mut *self
+                            .mesh_reductions
+                            .continuations
+                            .get_mut(continuation.index());
                         slot.on_child_completed(continuation, manifold);
-                        if let Some(flush_result) = slot.try_flush(continuation.pair_id, &mut *self.pool) {
+                        if let Some(flush_result) =
+                            slot.try_flush(continuation.pair_id, &mut *self.pool)
+                        {
                             self.report_flush_result(continuation.pair_id, flush_result);
-                            self.mesh_reductions.id_pool.return_id(continuation.index(), &mut *self.pool);
+                            self.mesh_reductions
+                                .id_pool
+                                .return_id(continuation.index(), &mut *self.pool);
                         }
                     }
                     CollisionContinuationType::CompoundMeshReduction => {
-                        let slot = &mut *self.compound_mesh_reductions.continuations.get_mut(continuation.index());
+                        let slot = &mut *self
+                            .compound_mesh_reductions
+                            .continuations
+                            .get_mut(continuation.index());
                         slot.on_child_completed(continuation, manifold);
-                        if let Some(flush_result) = slot.try_flush(continuation.pair_id, &mut *self.pool) {
+                        if let Some(flush_result) =
+                            slot.try_flush(continuation.pair_id, &mut *self.pool)
+                        {
                             self.report_flush_result(continuation.pair_id, flush_result);
-                            self.compound_mesh_reductions.id_pool.return_id(continuation.index(), &mut *self.pool);
+                            self.compound_mesh_reductions
+                                .id_pool
+                                .return_id(continuation.index(), &mut *self.pool);
                         }
                     }
                     _ => {}
@@ -650,27 +686,48 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         unsafe {
             match continuation.continuation_type() {
                 CollisionContinuationType::NonconvexReduction => {
-                    let slot = &mut *self.nonconvex_reductions.continuations.get_mut(continuation.index());
+                    let slot = &mut *self
+                        .nonconvex_reductions
+                        .continuations
+                        .get_mut(continuation.index());
                     slot.on_untested_child_completed(continuation);
-                    if let Some(flush_result) = slot.try_flush(continuation.pair_id, &mut *self.pool) {
+                    if let Some(flush_result) =
+                        slot.try_flush(continuation.pair_id, &mut *self.pool)
+                    {
                         self.report_flush_result(continuation.pair_id, flush_result);
-                        self.nonconvex_reductions.id_pool.return_id(continuation.index(), &mut *self.pool);
+                        self.nonconvex_reductions
+                            .id_pool
+                            .return_id(continuation.index(), &mut *self.pool);
                     }
                 }
                 CollisionContinuationType::MeshReduction => {
-                    let slot = &mut *self.mesh_reductions.continuations.get_mut(continuation.index());
+                    let slot = &mut *self
+                        .mesh_reductions
+                        .continuations
+                        .get_mut(continuation.index());
                     slot.on_untested_child_completed(continuation);
-                    if let Some(flush_result) = slot.try_flush(continuation.pair_id, &mut *self.pool) {
+                    if let Some(flush_result) =
+                        slot.try_flush(continuation.pair_id, &mut *self.pool)
+                    {
                         self.report_flush_result(continuation.pair_id, flush_result);
-                        self.mesh_reductions.id_pool.return_id(continuation.index(), &mut *self.pool);
+                        self.mesh_reductions
+                            .id_pool
+                            .return_id(continuation.index(), &mut *self.pool);
                     }
                 }
                 CollisionContinuationType::CompoundMeshReduction => {
-                    let slot = &mut *self.compound_mesh_reductions.continuations.get_mut(continuation.index());
+                    let slot = &mut *self
+                        .compound_mesh_reductions
+                        .continuations
+                        .get_mut(continuation.index());
                     slot.on_untested_child_completed(continuation);
-                    if let Some(flush_result) = slot.try_flush(continuation.pair_id, &mut *self.pool) {
+                    if let Some(flush_result) =
+                        slot.try_flush(continuation.pair_id, &mut *self.pool)
+                    {
                         self.report_flush_result(continuation.pair_id, flush_result);
-                        self.compound_mesh_reductions.id_pool.return_id(continuation.index(), &mut *self.pool);
+                        self.compound_mesh_reductions
+                            .id_pool
+                            .return_id(continuation.index(), &mut *self.pool);
                     }
                 }
                 _ => {}
@@ -687,10 +744,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             for i in self.minimum_batch_index..=self.maximum_batch_index {
                 let batch_ptr = self.batches.get_mut_ptr(i) as *mut CollisionBatch;
                 if (*batch_ptr).pairs.count > 0 {
-                    type_matrix.tasks[i as usize].execute_batch(
-                        &mut (*batch_ptr).pairs,
-                        &vtable,
-                    );
+                    type_matrix.tasks[i as usize].execute_batch(&mut (*batch_ptr).pairs, &vtable);
                 }
             }
             // Dispose batch resources

@@ -6,18 +6,13 @@ use crate::physics::collidables::collidable_reference::{CollidableMobility, Coll
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::constraint_set::ConstraintSet;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
-use crate::physics::island_scaffold::IslandScaffold;
-use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::physics::solver::{PrimitiveComparer, Solver};
 use crate::physics::statics::Statics;
-use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::collections::quick_dictionary::QuickDictionary;
 use crate::utilities::collections::quicklist::QuickList;
-use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use crate::utilities::vector::Vector;
 use std::cell::UnsafeCell;
@@ -195,7 +190,8 @@ impl IslandAwakener {
 
     /// Wakes up any sleeping bodies associated with a constraint.
     pub fn awaken_constraint(&mut self, constraint_handle: ConstraintHandle) {
-        let set_index = unsafe { self.solver().handle_to_constraint.get(constraint_handle.0) }.set_index;
+        let set_index =
+            unsafe { self.solver().handle_to_constraint.get(constraint_handle.0) }.set_index;
         self.awaken_set(set_index);
     }
 
@@ -206,7 +202,9 @@ impl IslandAwakener {
             let pool = self.pool();
             let mut list = QuickList::with_capacity(1, pool);
             list.add_unsafely(set_index);
-            unsafe { self.awaken_sets(&mut list, None); }
+            unsafe {
+                self.awaken_sets(&mut list, None);
+            }
             list.dispose(self.pool());
         }
     }
@@ -305,7 +303,8 @@ impl IslandAwakener {
             let awakener = &mut *(dispatcher.unmanaged_context() as *mut IslandAwakener);
             loop {
                 let index = AtomicI32::from_ptr(awakener.job_index.get())
-                    .fetch_add(1, Ordering::AcqRel) + 1;
+                    .fetch_add(1, Ordering::AcqRel)
+                    + 1;
                 if index >= awakener.job_count {
                     break;
                 }
@@ -320,7 +319,8 @@ impl IslandAwakener {
             let awakener = &mut *(dispatcher.unmanaged_context() as *mut IslandAwakener);
             loop {
                 let index = AtomicI32::from_ptr(awakener.job_index.get())
-                    .fetch_add(1, Ordering::AcqRel) + 1;
+                    .fetch_add(1, Ordering::AcqRel)
+                    + 1;
                 if index >= awakener.job_count {
                     break;
                 }
@@ -376,12 +376,26 @@ impl IslandAwakener {
                         for j in 0..source_count {
                             // Inactive set keys are body handles; translate to body indices via HandleToLocation.
                             // HandleToLocation was updated during job setup, so indices point to the active set.
-                            let body_handle = *(*solver_ptr).sets.get(set_index).sequential_fallback.dynamic_body_constraint_counts.key_at(j);
-                            let value = *(*solver_ptr).sets.get(set_index).sequential_fallback.dynamic_body_constraint_counts.value_at(j);
+                            let body_handle = *(*solver_ptr)
+                                .sets
+                                .get(set_index)
+                                .sequential_fallback
+                                .dynamic_body_constraint_counts
+                                .key_at(j);
+                            let value = *(*solver_ptr)
+                                .sets
+                                .get(set_index)
+                                .sequential_fallback
+                                .dynamic_body_constraint_counts
+                                .value_at(j);
                             let body_location = bodies.handle_to_location.get(body_handle);
                             debug_assert!(body_location.set_index == 0,
                                 "Any batch moved into active set should deal with bodies already in the active set.");
-                            (*solver_ptr).active_set_mut().sequential_fallback.dynamic_body_constraint_counts.add_unsafely(body_location.index, value);
+                            (*solver_ptr)
+                                .active_set_mut()
+                                .sequential_fallback
+                                .dynamic_body_constraint_counts
+                                .add_unsafely(body_location.index, value);
                         }
                     }
                 }
@@ -392,9 +406,24 @@ impl IslandAwakener {
                 let target_set = bodies.active_set_mut();
 
                 // Copy body data from sleeping set to active set
-                (*source_set_ptr).collidables.copy_to(job.source_start, &mut target_set.collidables, job.target_start, job.count);
-                (*source_set_ptr).constraints.copy_to(job.source_start, &mut target_set.constraints, job.target_start, job.count);
-                (*source_set_ptr).dynamics_state.copy_to(job.source_start, &mut target_set.dynamics_state, job.target_start, job.count);
+                (*source_set_ptr).collidables.copy_to(
+                    job.source_start,
+                    &mut target_set.collidables,
+                    job.target_start,
+                    job.count,
+                );
+                (*source_set_ptr).constraints.copy_to(
+                    job.source_start,
+                    &mut target_set.constraints,
+                    job.target_start,
+                    job.count,
+                );
+                (*source_set_ptr).dynamics_state.copy_to(
+                    job.source_start,
+                    &mut target_set.dynamics_state,
+                    job.target_start,
+                    job.count,
+                );
 
                 // This rescans the memory, but it should be still floating in cache ready to access.
                 let source_set = &*source_set_ptr;
@@ -402,7 +431,11 @@ impl IslandAwakener {
                 for i in 0..job.count {
                     let source_body_index = i + job.source_start;
                     if Bodies::is_kinematic_unsafe_gc_hole(
-                        &source_set.dynamics_state.get(source_body_index).inertia.local,
+                        &source_set
+                            .dynamics_state
+                            .get(source_body_index)
+                            .inertia
+                            .local,
                     ) && source_set.constraints.get(source_body_index).count > 0
                     {
                         // SpinLock: acquire
@@ -428,8 +461,18 @@ impl IslandAwakener {
                     }
                 }
 
-                (*source_set_ptr).activity.copy_to(job.source_start, &mut target_set.activity, job.target_start, job.count);
-                (*source_set_ptr).index_to_handle.copy_to(job.source_start, &mut target_set.index_to_handle, job.target_start, job.count);
+                (*source_set_ptr).activity.copy_to(
+                    job.source_start,
+                    &mut target_set.activity,
+                    job.target_start,
+                    job.count,
+                );
+                (*source_set_ptr).index_to_handle.copy_to(
+                    job.source_start,
+                    &mut target_set.index_to_handle,
+                    job.target_start,
+                    job.count,
+                );
 
                 if self.reset_activity_states {
                     // Reset activity states for woken bodies
@@ -463,11 +506,15 @@ impl IslandAwakener {
                         let body_location = *bodies.handle_to_location.get(handle_value);
                         debug_assert!(body_location.set_index == 0);
                         // The broad phase index value is currently the static index.
-                        let collidable = bodies.active_set_mut().collidables.get_mut(body_location.index);
+                        let collidable = bodies
+                            .active_set_mut()
+                            .collidables
+                            .get_mut(body_location.index);
                         let broad_phase_index = collidable.broad_phase_index;
                         if broad_phase_index >= 0 {
                             // Get bounds from static tree.
-                            let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(broad_phase_index);
+                            let (min_ptr, max_ptr) =
+                                broad_phase.get_static_bounds_pointers(broad_phase_index);
                             let min = *min_ptr;
                             let max = *max_ptr;
                             let leaf = *broad_phase.static_leaves.get(broad_phase_index);
@@ -477,11 +524,17 @@ impl IslandAwakener {
                             // Remove from static tree.
                             let static_index_to_remove = broad_phase_index;
                             let mut moved_leaf = CollidableReference::default();
-                            if broad_phase.remove_static_at(static_index_to_remove, &mut moved_leaf) {
+                            if broad_phase.remove_static_at(static_index_to_remove, &mut moved_leaf)
+                            {
                                 if moved_leaf.mobility() == CollidableMobility::Static {
-                                    statics.get_direct_reference_mut(moved_leaf.static_handle()).broad_phase_index = static_index_to_remove;
+                                    statics
+                                        .get_direct_reference_mut(moved_leaf.static_handle())
+                                        .broad_phase_index = static_index_to_remove;
                                 } else {
-                                    bodies.update_collidable_broad_phase_index(moved_leaf.body_handle(), static_index_to_remove);
+                                    bodies.update_collidable_broad_phase_index(
+                                        moved_leaf.body_handle(),
+                                        static_index_to_remove,
+                                    );
                                 }
                             }
                         }
@@ -491,9 +544,7 @@ impl IslandAwakener {
             PhaseTwoJobType::CopyConstraintRegion => {
                 let j = &job.copy_constraint_region;
                 let solver = self.solver_mut();
-                let type_proc = solver.type_processors[j.type_id as usize]
-                    .as_ref()
-                    .unwrap();
+                let type_proc = solver.type_processors[j.type_id as usize].as_ref().unwrap();
                 type_proc.inner().copy_sleeping_to_active(
                     j.source_set,
                     j.batch,
@@ -555,7 +606,8 @@ impl IslandAwakener {
                 highest_new_batch_count = set_batch_count;
             }
             let constraint_set = solver.sets.get(set_index);
-            additional_required_fallback_capacity += constraint_set.sequential_fallback.body_count();
+            additional_required_fallback_capacity +=
+                constraint_set.sequential_fallback.body_count();
             for batch_index in 0..constraint_set.batches.count {
                 let batch = constraint_set.batches.get(batch_index);
                 for type_batch_index in 0..batch.type_batches.count {
@@ -579,7 +631,10 @@ impl IslandAwakener {
             unsafe fn new(pool: &mut BufferPool, max_type_count: i32) -> Self {
                 let mut type_counts: Buffer<i32> = pool.take_at_least(max_type_count);
                 type_counts.clear(0, max_type_count);
-                Self { type_counts, highest_occupied_type_index: 0 }
+                Self {
+                    type_counts,
+                    highest_occupied_type_index: 0,
+                }
             }
             fn add(&mut self, type_id: i32, count: i32) {
                 *self.type_counts.get_mut(type_id) += count;
@@ -605,7 +660,8 @@ impl IslandAwakener {
             let set_index = *set_indices.get(i);
             let constraint_set = solver.sets.get(set_index);
             for batch_index in 0..constraint_set.batches.count {
-                let constraint_count_per_type = constraint_count_per_type_per_batch.get_mut(batch_index);
+                let constraint_count_per_type =
+                    constraint_count_per_type_per_batch.get_mut(batch_index);
                 let batch = constraint_set.batches.get(batch_index);
                 for type_batch_index in 0..batch.type_batches.count {
                     let type_batch = batch.type_batches.get(type_batch_index);
@@ -620,12 +676,18 @@ impl IslandAwakener {
         let bodies_mut = &mut *self.bodies;
         bodies_mut.ensure_capacity(bodies_mut.active_set().count + new_body_count);
         solver.constrained_kinematic_handles.ensure_capacity(
-            solver.constrained_kinematic_handles.count + new_body_count, pool);
+            solver.constrained_kinematic_handles.count + new_body_count,
+            pool,
+        );
         let broad_phase = &mut *self.broad_phase;
         broad_phase.ensure_capacity(
             broad_phase.active_tree.leaf_count + new_body_count,
-            broad_phase.static_tree.leaf_count);
-        solver.active_set_mut().batches.ensure_capacity(highest_new_batch_count, pool);
+            broad_phase.static_tree.leaf_count,
+        );
+        solver
+            .active_set_mut()
+            .batches
+            .ensure_capacity(highest_new_batch_count, pool);
         if additional_required_fallback_capacity > 0 {
             let current_body_count = solver.active_set().sequential_fallback.body_count();
             solver.active_set_mut().sequential_fallback.ensure_capacity(
@@ -633,24 +695,36 @@ impl IslandAwakener {
                 pool,
             );
         }
-        debug_assert!(highest_new_batch_count <= solver.fallback_batch_threshold() + 1,
-            "Shouldn't have any batches beyond the fallback batch.");
-        solver.batch_referenced_handles.ensure_capacity(highest_new_batch_count, pool);
+        debug_assert!(
+            highest_new_batch_count <= solver.fallback_batch_threshold() + 1,
+            "Shouldn't have any batches beyond the fallback batch."
+        );
+        solver
+            .batch_referenced_handles
+            .ensure_capacity(highest_new_batch_count, pool);
         // Create new batches if needed.
         let solver_ptr = solver as *mut Solver;
         for batch_index in (*solver_ptr).active_set().batches.count..highest_new_batch_count {
             *(*solver_ptr).active_set_mut().batches.allocate_unsafely() =
                 ConstraintBatch::new(pool, 16);
-            *(*solver_ptr).batch_referenced_handles.allocate_unsafely() =
-                IndexSet::new(pool, bodies_mut.handle_pool.highest_possibly_claimed_id() + 1);
+            *(*solver_ptr).batch_referenced_handles.allocate_unsafely() = IndexSet::new(
+                pool,
+                bodies_mut.handle_pool.highest_possibly_claimed_id() + 1,
+            );
         }
         let fallback_threshold = (*solver_ptr).fallback_batch_threshold();
         for batch_index in 0..highest_new_batch_count {
-            let constraint_count_per_type = constraint_count_per_type_per_batch.get_mut(batch_index);
+            let constraint_count_per_type =
+                constraint_count_per_type_per_batch.get_mut(batch_index);
             let batch = (*solver_ptr).active_set_mut().batches.get_mut(batch_index);
             batch.ensure_type_map_size(pool, constraint_count_per_type.highest_occupied_type_index);
-            (*solver_ptr).batch_referenced_handles.get_mut(batch_index).ensure_capacity(
-                bodies_mut.handle_pool.highest_possibly_claimed_id() + 1, pool);
+            (*solver_ptr)
+                .batch_referenced_handles
+                .get_mut(batch_index)
+                .ensure_capacity(
+                    bodies_mut.handle_pool.highest_possibly_claimed_id() + 1,
+                    pool,
+                );
             for type_id in 0..=constraint_count_per_type.highest_occupied_type_index {
                 let mut count_for_type = *constraint_count_per_type.type_counts.get(type_id);
                 // The fallback batch must allocate worst case: every new constraint needs its own bundle.
@@ -660,15 +734,19 @@ impl IslandAwakener {
                 if count_for_type > 0 {
                     // Avoid implicit autoref on raw pointer dereference.
                     let tp_vec = std::ptr::addr_of!((*solver_ptr).type_processors);
-                    let tp_slice = std::slice::from_raw_parts(
-                        (*tp_vec).as_ptr(), (*tp_vec).len());
-                    let type_processor = tp_slice[type_id as usize]
-                        .as_ref().unwrap();
+                    let tp_slice = std::slice::from_raw_parts((*tp_vec).as_ptr(), (*tp_vec).len());
+                    let type_processor = tp_slice[type_id as usize].as_ref().unwrap();
                     let type_batch = batch.get_or_create_type_batch(
-                        type_id, type_processor.inner(), count_for_type, pool);
+                        type_id,
+                        type_processor.inner(),
+                        count_for_type,
+                        pool,
+                    );
                     let target_capacity = count_for_type + (*type_batch).constraint_count;
                     if target_capacity > (*type_batch).index_to_handle.len() {
-                        type_processor.inner().resize(&mut *type_batch, target_capacity, pool);
+                        type_processor
+                            .inner()
+                            .resize(&mut *type_batch, target_capacity, pool);
                     }
                 }
             }
@@ -677,14 +755,12 @@ impl IslandAwakener {
         pool.return_buffer(&mut constraint_count_per_type_per_batch);
         // Ensure pair cache mapping capacity.
         let pair_cache_mut = &mut *self.pair_cache;
-        pair_cache_mut.mapping.ensure_capacity(
-            pair_cache_mut.mapping.count + new_pair_count, pool);
+        pair_cache_mut
+            .mapping
+            .ensure_capacity(pair_cache_mut.mapping.count + new_pair_count, pool);
 
         // Create phase one jobs
-        self.phase_one_jobs = QuickList::with_capacity(
-            32.max(highest_new_batch_count + 2),
-            pool,
-        );
+        self.phase_one_jobs = QuickList::with_capacity(32.max(highest_new_batch_count + 2), pool);
 
         // Pair cache job
         {
@@ -730,12 +806,15 @@ impl IslandAwakener {
 
         // Multiple source sets can contribute to the same target type batch in the fallback.
         // Track those as we enumerate sets so we can create a single job for each target after the loop.
-        let mut target_fallback_type_batches_to_sources: QuickDictionary<i32, QuickList<FallbackAddSource>, PrimitiveComparer<i32>> =
-            if highest_new_batch_count > solver.fallback_batch_threshold() {
-                QuickDictionary::with_capacity(8, 3, pool, PrimitiveComparer::<i32>::default())
-            } else {
-                QuickDictionary::default()
-            };
+        let mut target_fallback_type_batches_to_sources: QuickDictionary<
+            i32,
+            QuickList<FallbackAddSource>,
+            PrimitiveComparer<i32>,
+        > = if highest_new_batch_count > solver.fallback_batch_threshold() {
+            QuickDictionary::with_capacity(8, 3, pool, PrimitiveComparer::<i32>::default())
+        } else {
+            QuickDictionary::default()
+        };
 
         // CopyBodyRegion jobs + CopyConstraintRegion jobs
         let bodies_mut = &mut *self.bodies;
@@ -753,11 +832,9 @@ impl IslandAwakener {
                 let remainder = source_count - base_per_job * set_job_count;
                 let mut previous_source_end = 0;
 
-                let phase_one_jobs = &mut *(&mut self.phase_one_jobs as *mut QuickList<PhaseOneJob>);
-                phase_one_jobs.ensure_capacity(
-                    phase_one_jobs.count + set_job_count,
-                    pool,
-                );
+                let phase_one_jobs =
+                    &mut *(&mut self.phase_one_jobs as *mut QuickList<PhaseOneJob>);
+                phase_one_jobs.ensure_capacity(phase_one_jobs.count + set_job_count, pool);
                 for job_index in 0..set_job_count {
                     let job = phase_one_jobs.allocate_unsafely();
                     job.job_type = PhaseOneJobType::CopyBodyRegion;
@@ -790,7 +867,8 @@ impl IslandAwakener {
             {
                 const CONSTRAINT_JOB_SIZE: i32 = 32;
                 let solver_ptr = solver as *mut Solver;
-                let source_constraint_set = (*solver_ptr).sets.get(source_set_index) as *const ConstraintSet;
+                let source_constraint_set =
+                    (*solver_ptr).sets.get(source_set_index) as *const ConstraintSet;
                 let fallback_index = (*solver_ptr).fallback_batch_threshold();
                 let active_solver_set = (*solver_ptr).active_set_mut() as *mut ConstraintSet;
 
@@ -804,17 +882,22 @@ impl IslandAwakener {
                     let source_batch = (*source_constraint_set).batches.get(batch_index);
                     let target_batch = (*active_solver_set).batches.get_mut(batch_index);
                     for source_type_batch_index in 0..source_batch.type_batches.count {
-                        let source_type_batch = source_batch.type_batches.get(source_type_batch_index);
-                        let target_type_batch_index = *target_batch.type_index_to_type_batch_index.get(source_type_batch.type_id);
-                        let target_type_batch = target_batch.type_batches.get_mut(target_type_batch_index);
-                        let job_count = 1.max(source_type_batch.constraint_count / CONSTRAINT_JOB_SIZE);
+                        let source_type_batch =
+                            source_batch.type_batches.get(source_type_batch_index);
+                        let target_type_batch_index = *target_batch
+                            .type_index_to_type_batch_index
+                            .get(source_type_batch.type_id);
+                        let target_type_batch =
+                            target_batch.type_batches.get_mut(target_type_batch_index);
+                        let job_count =
+                            1.max(source_type_batch.constraint_count / CONSTRAINT_JOB_SIZE);
                         let base = source_type_batch.constraint_count / job_count;
                         let rem = source_type_batch.constraint_count - base * job_count;
                         let mut prev_end = 0;
 
-                        let phase_two_jobs = &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
-                        phase_two_jobs
-                            .ensure_capacity(phase_two_jobs.count + job_count, pool);
+                        let phase_two_jobs =
+                            &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
+                        phase_two_jobs.ensure_capacity(phase_two_jobs.count + job_count, pool);
                         for j in 0..job_count {
                             let count = if j < rem { base + 1 } else { base };
                             let job = phase_two_jobs.allocate_unsafely();
@@ -834,13 +917,17 @@ impl IslandAwakener {
                             target_type_batch.constraint_count += count;
                             if target_type_batch.bundle_count() != old_bundle_count {
                                 // A new bundle was created; guarantee trailing slots are -1.
-                                let bodies_per_constraint = (&(*solver_ptr).type_processors)[source_type_batch.type_id as usize]
+                                let bodies_per_constraint = (&(*solver_ptr).type_processors)
+                                    [source_type_batch.type_id as usize]
                                     .as_ref()
                                     .unwrap()
                                     .bodies_per_constraint;
                                 let vector_size = std::mem::size_of::<Vector<i32>>();
-                                let bundle_start = target_type_batch.body_references.as_ptr()
-                                    .add((target_type_batch.bundle_count() - 1) * bodies_per_constraint as usize * vector_size)
+                                let bundle_start = target_type_batch.body_references.as_ptr().add(
+                                    (target_type_batch.bundle_count() - 1)
+                                        * bodies_per_constraint as usize
+                                        * vector_size,
+                                )
                                     as *mut Vector<i32>;
                                 let neg_one = Vector::<i32>::splat(-1);
                                 for vi in 0..bodies_per_constraint as usize {
@@ -856,17 +943,25 @@ impl IslandAwakener {
                     let source_batch = (*source_constraint_set).batches.get(fallback_index);
                     let target_batch = (*active_solver_set).batches.get_mut(fallback_index);
                     for source_type_batch_index in 0..source_batch.type_batches.count {
-                        let source_type_batch = source_batch.type_batches.get(source_type_batch_index);
-                        let target_type_batch_index = *target_batch.type_index_to_type_batch_index.get(source_type_batch.type_id);
+                        let source_type_batch =
+                            source_batch.type_batches.get(source_type_batch_index);
+                        let target_type_batch_index = *target_batch
+                            .type_index_to_type_batch_index
+                            .get(source_type_batch.type_id);
                         let mut slot_index = 0i32;
                         target_fallback_type_batches_to_sources.ensure_capacity(
-                            target_fallback_type_batches_to_sources.count + 1, pool);
+                            target_fallback_type_batches_to_sources.count + 1,
+                            pool,
+                        );
                         if !target_fallback_type_batches_to_sources.find_or_allocate_slot_unsafely(
-                            &target_type_batch_index, &mut slot_index) {
+                            &target_type_batch_index,
+                            &mut slot_index,
+                        ) {
                             *target_fallback_type_batches_to_sources.value_at_mut(slot_index) =
                                 QuickList::with_capacity(8, pool);
                         }
-                        let sources_list = target_fallback_type_batches_to_sources.value_at_mut(slot_index);
+                        let sources_list =
+                            target_fallback_type_batches_to_sources.value_at_mut(slot_index);
                         sources_list.ensure_capacity(sources_list.count + 1, pool);
                         *sources_list.allocate_unsafely() = FallbackAddSource {
                             source_set: source_set_index,
@@ -881,7 +976,9 @@ impl IslandAwakener {
         if target_fallback_type_batches_to_sources.keys.allocated() {
             let phase_two_jobs = &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
             phase_two_jobs.ensure_capacity(
-                phase_two_jobs.count + target_fallback_type_batches_to_sources.count, pool);
+                phase_two_jobs.count + target_fallback_type_batches_to_sources.count,
+                pool,
+            );
             for i in 0..target_fallback_type_batches_to_sources.count {
                 let job = phase_two_jobs.allocate_unsafely();
                 job.job_type = PhaseTwoJobType::AddFallbackTypeBatchConstraints;
@@ -891,7 +988,9 @@ impl IslandAwakener {
                 job.fallback_sources = list.span.slice_count(list.count);
                 job.fallback_target_type_batch = target_tb_index;
                 let active_solver_set = solver.active_set();
-                let fallback_batch = active_solver_set.batches.get(solver.fallback_batch_threshold());
+                let fallback_batch = active_solver_set
+                    .batches
+                    .get(solver.fallback_batch_threshold());
                 job.fallback_type_id = fallback_batch.type_batches.get(target_tb_index).type_id;
             }
             // Dispose the dictionary container, but NOT the per-target lists —
@@ -935,7 +1034,10 @@ impl IslandAwakener {
             let phase_two = &mut *(&mut self.phase_two_jobs as *mut QuickList<PhaseTwoJob>);
             for i in 0..phase_two.count {
                 let job = phase_two.get_mut(i);
-                if matches!(job.job_type, PhaseTwoJobType::AddFallbackTypeBatchConstraints) {
+                if matches!(
+                    job.job_type,
+                    PhaseTwoJobType::AddFallbackTypeBatchConstraints
+                ) {
                     if job.fallback_sources.allocated() {
                         pool.return_buffer(&mut job.fallback_sources);
                     }

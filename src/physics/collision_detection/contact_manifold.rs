@@ -1,7 +1,6 @@
 // Translated from BepuPhysics/CollisionDetection/ContactManifold.cs
 
 use glam::Vec3;
-use std::fmt;
 
 /// Information about a single contact.
 /// This type contains a field for the normal; it can be used to represent contacts within nonconvex contact manifolds or convex manifolds.
@@ -363,7 +362,8 @@ impl ConvexContactManifold {
     #[inline(always)]
     pub unsafe fn get_feature_id_ref(manifold: &mut Self, contact_index: i32) -> &mut i32 {
         manifold.validate_index(contact_index);
-        &mut (*(&mut manifold.contact0 as *mut ConvexContact).add(contact_index as usize)).feature_id
+        &mut (*(&mut manifold.contact0 as *mut ConvexContact).add(contact_index as usize))
+            .feature_id
     }
 
     /// Quickly removes a contact at the given index by swapping with the last.
@@ -404,7 +404,9 @@ impl IContactManifold for ConvexContactManifold {
     #[inline(always)]
     fn get_feature_id(&self, contact_index: i32) -> i32 {
         self.validate_index(contact_index);
-        unsafe { (*(&self.contact0 as *const ConvexContact).add(contact_index as usize)).feature_id }
+        unsafe {
+            (*(&self.contact0 as *const ConvexContact).add(contact_index as usize)).feature_id
+        }
     }
 
     #[inline(always)]

@@ -69,7 +69,8 @@ impl ManagedIdPool {
         if (self.available_ids.len() as i32) < count {
             // C# uses Array.Resize which gives exactly `count` capacity.
             // Vec::reserve(additional) guarantees capacity >= len + additional.
-            self.available_ids.reserve((count as usize) - self.available_ids.len());
+            self.available_ids
+                .reserve((count as usize) - self.available_ids.len());
         }
     }
 

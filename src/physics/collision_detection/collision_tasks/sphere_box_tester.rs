@@ -30,11 +30,24 @@ impl SphereBoxTester {
         let mut orientation_matrix_b = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_b, &mut orientation_matrix_b);
         let mut local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &orientation_matrix_b, &mut local_offset_b);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            offset_b,
+            &orientation_matrix_b,
+            &mut local_offset_b,
+        );
 
-        let clamped_x = local_offset_b.x.simd_max(-b.half_width).simd_min(b.half_width);
-        let clamped_y = local_offset_b.y.simd_max(-b.half_height).simd_min(b.half_height);
-        let clamped_z = local_offset_b.z.simd_max(-b.half_length).simd_min(b.half_length);
+        let clamped_x = local_offset_b
+            .x
+            .simd_max(-b.half_width)
+            .simd_min(b.half_width);
+        let clamped_y = local_offset_b
+            .y
+            .simd_max(-b.half_height)
+            .simd_min(b.half_height);
+        let clamped_z = local_offset_b
+            .z
+            .simd_max(-b.half_length)
+            .simd_min(b.half_length);
         let clamped_local_offset_b = Vector3Wide {
             x: clamped_x,
             y: clamped_y,
@@ -43,7 +56,11 @@ impl SphereBoxTester {
 
         // Implicit negation to make the normal point from B to A.
         let mut outside_normal = Vector3Wide::default();
-        Vector3Wide::subtract(&clamped_local_offset_b, &local_offset_b, &mut outside_normal);
+        Vector3Wide::subtract(
+            &clamped_local_offset_b,
+            &local_offset_b,
+            &mut outside_normal,
+        );
         let mut distance = Vector::<f32>::splat(0.0);
         Vector3Wide::length_into(&outside_normal, &mut distance);
         let inverse_distance = Vector::<f32>::splat(1.0) / distance;
@@ -63,30 +80,30 @@ impl SphereBoxTester {
         let neg_one = Vector::<f32>::splat(-1.0);
         let zero = Vector::<f32>::splat(0.0);
         let inside_normal = Vector3Wide {
-            x: use_x.select(
-                local_offset_b.x.simd_lt(zero).select(one, neg_one),
-                zero,
-            ),
-            y: use_y.select(
-                local_offset_b.y.simd_lt(zero).select(one, neg_one),
-                zero,
-            ),
-            z: use_z.select(
-                local_offset_b.z.simd_lt(zero).select(one, neg_one),
-                zero,
-            ),
+            x: use_x.select(local_offset_b.x.simd_lt(zero).select(one, neg_one), zero),
+            y: use_y.select(local_offset_b.y.simd_lt(zero).select(one, neg_one), zero),
+            z: use_z.select(local_offset_b.z.simd_lt(zero).select(one, neg_one), zero),
         };
 
         let inside_depth_total = inside_depth + a.radius;
         let use_inside = distance.simd_eq(Vector::<f32>::splat(0.0));
-        let local_normal = Vector3Wide::conditional_select(&use_inside.to_int(), &inside_normal, &outside_normal);
-        Matrix3x3Wide::transform_without_overlap(&local_normal, &orientation_matrix_b, &mut manifold.normal);
+        let local_normal =
+            Vector3Wide::conditional_select(&use_inside.to_int(), &inside_normal, &outside_normal);
+        Matrix3x3Wide::transform_without_overlap(
+            &local_normal,
+            &orientation_matrix_b,
+            &mut manifold.normal,
+        );
         manifold.depth = use_inside.select(inside_depth_total, outside_depth);
         manifold.feature_id = Vector::<i32>::splat(0);
 
         // Contact position from the normal and depth.
         let negative_offset_from_sphere = manifold.depth * Vector::<f32>::splat(0.5) - a.radius;
-        Vector3Wide::scale_to(&manifold.normal, &negative_offset_from_sphere, &mut manifold.offset_a);
+        Vector3Wide::scale_to(
+            &manifold.normal,
+            &negative_offset_from_sphere,
+            &mut manifold.offset_a,
+        );
         manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_int();
     }
 }

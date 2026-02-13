@@ -44,13 +44,18 @@ impl PointOnLineServo {
     ) {
         #[cfg(debug_assertions)]
         {
-            ConstraintChecker::assert_unit_length_vec3(self.local_direction, "PointOnLineServo", "local_direction");
-            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "PointOnLineServo");
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_direction,
+                "PointOnLineServo",
+                "local_direction",
+            );
+            ConstraintChecker::assert_valid_servo_settings(
+                &self.servo_settings,
+                "PointOnLineServo",
+            );
         }
 
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
         Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
         Vector3Wide::write_first(self.local_direction, &mut target.local_direction);
@@ -64,9 +69,7 @@ impl PointOnLineServo {
         inner_index: usize,
         description: &mut PointOnLineServo,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
         Vector3Wide::read_first(&source.local_direction, &mut description.local_direction);
@@ -106,11 +109,20 @@ impl PointOnLineServoFunctions {
         let mut angular_impulse_b = Vector3Wide::default();
         Matrix2x3Wide::transform(csi, angular_jacobian_b, &mut angular_impulse_b);
         let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_a, &inertia_a.inverse_inertia_tensor, &mut angular_change_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_change_a,
+        );
         let mut angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_b, &inertia_b.inverse_inertia_tensor, &mut angular_change_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_b,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_change_b,
+        );
         let linear_change_a = Vector3Wide::scale(&linear_impulse_a, &inertia_a.inverse_mass);
-        let negated_linear_change_b = Vector3Wide::scale(&linear_impulse_a, &inertia_b.inverse_mass);
+        let negated_linear_change_b =
+            Vector3Wide::scale(&linear_impulse_a, &inertia_b.inverse_mass);
 
         let mut tmp = Vector3Wide::default();
         Vector3Wide::add(&linear_change_a, &velocity_a.linear, &mut tmp);
@@ -138,17 +150,29 @@ impl PointOnLineServoFunctions {
     ) {
         let mut local_tangent_x = Vector3Wide::default();
         let mut local_tangent_y = Vector3Wide::default();
-        Helpers::build_orthonormal_basis(local_direction, &mut local_tangent_x, &mut local_tangent_y);
+        Helpers::build_orthonormal_basis(
+            local_direction,
+            &mut local_tangent_x,
+            &mut local_tangent_y,
+        );
         let mut orientation_matrix_a = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
         let mut anchor_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(local_offset_a, &orientation_matrix_a, &mut anchor_a);
+        Matrix3x3Wide::transform_without_overlap(
+            local_offset_a,
+            &orientation_matrix_a,
+            &mut anchor_a,
+        );
         let mut offset_b = Vector3Wide::default();
         QuaternionWide::transform_without_overlap(local_offset_b, orientation_b, &mut offset_b);
 
         // Find offsetA by computing the closest point on the line to anchorB.
         let mut direction = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(local_direction, &orientation_matrix_a, &mut direction);
+        Matrix3x3Wide::transform_without_overlap(
+            local_direction,
+            &orientation_matrix_a,
+            &mut direction,
+        );
         let mut anchor_b = Vector3Wide::default();
         Vector3Wide::add(&offset_b, ab, &mut anchor_b);
         Vector3Wide::subtract(&anchor_b, &anchor_a, anchor_offset);
@@ -158,8 +182,16 @@ impl PointOnLineServoFunctions {
         let mut offset_a = Vector3Wide::default();
         Vector3Wide::add(&line_start_to_closest, &anchor_a, &mut offset_a);
 
-        Matrix3x3Wide::transform_without_overlap(&local_tangent_x, &orientation_matrix_a, &mut linear_jacobian.x);
-        Matrix3x3Wide::transform_without_overlap(&local_tangent_y, &orientation_matrix_a, &mut linear_jacobian.y);
+        Matrix3x3Wide::transform_without_overlap(
+            &local_tangent_x,
+            &orientation_matrix_a,
+            &mut linear_jacobian.x,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            &local_tangent_y,
+            &orientation_matrix_a,
+            &mut linear_jacobian.y,
+        );
 
         unsafe {
             Vector3Wide::cross_without_overlap(&offset_a, &linear_jacobian.x, &mut angular_ja.x);
@@ -188,10 +220,27 @@ impl PointOnLineServoFunctions {
         let mut angular_ja = Matrix2x3Wide::default();
         let mut angular_jb = Matrix2x3Wide::default();
         Self::compute_jacobians(
-            &ab, orientation_a, orientation_b, &prestep.local_direction, &prestep.local_offset_a, &prestep.local_offset_b,
-            &mut _anchor_offset, &mut linear_jacobian, &mut angular_ja, &mut angular_jb,
+            &ab,
+            orientation_a,
+            orientation_b,
+            &prestep.local_direction,
+            &prestep.local_offset_a,
+            &prestep.local_offset_b,
+            &mut _anchor_offset,
+            &mut linear_jacobian,
+            &mut angular_ja,
+            &mut angular_jb,
         );
-        Self::apply_impulse(wsv_a, wsv_b, &linear_jacobian, &angular_ja, &angular_jb, inertia_a, inertia_b, accumulated_impulses);
+        Self::apply_impulse(
+            wsv_a,
+            wsv_b,
+            &linear_jacobian,
+            &angular_ja,
+            &angular_jb,
+            inertia_a,
+            inertia_b,
+            accumulated_impulses,
+        );
     }
 
     pub fn solve(
@@ -215,19 +264,43 @@ impl PointOnLineServoFunctions {
         let mut angular_ja = Matrix2x3Wide::default();
         let mut angular_jb = Matrix2x3Wide::default();
         Self::compute_jacobians(
-            &ab, orientation_a, orientation_b, &prestep.local_direction, &prestep.local_offset_a, &prestep.local_offset_b,
-            &mut anchor_offset, &mut linear_jacobian, &mut angular_ja, &mut angular_jb,
+            &ab,
+            orientation_a,
+            orientation_b,
+            &prestep.local_direction,
+            &prestep.local_offset_a,
+            &prestep.local_offset_b,
+            &mut anchor_offset,
+            &mut linear_jacobian,
+            &mut angular_ja,
+            &mut angular_jb,
         );
 
         let inverse_mass_sum = inertia_a.inverse_mass + inertia_b.inverse_mass;
         let mut linear_contribution = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::sandwich_scale(&linear_jacobian, &inverse_mass_sum, &mut linear_contribution);
+        Symmetric2x2Wide::sandwich_scale(
+            &linear_jacobian,
+            &inverse_mass_sum,
+            &mut linear_contribution,
+        );
         let mut angular_contribution_a = Symmetric2x2Wide::default();
-        Symmetric3x3Wide::matrix_sandwich(&angular_ja, &inertia_a.inverse_inertia_tensor, &mut angular_contribution_a);
+        Symmetric3x3Wide::matrix_sandwich(
+            &angular_ja,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_contribution_a,
+        );
         let mut angular_contribution_b = Symmetric2x2Wide::default();
-        Symmetric3x3Wide::matrix_sandwich(&angular_jb, &inertia_b.inverse_inertia_tensor, &mut angular_contribution_b);
+        Symmetric3x3Wide::matrix_sandwich(
+            &angular_jb,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_contribution_b,
+        );
         let mut inverse_effective_mass = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::add(&angular_contribution_a, &angular_contribution_b, &mut inverse_effective_mass);
+        Symmetric2x2Wide::add(
+            &angular_contribution_a,
+            &angular_contribution_b,
+            &mut inverse_effective_mass,
+        );
         let mut tmp_sym = Symmetric2x2Wide::default();
         Symmetric2x2Wide::add(&inverse_effective_mass, &linear_contribution, &mut tmp_sym);
         inverse_effective_mass = tmp_sym;
@@ -238,20 +311,46 @@ impl PointOnLineServoFunctions {
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(&prestep.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+        SpringSettingsWide::compute_springiness(
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let mut effective_mass_scaled = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::scale(&effective_mass, &effective_mass_cfm_scale, &mut effective_mass_scaled);
+        Symmetric2x2Wide::scale(
+            &effective_mass,
+            &effective_mass_cfm_scale,
+            &mut effective_mass_scaled,
+        );
         effective_mass = effective_mass_scaled;
 
         // CSV computation
         let mut linear_csv_a = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(&wsv_a.linear, &linear_jacobian, &mut linear_csv_a);
+        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &wsv_a.linear,
+            &linear_jacobian,
+            &mut linear_csv_a,
+        );
         let mut negated_linear_csv_b = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(&wsv_b.linear, &linear_jacobian, &mut negated_linear_csv_b);
+        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &wsv_b.linear,
+            &linear_jacobian,
+            &mut negated_linear_csv_b,
+        );
         let mut angular_csv_a = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(&wsv_a.angular, &angular_ja, &mut angular_csv_a);
+        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &wsv_a.angular,
+            &angular_ja,
+            &mut angular_csv_a,
+        );
         let mut angular_csv_b = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(&wsv_b.angular, &angular_jb, &mut angular_csv_b);
+        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &wsv_b.angular,
+            &angular_jb,
+            &mut angular_csv_b,
+        );
         let mut linear_csv = Vector2Wide::default();
         Vector2Wide::subtract(&linear_csv_a, &negated_linear_csv_b, &mut linear_csv);
         let mut angular_csv = Vector2Wide::default();
@@ -266,8 +365,13 @@ impl PointOnLineServoFunctions {
         let mut bias_velocity = Vector2Wide::default();
         let mut maximum_impulse = Vector::<f32>::splat(0.0);
         ServoSettingsWide::compute_clamped_bias_velocity_2d(
-            &error, &position_error_to_velocity, &prestep.servo_settings, dt, inverse_dt,
-            &mut bias_velocity, &mut maximum_impulse,
+            &error,
+            &position_error_to_velocity,
+            &prestep.servo_settings,
+            dt,
+            inverse_dt,
+            &mut bias_velocity,
+            &mut maximum_impulse,
         );
 
         let mut bias_minus_csv = Vector2Wide::default();
@@ -275,12 +379,25 @@ impl PointOnLineServoFunctions {
         let mut csi = Vector2Wide::default();
         Symmetric2x2Wide::transform_without_overlap(&bias_minus_csv, &effective_mass, &mut csi);
         let mut softness_contribution = Vector2Wide::default();
-        Vector2Wide::scale(accumulated_impulses, &softness_impulse_scale, &mut softness_contribution);
+        Vector2Wide::scale(
+            accumulated_impulses,
+            &softness_impulse_scale,
+            &mut softness_contribution,
+        );
         let mut tmp_v2 = Vector2Wide::default();
         Vector2Wide::subtract(&csi, &softness_contribution, &mut tmp_v2);
         csi = tmp_v2;
         ServoSettingsWide::clamp_impulse_2d(&maximum_impulse, accumulated_impulses, &mut csi);
-        Self::apply_impulse(wsv_a, wsv_b, &linear_jacobian, &angular_ja, &angular_jb, inertia_a, inertia_b, &csi);
+        Self::apply_impulse(
+            wsv_a,
+            wsv_b,
+            &linear_jacobian,
+            &angular_ja,
+            &angular_jb,
+            inertia_a,
+            inertia_b,
+            &csi,
+        );
     }
 }
 

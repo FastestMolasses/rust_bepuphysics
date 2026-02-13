@@ -87,7 +87,11 @@ impl OneBodyLinearServoFunctions {
             Vector3Wide::cross_without_overlap(offset, csi, &mut wsi);
         }
         let mut change = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&wsi, &inertia.inverse_inertia_tensor, &mut change);
+        Symmetric3x3Wide::transform_without_overlap(
+            &wsi,
+            &inertia.inverse_inertia_tensor,
+            &mut change,
+        );
         let mut tmp = Vector3Wide::default();
         Vector3Wide::add(&velocity_a.angular, &change, &mut tmp);
         velocity_a.angular = tmp;
@@ -107,7 +111,11 @@ impl OneBodyLinearServoFunctions {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset, orientation_a, &mut offset);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset,
+            orientation_a,
+            &mut offset,
+        );
         Self::apply_impulse(&offset, inertia_a, wsv_a, _accumulated_impulses);
     }
 
@@ -123,7 +131,11 @@ impl OneBodyLinearServoFunctions {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset, orientation_a, &mut offset);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset,
+            orientation_a,
+            &mut offset,
+        );
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
@@ -182,11 +194,7 @@ impl OneBodyLinearServoFunctions {
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);
 
         // The motor has a limited maximum force, so clamp the accumulated impulse.
-        ServoSettingsWide::clamp_impulse_3d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
+        ServoSettingsWide::clamp_impulse_3d(&maximum_impulse, accumulated_impulses, &mut csi);
         Self::apply_impulse(&offset, inertia_a, wsv_a, &csi);
     }
 

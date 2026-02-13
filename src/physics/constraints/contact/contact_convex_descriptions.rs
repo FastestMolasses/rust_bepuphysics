@@ -3,12 +3,10 @@
 
 use crate::physics::collision_detection::narrow_phase_callbacks::PairMaterialProperties;
 use crate::physics::constraints::contact::contact_constraint_description::ConstraintContactData;
-use crate::physics::constraints::contact::contact_convex_common::{ConvexContactWide, MaterialPropertiesWide};
+use crate::physics::constraints::contact::contact_convex_common::ConvexContactWide;
 use crate::physics::constraints::contact::contact_convex_types::*;
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::memory::buffer::Buffer;
-use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 
@@ -215,22 +213,34 @@ macro_rules! impl_convex_two_body_description {
 // ============================================================================
 
 impl_convex_one_body_description!(
-    Contact1OneBody, Contact1OneBodyPrestepData, Contact1OneBodyTypeProcessor, 1,
+    Contact1OneBody,
+    Contact1OneBodyPrestepData,
+    Contact1OneBodyTypeProcessor,
+    1,
     [contact0]
 );
 
 impl_convex_one_body_description!(
-    Contact2OneBody, Contact2OneBodyPrestepData, Contact2OneBodyTypeProcessor, 2,
+    Contact2OneBody,
+    Contact2OneBodyPrestepData,
+    Contact2OneBodyTypeProcessor,
+    2,
     [contact0, contact1]
 );
 
 impl_convex_one_body_description!(
-    Contact3OneBody, Contact3OneBodyPrestepData, Contact3OneBodyTypeProcessor, 3,
+    Contact3OneBody,
+    Contact3OneBodyPrestepData,
+    Contact3OneBodyTypeProcessor,
+    3,
     [contact0, contact1, contact2]
 );
 
 impl_convex_one_body_description!(
-    Contact4OneBody, Contact4OneBodyPrestepData, Contact4OneBodyTypeProcessor, 4,
+    Contact4OneBody,
+    Contact4OneBodyPrestepData,
+    Contact4OneBodyTypeProcessor,
+    4,
     [contact0, contact1, contact2, contact3]
 );
 
@@ -239,21 +249,33 @@ impl_convex_one_body_description!(
 // ============================================================================
 
 impl_convex_two_body_description!(
-    Contact1TwoBody, Contact1PrestepData, Contact1TypeProcessor, 1,
+    Contact1TwoBody,
+    Contact1PrestepData,
+    Contact1TypeProcessor,
+    1,
     [contact0]
 );
 
 impl_convex_two_body_description!(
-    Contact2TwoBody, Contact2PrestepData, Contact2TypeProcessor, 2,
+    Contact2TwoBody,
+    Contact2PrestepData,
+    Contact2TypeProcessor,
+    2,
     [contact0, contact1]
 );
 
 impl_convex_two_body_description!(
-    Contact3TwoBody, Contact3PrestepData, Contact3TypeProcessor, 3,
+    Contact3TwoBody,
+    Contact3PrestepData,
+    Contact3TypeProcessor,
+    3,
     [contact0, contact1, contact2]
 );
 
 impl_convex_two_body_description!(
-    Contact4TwoBody, Contact4PrestepData, Contact4TypeProcessor, 4,
+    Contact4TwoBody,
+    Contact4PrestepData,
+    Contact4TypeProcessor,
+    4,
     [contact0, contact1, contact2, contact3]
 );

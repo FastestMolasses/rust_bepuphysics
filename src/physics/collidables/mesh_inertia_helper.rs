@@ -22,21 +22,36 @@ impl MeshInertiaHelper {
         let off_scaling = mass * (6.0 / 120.0);
 
         let xx = diagonal_scaling
-            * (a.y * a.y + a.z * a.z + b.y * b.y + b.z * b.z + c.y * c.y + c.z * c.z
+            * (a.y * a.y
+                + a.z * a.z
+                + b.y * b.y
+                + b.z * b.z
+                + c.y * c.y
+                + c.z * c.z
                 + b.y * c.y
                 + b.z * c.z
                 + a.y * (b.y + c.y)
                 + a.z * (b.z + c.z));
 
         let yy = diagonal_scaling
-            * (a.x * a.x + a.z * a.z + b.x * b.x + b.z * b.z + c.x * c.x + c.z * c.z
+            * (a.x * a.x
+                + a.z * a.z
+                + b.x * b.x
+                + b.z * b.z
+                + c.x * c.x
+                + c.z * c.z
                 + b.x * c.x
                 + b.z * c.z
                 + a.x * (b.x + c.x)
                 + a.z * (b.z + c.z));
 
         let zz = diagonal_scaling
-            * (a.x * a.x + a.y * a.y + b.x * b.x + b.y * b.y + c.x * c.x + c.y * c.y
+            * (a.x * a.x
+                + a.y * a.y
+                + b.x * b.x
+                + b.y * b.y
+                + c.x * c.x
+                + c.y * c.y
                 + b.x * c.x
                 + b.y * c.y
                 + a.x * (b.x + c.x)
@@ -137,9 +152,7 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the center of mass of a closed mesh.
-    pub fn compute_closed_center_of_mass(
-        triangle_source: &mut dyn ITriangleSource,
-    ) -> (f32, Vec3) {
+    pub fn compute_closed_center_of_mass(triangle_source: &mut dyn ITriangleSource) -> (f32, Vec3) {
         let mut center = Vec3::ZERO;
         let mut volume = 0.0f32;
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
@@ -157,7 +170,12 @@ impl MeshInertiaHelper {
         let off_scaling = mass * (2.0 / 24.0);
 
         let xx = diagonal_scaling
-            * (a.y * a.y + a.z * a.z + b.y * b.y + b.z * b.z + c.y * c.y + c.z * c.z
+            * (a.y * a.y
+                + a.z * a.z
+                + b.y * b.y
+                + b.z * b.z
+                + c.y * c.y
+                + c.z * c.z
                 + a.y * b.y
                 + a.z * b.z
                 + a.y * c.y
@@ -166,7 +184,12 @@ impl MeshInertiaHelper {
                 + b.z * c.z);
 
         let yy = diagonal_scaling
-            * (a.x * a.x + a.z * a.z + b.x * b.x + b.z * b.z + c.x * c.x + c.z * c.z
+            * (a.x * a.x
+                + a.z * a.z
+                + b.x * b.x
+                + b.z * b.z
+                + c.x * c.x
+                + c.z * c.z
                 + a.x * b.x
                 + a.z * b.z
                 + a.x * c.x
@@ -175,7 +198,12 @@ impl MeshInertiaHelper {
                 + b.z * c.z);
 
         let zz = diagonal_scaling
-            * (a.x * a.x + a.y * a.y + b.x * b.x + b.y * b.y + c.x * c.x + c.y * c.y
+            * (a.x * a.x
+                + a.y * a.y
+                + b.x * b.x
+                + b.y * b.y
+                + c.x * c.x
+                + c.y * c.y
                 + a.x * b.x
                 + a.y * b.y
                 + a.x * c.x
@@ -237,8 +265,7 @@ impl MeshInertiaHelper {
         let mut area = 0.0f32;
         let mut inertia = Symmetric3x3::default();
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
-            let (t_area, t_contribution) =
-                Self::compute_triangle_contribution_with_area(a, b, c);
+            let (t_area, t_contribution) = Self::compute_triangle_contribution_with_area(a, b, c);
             area += t_area;
             inertia = inertia + t_contribution;
         }
@@ -256,8 +283,7 @@ impl MeshInertiaHelper {
         let mut area = 0.0f32;
         let mut inertia = Symmetric3x3::default();
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
-            let (t_area, t_contribution) =
-                Self::compute_triangle_contribution_with_area(a, b, c);
+            let (t_area, t_contribution) = Self::compute_triangle_contribution_with_area(a, b, c);
             area += t_area;
             center += t_area * (a + b + c);
             inertia = inertia + t_contribution;
@@ -270,9 +296,7 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the center of mass of an open mesh, treating it as a triangle soup.
-    pub fn compute_open_center_of_mass(
-        triangle_source: &mut dyn ITriangleSource,
-    ) -> Vec3 {
+    pub fn compute_open_center_of_mass(triangle_source: &mut dyn ITriangleSource) -> Vec3 {
         let mut center = Vec3::ZERO;
         let mut area = 0.0f32;
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {

@@ -78,7 +78,11 @@ impl OneBodyLinearMotorFunctions {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset, orientation_a, &mut offset);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset,
+            orientation_a,
+            &mut offset,
+        );
         OneBodyLinearServoFunctions::apply_impulse(&offset, inertia_a, wsv_a, accumulated_impulses);
     }
 
@@ -94,7 +98,11 @@ impl OneBodyLinearMotorFunctions {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset, orientation_a, &mut offset);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset,
+            orientation_a,
+            &mut offset,
+        );
 
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
@@ -135,11 +143,7 @@ impl OneBodyLinearMotorFunctions {
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);
 
-        ServoSettingsWide::clamp_impulse_3d(
-            &maximum_impulse,
-            accumulated_impulses,
-            &mut csi,
-        );
+        ServoSettingsWide::clamp_impulse_3d(&maximum_impulse, accumulated_impulses, &mut csi);
         OneBodyLinearServoFunctions::apply_impulse(&offset, inertia_a, wsv_a, &csi);
     }
 

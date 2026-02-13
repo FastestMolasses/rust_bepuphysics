@@ -93,9 +93,7 @@ impl InvasiveHashDiagnostics {
         let run = self.current_run_index as usize;
         let ht = hash_type as usize;
         let hi = self.current_hash_index as usize;
-        run < self.hashes.len()
-            && ht < self.hashes[run].len()
-            && hi < self.hashes[run][ht].len()
+        run < self.hashes.len() && ht < self.hashes[run].len() && hi < self.hashes[run][ht].len()
     }
 
     pub fn move_to_next_run(&mut self) {
@@ -174,7 +172,11 @@ impl InvasiveHashDiagnostics {
         Self::contribute_to_hash_value(hash, value);
     }
 
-    pub fn contribute_to_hash_type_bytes<T: Copy>(&mut self, hash_type: HashDiagnosticType, value: T) {
+    pub fn contribute_to_hash_type_bytes<T: Copy>(
+        &mut self,
+        hash_type: HashDiagnosticType,
+        value: T,
+    ) {
         let hash = self.get_hash_for_type(hash_type);
         Self::contribute_to_hash_bytes(hash, value);
     }

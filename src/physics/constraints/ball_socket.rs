@@ -35,9 +35,7 @@ impl BallSocket {
         #[cfg(debug_assertions)]
         ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "BallSocket");
 
-        let target = unsafe {
-            GatherScatter::get_offset_instance_mut(prestep_data, inner_index)
-        };
+        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
         Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
         SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
@@ -49,9 +47,7 @@ impl BallSocket {
         inner_index: usize,
         description: &mut BallSocket,
     ) {
-        let source = unsafe {
-            GatherScatter::get_offset_instance(prestep_data, inner_index)
-        };
+        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
         SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
@@ -96,9 +92,17 @@ impl BallSocketFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut offset_a = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_a, orientation_a, &mut offset_a);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_a,
+            orientation_a,
+            &mut offset_a,
+        );
         let mut offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_b, orientation_b, &mut offset_b);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_b,
+            orientation_b,
+            &mut offset_b,
+        );
         BallSocketShared::apply_impulse(
             wsv_a,
             wsv_b,
@@ -126,9 +130,17 @@ impl BallSocketFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         let mut offset_a = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_a, orientation_a, &mut offset_a);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_a,
+            orientation_a,
+            &mut offset_a,
+        );
         let mut offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(&prestep.local_offset_b, orientation_b, &mut offset_b);
+        QuaternionWide::transform_without_overlap(
+            &prestep.local_offset_b,
+            orientation_b,
+            &mut offset_b,
+        );
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);

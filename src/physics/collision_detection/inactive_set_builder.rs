@@ -1,8 +1,8 @@
 // Translated from BepuPhysics/CollisionDetection/InactiveSetBuilder.cs
 
+use super::pair_cache::{CollidablePair, ConstraintCache};
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use super::pair_cache::{CollidablePair, ConstraintCache};
 
 /// A pair stored in a sleeping set.
 #[repr(C)]
@@ -53,7 +53,12 @@ impl SleepingSetBuilder {
     }
 
     /// Adds a pair to the builder. Returns the index of the pair.
-    pub fn add(&mut self, pool: &mut BufferPool, pair: CollidablePair, cache: &ConstraintCache) -> i32 {
+    pub fn add(
+        &mut self,
+        pool: &mut BufferPool,
+        pair: CollidablePair,
+        cache: &ConstraintCache,
+    ) -> i32 {
         let pair_index = self.pairs.count;
         let entry = self.pairs.allocate(pool);
         entry.pair = pair;
@@ -69,7 +74,8 @@ impl SleepingSetBuilder {
         // 2) minimizes the memory required for the inactive set.
         if self.pairs.count > 0 {
             set.pairs = QuickList::with_capacity(self.pairs.count, pool);
-            set.pairs.add_range_unsafely(&self.pairs.span, 0, self.pairs.count);
+            set.pairs
+                .add_range_unsafely(&self.pairs.span, 0, self.pairs.count);
             self.pairs.count = 0;
         } else {
             // No pairs -> no set required.

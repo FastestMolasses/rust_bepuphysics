@@ -26,7 +26,11 @@ impl SphereTriangleTester {
     ) {
         let use_candidate = distance_squared_candidate.simd_lt(*distance_squared);
         *distance_squared = distance_squared.simd_min(*distance_squared_candidate);
-        *local_normal = Vector3Wide::conditional_select(&use_candidate.to_int(), local_normal_candidate, local_normal);
+        *local_normal = Vector3Wide::conditional_select(
+            &use_candidate.to_int(),
+            local_normal_candidate,
+            local_normal,
+        );
     }
 
     /// Tests sphere vs triangle collision (one orientation for the triangle).
@@ -58,7 +62,8 @@ impl SphereTriangleTester {
         let mut triangle_normal_length = Vector::<f32>::splat(0.0);
         Vector3Wide::length_into(&local_triangle_normal, &mut triangle_normal_length);
         let inverse_triangle_normal_length = Vector::<f32>::splat(1.0) / triangle_normal_length;
-        local_triangle_normal = Vector3Wide::scale(&local_triangle_normal, &inverse_triangle_normal_length);
+        local_triangle_normal =
+            Vector3Wide::scale(&local_triangle_normal, &inverse_triangle_normal_length);
 
         // Edge plane tests using barycentric coordinates
         let mut paxab = Vector3Wide::default();
@@ -69,8 +74,8 @@ impl SphereTriangleTester {
         Vector3Wide::dot(&paxab, &local_triangle_normal, &mut edge_plane_test_ab);
         let mut edge_plane_test_ac = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&acxpa, &local_triangle_normal, &mut edge_plane_test_ac);
-        let edge_plane_test_bc =
-            Vector::<f32>::splat(1.0) - (edge_plane_test_ab + edge_plane_test_ac) * inverse_triangle_normal_length;
+        let edge_plane_test_bc = Vector::<f32>::splat(1.0)
+            - (edge_plane_test_ab + edge_plane_test_ac) * inverse_triangle_normal_length;
 
         let outside_ab = edge_plane_test_ab.simd_lt(Vector::<f32>::splat(0.0));
         let outside_ac = edge_plane_test_ac.simd_lt(Vector::<f32>::splat(0.0));
@@ -91,14 +96,21 @@ impl SphereTriangleTester {
                 Vector3Wide::conditional_select(&outside_ac.to_int(), &ac, &ab);
             let mut bc = Vector3Wide::default();
             Vector3Wide::subtract(&b.c, &b.b, &mut bc);
-            let edge_direction =
-                Vector3Wide::conditional_select(&outside_bc.to_int(), &bc, &edge_direction_ac_or_ab);
+            let edge_direction = Vector3Wide::conditional_select(
+                &outside_bc.to_int(),
+                &bc,
+                &edge_direction_ac_or_ab,
+            );
             let edge_start = Vector3Wide::conditional_select(&outside_bc.to_int(), &b.b, &b.a);
 
             let mut neg_edge_start_to_p = Vector3Wide::default();
             Vector3Wide::add(&local_offset_b, &edge_start, &mut neg_edge_start_to_p);
             let mut neg_offset_dot_edge = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&neg_edge_start_to_p, &edge_direction, &mut neg_offset_dot_edge);
+            Vector3Wide::dot(
+                &neg_edge_start_to_p,
+                &edge_direction,
+                &mut neg_offset_dot_edge,
+            );
             let mut edge_dot_edge = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&edge_direction, &edge_direction, &mut edge_dot_edge);
             let edge_scale = Vector::<f32>::splat(0.0)
@@ -136,10 +148,17 @@ impl SphereTriangleTester {
         manifold.feature_id = outside_any_edge
             .to_int()
             .simd_eq(Vector::<i32>::splat(0))
-            .select(Vector::<i32>::splat(FACE_COLLISION_FLAG), Vector::<i32>::splat(0));
+            .select(
+                Vector::<i32>::splat(FACE_COLLISION_FLAG),
+                Vector::<i32>::splat(0),
+            );
 
         // Contact position on mesh surface
-        Matrix3x3Wide::transform_without_overlap(&local_closest_on_triangle, &r_b, &mut manifold.offset_a);
+        Matrix3x3Wide::transform_without_overlap(
+            &local_closest_on_triangle,
+            &r_b,
+            &mut manifold.offset_a,
+        );
         manifold.offset_a = manifold.offset_a + *offset_b;
         let mut distance = Vector::<f32>::splat(0.0);
         Vector3Wide::length_into(&manifold.offset_a, &mut distance);
@@ -150,7 +169,11 @@ impl SphereTriangleTester {
 
         // Triangle degenerate and backface checks
         let mut face_normal_dot = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&local_triangle_normal, &manifold.normal, &mut face_normal_dot);
+        Vector3Wide::dot(
+            &local_triangle_normal,
+            &manifold.normal,
+            &mut face_normal_dot,
+        );
         let mut epsilon_scale = Vector::<f32>::splat(0.0);
         let mut nondegenerate_mask = Vector::<i32>::splat(0);
         let mut ab_len_sq = Vector::<f32>::splat(0.0);

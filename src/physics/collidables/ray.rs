@@ -1,7 +1,7 @@
 use glam::Vec3;
 
-use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::vector3_wide::Vector3Wide;
 
 /// Data for a single ray.
 #[repr(C)]

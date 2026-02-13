@@ -8,9 +8,7 @@ pub type Triangle = CollidableTriangle;
 use crate::physics::collision_detection::collision_batcher_continuations::{
     ICollisionTestContinuation, PairContinuation,
 };
-use crate::physics::collision_detection::contact_manifold::{
-    ConvexContact, ConvexContactManifold,
-};
+use crate::physics::collision_detection::contact_manifold::{ConvexContact, ConvexContactManifold};
 use crate::physics::collision_detection::nonconvex_reduction::{
     FlushResult, NonconvexReduction, NonconvexReductionChild,
 };
@@ -77,12 +75,13 @@ impl TestTriangle {
         let ny = Vec4::new(n.y, edge_normal_ab.y, edge_normal_bc.y, edge_normal_ca.y);
         let nz = Vec4::new(n.z, edge_normal_ab.z, edge_normal_bc.z, edge_normal_ca.z);
         let normal_length_squared = nx * nx + ny * ny + nz * nz;
-        let inverse_length = Vec4::ONE / Vec4::new(
-            normal_length_squared.x.max(1e-30).sqrt(),
-            normal_length_squared.y.max(1e-30).sqrt(),
-            normal_length_squared.z.max(1e-30).sqrt(),
-            normal_length_squared.w.max(1e-30).sqrt(),
-        );
+        let inverse_length = Vec4::ONE
+            / Vec4::new(
+                normal_length_squared.x.max(1e-30).sqrt(),
+                normal_length_squared.y.max(1e-30).sqrt(),
+                normal_length_squared.z.max(1e-30).sqrt(),
+                normal_length_squared.w.max(1e-30).sqrt(),
+            );
         let nx = nx * inverse_length;
         let ny = ny * inverse_length;
         let nz = nz * inverse_length;
@@ -171,13 +170,29 @@ unsafe fn compute_mesh_space_contact(
         let contact_offset =
             (*(&manifold.contact0 as *const ConvexContact).add(deepest_index as usize)).offset
                 - manifold.offset_b;
-        Matrix3x3::transform(&contact_offset, inverse_mesh_orientation, mesh_space_contact);
-        Matrix3x3::transform(&(-manifold.normal), inverse_mesh_orientation, mesh_space_normal);
+        Matrix3x3::transform(
+            &contact_offset,
+            inverse_mesh_orientation,
+            mesh_space_contact,
+        );
+        Matrix3x3::transform(
+            &(-manifold.normal),
+            inverse_mesh_orientation,
+            mesh_space_normal,
+        );
     } else {
         let contact_offset =
             (*(&manifold.contact0 as *const ConvexContact).add(deepest_index as usize)).offset;
-        Matrix3x3::transform(&contact_offset, inverse_mesh_orientation, mesh_space_contact);
-        Matrix3x3::transform(&manifold.normal, inverse_mesh_orientation, mesh_space_normal);
+        Matrix3x3::transform(
+            &contact_offset,
+            inverse_mesh_orientation,
+            mesh_space_contact,
+        );
+        Matrix3x3::transform(
+            &manifold.normal,
+            inverse_mesh_orientation,
+            mesh_space_normal,
+        );
     }
 }
 
@@ -345,7 +360,11 @@ impl MeshReduction {
 
                     for j in 0..count {
                         let target_triangle = &active_triangles[j as usize];
-                        if should_block_normal(target_triangle, mesh_space_contact, mesh_space_normal) {
+                        if should_block_normal(
+                            target_triangle,
+                            mesh_space_contact,
+                            mesh_space_normal,
+                        ) {
                             let corrected_normal = Vec3::new(
                                 target_triangle.nx.x,
                                 target_triangle.ny.x,
@@ -356,7 +375,8 @@ impl MeshReduction {
                             let source_triangle = &mut active_triangles[i as usize];
                             source_triangle.blocked = true;
                             source_triangle.corrected_normal = corrected_normal;
-                            let correct_instead_of_delete = !source_triangle.force_deletion_on_block
+                            let correct_instead_of_delete = !source_triangle
+                                .force_deletion_on_block
                                 || (*children_ptr.add(target_child_index as usize))
                                     .manifold
                                     .count
@@ -394,11 +414,7 @@ impl MeshReduction {
     }
 
     /// Tries to flush the mesh reduction if all children are completed.
-    pub unsafe fn try_flush(
-        &mut self,
-        pair_id: i32,
-        pool: &mut BufferPool,
-    ) -> Option<FlushResult> {
+    pub unsafe fn try_flush(&mut self, pair_id: i32, pool: &mut BufferPool) -> Option<FlushResult> {
         debug_assert!(self.inner.child_count > 0);
         if self.inner.completed_child_count == self.inner.child_count {
             let mut mesh_orientation = Matrix3x3::default();

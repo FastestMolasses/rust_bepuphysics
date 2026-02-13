@@ -1,23 +1,22 @@
 use glam::{Quat, Vec3};
 
-use crate::utilities::quaternion_ex;
-use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::quaternion_ex;
+use crate::utilities::quaternion_wide::QuaternionWide;
 
-use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose, RigidPoseWide};
-use super::typed_index::TypedIndex;
-use super::shape::{IShape, IShapeRayHitHandler, IDisposableShape, ICompoundShape};
-use super::shapes::Shapes;
 use super::compound_builder::CompoundBuilder;
+use super::shape::{ICompoundShape, IDisposableShape, IShape, IShapeRayHitHandler};
+use super::shapes::Shapes;
+use super::typed_index::TypedIndex;
+use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::ray_batchers::RayData;
 
-use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
-use crate::physics::collision_detection::collision_tasks::convex_compound_task_overlaps::ConvexCompoundTaskOverlaps;
 use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::{
     ICollisionTaskOverlaps, ICollisionTaskSubpairOverlaps, OverlapQueryForPair,
 };
+use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::utilities::bounding_box::BoundingBox;
 
 /// Collects overlap results from compound overlap queries.
@@ -190,7 +189,8 @@ impl Compound {
             let local_pose_radius_squared = child_pose.position.length_squared();
             let mut angular_contribution = angular_contribution_to_child_linear;
             if contribution_length_squared > local_pose_radius_squared {
-                angular_contribution *= (local_pose_radius_squared.sqrt() / contribution_length_squared.sqrt()) as f32;
+                angular_contribution *=
+                    (local_pose_radius_squared.sqrt() / contribution_length_squared.sqrt()) as f32;
             }
             child_velocity.linear = velocity.linear + angular_contribution;
             child_pose.position += pose.position;
@@ -413,11 +413,7 @@ impl Compound {
 
     /// Computes the inertia of this compound using the shapes collection.
     /// Does not recenter children.
-    pub fn compute_inertia(
-        &self,
-        child_masses: &[f32],
-        shapes: &Shapes,
-    ) -> BodyInertia {
+    pub fn compute_inertia(&self, child_masses: &[f32], shapes: &Shapes) -> BodyInertia {
         CompoundBuilder::compute_inertia(&self.children, child_masses, shapes)
     }
 
@@ -481,7 +477,13 @@ impl ICompoundShape for Compound {
         velocity: &BodyVelocity,
         body_index: i32,
     ) {
-        Self::add_child_bounds_to_batcher_static(&self.children, batcher, pose, velocity, body_index);
+        Self::add_child_bounds_to_batcher_static(
+            &self.children,
+            batcher,
+            pose,
+            velocity,
+            body_index,
+        );
     }
 }
 
@@ -539,8 +541,8 @@ impl IBoundsQueryableCompound for Compound {
         shapes: &Shapes,
         overlaps: *mut u8,
     ) {
-        use crate::physics::trees::tree::Tree;
         use crate::physics::trees::ray_batcher::TreeRay;
+        use crate::physics::trees::tree::Tree;
 
         let mut sweep_origin = Vec3::ZERO;
         let mut expansion = Vec3::ZERO;

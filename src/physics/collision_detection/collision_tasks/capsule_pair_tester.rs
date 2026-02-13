@@ -45,10 +45,16 @@ impl CapsulePairTester {
         let absdadb = dadb.abs();
         let b_onto_a_offset = b.half_length * absdadb;
         let a_onto_b_offset = a.half_length * absdadb;
-        let mut a_min = (-a.half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(a.half_length));
-        let mut a_max = a.half_length.simd_min((da_offset_b + b_onto_a_offset).simd_max(-a.half_length));
-        let b_min = (-b.half_length).simd_max((-a_onto_b_offset - db_offset_b).simd_min(b.half_length));
-        let b_max = b.half_length.simd_min((a_onto_b_offset - db_offset_b).simd_max(-b.half_length));
+        let mut a_min =
+            (-a.half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(a.half_length));
+        let mut a_max = a
+            .half_length
+            .simd_min((da_offset_b + b_onto_a_offset).simd_max(-a.half_length));
+        let b_min =
+            (-b.half_length).simd_max((-a_onto_b_offset - db_offset_b).simd_min(b.half_length));
+        let b_max = b
+            .half_length
+            .simd_min((a_onto_b_offset - db_offset_b).simd_max(-b.half_length));
         ta = ta.simd_max(a_min).simd_min(a_max);
         tb = tb.simd_max(b_min).simd_min(b_max);
 
@@ -58,12 +64,17 @@ impl CapsulePairTester {
         Vector3Wide::scale_to(&db, &tb, &mut closest_point_on_b);
         closest_point_on_b = closest_point_on_b + *offset_b;
         // Normals point from B to A by convention.
-        Vector3Wide::subtract(&closest_point_on_a, &closest_point_on_b, &mut manifold.normal);
+        Vector3Wide::subtract(
+            &closest_point_on_a,
+            &closest_point_on_b,
+            &mut manifold.normal,
+        );
         let distance = manifold.normal.length();
         let inverse_distance = Vector::<f32>::splat(1.0) / distance;
         manifold.normal = Vector3Wide::scale(&manifold.normal, &inverse_distance);
         let normal_is_valid = distance.simd_gt(Vector::<f32>::splat(1e-7));
-        manifold.normal = Vector3Wide::conditional_select(&normal_is_valid.to_int(), &manifold.normal, &xa);
+        manifold.normal =
+            Vector3Wide::conditional_select(&normal_is_valid.to_int(), &manifold.normal, &xa);
 
         // Coplanarity-based interval weighting.
         let mut plane_normal = Vector3Wide::default();
@@ -81,12 +92,11 @@ impl CapsulePairTester {
 
         const LOWER_THRESHOLD: f32 = 0.01 * 0.01;
         const UPPER_THRESHOLD: f32 = 0.05 * 0.05;
-        let interval_weight = Vector::<f32>::splat(0.0).simd_max(
-            Vector::<f32>::splat(1.0).simd_min(
+        let interval_weight =
+            Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0).simd_min(
                 (Vector::<f32>::splat(UPPER_THRESHOLD) - squared_angle)
                     * Vector::<f32>::splat(1.0 / (UPPER_THRESHOLD - LOWER_THRESHOLD)),
-            ),
-        );
+            ));
         let weighted_ta = ta - ta * interval_weight;
         a_min = interval_weight * a_min + weighted_ta;
         a_max = interval_weight * a_max + weighted_ta;
@@ -109,8 +119,10 @@ impl CapsulePairTester {
         let mut b1_normal = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&offset_b1, &manifold.normal, &mut b1_normal);
         let capsules_are_perpendicular = dadb.abs().simd_lt(Vector::<f32>::splat(1e-7));
-        let distance0 = capsules_are_perpendicular.select(distance, b0_normal - db_normal * projected_tb0);
-        let distance1 = capsules_are_perpendicular.select(distance, b1_normal - db_normal * projected_tb1);
+        let distance0 =
+            capsules_are_perpendicular.select(distance, b0_normal - db_normal * projected_tb0);
+        let distance1 =
+            capsules_are_perpendicular.select(distance, b1_normal - db_normal * projected_tb1);
         let combined_radius = a.radius + b.radius;
         manifold.depth0 = combined_radius - distance0;
         manifold.depth1 = combined_radius - distance1;

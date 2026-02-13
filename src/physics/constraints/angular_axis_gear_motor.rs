@@ -1,11 +1,11 @@
-use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::motor_settings::{MotorSettings, MotorSettingsWide};
 use crate::physics::constraints::servo_settings::ServoSettingsWide;
+use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 
 /// Constrains body B's angular velocity around an axis anchored to body A to equal body A's velocity
@@ -32,7 +32,11 @@ impl AngularAxisGearMotor {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_unit_length_vec3(self.local_axis_a, "AngularAxisGearMotor", "local_axis_a");
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_axis_a,
+                "AngularAxisGearMotor",
+                "local_axis_a",
+            );
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "AngularAxisGearMotor");
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
@@ -102,10 +106,24 @@ impl AngularAxisGearMotorFunctions {
         let mut j_a = Vector3Wide::default();
         Vector3Wide::scale_to(&axis, &prestep.velocity_scale, &mut j_a);
         let mut impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&j_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &j_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut negated_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&axis, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
-        Self::apply_impulse(&impulse_to_velocity_a, &negated_impulse_to_velocity_b, accumulated_impulses, &mut wsv_a.angular, &mut wsv_b.angular);
+        Symmetric3x3Wide::transform_without_overlap(
+            &axis,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
+        Self::apply_impulse(
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            accumulated_impulses,
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+        );
     }
 
     #[inline(always)]
@@ -129,11 +147,19 @@ impl AngularAxisGearMotorFunctions {
         let mut j_a = Vector3Wide::default();
         Vector3Wide::scale_to(&axis, &prestep.velocity_scale, &mut j_a);
         let mut impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&j_a, &inertia_a.inverse_inertia_tensor, &mut impulse_to_velocity_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &j_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut impulse_to_velocity_a,
+        );
         let mut contribution_a = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&j_a, &impulse_to_velocity_a, &mut contribution_a);
         let mut negated_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&axis, &inertia_b.inverse_inertia_tensor, &mut negated_impulse_to_velocity_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &axis,
+            &inertia_b.inverse_inertia_tensor,
+            &mut negated_impulse_to_velocity_b,
+        );
         let mut contribution_b = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&axis, &negated_impulse_to_velocity_b, &mut contribution_b);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
@@ -153,9 +179,16 @@ impl AngularAxisGearMotorFunctions {
         Vector3Wide::dot(&wsv_a.angular, &j_a, &mut unscaled_csv_a);
         let mut negated_csv_b = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&wsv_b.angular, &axis, &mut negated_csv_b);
-        let mut csi = (negated_csv_b - unscaled_csv_a) * effective_mass - *accumulated_impulses * softness_impulse_scale;
+        let mut csi = (negated_csv_b - unscaled_csv_a) * effective_mass
+            - *accumulated_impulses * softness_impulse_scale;
         ServoSettingsWide::clamp_impulse_1d(&maximum_impulse, accumulated_impulses, &mut csi);
-        Self::apply_impulse(&impulse_to_velocity_a, &negated_impulse_to_velocity_b, accumulated_impulses, &mut wsv_a.angular, &mut wsv_b.angular);
+        Self::apply_impulse(
+            &impulse_to_velocity_a,
+            &negated_impulse_to_velocity_b,
+            accumulated_impulses,
+            &mut wsv_a.angular,
+            &mut wsv_b.angular,
+        );
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;

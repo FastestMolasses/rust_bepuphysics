@@ -40,10 +40,7 @@ impl<T: Copy> QuickQueue<T> {
 
     /// Creates a new queue with minimum capacity from a pool.
     #[inline(always)]
-    pub fn with_capacity(
-        minimum_initial_count: i32,
-        pool: &mut impl UnmanagedMemoryPool,
-    ) -> Self {
+    pub fn with_capacity(minimum_initial_count: i32, pool: &mut impl UnmanagedMemoryPool) -> Self {
         let span = pool.take_at_least::<T>(minimum_initial_count);
         Self::new(span)
     }
@@ -192,12 +189,15 @@ impl<T: Copy> QuickQueue<T> {
         // Copy elements from old span to new span, handling wrap-around
         if self.last_index >= self.first_index {
             // No wrap-around: elements are contiguous
-            self.span.copy_to(self.first_index, &mut new_span, 0, self.count);
+            self.span
+                .copy_to(self.first_index, &mut new_span, 0, self.count);
         } else if self.count > 0 {
             // Wrap-around: copy in two parts
             let elements_at_end = self.span.len() - self.first_index;
-            self.span.copy_to(self.first_index, &mut new_span, 0, elements_at_end);
-            self.span.copy_to(0, &mut new_span, elements_at_end, self.last_index + 1);
+            self.span
+                .copy_to(self.first_index, &mut new_span, 0, elements_at_end);
+            self.span
+                .copy_to(0, &mut new_span, elements_at_end, self.last_index + 1);
         }
 
         pool.return_buffer(&mut self.span);
@@ -361,7 +361,12 @@ impl<T: Copy> QuickQueue<T> {
     /// Clears the queue, zeroing out all elements.
     #[inline(always)]
     pub fn clear(&mut self) {
-        Self::clear_span(&mut self.span, self.first_index, self.last_index, self.count);
+        Self::clear_span(
+            &mut self.span,
+            self.first_index,
+            self.last_index,
+            self.count,
+        );
         self.count = 0;
         self.first_index = 0;
         self.last_index = self.capacity_mask;

@@ -40,7 +40,9 @@ impl ConstraintChecker {
     pub fn assert_unit_length_vec3(v: Vec3, type_name: &str, property_name: &str) {
         let length_squared = v.length_squared();
         debug_assert!(
-            length_squared <= 1.0 + 1e-5 && length_squared >= 1.0 - 1e-5 && Self::is_finite_number(length_squared),
+            length_squared <= 1.0 + 1e-5
+                && length_squared >= 1.0 - 1e-5
+                && Self::is_finite_number(length_squared),
             "{}.{} must be unit length.",
             type_name,
             property_name
@@ -55,7 +57,9 @@ impl ConstraintChecker {
     pub fn assert_unit_length_quat(q: Quat, type_name: &str, property_name: &str) {
         let length_squared = q.length_squared();
         debug_assert!(
-            length_squared <= 1.0 + 1e-5 && length_squared >= 1.0 - 1e-5 && Self::is_finite_number(length_squared),
+            length_squared <= 1.0 + 1e-5
+                && length_squared >= 1.0 - 1e-5
+                && Self::is_finite_number(length_squared),
             "{}.{} must be unit length.",
             type_name,
             property_name
@@ -67,7 +71,10 @@ impl ConstraintChecker {
     pub fn assert_unit_length_quat(_q: Quat, _type_name: &str, _property_name: &str) {}
 
     #[cfg(debug_assertions)]
-    pub fn assert_valid_spring_settings(settings: &super::spring_settings::SpringSettings, type_name: &str) {
+    pub fn assert_valid_spring_settings(
+        settings: &super::spring_settings::SpringSettings,
+        type_name: &str,
+    ) {
         debug_assert!(
             super::spring_settings::SpringSettings::validate(settings),
             "{}.SpringSettings must have positive frequency and nonnegative damping ratio.",
@@ -84,7 +91,10 @@ impl ConstraintChecker {
     }
 
     #[cfg(debug_assertions)]
-    pub fn assert_valid_motor_settings(settings: &super::motor_settings::MotorSettings, type_name: &str) {
+    pub fn assert_valid_motor_settings(
+        settings: &super::motor_settings::MotorSettings,
+        type_name: &str,
+    ) {
         debug_assert!(
             super::motor_settings::MotorSettings::validate(settings),
             "{}.MotorSettings must have nonnegative maximum force and damping.",
@@ -101,7 +111,10 @@ impl ConstraintChecker {
     }
 
     #[cfg(debug_assertions)]
-    pub fn assert_valid_servo_settings(settings: &super::servo_settings::ServoSettings, type_name: &str) {
+    pub fn assert_valid_servo_settings(
+        settings: &super::servo_settings::ServoSettings,
+        type_name: &str,
+    ) {
         debug_assert!(
             super::servo_settings::ServoSettings::validate(settings),
             "{}.ServoSettings must have nonnegative maximum speed, base speed, and maximum force.",

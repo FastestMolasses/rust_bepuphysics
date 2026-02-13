@@ -8,7 +8,7 @@ use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::island_sleeper::IslandSleeper;
 use crate::physics::pose_integration::IPoseIntegratorCallbacks;
-use crate::physics::pose_integrator::{IPoseIntegrator, PoseIntegrator};
+use crate::physics::pose_integrator::IPoseIntegrator;
 use crate::physics::simulation_allocation_sizes::SimulationAllocationSizes;
 use crate::physics::simulation_profiler::SimulationProfiler;
 use crate::physics::solve_description::SolveDescription;
@@ -96,18 +96,18 @@ impl Simulation {
         shapes: Option<*mut crate::physics::collidables::shapes::Shapes>,
     ) -> Box<Simulation>
     where
-        TNarrowPhaseCallbacks: crate::physics::collision_detection::narrow_phase_callbacks::INarrowPhaseCallbacks + 'static,
-        TPoseIntegratorCallbacks: crate::physics::pose_integration::IPoseIntegratorCallbacks + 'static,
+        TNarrowPhaseCallbacks:
+            crate::physics::collision_detection::narrow_phase_callbacks::INarrowPhaseCallbacks
+                + 'static,
+        TPoseIntegratorCallbacks:
+            crate::physics::pose_integration::IPoseIntegratorCallbacks + 'static,
     {
         use crate::physics::batch_compressor::BatchCompressor;
+        use crate::physics::collidables::shapes::Shapes as RealShapes;
         use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
         use crate::physics::collision_detection::collidable_overlap_finder::CollidableOverlapFinder as RealOverlapFinder;
         use crate::physics::collision_detection::constraint_remover::ConstraintRemover as RealConstraintRemover;
-        use crate::physics::collision_detection::narrow_phase::{
-            NarrowPhase as RealNarrowPhase,
-            NarrowPhaseGeneric,
-        };
-        use crate::physics::collidables::shapes::Shapes as RealShapes;
+        use crate::physics::collision_detection::narrow_phase::NarrowPhaseGeneric;
         use crate::physics::default_timestepper::DefaultTimestepper;
         use crate::physics::default_types::DefaultTypes;
         use crate::physics::island_awakener::IslandAwakener;
@@ -130,7 +130,10 @@ impl Simulation {
         let shapes_ptr = if let Some(s) = shapes {
             s
         } else {
-            Box::into_raw(Box::new(RealShapes::new(pool, sizes.shapes_per_type as usize)))
+            Box::into_raw(Box::new(RealShapes::new(
+                pool,
+                sizes.shapes_per_type as usize,
+            )))
         };
 
         // Create broad phase.
@@ -176,7 +179,8 @@ impl Simulation {
             sizes.islands,
             sizes.constraints_per_type_batch,
         )));
-        (*solver).pose_integrator = Some(pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator);
+        (*solver).pose_integrator =
+            Some(pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator);
 
         // Create constraint remover.
         let constraint_remover = RealConstraintRemover::with_defaults(buffer_pool, bodies, solver);
@@ -209,14 +213,19 @@ impl Simulation {
         (*bodies).initialize(solver, awakener, sleeper);
 
         // Create batch compressor.
-        let batch_compressor = Box::into_raw(Box::new(BatchCompressor::with_defaults(solver, bodies)));
+        let batch_compressor =
+            Box::into_raw(Box::new(BatchCompressor::with_defaults(solver, bodies)));
 
         // Create timestepper.
-        let timestepper: Box<dyn ITimestepper> = timestepper.unwrap_or_else(|| Box::new(DefaultTimestepper::default()));
+        let timestepper: Box<dyn ITimestepper> =
+            timestepper.unwrap_or_else(|| Box::new(DefaultTimestepper::default()));
 
         // Create collision task registries.
-        let collision_task_registry = Box::into_raw(Box::new(DefaultTypes::create_default_collision_task_registry()));
-        let sweep_task_registry = Box::into_raw(Box::new(DefaultTypes::create_default_sweep_task_registry()));
+        let collision_task_registry = Box::into_raw(Box::new(
+            DefaultTypes::create_default_collision_task_registry(),
+        ));
+        let sweep_task_registry =
+            Box::into_raw(Box::new(DefaultTypes::create_default_sweep_task_registry()));
 
         // Create narrow phase.
         let narrow_phase = Box::into_raw(Box::new(NarrowPhaseGeneric::new(
@@ -239,13 +248,15 @@ impl Simulation {
         DefaultTypes::register_defaults(&mut *solver, &mut (*narrow_phase).base);
 
         // Wire pair cache into sleeper, awakener, solver.
-        let pair_cache_ptr = &mut (*narrow_phase).base.pair_cache as *mut crate::physics::collision_detection::pair_cache::PairCache;
+        let pair_cache_ptr = &mut (*narrow_phase).base.pair_cache
+            as *mut crate::physics::collision_detection::pair_cache::PairCache;
         (*sleeper).pair_cache = pair_cache_ptr;
         (*awakener).pair_cache = pair_cache_ptr;
         (*solver).pair_cache = pair_cache_ptr;
 
         // Wire constraint_remover into sleeper (the NarrowPhase owns the ConstraintRemover so we use its address).
-        (*sleeper).constraint_remover = &mut (*narrow_phase).base.constraint_remover as *mut RealConstraintRemover;
+        (*sleeper).constraint_remover =
+            &mut (*narrow_phase).base.constraint_remover as *mut RealConstraintRemover;
 
         // Create broad phase overlap finder.
         let overlap_finder = Box::into_raw(Box::new(RealOverlapFinder::new(
@@ -262,12 +273,15 @@ impl Simulation {
             shapes: shapes_ptr as *mut Shapes,
             solver_batch_compressor: batch_compressor,
             solver,
-            pose_integrator: pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator,
+            pose_integrator: pose_integrator
+                as *mut dyn crate::physics::pose_integrator::IPoseIntegrator,
             broad_phase: broad_phase as *mut BroadPhase,
             broad_phase_overlap_finder: overlap_finder as *mut CollidableOverlapFinder,
             narrow_phase: narrow_phase as *mut NarrowPhase,
             profiler: SimulationProfiler::new(16),
-            constraint_remover: &mut (*narrow_phase).base.constraint_remover as *mut RealConstraintRemover as *mut ConstraintRemover,
+            constraint_remover: &mut (*narrow_phase).base.constraint_remover
+                as *mut RealConstraintRemover
+                as *mut ConstraintRemover,
             buffer_pool: buffer_pool,
             timestepper,
             deterministic: false,
@@ -290,7 +304,9 @@ impl Simulation {
         self.profiler.start("simulation");
         unsafe {
             let self_ptr = self as *mut Simulation;
-            (*self_ptr).timestepper.timestep(self_ptr, dt, thread_dispatcher);
+            (*self_ptr)
+                .timestepper
+                .timestep(self_ptr, dt, thread_dispatcher);
         }
         self.profiler.end("simulation");
     }
@@ -310,7 +326,11 @@ impl Simulation {
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
         self.profiler.start("pose_integrator");
-        (&mut *self.pose_integrator).predict_bounding_boxes(dt, &mut *self.buffer_pool, thread_dispatcher);
+        (&mut *self.pose_integrator).predict_bounding_boxes(
+            dt,
+            &mut *self.buffer_pool,
+            thread_dispatcher,
+        );
         self.profiler.end("pose_integrator");
     }
 
@@ -349,16 +369,13 @@ impl Simulation {
 
     /// Solves all constraints, performs substepped integration for constrained bodies,
     /// and integrates unconstrained bodies.
-    pub unsafe fn solve(
-        &mut self,
-        dt: f32,
-        thread_dispatcher: Option<&dyn IThreadDispatcher>,
-    ) {
+    pub unsafe fn solve(&mut self, dt: f32, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         let solver = &mut *self.solver;
         // Wire the pose integrator into the solver for kinematic integration during substepping.
         solver.pose_integrator = Some(self.pose_integrator);
         self.profiler.start("solver");
-        let constrained_body_set = solver.prepare_constraint_integration_responsibilities(thread_dispatcher);
+        let constrained_body_set =
+            solver.prepare_constraint_integration_responsibilities(thread_dispatcher);
         solver.solve(dt, thread_dispatcher);
         self.profiler.end("solver");
 
@@ -414,13 +431,16 @@ impl Simulation {
     pub unsafe fn ensure_capacity(&mut self, target: &SimulationAllocationSizes) {
         let solver = &mut *self.solver;
         solver.ensure_solver_capacities(target.bodies, target.constraints);
-        let min = target.constraints_per_type_batch.max(solver.minimum_capacity_per_type_batch());
+        let min = target
+            .constraints_per_type_batch
+            .max(solver.minimum_capacity_per_type_batch());
         solver.set_minimum_capacity_per_type_batch(min);
         solver.ensure_type_batch_capacities();
 
         {
             use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
-            (&mut *(self.narrow_phase as *mut RealNarrowPhase)).pair_cache
+            (&mut *(self.narrow_phase as *mut RealNarrowPhase))
+                .pair_cache
                 .ensure_constraint_to_pair_mapping_capacity(solver, target.constraints);
         }
 
@@ -433,11 +453,13 @@ impl Simulation {
         (&mut *self.statics).ensure_capacity(target.statics);
         {
             use crate::physics::collidables::shapes::Shapes as RealShapes;
-            (&mut *(self.shapes as *mut RealShapes)).ensure_batch_capacities(target.shapes_per_type as usize);
+            (&mut *(self.shapes as *mut RealShapes))
+                .ensure_batch_capacities(target.shapes_per_type as usize);
         }
         {
             use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
-            (&mut *(self.broad_phase as *mut RealBroadPhase)).ensure_capacity(target.bodies, target.bodies + target.statics);
+            (&mut *(self.broad_phase as *mut RealBroadPhase))
+                .ensure_capacity(target.bodies, target.bodies + target.statics);
         }
     }
 
@@ -450,7 +472,8 @@ impl Simulation {
 
         {
             use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
-            (&mut *(self.narrow_phase as *mut RealNarrowPhase)).pair_cache
+            (&mut *(self.narrow_phase as *mut RealNarrowPhase))
+                .pair_cache
                 .resize_constraint_to_pair_mapping_capacity(solver, target.constraints);
         }
 
@@ -463,11 +486,13 @@ impl Simulation {
         (&mut *self.statics).resize(target.statics);
         {
             use crate::physics::collidables::shapes::Shapes as RealShapes;
-            (&mut *(self.shapes as *mut RealShapes)).resize_batches(target.shapes_per_type as usize);
+            (&mut *(self.shapes as *mut RealShapes))
+                .resize_batches(target.shapes_per_type as usize);
         }
         {
             use crate::physics::collision_detection::broad_phase::BroadPhase as RealBroadPhase;
-            (&mut *(self.broad_phase as *mut RealBroadPhase)).resize(target.bodies, target.bodies + target.statics);
+            (&mut *(self.broad_phase as *mut RealBroadPhase))
+                .resize(target.bodies, target.bodies + target.statics);
         }
     }
 
@@ -502,8 +527,8 @@ unsafe impl Sync for Simulation {}
 use glam::Vec3;
 
 // Re-export types from ray_batchers for public API.
-pub use crate::physics::collision_detection::ray_batchers::{RayData, IShapeRayHitHandler};
 pub use crate::physics::collidables::collidable_reference::CollidableReference;
+pub use crate::physics::collision_detection::ray_batchers::{IShapeRayHitHandler, RayData};
 
 /// Defines a type capable of filtering ray test candidates and handling ray hit results.
 pub trait IRayHitHandler {
@@ -568,7 +593,10 @@ impl Simulation {
             let location = bodies.handle_to_location.get(reference.body_handle().0);
             let set = bodies.sets.get(location.set_index);
             let dynamics = set.dynamics_state.get(location.index);
-            (&dynamics.motion.pose as *const RigidPose, set.collidables.get(location.index).shape)
+            (
+                &dynamics.motion.pose as *const RigidPose,
+                set.collidables.get(location.index).shape,
+            )
         }
     }
 
@@ -594,7 +622,8 @@ impl Simulation {
         impl<H: IRayHitHandler> IShapeRayHitHandler for ShapeRayHitHandler<'_, H> {
             #[inline(always)]
             fn allow_test(&self, child_index: i32) -> bool {
-                self.hit_handler.allow_test_child(&self.collidable, child_index)
+                self.hit_handler
+                    .allow_test_child(&self.collidable, child_index)
             }
 
             #[inline(always)]
@@ -606,7 +635,14 @@ impl Simulation {
                 normal: Vec3,
                 child_index: i32,
             ) {
-                self.hit_handler.on_ray_hit(ray, maximum_t, t, normal, &self.collidable, child_index);
+                self.hit_handler.on_ray_hit(
+                    ray,
+                    maximum_t,
+                    t,
+                    normal,
+                    &self.collidable,
+                    child_index,
+                );
             }
         }
 
@@ -624,7 +660,11 @@ impl Simulation {
                 ray_data: *const RayData,
                 maximum_t: *mut f32,
             ) {
-                if self.shape_hit_handler.hit_handler.allow_test_collidable(&collidable) {
+                if self
+                    .shape_hit_handler
+                    .hit_handler
+                    .allow_test_collidable(&collidable)
+                {
                     self.shape_hit_handler.collidable = collidable;
                     let (pose, shape) = self.simulation.get_pose_and_shape(collidable);
                     type RealShapes = crate::physics::collidables::shapes::Shapes;
@@ -680,7 +720,9 @@ impl Simulation {
         max: Vec3,
     ) {
         use crate::physics::collision_detection::ray_batchers::IBroadPhaseSweepTester;
-        use crate::physics::collision_detection::sweep_task_registry::{ISweepFilter, SweepTaskRegistry};
+        use crate::physics::collision_detection::sweep_task_registry::{
+            ISweepFilter, SweepTaskRegistry,
+        };
 
         // SweepFilter delegates child-level filtering to the user's hit handler.
         struct SweepFilter<'a, H: ISweepHitHandler> {
@@ -692,7 +734,8 @@ impl Simulation {
             #[inline(always)]
             fn allow_test(&self, _child_a: i32, child_b: i32) -> bool {
                 // Simulation sweep does not permit nonconvex sweep shapes, so childA is irrelevant.
-                self.hit_handler.allow_test_child(&self.collidable_being_tested, child_b)
+                self.hit_handler
+                    .allow_test_child(&self.collidable_being_tested, child_b)
             }
         }
 
@@ -732,8 +775,7 @@ impl Simulation {
                         crate::physics::collision_detection::narrow_phase::NarrowPhase;
                     let narrow_phase =
                         unsafe { &*(self.simulation.narrow_phase as *const RealNarrowPhase) };
-                    let sweep_task_registry =
-                        unsafe { &*narrow_phase.sweep_task_registry };
+                    let sweep_task_registry = unsafe { &*narrow_phase.sweep_task_registry };
 
                     if let Some(task) =
                         sweep_task_registry.get_task(self.shape_type, target_shape.type_id())
@@ -779,8 +821,13 @@ impl Simulation {
                         if result {
                             if t1 > 0.0 {
                                 hit_location += self.pose.position;
-                                self.hit_handler
-                                    .on_hit(maximum_t, t1, hit_location, hit_normal, &collidable);
+                                self.hit_handler.on_hit(
+                                    maximum_t,
+                                    t1,
+                                    hit_location,
+                                    hit_normal,
+                                    &collidable,
+                                );
                             } else {
                                 self.hit_handler.on_hit_at_zero_t(maximum_t, &collidable);
                             }
@@ -834,8 +881,8 @@ impl Simulation {
         let size_estimate = minimum_radius.max(maximum_radius * 0.25);
         let minimum_progression_distance = 0.1 * size_estimate;
         let convergence_threshold_distance = 1e-5 * size_estimate;
-        let tangent_velocity = (velocity.angular.length() * maximum_radius)
-            .min(maximum_angular_expansion / maximum_t);
+        let tangent_velocity =
+            (velocity.angular.length() * maximum_radius).min(maximum_angular_expansion / maximum_t);
         let inverse_velocity = 1.0 / (velocity.linear.length() + tangent_velocity);
         let minimum_progression_t = minimum_progression_distance * inverse_velocity;
         let convergence_threshold_t = convergence_threshold_distance * inverse_velocity;

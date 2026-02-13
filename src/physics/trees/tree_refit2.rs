@@ -207,7 +207,11 @@ impl Tree {
             );
             debug_assert!(node.a.index >= 0);
             self.refit2_with_task_spawning(&mut node.a, context, worker_index, dispatcher);
-            (*(*context).task_stack).wait_for_completion_unfiltered(continuation, worker_index, dispatcher);
+            (*(*context).task_stack).wait_for_completion_unfiltered(
+                continuation,
+                worker_index,
+                dispatcher,
+            );
         } else {
             if node.a.index >= 0 {
                 if node.a.leaf_count >= leaf_count_per_task {
@@ -236,8 +240,11 @@ impl Tree {
         dispatcher: &dyn IThreadDispatcher,
     ) {
         let context = untyped_context as *mut RefitContext;
-        let node = &mut *((*context).tree.nodes.as_ptr() as *mut Node).add(parent_node_index as usize);
-        (*context).tree.refit2_with_task_spawning(&mut node.b, context, worker_index, dispatcher);
+        let node =
+            &mut *((*context).tree.nodes.as_ptr() as *mut Node).add(parent_node_index as usize);
+        (*context)
+            .tree
+            .refit2_with_task_spawning(&mut node.b, context, worker_index, dispatcher);
     }
 
     unsafe fn refit2_root_entry_task(
@@ -249,7 +256,9 @@ impl Tree {
         let context = untyped_context as *mut RefitContext;
         let mut stub = NodeChild::default();
         stub.index = 0;
-        (*context).tree.refit2_with_task_spawning(&mut stub, context, worker_index, dispatcher);
+        (*context)
+            .tree
+            .refit2_with_task_spawning(&mut stub, context, worker_index, dispatcher);
         (*(*context).task_stack).request_stop();
     }
 
@@ -271,9 +280,8 @@ impl Tree {
             target_task_count
         };
         const MINIMUM_TASK_SIZE: i32 = 32;
-        let leaf_count_per_task = MINIMUM_TASK_SIZE.max(
-            (self.leaf_count as f32 / target_task_count as f32).ceil() as i32,
-        );
+        let leaf_count_per_task = MINIMUM_TASK_SIZE
+            .max((self.leaf_count as f32 / target_task_count as f32).ceil() as i32);
         let mut refit_context = RefitContext {
             leaf_count_per_task,
             task_stack,
@@ -303,11 +311,7 @@ impl Tree {
     }
 
     /// MT Refit2. Creates its own TaskStack and dispatches internally.
-    pub unsafe fn refit2_mt(
-        &self,
-        pool: &mut BufferPool,
-        dispatcher: &dyn IThreadDispatcher,
-    ) {
+    pub unsafe fn refit2_mt(&self, pool: &mut BufferPool, dispatcher: &dyn IThreadDispatcher) {
         let thread_count = dispatcher.thread_count();
         let mut task_stack = TaskStack::new(pool, dispatcher, thread_count, 128, 128);
         self.refit2_internal_mt(pool, dispatcher, &mut task_stack, 0, -1, true);
@@ -323,7 +327,14 @@ impl Tree {
         worker_index: i32,
         target_task_count: i32,
     ) {
-        self.refit2_internal_mt(pool, dispatcher, task_stack, worker_index, target_task_count, false);
+        self.refit2_internal_mt(
+            pool,
+            dispatcher,
+            task_stack,
+            worker_index,
+            target_task_count,
+            false,
+        );
     }
 
     // ── MT Refit2 with cache optimization ──
@@ -341,7 +352,8 @@ impl Tree {
         debug_assert!(ctx.tree.leaf_count >= 2);
         let source_node = &*ctx.source_nodes.get(source_node_index);
         let target_node_index = child_in_parent.index;
-        let target_node = &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
+        let target_node =
+            &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
         let target_metanode = ctx.tree.metanodes.get_mut(target_node_index);
         target_metanode.parent = parent_index;
         target_metanode.index_in_parent = child_index_in_parent;
@@ -352,7 +364,9 @@ impl Tree {
         let target_index_b = target_node_index + source_a.leaf_count;
         debug_assert!(ctx.leaf_count_per_task > 1);
 
-        if source_a.leaf_count >= ctx.leaf_count_per_task && source_b.leaf_count >= ctx.leaf_count_per_task {
+        if source_a.leaf_count >= ctx.leaf_count_per_task
+            && source_b.leaf_count >= ctx.leaf_count_per_task
+        {
             // Both children big enough — spawn task for B, recurse on A.
             target_node.a.index = target_index_a;
             target_node.a.leaf_count = source_a.leaf_count;
@@ -382,22 +396,37 @@ impl Tree {
                 worker_index,
                 dispatcher,
             );
-            (*ctx.task_stack).wait_for_completion_unfiltered(continuation, worker_index, dispatcher);
+            (*ctx.task_stack).wait_for_completion_unfiltered(
+                continuation,
+                worker_index,
+                dispatcher,
+            );
         } else {
             if source_a.index >= 0 {
                 target_node.a.index = target_index_a;
                 target_node.a.leaf_count = source_a.leaf_count;
                 if source_a.leaf_count >= ctx.leaf_count_per_task {
                     Self::refit2_with_cache_opt_and_task_spawning(
-                        source_a.index, target_node_index, 0,
-                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize)).a,
-                        context, worker_index, dispatcher,
+                        source_a.index,
+                        target_node_index,
+                        0,
+                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node)
+                            .add(target_node_index as usize))
+                        .a,
+                        context,
+                        worker_index,
+                        dispatcher,
                     );
                 } else {
                     Self::refit2_with_cache_optimization_recursive(
-                        source_a.index, target_node_index, 0,
-                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize)).a,
-                        &ctx.source_nodes, &mut ctx.tree,
+                        source_a.index,
+                        target_node_index,
+                        0,
+                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node)
+                            .add(target_node_index as usize))
+                        .a,
+                        &ctx.source_nodes,
+                        &mut ctx.tree,
                     );
                 }
             } else {
@@ -406,32 +435,50 @@ impl Tree {
                     Leaf::new(target_node_index, 0);
             }
             if source_b.index >= 0 {
-                let target_node = &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
+                let target_node =
+                    &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
                 target_node.b.index = target_index_b;
                 target_node.b.leaf_count = source_b.leaf_count;
                 if source_b.leaf_count >= ctx.leaf_count_per_task {
                     Self::refit2_with_cache_opt_and_task_spawning(
-                        source_b.index, target_node_index, 1,
-                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize)).b,
-                        context, worker_index, dispatcher,
+                        source_b.index,
+                        target_node_index,
+                        1,
+                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node)
+                            .add(target_node_index as usize))
+                        .b,
+                        context,
+                        worker_index,
+                        dispatcher,
                     );
                 } else {
                     Self::refit2_with_cache_optimization_recursive(
-                        source_b.index, target_node_index, 1,
-                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize)).b,
-                        &ctx.source_nodes, &mut ctx.tree,
+                        source_b.index,
+                        target_node_index,
+                        1,
+                        &mut (*(ctx.tree.nodes.as_ptr() as *mut Node)
+                            .add(target_node_index as usize))
+                        .b,
+                        &ctx.source_nodes,
+                        &mut ctx.tree,
                     );
                 }
             } else {
-                let target_node = &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
+                let target_node =
+                    &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
                 target_node.b = source_b;
                 *ctx.tree.leaves.get_mut(Self::encode(source_b.index)) =
                     Leaf::new(target_node_index, 1);
             }
         }
-        let target_node = &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
+        let target_node =
+            &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
         let mut merged = MaybeUninit::new(*child_in_parent);
-        BoundingBox::create_merged_unsafe_with_preservation(&target_node.a, &target_node.b, &mut merged);
+        BoundingBox::create_merged_unsafe_with_preservation(
+            &target_node.a,
+            &target_node.b,
+            &mut merged,
+        );
         *child_in_parent = merged.assume_init();
     }
 
@@ -445,7 +492,8 @@ impl Tree {
         let source_parent_index = (parent_node_indices >> 32) as i32;
         let target_parent_index = parent_node_indices as i32;
         let source_parent_node = &*(*context).source_nodes.get(source_parent_index);
-        let target_parent_node = &mut *((*context).tree.nodes.as_ptr() as *mut Node).add(target_parent_index as usize);
+        let target_parent_node =
+            &mut *((*context).tree.nodes.as_ptr() as *mut Node).add(target_parent_index as usize);
         Self::refit2_with_cache_opt_and_task_spawning(
             source_parent_node.b.index,
             target_parent_index,
@@ -466,7 +514,15 @@ impl Tree {
         let context = untyped_context as *mut RefitWithCacheOptimizationContext;
         let mut stub = NodeChild::default();
         stub.index = 0;
-        Self::refit2_with_cache_opt_and_task_spawning(0, -1, -1, &mut stub, context, worker_index, dispatcher);
+        Self::refit2_with_cache_opt_and_task_spawning(
+            0,
+            -1,
+            -1,
+            &mut stub,
+            context,
+            worker_index,
+            dispatcher,
+        );
         (*(*context).task_stack).request_stop();
     }
 
@@ -489,9 +545,8 @@ impl Tree {
             target_task_count
         };
         const MINIMUM_TASK_SIZE: i32 = 32;
-        let leaf_count_per_task = MINIMUM_TASK_SIZE.max(
-            (self.leaf_count as f32 / target_task_count as f32).ceil() as i32,
-        );
+        let leaf_count_per_task = MINIMUM_TASK_SIZE
+            .max((self.leaf_count as f32 / target_task_count as f32).ceil() as i32);
         let mut refit_context = RefitWithCacheOptimizationContext {
             source_nodes,
             tree: *self,
@@ -518,7 +573,13 @@ impl Tree {
             let mut stub = NodeChild::default();
             stub.index = 0;
             Self::refit2_with_cache_opt_and_task_spawning(
-                0, -1, -1, &mut stub, &mut refit_context, worker_index, dispatcher,
+                0,
+                -1,
+                -1,
+                &mut stub,
+                &mut refit_context,
+                worker_index,
+                dispatcher,
             );
         }
     }
@@ -539,7 +600,13 @@ impl Tree {
         let old_nodes = self.nodes;
         self.nodes = pool.take_at_least::<Node>(old_nodes.len());
         self.refit2_with_cache_opt_internal_mt(
-            pool, dispatcher, &mut task_stack, 0, -1, true, old_nodes,
+            pool,
+            dispatcher,
+            &mut task_stack,
+            0,
+            -1,
+            true,
+            old_nodes,
         );
         task_stack.dispose(pool, dispatcher);
         if dispose_original_nodes {
@@ -565,7 +632,13 @@ impl Tree {
         let old_nodes = self.nodes;
         self.nodes = pool.take_at_least::<Node>(old_nodes.len());
         self.refit2_with_cache_opt_internal_mt(
-            pool, dispatcher, task_stack, worker_index, target_task_count, false, old_nodes,
+            pool,
+            dispatcher,
+            task_stack,
+            worker_index,
+            target_task_count,
+            false,
+            old_nodes,
         );
         if dispose_original_nodes {
             let mut old = old_nodes;
@@ -585,7 +658,13 @@ impl Tree {
         target_task_count: i32,
     ) {
         self.refit2_with_cache_opt_internal_mt(
-            pool, dispatcher, task_stack, worker_index, target_task_count, false, source_nodes,
+            pool,
+            dispatcher,
+            task_stack,
+            worker_index,
+            target_task_count,
+            false,
+            source_nodes,
         );
     }
 }

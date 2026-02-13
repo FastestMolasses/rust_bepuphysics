@@ -5,7 +5,6 @@ use crate::physics::handles::ConstraintHandle;
 use crate::physics::solver::Solver;
 use crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer;
 use crate::utilities::collections::quick_dictionary::QuickDictionary;
-use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
@@ -57,7 +56,8 @@ impl RefEqualityComparer<CollidablePair> for CollidablePairComparer {
     fn equals(&self, a: &CollidablePair, b: &CollidablePair) -> bool {
         // Compare as u64 for speed
         unsafe {
-            *(a as *const CollidablePair as *const u64) == *(b as *const CollidablePair as *const u64)
+            *(a as *const CollidablePair as *const u64)
+                == *(b as *const CollidablePair as *const u64)
         }
     }
 
@@ -65,7 +65,8 @@ impl RefEqualityComparer<CollidablePair> for CollidablePairComparer {
     fn hash(&self, item: &CollidablePair) -> i32 {
         const P1: u64 = 961748927;
         const P2: u64 = 899809343;
-        let hash64 = (item.a.packed as u64).wrapping_mul(P1.wrapping_mul(P2))
+        let hash64 = (item.a.packed as u64)
+            .wrapping_mul(P1.wrapping_mul(P2))
             .wrapping_add((item.b.packed as u64).wrapping_mul(P2));
         (hash64 ^ (hash64 >> 32)) as i32
     }
@@ -161,7 +162,6 @@ pub struct PairCache {
     /// Sleeping sets, filled in parallel with Bodies.Sets and Solver.Sets.
     /// Note that this does not include the active set, so index 0 is always empty.
     pub(crate) sleeping_sets: Buffer<SleepingSet>,
-
 }
 
 impl PairCache {
@@ -240,14 +240,13 @@ impl PairCache {
         target_capacity: i32,
     ) {
         let pool_ref = unsafe { &mut *self.pool };
-        let target = i32::max(solver.handle_pool.highest_possibly_claimed_id() + 1, target_capacity);
+        let target = i32::max(
+            solver.handle_pool.highest_possibly_claimed_id() + 1,
+            target_capacity,
+        );
         if self.constraint_handle_to_pair.len() < target {
             let copy_count = self.constraint_handle_to_pair.len();
-            pool_ref.resize_to_at_least(
-                &mut self.constraint_handle_to_pair,
-                target,
-                copy_count,
-            );
+            pool_ref.resize_to_at_least(&mut self.constraint_handle_to_pair, target, copy_count);
         }
     }
 
@@ -258,16 +257,13 @@ impl PairCache {
         target_capacity: i32,
     ) {
         let pool_ref = unsafe { &mut *self.pool };
-        let target = BufferPool::get_capacity_for_count::<CollisionPairLocation>(
-            i32::max(solver.handle_pool.highest_possibly_claimed_id() + 1, target_capacity),
-        );
+        let target = BufferPool::get_capacity_for_count::<CollisionPairLocation>(i32::max(
+            solver.handle_pool.highest_possibly_claimed_id() + 1,
+            target_capacity,
+        ));
         if self.constraint_handle_to_pair.len() != target {
             let copy_count = i32::min(target, self.constraint_handle_to_pair.len());
-            pool_ref.resize_to_at_least(
-                &mut self.constraint_handle_to_pair,
-                target,
-                copy_count,
-            );
+            pool_ref.resize_to_at_least(&mut self.constraint_handle_to_pair, target, copy_count);
         }
     }
 
@@ -291,7 +287,8 @@ impl PairCache {
                 largest_intermediate_size = new_mapping_size;
             }
         }
-        self.mapping.ensure_capacity(largest_intermediate_size, pool_ref);
+        self.mapping
+            .ensure_capacity(largest_intermediate_size, pool_ref);
 
         jobs.push(super::narrow_phase::NarrowPhaseFlushJob {
             job_type: super::narrow_phase::NarrowPhaseFlushJobType::FlushPairCacheChanges,
@@ -316,11 +313,13 @@ impl PairCache {
     ) {
         // Write the constraint handle back into the appropriate location.
         if pair_cache_change_index.is_pending() {
-            (*self.worker_pending_changes.get_mut(pair_cache_change_index.worker_index))
-                .pending_adds
-                .get_mut(pair_cache_change_index.index)
-                .cache
-                .constraint_handle = constraint_handle;
+            (*self
+                .worker_pending_changes
+                .get_mut(pair_cache_change_index.worker_index))
+            .pending_adds
+            .get_mut(pair_cache_change_index.index)
+            .cache
+            .constraint_handle = constraint_handle;
         } else {
             (*self.mapping.values.get_mut(pair_cache_change_index.index)).constraint_handle =
                 constraint_handle;
@@ -500,7 +499,11 @@ impl PairCache {
     // --- PairCache_Activity methods ---
 
     /// Resizes the sleeping sets capacity.
-    pub(crate) fn resize_sets_capacity(&mut self, sets_capacity: i32, potentially_allocated_count: i32) {
+    pub(crate) fn resize_sets_capacity(
+        &mut self,
+        sets_capacity: i32,
+        potentially_allocated_count: i32,
+    ) {
         let pool_ref = unsafe { &mut *self.pool };
         debug_assert!(
             sets_capacity >= potentially_allocated_count
@@ -516,7 +519,8 @@ impl PairCache {
             );
             if old_capacity < self.sleeping_sets.len() {
                 // We rely on unused slots being default initialized.
-                self.sleeping_sets.clear(old_capacity, self.sleeping_sets.len() - old_capacity);
+                self.sleeping_sets
+                    .clear(old_capacity, self.sleeping_sets.len() - old_capacity);
             }
         }
     }
@@ -566,10 +570,10 @@ impl PairCache {
                 );
                 if is_contact_constraint_type(type_batch.type_id) {
                     for index_in_type_batch in 0..type_batch.constraint_count {
-                        let handle = unsafe { *type_batch.index_to_handle.get(index_in_type_batch) };
-                        let pair_location = unsafe {
-                            &mut *self.constraint_handle_to_pair.get_mut(handle.0)
-                        };
+                        let handle =
+                            unsafe { *type_batch.index_to_handle.get(index_in_type_batch) };
+                        let pair_location =
+                            unsafe { &mut *self.constraint_handle_to_pair.get_mut(handle.0) };
                         let mut table_index = 0i32;
                         let mut element_index = 0i32;
                         self.mapping.get_table_indices(

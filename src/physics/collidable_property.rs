@@ -45,11 +45,7 @@ impl<T: Copy + Default> CollidableProperty<T> {
     }
 
     /// Initializes the property collection if the deferred constructor was used.
-    pub fn initialize(
-        &mut self,
-        body_handle_capacity: i32,
-        static_handle_capacity: i32,
-    ) {
+    pub fn initialize(&mut self, body_handle_capacity: i32, static_handle_capacity: i32) {
         let pool = unsafe { &mut *self.pool };
         self.body_data = pool.take_at_least(body_handle_capacity);
         self.static_data = pool.take_at_least(static_handle_capacity);
@@ -140,13 +136,10 @@ impl<T: Copy + Default> CollidableProperty<T> {
     }
 
     /// Ensures that the internal structures have at least the given capacity for bodies.
-    pub fn ensure_body_capacity(
-        &mut self,
-        capacity: i32,
-        highest_possibly_claimed_id: i32,
-    ) {
-        let target_count =
-            BufferPool::get_capacity_for_count::<T>((highest_possibly_claimed_id + 1).max(capacity));
+    pub fn ensure_body_capacity(&mut self, capacity: i32, highest_possibly_claimed_id: i32) {
+        let target_count = BufferPool::get_capacity_for_count::<T>(
+            (highest_possibly_claimed_id + 1).max(capacity),
+        );
         if target_count > self.body_data.len() {
             let copy_count = self.body_data.len().min(highest_possibly_claimed_id + 1);
             let pool = unsafe { &mut *self.pool };
@@ -155,13 +148,10 @@ impl<T: Copy + Default> CollidableProperty<T> {
     }
 
     /// Ensures that the internal structures have at least the given capacity for statics.
-    pub fn ensure_static_capacity(
-        &mut self,
-        capacity: i32,
-        highest_possibly_claimed_id: i32,
-    ) {
-        let target_count =
-            BufferPool::get_capacity_for_count::<T>((highest_possibly_claimed_id + 1).max(capacity));
+    pub fn ensure_static_capacity(&mut self, capacity: i32, highest_possibly_claimed_id: i32) {
+        let target_count = BufferPool::get_capacity_for_count::<T>(
+            (highest_possibly_claimed_id + 1).max(capacity),
+        );
         if target_count > self.static_data.len() {
             let copy_count = self.static_data.len().min(highest_possibly_claimed_id + 1);
             let pool = unsafe { &mut *self.pool };
@@ -171,8 +161,7 @@ impl<T: Copy + Default> CollidableProperty<T> {
 
     /// Compacts the memory used by the collection for bodies.
     pub fn compact_bodies(&mut self, highest_possibly_claimed_id: i32) {
-        let target_count =
-            BufferPool::get_capacity_for_count::<T>(highest_possibly_claimed_id + 1);
+        let target_count = BufferPool::get_capacity_for_count::<T>(highest_possibly_claimed_id + 1);
         if target_count < self.body_data.len() {
             let pool = unsafe { &mut *self.pool };
             pool.resize_to_at_least(
@@ -185,8 +174,7 @@ impl<T: Copy + Default> CollidableProperty<T> {
 
     /// Compacts the memory used by the collection for statics.
     pub fn compact_statics(&mut self, highest_possibly_claimed_id: i32) {
-        let target_count =
-            BufferPool::get_capacity_for_count::<T>(highest_possibly_claimed_id + 1);
+        let target_count = BufferPool::get_capacity_for_count::<T>(highest_possibly_claimed_id + 1);
         if target_count < self.static_data.len() {
             let pool = unsafe { &mut *self.pool };
             pool.resize_to_at_least(

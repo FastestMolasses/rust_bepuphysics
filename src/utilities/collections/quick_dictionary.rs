@@ -122,7 +122,12 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
 
     /// Gets the table indices for a given key, returns (table_index, element_index).
     #[inline(always)]
-    pub fn get_table_indices(&self, key: &TKey, table_index: &mut i32, element_index: &mut i32) -> bool {
+    pub fn get_table_indices(
+        &self,
+        key: &TKey,
+        table_index: &mut i32,
+        element_index: &mut i32,
+    ) -> bool {
         let hash_code = self.equality_comparer.hash(key);
         *table_index = HashHelper::rehash(hash_code) & self.table_mask;
 
@@ -135,7 +140,10 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
             }
 
             // Check if the key at the element index matches.
-            if self.equality_comparer.equals(&self.keys[*element_index], key) {
+            if self
+                .equality_comparer
+                .equals(&self.keys[*element_index], key)
+            {
                 return true;
             }
 
@@ -175,7 +183,9 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
             *value = self.values[element_index];
             true
         } else {
-            unsafe { std::ptr::write_bytes(value as *mut TValue, 0, 1); }
+            unsafe {
+                std::ptr::write_bytes(value as *mut TValue, 0, 1);
+            }
             false
         }
     }
@@ -208,10 +218,7 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     /// Returns true if the pair was added, false if the key was already present.
     #[inline(always)]
     pub fn add_unsafely(&mut self, key: TKey, value: TValue) -> bool {
-        debug_assert!(
-            self.count < self.keys.len(),
-            "Adding would exceed capacity"
-        );
+        debug_assert!(self.count < self.keys.len(), "Adding would exceed capacity");
 
         let hash_code = self.equality_comparer.hash(&key);
         let mut table_index = HashHelper::rehash(hash_code) & self.table_mask;
@@ -223,7 +230,10 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
                 // Empty slot — insert here.
                 break;
             }
-            if self.equality_comparer.equals(&self.keys[element_index], &key) {
+            if self
+                .equality_comparer
+                .equals(&self.keys[element_index], &key)
+            {
                 // Already present!
                 return false;
             }
@@ -276,7 +286,12 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     /// Adds or updates a pair. Resizes if necessary.
     /// Returns true if added, false if replaced.
     #[inline(always)]
-    pub fn add_and_replace(&mut self, key: TKey, value: TValue, pool: &mut impl UnmanagedMemoryPool) -> bool {
+    pub fn add_and_replace(
+        &mut self,
+        key: TKey,
+        value: TValue,
+        pool: &mut impl UnmanagedMemoryPool,
+    ) -> bool {
         self.ensure_capacity(self.count + 1, pool);
         self.add_and_replace_unsafely(key, value)
     }
@@ -301,7 +316,12 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
     /// Attempts to find the index of the given key. If present, returns true with index.
     /// If not present, allocates a slot and returns false. Resizes if needed.
     #[inline(always)]
-    pub fn find_or_allocate_slot(&mut self, key: &TKey, pool: &mut impl UnmanagedMemoryPool, slot_index: &mut i32) -> bool {
+    pub fn find_or_allocate_slot(
+        &mut self,
+        key: &TKey,
+        pool: &mut impl UnmanagedMemoryPool,
+        slot_index: &mut i32,
+    ) -> bool {
         if self.count == self.keys.len() {
             self.resize((self.count * 2).max(1), pool);
         }
@@ -365,7 +385,8 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
             // This slot contains something. What is its actual index?
             let candidate_element_index = move_candidate_index - 1;
             let desired_index = HashHelper::rehash(
-                self.equality_comparer.hash(&self.keys[candidate_element_index]),
+                self.equality_comparer
+                    .hash(&self.keys[candidate_element_index]),
             ) & self.table_mask;
 
             // Would this element be closer to its actual index if it was moved to the gap?
@@ -561,11 +582,18 @@ impl<'a, TKey: Copy, TValue: Copy> Iterator for QuickDictionaryIterator<'a, TKey
 
 impl<'a, TKey: Copy, TValue: Copy> ExactSizeIterator for QuickDictionaryIterator<'a, TKey, TValue> {}
 
-impl<TKey: Copy, TValue: Copy, TEqualityComparer: Copy> Clone for QuickDictionary<TKey, TValue, TEqualityComparer> {
-    fn clone(&self) -> Self { *self }
+impl<TKey: Copy, TValue: Copy, TEqualityComparer: Copy> Clone
+    for QuickDictionary<TKey, TValue, TEqualityComparer>
+{
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
-impl<TKey: Copy, TValue: Copy, TEqualityComparer: Copy> Copy for QuickDictionary<TKey, TValue, TEqualityComparer> {}
+impl<TKey: Copy, TValue: Copy, TEqualityComparer: Copy> Copy
+    for QuickDictionary<TKey, TValue, TEqualityComparer>
+{
+}
 
 impl<TKey: Copy, TValue: Copy, TEqualityComparer: Default> Default
     for QuickDictionary<TKey, TValue, TEqualityComparer>

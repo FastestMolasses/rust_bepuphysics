@@ -8,11 +8,8 @@ use crate::physics::constraints::contact::contact_constraint_description::{
 };
 use crate::physics::constraints::contact::contact_nonconvex_common::NonconvexContactPrestepData;
 use crate::physics::constraints::contact::contact_nonconvex_types::*;
-use crate::physics::constraints::contact::contact_convex_common::MaterialPropertiesWide;
 use crate::physics::constraints::spring_settings::SpringSettingsWide;
 use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::memory::buffer::Buffer;
-use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 
@@ -252,17 +249,26 @@ macro_rules! impl_nonconvex_one_body_description {
 // ============================================================================
 
 impl_nonconvex_two_body_description!(
-    Contact2Nonconvex, Contact2NonconvexPrestepData, Contact2NonconvexTypeProcessor, 2,
+    Contact2Nonconvex,
+    Contact2NonconvexPrestepData,
+    Contact2NonconvexTypeProcessor,
+    2,
     [contact0, contact1]
 );
 
 impl_nonconvex_two_body_description!(
-    Contact3Nonconvex, Contact3NonconvexPrestepData, Contact3NonconvexTypeProcessor, 3,
+    Contact3Nonconvex,
+    Contact3NonconvexPrestepData,
+    Contact3NonconvexTypeProcessor,
+    3,
     [contact0, contact1, contact2]
 );
 
 impl_nonconvex_two_body_description!(
-    Contact4Nonconvex, Contact4NonconvexPrestepData, Contact4NonconvexTypeProcessor, 4,
+    Contact4Nonconvex,
+    Contact4NonconvexPrestepData,
+    Contact4NonconvexTypeProcessor,
+    4,
     [contact0, contact1, contact2, contact3]
 );
 
@@ -271,16 +277,25 @@ impl_nonconvex_two_body_description!(
 // ============================================================================
 
 impl_nonconvex_one_body_description!(
-    Contact2NonconvexOneBody, Contact2NonconvexOneBodyPrestepData, Contact2NonconvexOneBodyTypeProcessor, 2,
+    Contact2NonconvexOneBody,
+    Contact2NonconvexOneBodyPrestepData,
+    Contact2NonconvexOneBodyTypeProcessor,
+    2,
     [contact0, contact1]
 );
 
 impl_nonconvex_one_body_description!(
-    Contact3NonconvexOneBody, Contact3NonconvexOneBodyPrestepData, Contact3NonconvexOneBodyTypeProcessor, 3,
+    Contact3NonconvexOneBody,
+    Contact3NonconvexOneBodyPrestepData,
+    Contact3NonconvexOneBodyTypeProcessor,
+    3,
     [contact0, contact1, contact2]
 );
 
 impl_nonconvex_one_body_description!(
-    Contact4NonconvexOneBody, Contact4NonconvexOneBodyPrestepData, Contact4NonconvexOneBodyTypeProcessor, 4,
+    Contact4NonconvexOneBody,
+    Contact4NonconvexOneBodyPrestepData,
+    Contact4NonconvexOneBodyTypeProcessor,
+    4,
     [contact0, contact1, contact2, contact3]
 );

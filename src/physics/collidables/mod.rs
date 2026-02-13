@@ -1,22 +1,22 @@
-pub mod typed_index;
 pub mod collidable;
 pub mod collidable_description;
 pub mod collidable_reference;
-pub mod shape;
 pub mod ray;
+pub mod shape;
+pub mod typed_index;
 
 // Convex shape primitives
-pub mod sphere;
 pub mod box_shape;
 pub mod capsule;
-pub mod cylinder;
-pub mod triangle;
 pub mod convex_hull;
 pub mod convex_hull_helper;
+pub mod cylinder;
+pub mod sphere;
+pub mod triangle;
 
 // Compound shapes
-pub mod compound;
 pub mod big_compound;
+pub mod compound;
 pub mod compound_builder;
 
 // Mesh

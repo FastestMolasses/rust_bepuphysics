@@ -1,12 +1,11 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ManifoldCandidateHelper.cs
 
+use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
+use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::matrix3x3::Matrix3x3;
-use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
-use std::simd::prelude::*;
 use glam::Vec3;
+use std::simd::prelude::*;
 
 /// A scalar manifold candidate (2D position on face + feature ID).
 #[repr(C)]
@@ -63,7 +62,8 @@ impl ManifoldCandidateHelper {
             }
         }
         let ones = Vector::<i32>::splat(1);
-        *count = new_contact_exists.simd_lt(Vector::<i32>::splat(0))
+        *count = new_contact_exists
+            .simd_lt(Vector::<i32>::splat(0))
             .select(*count + ones, *count);
     }
 
@@ -87,7 +87,8 @@ impl ManifoldCandidateHelper {
             }
         }
         let ones = Vector::<i32>::splat(1);
-        *count = new_contact_exists.simd_lt(Vector::<i32>::splat(0))
+        *count = new_contact_exists
+            .simd_lt(Vector::<i32>::splat(0))
             .select(*count + ones, *count);
     }
 
@@ -166,7 +167,11 @@ impl ManifoldCandidateHelper {
         // Compute depths for reduction
         let dot_axis = Vector3Wide::scale(face_normal_a, &inverse_face_normal_dot_normal);
         let mut negative_base_dot = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(face_center_b_to_face_center_a, &dot_axis, &mut negative_base_dot);
+        Vector3Wide::dot(
+            face_center_b_to_face_center_a,
+            &dot_axis,
+            &mut negative_base_dot,
+        );
         let mut x_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(tangent_bx, &dot_axis, &mut x_dot);
         let mut y_dot = Vector::<f32>::splat(0.0);
@@ -181,7 +186,13 @@ impl ManifoldCandidateHelper {
         for i in (0..max_count as usize).rev() {
             let candidate = &*candidates.add(i);
             let mut contact_exists = Vector::<i32>::splat(0);
-            Self::candidate_exists(candidate, &minimum_depth, &masked_contact_count, i as i32, &mut contact_exists);
+            Self::candidate_exists(
+                candidate,
+                &minimum_depth,
+                &masked_contact_count,
+                i as i32,
+                &mut contact_exists,
+            );
             if (contact_exists.simd_eq(Vector::<i32>::splat(-i32::MAX))).any() {
                 max_count = i as i32 + 1;
                 break;
@@ -284,27 +295,27 @@ impl ManifoldCandidateHelper {
         for i in 0..max_candidate_count {
             let candidate = &*candidates.add(i as usize);
             let mut exists = Vector::<i32>::splat(0);
-            Self::candidate_exists(candidate, minimum_depth, masked_contact_count, i, &mut exists);
+            Self::candidate_exists(
+                candidate,
+                minimum_depth,
+                masked_contact_count,
+                i,
+                &mut exists,
+            );
             let extremity = (candidate.x * Vector::<f32>::splat(0.7946897654)
                 + candidate.y * Vector::<f32>::splat(0.60701579614))
-                .abs();
+            .abs();
             let candidate_score = candidate.depth
                 + candidate
                     .depth
                     .simd_ge(Vector::<f32>::splat(0.0))
                     .select(extremity * extremity_scale, Vector::<f32>::splat(0.0));
-            let candidate_is_best = (exists.simd_lt(Vector::<i32>::splat(0)))
-                & (candidate_score.simd_gt(best_score));
-            *contact0 = Self::conditional_select(
-                &candidate_is_best.to_int(),
-                candidate,
-                contact0,
-            );
+            let candidate_is_best =
+                (exists.simd_lt(Vector::<i32>::splat(0))) & (candidate_score.simd_gt(best_score));
+            *contact0 = Self::conditional_select(&candidate_is_best.to_int(), candidate, contact0);
             best_score = candidate_is_best.select(candidate_score, best_score);
         }
-        *contact0_exists = best_score
-            .simd_gt(Vector::<f32>::splat(-f32::MAX))
-            .to_int();
+        *contact0_exists = best_score.simd_gt(Vector::<f32>::splat(-f32::MAX)).to_int();
 
         // 2. Find most distant from contact0 → contact1
         let mut max_distance_squared = Vector::<f32>::splat(0.0);
@@ -314,16 +325,19 @@ impl ManifoldCandidateHelper {
             let offset_y = candidate.y - contact0.y;
             let distance_squared = offset_x * offset_x + offset_y * offset_y;
             let mut exists = Vector::<i32>::splat(0);
-            Self::candidate_exists(candidate, minimum_depth, masked_contact_count, i, &mut exists);
+            Self::candidate_exists(
+                candidate,
+                minimum_depth,
+                masked_contact_count,
+                i,
+                &mut exists,
+            );
             let candidate_is_most_distant = (distance_squared.simd_gt(max_distance_squared))
                 & (exists.simd_lt(Vector::<i32>::splat(0)));
             max_distance_squared =
                 candidate_is_most_distant.select(distance_squared, max_distance_squared);
-            *contact1 = Self::conditional_select(
-                &candidate_is_most_distant.to_int(),
-                candidate,
-                contact1,
-            );
+            *contact1 =
+                Self::conditional_select(&candidate_is_most_distant.to_int(), candidate, contact1);
         }
         *contact1_exists = max_distance_squared
             .simd_gt(*epsilon_scale * *epsilon_scale * Vector::<f32>::splat(1e-6))
@@ -344,25 +358,25 @@ impl ManifoldCandidateHelper {
             signed_area = candidate
                 .depth
                 .simd_lt(Vector::<f32>::splat(0.0))
-                .select(
-                    Vector::<f32>::splat(0.25) * signed_area,
-                    signed_area,
-                );
+                .select(Vector::<f32>::splat(0.25) * signed_area, signed_area);
             let mut exists = Vector::<i32>::splat(0);
-            Self::candidate_exists(candidate, minimum_depth, masked_contact_count, i, &mut exists);
-            let is_min_area = (signed_area.simd_lt(min_signed_area))
-                & (exists.simd_lt(Vector::<i32>::splat(0)));
+            Self::candidate_exists(
+                candidate,
+                minimum_depth,
+                masked_contact_count,
+                i,
+                &mut exists,
+            );
+            let is_min_area =
+                (signed_area.simd_lt(min_signed_area)) & (exists.simd_lt(Vector::<i32>::splat(0)));
             min_signed_area = is_min_area.select(signed_area, min_signed_area);
-            *contact2 =
-                Self::conditional_select(&is_min_area.to_int(), candidate, contact2);
-            let is_max_area = (signed_area.simd_gt(max_signed_area))
-                & (exists.simd_lt(Vector::<i32>::splat(0)));
+            *contact2 = Self::conditional_select(&is_min_area.to_int(), candidate, contact2);
+            let is_max_area =
+                (signed_area.simd_gt(max_signed_area)) & (exists.simd_lt(Vector::<i32>::splat(0)));
             max_signed_area = is_max_area.select(signed_area, max_signed_area);
-            *contact3 =
-                Self::conditional_select(&is_max_area.to_int(), candidate, contact3);
+            *contact3 = Self::conditional_select(&is_max_area.to_int(), candidate, contact3);
         }
-        let epsilon =
-            max_distance_squared * max_distance_squared * Vector::<f32>::splat(1e-6);
+        let epsilon = max_distance_squared * max_distance_squared * Vector::<f32>::splat(1e-6);
         *contact2_exists = (min_signed_area * min_signed_area)
             .simd_gt(epsilon)
             .to_int();
@@ -480,8 +494,16 @@ impl ManifoldCandidateHelper {
         if candidate_count <= 4 {
             for i in 0..candidate_count as usize {
                 Self::place_candidate_in_slot(
-                    &*candidates.add(i), i, face_center_b, tangent_bx, tangent_by,
-                    *candidate_depths.add(i), rotation_to_world, world_offset_b, slot_index, manifold,
+                    &*candidates.add(i),
+                    i,
+                    face_center_b,
+                    tangent_bx,
+                    tangent_by,
+                    *candidate_depths.add(i),
+                    rotation_to_world,
+                    world_offset_b,
+                    slot_index,
+                    manifold,
                 );
             }
             return;
@@ -512,10 +534,23 @@ impl ManifoldCandidateHelper {
         let candidate0 = *candidates.add(best_index0);
         let depth0 = *candidate_depths.add(best_index0);
         Self::place_candidate_in_slot(
-            &candidate0, 0, face_center_b, tangent_bx, tangent_by,
-            depth0, rotation_to_world, world_offset_b, slot_index, manifold,
+            &candidate0,
+            0,
+            face_center_b,
+            tangent_bx,
+            tangent_by,
+            depth0,
+            rotation_to_world,
+            world_offset_b,
+            slot_index,
+            manifold,
         );
-        Self::remove_candidate_at(candidates, candidate_depths, best_index0, &mut candidate_count);
+        Self::remove_candidate_at(
+            candidates,
+            candidate_depths,
+            best_index0,
+            &mut candidate_count,
+        );
 
         // Find most distant contact (contact 1).
         let mut maximum_distance_squared = -1.0f32;
@@ -536,10 +571,23 @@ impl ManifoldCandidateHelper {
         let candidate1 = *candidates.add(best_index1);
         let depth1 = *candidate_depths.add(best_index1);
         Self::place_candidate_in_slot(
-            &candidate1, 1, face_center_b, tangent_bx, tangent_by,
-            depth1, rotation_to_world, world_offset_b, slot_index, manifold,
+            &candidate1,
+            1,
+            face_center_b,
+            tangent_bx,
+            tangent_by,
+            depth1,
+            rotation_to_world,
+            world_offset_b,
+            slot_index,
+            manifold,
         );
-        Self::remove_candidate_at(candidates, candidate_depths, best_index1, &mut candidate_count);
+        Self::remove_candidate_at(
+            candidates,
+            candidate_depths,
+            best_index1,
+            &mut candidate_count,
+        );
 
         // Find two more contacts with largest signed areas (contacts 2 & 3).
         let edge_offset_x = candidate1.x - candidate0.x;
@@ -570,14 +618,30 @@ impl ManifoldCandidateHelper {
         let area_epsilon = maximum_distance_squared * maximum_distance_squared * 1e-6;
         if min_signed_area * min_signed_area > area_epsilon {
             Self::place_candidate_in_slot(
-                &*candidates.add(best_index2), 2, face_center_b, tangent_bx, tangent_by,
-                *candidate_depths.add(best_index2), rotation_to_world, world_offset_b, slot_index, manifold,
+                &*candidates.add(best_index2),
+                2,
+                face_center_b,
+                tangent_bx,
+                tangent_by,
+                *candidate_depths.add(best_index2),
+                rotation_to_world,
+                world_offset_b,
+                slot_index,
+                manifold,
             );
         }
         if max_signed_area * max_signed_area > area_epsilon {
             Self::place_candidate_in_slot(
-                &*candidates.add(best_index3), 3, face_center_b, tangent_bx, tangent_by,
-                *candidate_depths.add(best_index3), rotation_to_world, world_offset_b, slot_index, manifold,
+                &*candidates.add(best_index3),
+                3,
+                face_center_b,
+                tangent_bx,
+                tangent_by,
+                *candidate_depths.add(best_index3),
+                rotation_to_world,
+                world_offset_b,
+                slot_index,
+                manifold,
             );
         }
     }

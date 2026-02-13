@@ -59,7 +59,8 @@ impl Tree {
             "Bad index in parent on node {node_index}"
         );
         assert_eq!(
-            unsafe { metanode.cost_or_flag.refine_flag }, 0,
+            unsafe { metanode.cost_or_flag.refine_flag },
+            0,
             "Nonzero refine flag on node {node_index}"
         );
 
@@ -86,13 +87,8 @@ impl Tree {
                     child.index,
                     self.node_count,
                 );
-                let child_found_leaf_count = self.validate_node(
-                    child.index,
-                    node_index,
-                    i,
-                    &child.min,
-                    &child.max,
-                );
+                let child_found_leaf_count =
+                    self.validate_node(child.index, node_index, i, &child.min, &child.max);
                 assert_eq!(
                     child_found_leaf_count, child.leaf_count,
                     "Bad leaf count for child {i} of node {node_index}."
@@ -124,9 +120,7 @@ impl Tree {
 
         let metric = Self::compute_bounds_metric_vecs(&merged_min, &merged_max);
         if found_leaf_count > 0 && (metric.is_nan() || metric.is_infinite()) {
-            panic!(
-                "Bad bounds: {metric} SAH. {merged_min:?}, {merged_max:?}."
-            );
+            panic!("Bad bounds: {metric} SAH. {merged_min:?}, {merged_max:?}.");
         }
 
         if expected_parent_index >= 0
@@ -193,15 +187,11 @@ impl Tree {
         }
         let valid = (self.node_count == 1 && self.leaf_count < 2)
             || (self.node_count == self.leaf_count - 1 && self.leaf_count >= 2);
-        assert!(
-            valid,
-            "Invalid node count versus leaf count."
-        );
+        assert!(valid, "Invalid node count versus leaf count.");
 
         let stand_in_min = Vec3::ZERO;
         let stand_in_max = Vec3::ZERO;
-        let found_leaf_count =
-            self.validate_node(0, -1, -1, &stand_in_min, &stand_in_max);
+        let found_leaf_count = self.validate_node(0, -1, -1, &stand_in_min, &stand_in_max);
         assert_eq!(
             found_leaf_count, self.leaf_count,
             "{found_leaf_count} leaves found in tree, expected {}.",
@@ -281,7 +271,12 @@ impl Tree {
         let mut found_nodes = 0;
         let mut node_score = 0.0f32;
         let mut scorable_node_count = 0;
-        self.measure_cache_quality_recursive(0, &mut found_nodes, &mut node_score, &mut scorable_node_count);
+        self.measure_cache_quality_recursive(
+            0,
+            &mut found_nodes,
+            &mut node_score,
+            &mut scorable_node_count,
+        );
         if scorable_node_count > 0 {
             node_score / scorable_node_count as f32
         } else {

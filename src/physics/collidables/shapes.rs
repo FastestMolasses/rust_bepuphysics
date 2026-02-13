@@ -5,9 +5,9 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 
-use crate::physics::body_properties::{BodyInertia, RigidPose};
 use super::shape::{IConvexShape, IShape};
 use super::typed_index::TypedIndex;
+use crate::physics::body_properties::{BodyInertia, RigidPose};
 
 /// Abstract base trait for shape batches. Each shape type gets its own batch.
 pub trait ShapeBatch {
@@ -30,7 +30,12 @@ pub trait ShapeBatch {
     fn remove_and_dispose(&mut self, index: usize, pool: &mut BufferPool);
 
     /// Recursively removes and disposes a shape and its children.
-    fn recursively_remove_and_dispose(&mut self, index: usize, shapes: &mut Shapes, pool: &mut BufferPool) {
+    fn recursively_remove_and_dispose(
+        &mut self,
+        index: usize,
+        shapes: &mut Shapes,
+        pool: &mut BufferPool,
+    ) {
         // Default: no children, just remove_and_dispose.
         self.remove_and_dispose(index, pool);
     }
@@ -56,7 +61,14 @@ pub trait ShapeBatch {
         min: &mut Vec3,
         max: &mut Vec3,
     ) {
-        let _ = (shape_index, orientation, maximum_radius, maximum_angular_expansion, min, max);
+        let _ = (
+            shape_index,
+            orientation,
+            maximum_radius,
+            maximum_angular_expansion,
+            min,
+            max,
+        );
         panic!("Nonconvex shapes are not required to have a maximum radius or angular expansion implementation. This should only ever be called on convexes.");
     }
 
@@ -226,7 +238,9 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
         min: &mut Vec3,
         max: &mut Vec3,
     ) {
-        self.shapes.get(shape_index as i32).compute_bounds(orientation, min, max);
+        self.shapes
+            .get(shape_index as i32)
+            .compute_bounds(orientation, min, max);
     }
 
     fn compute_bounds_with_angular_data(
@@ -267,7 +281,8 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
         let pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<TShape>(target as i32);
         if target != self.shapes.len() {
-            let old_copy_len = (self.id_pool.highest_possibly_claimed_id() + 1).min(self.shapes.len());
+            let old_copy_len =
+                (self.id_pool.highest_possibly_claimed_id() + 1).min(self.shapes.len());
             self.internal_resize(target, old_copy_len);
         }
     }
@@ -299,7 +314,14 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
     ) {
         let mut t = 0.0f32;
         let mut normal = Vec3::ZERO;
-        if self.shapes.get(shape_index as i32).ray_test(pose, ray.origin, ray.direction, &mut t, &mut normal) && t <= *maximum_t {
+        if self.shapes.get(shape_index as i32).ray_test(
+            pose,
+            ray.origin,
+            ray.direction,
+            &mut t,
+            &mut normal,
+        ) && t <= *maximum_t
+        {
             hit_handler.on_ray_hit(ray, maximum_t, t, normal, 0);
         }
     }
@@ -309,7 +331,9 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
     }
 }
 
-impl<TShape: IConvexShape + Copy + Default + 'static> IConvexShapeBatch for ConvexShapeBatch<TShape> {
+impl<TShape: IConvexShape + Copy + Default + 'static> IConvexShapeBatch
+    for ConvexShapeBatch<TShape>
+{
     fn compute_inertia(&self, shape_index: usize, mass: f32) -> BodyInertia {
         self.shapes.get(shape_index as i32).compute_inertia(mass)
     }
@@ -334,12 +358,22 @@ impl ConvexHullShapeBatch {
 }
 
 impl ShapeBatch for ConvexHullShapeBatch {
-    fn capacity(&self) -> usize { self.inner.capacity() }
-    fn type_id(&self) -> i32 { self.inner.type_id() }
-    fn compound(&self) -> bool { false }
-    fn shape_data_size(&self) -> usize { self.inner.shape_data_size() }
+    fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+    fn type_id(&self) -> i32 {
+        self.inner.type_id()
+    }
+    fn compound(&self) -> bool {
+        false
+    }
+    fn shape_data_size(&self) -> usize {
+        self.inner.shape_data_size()
+    }
 
-    fn remove(&mut self, index: usize) { self.inner.remove(index); }
+    fn remove(&mut self, index: usize) {
+        self.inner.remove(index);
+    }
 
     fn remove_and_dispose(&mut self, index: usize, pool: &mut BufferPool) {
         // ConvexHull has internal buffers that must be returned to the pool.
@@ -347,23 +381,55 @@ impl ShapeBatch for ConvexHullShapeBatch {
         self.inner.remove(index);
     }
 
-    fn compute_bounds_by_orientation(&self, shape_index: usize, orientation: Quat, min: &mut Vec3, max: &mut Vec3) {
-        self.inner.compute_bounds_by_orientation(shape_index, orientation, min, max);
+    fn compute_bounds_by_orientation(
+        &self,
+        shape_index: usize,
+        orientation: Quat,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        self.inner
+            .compute_bounds_by_orientation(shape_index, orientation, min, max);
     }
 
-    fn compute_bounds_with_angular_data(&self, shape_index: usize, orientation: Quat,
-        maximum_radius: &mut f32, maximum_angular_expansion: &mut f32, min: &mut Vec3, max: &mut Vec3) {
-        self.inner.compute_bounds_with_angular_data(shape_index, orientation, maximum_radius, maximum_angular_expansion, min, max);
+    fn compute_bounds_with_angular_data(
+        &self,
+        shape_index: usize,
+        orientation: Quat,
+        maximum_radius: &mut f32,
+        maximum_angular_expansion: &mut f32,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        self.inner.compute_bounds_with_angular_data(
+            shape_index,
+            orientation,
+            maximum_radius,
+            maximum_angular_expansion,
+            min,
+            max,
+        );
     }
 
-    unsafe fn compute_bounds_for_batcher(&self, batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher) {
+    unsafe fn compute_bounds_for_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+    ) {
         self.inner.compute_bounds_for_batcher(batcher);
     }
 
-    fn clear(&mut self) { self.inner.clear(); }
-    fn ensure_capacity(&mut self, shape_capacity: usize) { self.inner.ensure_capacity(shape_capacity); }
-    fn resize(&mut self, shape_capacity: usize) { self.inner.resize(shape_capacity); }
-    fn dispose(&mut self) { self.inner.dispose(); }
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+    fn ensure_capacity(&mut self, shape_capacity: usize) {
+        self.inner.ensure_capacity(shape_capacity);
+    }
+    fn resize(&mut self, shape_capacity: usize) {
+        self.inner.resize(shape_capacity);
+    }
+    fn dispose(&mut self) {
+        self.inner.dispose();
+    }
 
     unsafe fn get_shape_data(&self, shape_index: usize) -> (*const u8, usize) {
         self.inner.get_shape_data(shape_index)
@@ -373,11 +439,16 @@ impl ShapeBatch for ConvexHullShapeBatch {
         self.inner.add_raw(data)
     }
 
-    unsafe fn ray_test(&self, shape_index: usize, pose: &RigidPose,
+    unsafe fn ray_test(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
-        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler) {
-        self.inner.ray_test(shape_index, pose, ray, maximum_t, hit_handler);
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
+        self.inner
+            .ray_test(shape_index, pose, ray, maximum_t, hit_handler);
     }
 
     fn try_compute_inertia(&self, shape_index: usize, mass: f32) -> Option<BodyInertia> {
@@ -397,7 +468,9 @@ use super::shape::{IDisposableShape, INonConvexBounds};
 
 /// Shape batch for homogeneous compound shapes (all children are the same type, e.g. Mesh).
 /// Equivalent to C# `HomogeneousCompoundShapeBatch<TShape, TChildShape, TChildShapeWide>`.
-pub struct HomogeneousCompoundShapeBatch<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default> {
+pub struct HomogeneousCompoundShapeBatch<
+    TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default,
+> {
     shapes: Buffer<TShape>,
     shapes_data: Buffer<u8>,
     id_pool: IdPool,
@@ -405,7 +478,9 @@ pub struct HomogeneousCompoundShapeBatch<TShape: IDisposableShape + INonConvexBo
     pool: *mut BufferPool,
 }
 
-impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'static> HomogeneousCompoundShapeBatch<TShape> {
+impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'static>
+    HomogeneousCompoundShapeBatch<TShape>
+{
     pub fn new(pool: &mut BufferPool, initial_capacity: usize) -> Self {
         let mut batch = Self {
             shapes: Buffer::default(),
@@ -442,11 +517,21 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
     }
 }
 
-impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'static> ShapeBatch for HomogeneousCompoundShapeBatch<TShape> {
-    fn capacity(&self) -> usize { self.shapes.len() as usize }
-    fn type_id(&self) -> i32 { self.type_id_val }
-    fn compound(&self) -> bool { true }
-    fn shape_data_size(&self) -> usize { std::mem::size_of::<TShape>() }
+impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'static> ShapeBatch
+    for HomogeneousCompoundShapeBatch<TShape>
+{
+    fn capacity(&self) -> usize {
+        self.shapes.len() as usize
+    }
+    fn type_id(&self) -> i32 {
+        self.type_id_val
+    }
+    fn compound(&self) -> bool {
+        true
+    }
+    fn shape_data_size(&self) -> usize {
+        std::mem::size_of::<TShape>()
+    }
 
     fn remove(&mut self, index: usize) {
         let pool = unsafe { &mut *self.pool };
@@ -459,20 +544,38 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
         self.id_pool.return_id(index as i32, pool_ref);
     }
 
-    fn recursively_remove_and_dispose(&mut self, index: usize, _shapes: &mut Shapes, pool: &mut BufferPool) {
+    fn recursively_remove_and_dispose(
+        &mut self,
+        index: usize,
+        _shapes: &mut Shapes,
+        pool: &mut BufferPool,
+    ) {
         // Homogeneous compounds don't have shape-registered children, just internal data.
         self.remove_and_dispose(index, pool);
     }
 
-    fn compute_bounds_by_orientation(&self, shape_index: usize, orientation: Quat, min: &mut Vec3, max: &mut Vec3) {
-        self.shapes.get(shape_index as i32).compute_bounds_by_orientation(orientation, min, max);
+    fn compute_bounds_by_orientation(
+        &self,
+        shape_index: usize,
+        orientation: Quat,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        self.shapes
+            .get(shape_index as i32)
+            .compute_bounds_by_orientation(orientation, min, max);
     }
 
-    unsafe fn compute_bounds_for_batcher(&self, batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher) {
+    unsafe fn compute_bounds_for_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+    ) {
         batcher.execute_homogeneous_compound_batch(self);
     }
 
-    fn clear(&mut self) { self.id_pool.clear(); }
+    fn clear(&mut self) {
+        self.id_pool.clear();
+    }
 
     fn ensure_capacity(&mut self, shape_capacity: usize) {
         if (self.shapes.len() as usize) < shape_capacity {
@@ -487,7 +590,8 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
         let pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<TShape>(target as i32);
         if target != self.shapes.len() {
-            let old_copy_len = (self.id_pool.highest_possibly_claimed_id() + 1).min(self.shapes.len());
+            let old_copy_len =
+                (self.id_pool.highest_possibly_claimed_id() + 1).min(self.shapes.len());
             self.internal_resize(target, old_copy_len);
         }
     }
@@ -516,10 +620,14 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
         index
     }
 
-    unsafe fn ray_test(&self, _shape_index: usize, _pose: &RigidPose,
+    unsafe fn ray_test(
+        &self,
+        _shape_index: usize,
+        _pose: &RigidPose,
         _ray: &crate::physics::collision_detection::ray_batchers::RayData,
         _maximum_t: &mut f32,
-        _hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler) {
+        _hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
         // Compound ray tests require the shape's own ray test implementation.
         // This is a placeholder; compound ray tests go through the shape directly.
         todo!("HomogeneousCompoundShapeBatch::ray_test not yet specialized");
@@ -545,7 +653,11 @@ pub struct CompoundShapeBatch<TShape: ICompoundShape + Copy + Default> {
 }
 
 impl<TShape: ICompoundShape + Copy + Default + 'static> CompoundShapeBatch<TShape> {
-    pub fn new(pool: &mut BufferPool, initial_capacity: usize, shape_batches: *const Shapes) -> Self {
+    pub fn new(
+        pool: &mut BufferPool,
+        initial_capacity: usize,
+        shape_batches: *const Shapes,
+    ) -> Self {
         let mut batch = Self {
             shapes: Buffer::default(),
             shapes_data: Buffer::default(),
@@ -583,10 +695,18 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> CompoundShapeBatch<TShap
 }
 
 impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundShapeBatch<TShape> {
-    fn capacity(&self) -> usize { self.shapes.len() as usize }
-    fn type_id(&self) -> i32 { self.type_id_val }
-    fn compound(&self) -> bool { true }
-    fn shape_data_size(&self) -> usize { std::mem::size_of::<TShape>() }
+    fn capacity(&self) -> usize {
+        self.shapes.len() as usize
+    }
+    fn type_id(&self) -> i32 {
+        self.type_id_val
+    }
+    fn compound(&self) -> bool {
+        true
+    }
+    fn shape_data_size(&self) -> usize {
+        std::mem::size_of::<TShape>()
+    }
 
     fn remove(&mut self, index: usize) {
         let pool = unsafe { &mut *self.pool };
@@ -599,7 +719,12 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
         self.id_pool.return_id(index as i32, pool_ref);
     }
 
-    fn recursively_remove_and_dispose(&mut self, index: usize, shapes: &mut Shapes, pool: &mut BufferPool) {
+    fn recursively_remove_and_dispose(
+        &mut self,
+        index: usize,
+        shapes: &mut Shapes,
+        pool: &mut BufferPool,
+    ) {
         let shape = self.shapes.get(index as i32);
         for i in 0..shape.child_count() {
             let child = shape.get_child(i);
@@ -608,17 +733,28 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
         self.remove_and_dispose(index, pool);
     }
 
-    fn compute_bounds_by_orientation(&self, _shape_index: usize, _orientation: Quat, _min: &mut Vec3, _max: &mut Vec3) {
+    fn compute_bounds_by_orientation(
+        &self,
+        _shape_index: usize,
+        _orientation: Quat,
+        _min: &mut Vec3,
+        _max: &mut Vec3,
+    ) {
         // Compound bounds computation requires access to the shapes collection.
         // The batcher path is the primary computation pathway.
         todo!("CompoundShapeBatch::compute_bounds_by_orientation not yet specialized");
     }
 
-    unsafe fn compute_bounds_for_batcher(&self, batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher) {
+    unsafe fn compute_bounds_for_batcher(
+        &self,
+        batcher: &mut crate::physics::bounding_box_batcher::BoundingBoxBatcher,
+    ) {
         batcher.execute_compound_batch(self);
     }
 
-    fn clear(&mut self) { self.id_pool.clear(); }
+    fn clear(&mut self) {
+        self.id_pool.clear();
+    }
 
     fn ensure_capacity(&mut self, shape_capacity: usize) {
         if (self.shapes.len() as usize) < shape_capacity {
@@ -633,7 +769,8 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
         let pool = unsafe { &mut *self.pool };
         let target = BufferPool::get_capacity_for_count::<TShape>(target as i32);
         if target != self.shapes.len() {
-            let old_copy_len = (self.id_pool.highest_possibly_claimed_id() + 1).min(self.shapes.len());
+            let old_copy_len =
+                (self.id_pool.highest_possibly_claimed_id() + 1).min(self.shapes.len());
             self.internal_resize(target, old_copy_len);
         }
     }
@@ -662,10 +799,14 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
         index
     }
 
-    unsafe fn ray_test(&self, _shape_index: usize, _pose: &RigidPose,
+    unsafe fn ray_test(
+        &self,
+        _shape_index: usize,
+        _pose: &RigidPose,
         _ray: &crate::physics::collision_detection::ray_batchers::RayData,
         _maximum_t: &mut f32,
-        _hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler) {
+        _hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
         // Compound ray tests go through the shape's own implementation, passing the shapes collection.
         todo!("CompoundShapeBatch::ray_test not yet specialized");
     }
@@ -712,7 +853,10 @@ impl Shapes {
     /// Adds a convex shape to the shapes collection.
     /// The shape type must have been registered via its `IShape::type_id()` before calling this,
     /// or this method will create a new batch automatically.
-    pub fn add<TShape: IConvexShape + Copy + Default + 'static>(&mut self, shape: &TShape) -> TypedIndex {
+    pub fn add<TShape: IConvexShape + Copy + Default + 'static>(
+        &mut self,
+        shape: &TShape,
+    ) -> TypedIndex {
         let type_id = TShape::type_id() as usize;
 
         if self.registered_type_span <= type_id {
@@ -724,9 +868,10 @@ impl Shapes {
 
         if self.batches[type_id].is_none() {
             let pool = unsafe { &mut *self.pool };
-            self.batches[type_id] = Some(Box::new(
-                ConvexShapeBatch::<TShape>::new(pool, self.initial_capacity_per_type_batch),
-            ));
+            self.batches[type_id] = Some(Box::new(ConvexShapeBatch::<TShape>::new(
+                pool,
+                self.initial_capacity_per_type_batch,
+            )));
         }
 
         let batch = self.batches[type_id].as_mut().unwrap();
@@ -751,9 +896,10 @@ impl Shapes {
         self.ensure_batch_slot(type_id);
         if self.batches[type_id].is_none() {
             let pool = unsafe { &mut *self.pool };
-            self.batches[type_id] = Some(Box::new(
-                ConvexHullShapeBatch::new(pool, self.initial_capacity_per_type_batch),
-            ));
+            self.batches[type_id] = Some(Box::new(ConvexHullShapeBatch::new(
+                pool,
+                self.initial_capacity_per_type_batch,
+            )));
         }
         let batch = self.batches[type_id].as_mut().unwrap();
         let index = unsafe { batch.add_raw(shape as *const ConvexHull as *const u8) };
@@ -768,9 +914,10 @@ impl Shapes {
         self.ensure_batch_slot(type_id);
         if self.batches[type_id].is_none() {
             let pool = unsafe { &mut *self.pool };
-            self.batches[type_id] = Some(Box::new(
-                HomogeneousCompoundShapeBatch::<Mesh>::new(pool, self.initial_capacity_per_type_batch),
-            ));
+            self.batches[type_id] = Some(Box::new(HomogeneousCompoundShapeBatch::<Mesh>::new(
+                pool,
+                self.initial_capacity_per_type_batch,
+            )));
         }
         let batch = self.batches[type_id].as_mut().unwrap();
         let index = unsafe { batch.add_raw(shape as *const Mesh as *const u8) };
@@ -786,9 +933,11 @@ impl Shapes {
         if self.batches[type_id].is_none() {
             let pool = unsafe { &mut *self.pool };
             let shapes_ptr = self as *const Shapes;
-            self.batches[type_id] = Some(Box::new(
-                CompoundShapeBatch::<Compound>::new(pool, self.initial_capacity_per_type_batch, shapes_ptr),
-            ));
+            self.batches[type_id] = Some(Box::new(CompoundShapeBatch::<Compound>::new(
+                pool,
+                self.initial_capacity_per_type_batch,
+                shapes_ptr,
+            )));
         }
         let batch = self.batches[type_id].as_mut().unwrap();
         let index = unsafe { batch.add_raw(shape as *const Compound as *const u8) };
@@ -804,9 +953,11 @@ impl Shapes {
         if self.batches[type_id].is_none() {
             let pool = unsafe { &mut *self.pool };
             let shapes_ptr = self as *const Shapes;
-            self.batches[type_id] = Some(Box::new(
-                CompoundShapeBatch::<BigCompound>::new(pool, self.initial_capacity_per_type_batch, shapes_ptr),
-            ));
+            self.batches[type_id] = Some(Box::new(CompoundShapeBatch::<BigCompound>::new(
+                pool,
+                self.initial_capacity_per_type_batch,
+                shapes_ptr,
+            )));
         }
         let batch = self.batches[type_id].as_mut().unwrap();
         let index = unsafe { batch.add_raw(shape as *const BigCompound as *const u8) };
@@ -817,7 +968,10 @@ impl Shapes {
     ///
     /// # Safety
     /// The caller must ensure that the batch at `type_id` contains shapes of type `TShape`.
-    pub unsafe fn get_shape<TShape: IConvexShape + Copy + Default + 'static>(&self, shape_index: i32) -> &TShape {
+    pub unsafe fn get_shape<TShape: IConvexShape + Copy + Default + 'static>(
+        &self,
+        shape_index: i32,
+    ) -> &TShape {
         let type_id = TShape::type_id() as usize;
         debug_assert!(self.registered_type_span > type_id);
         let batch = self.batches[type_id].as_ref().unwrap();
@@ -833,12 +987,21 @@ impl Shapes {
         bounds: &mut BoundingBox,
     ) {
         if let Some(batch) = self.get_batch(shape_index.type_id() as usize) {
-            batch.compute_bounds_by_pose(shape_index.index() as usize, pose, &mut bounds.min, &mut bounds.max);
+            batch.compute_bounds_by_pose(
+                shape_index.index() as usize,
+                pose,
+                &mut bounds.min,
+                &mut bounds.max,
+            );
         }
     }
 
     /// Recursively removes a shape and any existing children from the shapes collection.
-    pub fn recursively_remove_and_dispose(&mut self, shape_index: &TypedIndex, pool: &mut BufferPool) {
+    pub fn recursively_remove_and_dispose(
+        &mut self,
+        shape_index: &TypedIndex,
+        pool: &mut BufferPool,
+    ) {
         if shape_index.exists() {
             let type_id = shape_index.type_id() as usize;
             debug_assert!(self.registered_type_span > type_id);

@@ -47,8 +47,7 @@ pub struct SequentialFallbackBatch {
     // Note that this dictionary uses active set body *indices* while active, but body *handles*
     // when associated with an inactive set. This is consistent with body references stored by
     // active/inactive constraints.
-    pub(crate) dynamic_body_constraint_counts:
-        QuickDictionary<i32, i32, PrimitiveComparer<i32>>,
+    pub(crate) dynamic_body_constraint_counts: QuickDictionary<i32, i32, PrimitiveComparer<i32>>,
 }
 
 impl SequentialFallbackBatch {
@@ -64,12 +63,12 @@ impl SequentialFallbackBatch {
         pool: &mut BufferPool,
         minimum_body_capacity: i32,
     ) {
-        let target = (self.dynamic_body_constraint_counts.count + dynamic_body_handles.len() as i32)
+        let target = (self.dynamic_body_constraint_counts.count
+            + dynamic_body_handles.len() as i32)
             .max(minimum_body_capacity);
         self.ensure_capacity(target, pool);
         for i in 0..dynamic_body_handles.len() {
-            let body_reference =
-                TGetter::get_body_reference(bodies, dynamic_body_handles[i]);
+            let body_reference = TGetter::get_body_reference(bodies, dynamic_body_handles[i]);
 
             let mut slot_index = 0i32;
             if self
@@ -128,18 +127,26 @@ impl SequentialFallbackBatch {
         index_in_type_batch: i32,
     ) {
         let solver_ref = &*solver;
-        let type_processor = solver_ref.type_processors[type_id as usize].as_ref().unwrap();
+        let type_processor = solver_ref.type_processors[type_id as usize]
+            .as_ref()
+            .unwrap();
         let body_count = type_processor.bodies_per_constraint;
 
         // Collect body indices by enumerating body references (stack alloc — matches C# stackalloc).
         let mut body_indices = [0i32; 8]; // max bodies per constraint
-        debug_assert!(body_count <= 8, "Bodies per constraint exceeds stack buffer size");
+        debug_assert!(
+            body_count <= 8,
+            "Bodies per constraint exceeds stack buffer size"
+        );
         let type_batch_index = *batch.type_index_to_type_batch_index.get(type_id);
         let type_batch = batch.type_batches.get(type_batch_index);
 
         // Use the raw body reference enumeration.
         let bodies_per_constraint = body_count;
-        let bytes_per_bundle = bodies_per_constraint * std::mem::size_of::<std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32;
+        let bytes_per_bundle = bodies_per_constraint
+            * std::mem::size_of::<
+                std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
+            >() as i32;
         let mut bundle_index = 0usize;
         let mut inner_index = 0usize;
         crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
@@ -150,7 +157,10 @@ impl SequentialFallbackBatch {
         let start_byte = bundle_index as i32 * bytes_per_bundle + inner_index as i32 * 4;
         for i in 0..body_count {
             body_indices[i as usize] = *(type_batch.body_references.as_ptr().add(
-                (start_byte + i * std::mem::size_of::<std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>>() as i32) as usize,
+                (start_byte
+                    + i * std::mem::size_of::<
+                        std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
+                    >() as i32) as usize,
             ) as *const i32);
         }
 
@@ -168,7 +178,10 @@ impl SequentialFallbackBatch {
             let raw_body_index = body_indices[i as usize];
             if Bodies::is_encoded_dynamic_reference(raw_body_index) {
                 let body_index = raw_body_index & Bodies::BODY_REFERENCE_MASK;
-                if self.remove_one_body_reference_from_dynamics_set(body_index, &mut allocation_ids_to_free) {
+                if self.remove_one_body_reference_from_dynamics_set(
+                    body_index,
+                    &mut allocation_ids_to_free,
+                ) {
                     let bodies = &*solver_ref.bodies;
                     let body_handle = bodies.active_set().index_to_handle.get(body_index).0;
                     fallback_batch_handles.unset(body_handle);
@@ -201,7 +214,9 @@ impl SequentialFallbackBatch {
             return false;
         }
 
-        let constraint_count = self.dynamic_body_constraint_counts.value_at_mut(body_references_index);
+        let constraint_count = self
+            .dynamic_body_constraint_counts
+            .value_at_mut(body_references_index);
         *constraint_count -= 1;
         if *constraint_count == 0 {
             // No more constraints associated with this body, get rid of the body list.
@@ -211,7 +226,8 @@ impl SequentialFallbackBatch {
             if self.dynamic_body_constraint_counts.count == 0 {
                 // No constraints remain in the fallback batch. Drop the dictionary.
                 allocation_ids_to_free.add_unsafely(self.dynamic_body_constraint_counts.keys.id());
-                allocation_ids_to_free.add_unsafely(self.dynamic_body_constraint_counts.values.id());
+                allocation_ids_to_free
+                    .add_unsafely(self.dynamic_body_constraint_counts.values.id());
                 allocation_ids_to_free.add_unsafely(self.dynamic_body_constraint_counts.table.id());
                 self.dynamic_body_constraint_counts = QuickDictionary::default();
             }
@@ -242,7 +258,8 @@ impl SequentialFallbackBatch {
             if self.dynamic_body_constraint_counts.count == 0 {
                 // No constraints remain in the fallback batch. Drop the dictionary.
                 allocation_ids_to_free.add_unsafely(self.dynamic_body_constraint_counts.keys.id());
-                allocation_ids_to_free.add_unsafely(self.dynamic_body_constraint_counts.values.id());
+                allocation_ids_to_free
+                    .add_unsafely(self.dynamic_body_constraint_counts.values.id());
                 allocation_ids_to_free.add_unsafely(self.dynamic_body_constraint_counts.table.id());
                 self.dynamic_body_constraint_counts = QuickDictionary::default();
             }
@@ -258,7 +275,9 @@ impl SequentialFallbackBatch {
     ) {
         debug_assert!(
             self.dynamic_body_constraint_counts.keys.allocated()
-                && !self.dynamic_body_constraint_counts.contains_key(&new_body_location),
+                && !self
+                    .dynamic_body_constraint_counts
+                    .contains_key(&new_body_location),
             "If a body is being moved, the target index should not be present."
         );
         let mut table_index = 0i32;
@@ -297,10 +316,16 @@ impl SequentialFallbackBatch {
         pool: &mut BufferPool,
     ) -> SequentialFallbackBatch {
         let mut target = SequentialFallbackBatch::default();
-        target.dynamic_body_constraint_counts.count = source_batch.dynamic_body_constraint_counts.count;
-        target.dynamic_body_constraint_counts.table_mask = source_batch.dynamic_body_constraint_counts.table_mask;
-        target.dynamic_body_constraint_counts.table_power_offset = source_batch.dynamic_body_constraint_counts.table_power_offset;
-        target.dynamic_body_constraint_counts.equality_comparer = source_batch.dynamic_body_constraint_counts.equality_comparer;
+        target.dynamic_body_constraint_counts.count =
+            source_batch.dynamic_body_constraint_counts.count;
+        target.dynamic_body_constraint_counts.table_mask =
+            source_batch.dynamic_body_constraint_counts.table_mask;
+        target.dynamic_body_constraint_counts.table_power_offset = source_batch
+            .dynamic_body_constraint_counts
+            .table_power_offset;
+        target.dynamic_body_constraint_counts.equality_comparer = source_batch
+            .dynamic_body_constraint_counts
+            .equality_comparer;
 
         target.dynamic_body_constraint_counts.keys =
             pool.take_at_least(source_batch.dynamic_body_constraint_counts.count);

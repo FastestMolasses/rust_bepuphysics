@@ -88,8 +88,7 @@ impl MotorSettingsWide {
         let dt_wide = Vector::<f32>::splat(dt);
         let dtd = dt_wide * settings.damping;
         *maximum_impulse = settings.maximum_force * dt_wide;
-        *softness_impulse_scale =
-            Vector::<f32>::splat(1.0) / (dtd + Vector::<f32>::splat(1.0));
+        *softness_impulse_scale = Vector::<f32>::splat(1.0) / (dtd + Vector::<f32>::splat(1.0));
         *effective_mass_cfm_scale = dtd * *softness_impulse_scale;
     }
 }

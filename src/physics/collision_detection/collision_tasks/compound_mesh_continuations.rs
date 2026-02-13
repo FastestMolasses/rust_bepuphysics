@@ -35,7 +35,8 @@ impl<TCompound, TMesh> Default for CompoundMeshContinuations<TCompound, TMesh> {
     }
 }
 
-impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> ICompoundPairContinuationHandler<CompoundMeshReduction>
+impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
+    ICompoundPairContinuationHandler<CompoundMeshReduction>
     for CompoundMeshContinuations<TCompound, TMesh>
 {
     fn collision_continuation_type(&self) -> CollisionContinuationType {
@@ -52,7 +53,8 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> ICompo
         continuation_index: &mut i32,
     ) -> *mut CompoundMeshReduction {
         let pool = &mut *vtable.pool;
-        let (index, continuation) = (&mut *vtable.compound_mesh_reductions).create_continuation(total_child_count, pool);
+        let (index, continuation) =
+            (&mut *vtable.compound_mesh_reductions).create_continuation(total_child_count, pool);
         *continuation_index = index;
         // Pass ownership of triangle and region buffers to the continuation.
         continuation.triangles = pool.take(total_child_count);
@@ -103,7 +105,9 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> ICompo
 
         *child_type_a = compound_child.shape_index.type_id();
         let shapes = &*vtable.shapes;
-        let batch = shapes.get_batch(*child_type_a as usize).expect("Shape batch must exist");
+        let batch = shapes
+            .get_batch(*child_type_a as usize)
+            .expect("Shape batch must exist");
         let (shape_data, _) = batch.get_shape_data(compound_child.shape_index.index() as usize);
         *child_shape_data_a = shape_data;
     }
@@ -137,8 +141,7 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>> ICompo
         // so there is no additional offset — just the orientation.
         *child_pose_b = RigidPose::new(Vec3::ZERO, pair.orientation_b);
 
-        let continuation_child =
-            &mut cont.inner.children[continuation_child_index];
+        let continuation_child = &mut cont.inner.children[continuation_child_index];
         if pair.flip_mask < 0 {
             continuation_child.child_index_a = child_index_b;
             continuation_child.child_index_b = child_index_a;

@@ -41,12 +41,7 @@ impl Tree {
                 );
             }
             if b_intersects {
-                self.dispatch_test_for_node_against_leaf(
-                    leaf_index,
-                    leaf_child,
-                    b_index,
-                    results,
-                );
+                self.dispatch_test_for_node_against_leaf(leaf_index, leaf_child, b_index, results);
             }
         }
     }
@@ -90,11 +85,7 @@ impl Tree {
             }
             if b_intersects {
                 Self::dispatch_test_for_leaf_against_node_intertree(
-                    leaf_index,
-                    leaf_child,
-                    b_index,
-                    tree_b,
-                    results,
+                    leaf_index, leaf_child, b_index, tree_b, results,
                 );
             }
         }
@@ -135,7 +126,9 @@ impl Tree {
         }
     }
 
-    pub(crate) fn get_overlaps_between_different_nodes_intertree<TOverlapHandler: IOverlapHandler>(
+    pub(crate) fn get_overlaps_between_different_nodes_intertree<
+        TOverlapHandler: IOverlapHandler,
+    >(
         &self,
         a: &Node,
         b: &Node,
@@ -180,20 +173,10 @@ impl Tree {
                 let aa_intersects = BoundingBox::intersects_unsafe(&a.a, &b.a);
                 let ab_intersects = BoundingBox::intersects_unsafe(&a.a, &b.b);
                 if aa_intersects {
-                    self.dispatch_test_for_nodes_intertree(
-                        &a.a,
-                        &b.a,
-                        tree_b,
-                        overlap_handler,
-                    );
+                    self.dispatch_test_for_nodes_intertree(&a.a, &b.a, tree_b, overlap_handler);
                 }
                 if ab_intersects {
-                    self.dispatch_test_for_nodes_intertree(
-                        &a.a,
-                        &b.b,
-                        tree_b,
-                        overlap_handler,
-                    );
+                    self.dispatch_test_for_nodes_intertree(&a.a, &b.b, tree_b, overlap_handler);
                 }
                 return;
             }
@@ -204,20 +187,10 @@ impl Tree {
                 let aa_intersects = BoundingBox::intersects_unsafe(&a.a, &b.a);
                 let ba_intersects = BoundingBox::intersects_unsafe(&a.b, &b.a);
                 if aa_intersects {
-                    self.dispatch_test_for_nodes_intertree(
-                        &a.a,
-                        &b.a,
-                        tree_b,
-                        overlap_handler,
-                    );
+                    self.dispatch_test_for_nodes_intertree(&a.a, &b.a, tree_b, overlap_handler);
                 }
                 if ba_intersects {
-                    self.dispatch_test_for_nodes_intertree(
-                        &a.b,
-                        &b.a,
-                        tree_b,
-                        overlap_handler,
-                    );
+                    self.dispatch_test_for_nodes_intertree(&a.b, &b.a, tree_b, overlap_handler);
                 }
                 return;
             }

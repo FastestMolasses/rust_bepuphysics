@@ -1,8 +1,8 @@
 // Translated from BepuPhysics/CollisionDetection/WorkerPairCache.cs
 
+use super::pair_cache::{CollidablePair, ConstraintCache};
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use super::pair_cache::{CollidablePair, ConstraintCache};
 
 /// A pending add to the pair cache.
 #[repr(C)]
@@ -40,7 +40,12 @@ impl WorkerPendingPairChanges {
 
     /// Adds a new pair to the pending adds. Returns the index of the added entry.
     #[inline(always)]
-    pub fn add(&mut self, pool: &mut BufferPool, pair: CollidablePair, cache: &ConstraintCache) -> i32 {
+    pub fn add(
+        &mut self,
+        pool: &mut BufferPool,
+        pair: CollidablePair,
+        cache: &ConstraintCache,
+    ) -> i32 {
         let index = self.pending_adds.count;
         let pending_add = self.pending_adds.allocate(pool);
         pending_add.pair = pair;

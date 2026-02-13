@@ -3,9 +3,11 @@
 use crate::physics::body_properties::{BodyVelocity, RigidPose};
 use crate::physics::collidables::shape::ICompoundShape;
 use crate::physics::collidables::shapes::Shapes;
-use crate::physics::collision_detection::sweep_task_registry::{ISweepFilter, SweepTask, SweepTaskRegistry};
-use crate::physics::collision_detection::sweep_tasks::compound_pair_sweep_overlap_finder::ICompoundPairSweepOverlapFinder;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
+use crate::physics::collision_detection::sweep_task_registry::{
+    ISweepFilter, SweepTask, SweepTaskRegistry,
+};
+use crate::physics::collision_detection::sweep_tasks::compound_pair_sweep_overlap_finder::ICompoundPairSweepOverlapFinder;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
 use std::marker::PhantomData;
@@ -35,8 +37,7 @@ impl<
         TCompoundA: ICompoundShape + 'static,
         TCompoundB: ICompoundShape + IBoundsQueryableCompound + 'static,
         TOverlapFinder: ICompoundPairSweepOverlapFinder<TCompoundA, TCompoundB> + 'static,
-    > SweepTask
-    for CompoundPairSweepTask<TCompoundA, TCompoundB, TOverlapFinder>
+    > SweepTask for CompoundPairSweepTask<TCompoundA, TCompoundB, TOverlapFinder>
 {
     fn shape_type_index_a(&self) -> i32 {
         self.shape_type_index_a
@@ -99,9 +100,17 @@ impl<
         *hit_normal = Vec3::ZERO;
         let mut overlaps = Default::default();
         TOverlapFinder::find_overlaps(
-            a, orientation_a, velocity_a,
-            b, offset_b, orientation_b, velocity_b,
-            maximum_t, &*shapes, &mut *pool, &mut overlaps,
+            a,
+            orientation_a,
+            velocity_a,
+            b,
+            offset_b,
+            orientation_b,
+            velocity_b,
+            maximum_t,
+            &*shapes,
+            &mut *pool,
+            &mut overlaps,
         );
         let filter_ref = &**(filter as *const *const dyn ISweepFilter);
         for i in 0..overlaps.child_count {
@@ -109,13 +118,15 @@ impl<
             let child_a = a.get_child(child_overlaps.child_index);
             let child_type_a = child_a.shape_index.type_id();
             let batch_a = (&*shapes).get_batch(child_type_a as usize).unwrap();
-            let (child_shape_data_a, _) = batch_a.get_shape_data(child_a.shape_index.index() as usize);
+            let (child_shape_data_a, _) =
+                batch_a.get_shape_data(child_a.shape_index.index() as usize);
             for j in 0..child_overlaps.count {
                 let child_index_b = child_overlaps.overlaps[j as usize];
                 let child_b = b.get_child(child_index_b);
                 let child_type_b = child_b.shape_index.type_id();
                 let batch_b = (&*shapes).get_batch(child_type_b as usize).unwrap();
-                let (child_shape_data_b, _) = batch_b.get_shape_data(child_b.shape_index.index() as usize);
+                let (child_shape_data_b, _) =
+                    batch_b.get_shape_data(child_b.shape_index.index() as usize);
                 let allow = if flip_required {
                     filter_ref.allow_test(child_index_b, child_overlaps.child_index)
                 } else {
@@ -128,10 +139,25 @@ impl<
                         let mut hit_location_candidate = Vec3::ZERO;
                         let mut hit_normal_candidate = Vec3::ZERO;
                         if task.sweep(
-                            child_shape_data_a, child_type_a, child_a.as_pose(), orientation_a, velocity_a,
-                            child_shape_data_b, child_type_b, child_b.as_pose(), offset_b, orientation_b, velocity_b,
-                            maximum_t, minimum_progression, convergence_threshold, maximum_iteration_count,
-                            &mut t0_candidate, &mut t1_candidate, &mut hit_location_candidate, &mut hit_normal_candidate,
+                            child_shape_data_a,
+                            child_type_a,
+                            child_a.as_pose(),
+                            orientation_a,
+                            velocity_a,
+                            child_shape_data_b,
+                            child_type_b,
+                            child_b.as_pose(),
+                            offset_b,
+                            orientation_b,
+                            velocity_b,
+                            maximum_t,
+                            minimum_progression,
+                            convergence_threshold,
+                            maximum_iteration_count,
+                            &mut t0_candidate,
+                            &mut t1_candidate,
+                            &mut hit_location_candidate,
+                            &mut hit_normal_candidate,
                         ) {
                             if t1_candidate < *t1 {
                                 *t0 = t0_candidate;

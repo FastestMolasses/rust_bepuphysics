@@ -272,8 +272,10 @@ impl CylinderConvexHullTester {
                 &hull_local_cylinder_orientation.y,
                 &mut cylinder_local_closest_y,
             );
-            let edge_center_to_closest =
-                Vector3Wide::scale(&hull_local_cylinder_orientation.y, &cylinder_local_closest_y);
+            let edge_center_to_closest = Vector3Wide::scale(
+                &hull_local_cylinder_orientation.y,
+                &cylinder_local_closest_y,
+            );
             Vector3Wide::subtract(
                 &closest_on_cylinder,
                 &edge_center_to_closest,
@@ -329,14 +331,10 @@ impl CylinderConvexHullTester {
                 let slot_inverse_local_normal_dot_cap_normal =
                     inverse_local_normal_dot_cap_normal.as_array()[slot_index];
 
-                let interior0_slot =
-                    GatherScatter::get_offset_instance(&interior0, slot_index);
-                let interior1_slot =
-                    GatherScatter::get_offset_instance(&interior1, slot_index);
-                let interior2_slot =
-                    GatherScatter::get_offset_instance(&interior2, slot_index);
-                let interior3_slot =
-                    GatherScatter::get_offset_instance(&interior3, slot_index);
+                let interior0_slot = GatherScatter::get_offset_instance(&interior0, slot_index);
+                let interior1_slot = GatherScatter::get_offset_instance(&interior1, slot_index);
+                let interior2_slot = GatherScatter::get_offset_instance(&interior2, slot_index);
+                let interior3_slot = GatherScatter::get_offset_instance(&interior3, slot_index);
                 let interior_points_x = [
                     interior0_slot.x[0],
                     interior1_slot.x[0],
@@ -357,8 +355,7 @@ impl CylinderConvexHullTester {
                     &mut slot_cylinder_orientation,
                 );
 
-                let previous_index_init =
-                    hull.face_vertex_indices[face_start + face_count - 1];
+                let previous_index_init = hull.face_vertex_indices[face_start + face_count - 1];
                 let mut hull_face_origin = Vec3::ZERO;
                 Vector3Wide::read_slot(
                     &hull.points[previous_index_init.bundle_index as usize],
@@ -400,8 +397,7 @@ impl CylinderConvexHullTester {
                     for k in 0..4 {
                         let mut dot = (interior_points_x[k] - previous_vertex_2d.x)
                             * hull_edge_offset.y
-                            - (interior_points_y[k] - previous_vertex_2d.y)
-                                * hull_edge_offset.x;
+                            - (interior_points_y[k] - previous_vertex_2d.y) * hull_edge_offset.x;
                         // If bottom cap, flip containment sign.
                         if slot_inverse_local_normal_dot_cap_normal > 0.0 {
                             dot = -dot;
@@ -437,9 +433,7 @@ impl CylinderConvexHullTester {
                             c.feature_id = base_feature_id + end_id as i32;
                             candidate_count += 1;
                         }
-                        if t_min < t_max
-                            && t_min > 0.0
-                            && candidate_count < maximum_candidate_count
+                        if t_min < t_max && t_min > 0.0 && candidate_count < maximum_candidate_count
                         {
                             let point_2d = hull_edge_offset * t_min + previous_vertex_2d;
                             let c = &mut candidates_buf[candidate_count];
@@ -541,8 +535,7 @@ impl CylinderConvexHullTester {
                     &mut slot_side_edge_center,
                 );
 
-                let previous_index_init =
-                    hull.face_vertex_indices[face_start + face_count - 1];
+                let previous_index_init = hull.face_vertex_indices[face_start + face_count - 1];
                 let mut hull_face_origin = Vec3::ZERO;
                 Vector3Wide::read_slot(
                     &hull.points[previous_index_init.bundle_index as usize],
@@ -566,16 +559,12 @@ impl CylinderConvexHullTester {
 
                     let edge_offset = vertex - previous_vertex;
                     let edge_plane_normal = edge_offset.cross(slot_local_normal);
-                    let cylinder_side_to_hull_edge_start =
-                        previous_vertex - slot_side_edge_center;
-                    let numerator =
-                        cylinder_side_to_hull_edge_start.dot(edge_plane_normal);
-                    let denominator =
-                        edge_plane_normal.dot(slot_cylinder_edge_axis);
+                    let cylinder_side_to_hull_edge_start = previous_vertex - slot_side_edge_center;
+                    let numerator = cylinder_side_to_hull_edge_start.dot(edge_plane_normal);
+                    let denominator = edge_plane_normal.dot(slot_cylinder_edge_axis);
                     previous_vertex = vertex;
 
-                    let edge_plane_normal_length_squared =
-                        edge_plane_normal.length_squared();
+                    let edge_plane_normal_length_squared = edge_plane_normal.length_squared();
                     let denominator_squared = denominator * denominator;
 
                     const MIN: f32 = 1e-5;
@@ -584,22 +573,17 @@ impl CylinderConvexHullTester {
 
                     if denominator_squared > MIN * edge_plane_normal_length_squared {
                         let mut num = numerator;
-                        if denominator_squared
-                            < MAX * edge_plane_normal_length_squared
-                        {
-                            let mut restrict_weight = (denominator_squared
-                                / edge_plane_normal_length_squared
-                                - MIN)
-                                * INVERSE_SPAN;
+                        if denominator_squared < MAX * edge_plane_normal_length_squared {
+                            let mut restrict_weight =
+                                (denominator_squared / edge_plane_normal_length_squared - MIN)
+                                    * INVERSE_SPAN;
                             if restrict_weight < 0.0 {
                                 restrict_weight = 0.0;
                             } else if restrict_weight > 1.0 {
                                 restrict_weight = 1.0;
                             }
-                            let slot_half_length =
-                                a.half_length.as_array()[slot_index];
-                            let mut unrestricted_numerator =
-                                slot_half_length * denominator;
+                            let slot_half_length = a.half_length.as_array()[slot_index];
+                            let mut unrestricted_numerator = slot_half_length * denominator;
                             if denominator < 0.0 {
                                 unrestricted_numerator = -unrestricted_numerator;
                             }
@@ -607,8 +591,7 @@ impl CylinderConvexHullTester {
                                 + (1.0 - restrict_weight) * unrestricted_numerator;
                         }
                         if denominator < 0.0 {
-                            if num * latest_entry_denominator
-                                > latest_entry_numerator * denominator
+                            if num * latest_entry_denominator > latest_entry_numerator * denominator
                             {
                                 latest_entry_numerator = num;
                                 latest_entry_denominator = denominator;
@@ -624,14 +607,10 @@ impl CylinderConvexHullTester {
                     }
                 }
 
-                let slot_side_edge_half_length =
-                    a.half_length.as_array()[slot_index];
-                let mut latest_entry =
-                    latest_entry_numerator / latest_entry_denominator;
-                let mut earliest_exit =
-                    earliest_exit_numerator / earliest_exit_denominator;
-                let inverse_depth_denominator =
-                    1.0 / slot_hull_face_normal.dot(slot_local_normal);
+                let slot_side_edge_half_length = a.half_length.as_array()[slot_index];
+                let mut latest_entry = latest_entry_numerator / latest_entry_denominator;
+                let mut earliest_exit = earliest_exit_numerator / earliest_exit_denominator;
+                let inverse_depth_denominator = 1.0 / slot_hull_face_normal.dot(slot_local_normal);
                 let negated_edge_length = -slot_side_edge_half_length;
                 if latest_entry < negated_edge_length {
                     latest_entry = negated_edge_length;
@@ -647,16 +626,15 @@ impl CylinderConvexHullTester {
                 }
 
                 let mut slot_hull_orientation = Matrix3x3::default();
-                Matrix3x3Wide::read_slot(
-                    &hull_orientation,
-                    slot_index,
-                    &mut slot_hull_orientation,
-                );
+                Matrix3x3Wide::read_slot(&hull_orientation, slot_index, &mut slot_hull_orientation);
                 let mut slot_offset_b = Vec3::ZERO;
                 Vector3Wide::read_slot(offset_b, slot_index, &mut slot_offset_b);
                 // Use pointer arithmetic for per-slot manifold access (Convex4ContactManifoldWide is not Copy).
                 let manifold_ptr = manifold as *mut Convex4ContactManifoldWide;
-                let slot_manifold = &mut *manifold_ptr.cast::<u8>().add(slot_index * std::mem::size_of::<f32>()).cast::<Convex4ContactManifoldWide>();
+                let slot_manifold = &mut *manifold_ptr
+                    .cast::<u8>()
+                    .add(slot_index * std::mem::size_of::<f32>())
+                    .cast::<Convex4ContactManifoldWide>();
 
                 Self::insert_contact(
                     slot_side_edge_center,
@@ -673,9 +651,7 @@ impl CylinderConvexHullTester {
                     &mut slot_manifold.feature_id0,
                     &mut slot_manifold.contact0_exists,
                 );
-                if earliest_exit - latest_entry
-                    > slot_side_edge_half_length * 1e-3
-                {
+                if earliest_exit - latest_entry > slot_side_edge_half_length * 1e-3 {
                     Self::insert_contact(
                         slot_side_edge_center,
                         slot_cylinder_edge_axis,
@@ -709,9 +685,25 @@ impl CylinderConvexHullTester {
         let offset1 = Vector3Wide::scale(&manifold.normal, &manifold.depth1);
         let offset2 = Vector3Wide::scale(&manifold.normal, &manifold.depth2);
         let offset3 = Vector3Wide::scale(&manifold.normal, &manifold.depth3);
-        Vector3Wide::add(&manifold.offset_a0.clone(), &offset0, &mut manifold.offset_a0);
-        Vector3Wide::add(&manifold.offset_a1.clone(), &offset1, &mut manifold.offset_a1);
-        Vector3Wide::add(&manifold.offset_a2.clone(), &offset2, &mut manifold.offset_a2);
-        Vector3Wide::add(&manifold.offset_a3.clone(), &offset3, &mut manifold.offset_a3);
+        Vector3Wide::add(
+            &manifold.offset_a0.clone(),
+            &offset0,
+            &mut manifold.offset_a0,
+        );
+        Vector3Wide::add(
+            &manifold.offset_a1.clone(),
+            &offset1,
+            &mut manifold.offset_a1,
+        );
+        Vector3Wide::add(
+            &manifold.offset_a2.clone(),
+            &offset2,
+            &mut manifold.offset_a2,
+        );
+        Vector3Wide::add(
+            &manifold.offset_a3.clone(),
+            &offset3,
+            &mut manifold.offset_a3,
+        );
     }
 }

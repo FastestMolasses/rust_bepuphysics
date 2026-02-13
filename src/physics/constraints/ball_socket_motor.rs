@@ -39,7 +39,10 @@ impl BallSocketMotor {
         }
         let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
-        Vector3Wide::write_first(self.target_velocity_local_a, &mut target.target_velocity_local_a);
+        Vector3Wide::write_first(
+            self.target_velocity_local_a,
+            &mut target.target_velocity_local_a,
+        );
         MotorSettingsWide::write_first(&self.settings, &mut target.settings);
     }
 
@@ -51,7 +54,10 @@ impl BallSocketMotor {
     ) {
         let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        Vector3Wide::read_first(&source.target_velocity_local_a, &mut description.target_velocity_local_a);
+        Vector3Wide::read_first(
+            &source.target_velocity_local_a,
+            &mut description.target_velocity_local_a,
+        );
         MotorSettingsWide::read_first(&source.settings, &mut description.settings);
     }
 }
@@ -149,7 +155,8 @@ impl BallSocketMotorFunctions {
             &mut effective_mass,
         );
 
-        let bias_velocity = QuaternionWide::transform(&prestep.target_velocity_local_a, orientation_a);
+        let bias_velocity =
+            QuaternionWide::transform(&prestep.target_velocity_local_a, orientation_a);
         let mut negated_bias_velocity = Vector3Wide::default();
         Vector3Wide::negate(&bias_velocity, &mut negated_bias_velocity);
 

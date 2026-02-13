@@ -49,7 +49,9 @@ impl BundleIndexing {
         let indices = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
         let mask = count.simd_le(indices);
         // Convert bool mask to -1/0 integers
-        Simd::from_array(std::array::from_fn(|i| if mask.test(i) { -1i32 } else { 0i32 }))
+        Simd::from_array(std::array::from_fn(
+            |i| if mask.test(i) { -1i32 } else { 0i32 },
+        ))
     }
 
     /// Creates a mask where lanes < count_in_bundle are set to -1 (all bits set).
@@ -59,7 +61,9 @@ impl BundleIndexing {
         let indices = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
         let mask = count.simd_gt(indices);
         // Convert bool mask to -1/0 integers
-        Simd::from_array(std::array::from_fn(|i| if mask.test(i) { -1i32 } else { 0i32 }))
+        Simd::from_array(std::array::from_fn(
+            |i| if mask.test(i) { -1i32 } else { 0i32 },
+        ))
     }
 
     #[inline(always)]
@@ -87,7 +91,7 @@ impl BundleIndexing {
         } else {
             // Find the position of the highest set bit
             let bit_width = std::mem::size_of_val(&bits) * 8;
-            (bit_width - bits.leading_zeros() as usize)
+            bit_width - bits.leading_zeros() as usize
         }
     }
 }

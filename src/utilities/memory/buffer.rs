@@ -7,8 +7,7 @@ use core::marker::PhantomData;
 use std::{
     mem::size_of,
     ops::{Index, IndexMut},
-    ptr,
-    slice,
+    ptr, slice,
 };
 
 /// Span over an unmanaged memory region.
@@ -342,7 +341,9 @@ impl<T: Copy> Buffer<T> {
     /// Searches for the first element matching a predicate in the buffer within [start, start+count).
     /// Returns the index if found, or -1 if not found.
     #[inline(always)]
-    pub fn index_of_predicate<TPredicate: crate::utilities::collections::predicate::Predicate<T>>(
+    pub fn index_of_predicate<
+        TPredicate: crate::utilities::collections::predicate::Predicate<T>,
+    >(
         &self,
         predicate: &TPredicate,
         start: i32,
@@ -359,7 +360,10 @@ impl<T: Copy> Buffer<T> {
 
     /// Returns a buffer to a pool. This should only be used if the specified pool is the same as the one used to allocate the buffer.
     #[inline(always)]
-    pub fn dispose(&mut self, pool: &mut impl crate::utilities::memory::unmanaged_mempool::UnmanagedMemoryPool) {
+    pub fn dispose(
+        &mut self,
+        pool: &mut impl crate::utilities::memory::unmanaged_mempool::UnmanagedMemoryPool,
+    ) {
         pool.return_buffer(self);
     }
 

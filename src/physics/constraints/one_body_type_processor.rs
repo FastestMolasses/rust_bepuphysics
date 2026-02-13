@@ -7,12 +7,13 @@
 use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraint_location::ConstraintLocation;
-use crate::physics::constraints::body_access_filter::{AccessAll, AccessOnlyVelocity, IBodyAccessFilter};
+use crate::physics::constraints::body_access_filter::{
+    AccessAll, AccessOnlyVelocity, IBodyAccessFilter,
+};
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::constraints::type_batch_alloc;
 use crate::physics::constraints::type_processor::ITypeProcessor;
 use crate::physics::handles::ConstraintHandle;
-use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
@@ -65,15 +66,27 @@ pub struct OneBodyTypeProcessorImpl<
 > {
     type_id: i32,
     constrained_degrees_of_freedom: i32,
-    _marker: PhantomData<(TPrestepData, TAccumulatedImpulse, TConstraintFunctions, TSolveAccessFilterA)>,
+    _marker: PhantomData<(
+        TPrestepData,
+        TAccumulatedImpulse,
+        TConstraintFunctions,
+        TSolveAccessFilterA,
+    )>,
 }
 
 impl<
-    TPrestepData: Copy + 'static,
-    TAccumulatedImpulse: Copy + 'static,
-    TConstraintFunctions: IOneBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
-    TSolveAccessFilterA: IBodyAccessFilter + 'static,
-> OneBodyTypeProcessorImpl<TPrestepData, TAccumulatedImpulse, TConstraintFunctions, TSolveAccessFilterA> {
+        TPrestepData: Copy + 'static,
+        TAccumulatedImpulse: Copy + 'static,
+        TConstraintFunctions: IOneBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
+        TSolveAccessFilterA: IBodyAccessFilter + 'static,
+    >
+    OneBodyTypeProcessorImpl<
+        TPrestepData,
+        TAccumulatedImpulse,
+        TConstraintFunctions,
+        TSolveAccessFilterA,
+    >
+{
     pub fn new(type_id: i32, constrained_degrees_of_freedom: i32) -> Self {
         Self {
             type_id,
@@ -84,11 +97,18 @@ impl<
 }
 
 impl<
-    TPrestepData: Copy + 'static,
-    TAccumulatedImpulse: Copy + 'static,
-    TConstraintFunctions: IOneBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
-    TSolveAccessFilterA: IBodyAccessFilter + 'static,
-> ITypeProcessor for OneBodyTypeProcessorImpl<TPrestepData, TAccumulatedImpulse, TConstraintFunctions, TSolveAccessFilterA> {
+        TPrestepData: Copy + 'static,
+        TAccumulatedImpulse: Copy + 'static,
+        TConstraintFunctions: IOneBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
+        TSolveAccessFilterA: IBodyAccessFilter + 'static,
+    > ITypeProcessor
+    for OneBodyTypeProcessorImpl<
+        TPrestepData,
+        TAccumulatedImpulse,
+        TConstraintFunctions,
+        TSolveAccessFilterA,
+    >
+{
     #[inline(always)]
     fn bodies_per_constraint(&self) -> i32 {
         1
@@ -226,15 +246,22 @@ impl<
             for i in 0..constraint_count {
                 *first_source_index.add(i as usize) = local_constraint_start + i;
                 let constraint_index = constraint_start + i;
-                let bundle_index = (constraint_index as usize) >> crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
-                let inner_index = (constraint_index as usize) & crate::utilities::bundle_indexing::VECTOR_MASK;
+                let bundle_index = (constraint_index as usize)
+                    >> crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
+                let inner_index =
+                    (constraint_index as usize) & crate::utilities::bundle_indexing::VECTOR_MASK;
                 let refs = &*body_references.add(bundle_index);
                 *first_sort_key.add(i as usize) = refs[inner_index];
             }
             // Copy body references to cache
             let ref_size = std::mem::size_of::<Vector<i32>>();
-            let src = type_batch.body_references.as_ptr().add(bundle_start as usize * ref_size);
-            let dst = body_references_cache.as_mut_ptr().add(local_bundle_start as usize * ref_size);
+            let src = type_batch
+                .body_references
+                .as_ptr()
+                .add(bundle_start as usize * ref_size);
+            let dst = body_references_cache
+                .as_mut_ptr()
+                .add(local_bundle_start as usize * ref_size);
             std::ptr::copy_nonoverlapping(src, dst, bundle_count as usize * ref_size);
         }
     }
@@ -253,17 +280,40 @@ impl<
         accumulated_impulses_cache: &mut Buffer<u8>,
     ) {
         unsafe {
-            let src_handles = type_batch.index_to_handle.as_ptr().add(constraint_start as usize);
-            let dst_handles = index_to_handle_cache.as_mut_ptr().add(local_constraint_start as usize);
+            let src_handles = type_batch
+                .index_to_handle
+                .as_ptr()
+                .add(constraint_start as usize);
+            let dst_handles = index_to_handle_cache
+                .as_mut_ptr()
+                .add(local_constraint_start as usize);
             std::ptr::copy_nonoverlapping(src_handles, dst_handles, constraint_count as usize);
             let prestep_size = std::mem::size_of::<TPrestepData>();
-            let src_prestep = type_batch.prestep_data.as_ptr().add(prestep_size * bundle_start as usize);
-            let dst_prestep = prestep_cache.as_mut_ptr().add(prestep_size * local_bundle_start as usize);
-            std::ptr::copy_nonoverlapping(src_prestep, dst_prestep, prestep_size * bundle_count as usize);
+            let src_prestep = type_batch
+                .prestep_data
+                .as_ptr()
+                .add(prestep_size * bundle_start as usize);
+            let dst_prestep = prestep_cache
+                .as_mut_ptr()
+                .add(prestep_size * local_bundle_start as usize);
+            std::ptr::copy_nonoverlapping(
+                src_prestep,
+                dst_prestep,
+                prestep_size * bundle_count as usize,
+            );
             let impulse_size = std::mem::size_of::<TAccumulatedImpulse>();
-            let src_impulse = type_batch.accumulated_impulses.as_ptr().add(impulse_size * bundle_start as usize);
-            let dst_impulse = accumulated_impulses_cache.as_mut_ptr().add(impulse_size * local_bundle_start as usize);
-            std::ptr::copy_nonoverlapping(src_impulse, dst_impulse, impulse_size * bundle_count as usize);
+            let src_impulse = type_batch
+                .accumulated_impulses
+                .as_ptr()
+                .add(impulse_size * bundle_start as usize);
+            let dst_impulse = accumulated_impulses_cache
+                .as_mut_ptr()
+                .add(impulse_size * local_bundle_start as usize);
+            std::ptr::copy_nonoverlapping(
+                src_impulse,
+                dst_impulse,
+                impulse_size * bundle_count as usize,
+            );
         }
     }
 
@@ -282,11 +332,13 @@ impl<
         unsafe {
             let body_ref_cache = body_references_cache.as_ptr() as *const Vector<i32>;
             let prestep_cache_typed = prestep_cache.as_ptr() as *const TPrestepData;
-            let impulse_cache_typed = accumulated_impulses_cache.as_ptr() as *const TAccumulatedImpulse;
+            let impulse_cache_typed =
+                accumulated_impulses_cache.as_ptr() as *const TAccumulatedImpulse;
 
             let body_ref_target = type_batch.body_references.as_mut_ptr() as *mut Vector<i32>;
             let prestep_target = type_batch.prestep_data.as_mut_ptr() as *mut TPrestepData;
-            let impulse_target = type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
+            let impulse_target =
+                type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
 
             let vector_shift = crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
             let vector_mask = crate::utilities::bundle_indexing::VECTOR_MASK;
@@ -307,14 +359,18 @@ impl<
 
                 // Copy prestep data lane
                 crate::utilities::gather_scatter::GatherScatter::copy_lane::<TPrestepData>(
-                    &*prestep_cache_typed.add(source_bundle), source_inner,
-                    &mut *prestep_target.add(target_bundle), target_inner,
+                    &*prestep_cache_typed.add(source_bundle),
+                    source_inner,
+                    &mut *prestep_target.add(target_bundle),
+                    target_inner,
                 );
 
                 // Copy accumulated impulses lane
                 crate::utilities::gather_scatter::GatherScatter::copy_lane::<TAccumulatedImpulse>(
-                    &*impulse_cache_typed.add(source_bundle), source_inner,
-                    &mut *impulse_target.add(target_bundle), target_inner,
+                    &*impulse_cache_typed.add(source_bundle),
+                    source_inner,
+                    &mut *impulse_target.add(target_bundle),
+                    target_inner,
                 );
 
                 // Update index to handle and handle-to-constraint mapping
@@ -334,8 +390,8 @@ impl<
             / std::mem::size_of::<crate::utilities::vector::Vector<f32>>();
         let broadcasted_scale = crate::utilities::vector::Vector::<f32>::splat(scale);
         unsafe {
-            let impulses_base =
-                type_batch.accumulated_impulses.as_mut_ptr() as *mut crate::utilities::vector::Vector<f32>;
+            let impulses_base = type_batch.accumulated_impulses.as_mut_ptr()
+                as *mut crate::utilities::vector::Vector<f32>;
             for i in 0..dof_count {
                 *impulses_base.add(i) *= broadcasted_scale;
             }
@@ -346,7 +402,9 @@ impl<
         &self,
         type_batch: &mut TypeBatch,
         bodies: &Bodies,
-        integration_flags: &crate::utilities::memory::buffer::Buffer<crate::utilities::collections::index_set::IndexSet>,
+        integration_flags: &crate::utilities::memory::buffer::Buffer<
+            crate::utilities::collections::index_set::IndexSet,
+        >,
         pose_integrator: Option<&dyn crate::physics::pose_integrator::IPoseIntegrator>,
         batch_integration_mode: crate::physics::constraints::batch_integration_mode::BatchIntegrationMode,
         allow_pose_integration: bool,
@@ -361,17 +419,30 @@ impl<
         unsafe {
             let prestep_bundles = type_batch.prestep_data.as_mut_ptr() as *mut TPrestepData;
             let body_ref_bundles = type_batch.body_references.as_mut_ptr() as *mut Vector<i32>;
-            let impulse_bundles = type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
+            let impulse_bundles =
+                type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
 
-            let angular_mode = pose_integrator.map(|pi| pi.angular_integration_mode())
+            let angular_mode = pose_integrator
+                .map(|pi| pi.angular_integration_mode())
                 .unwrap_or(crate::physics::pose_integration::AngularIntegrationMode::Nonconserving);
-            let velocity_fn = |body_indices: Vector<i32>, position: Vector3Wide, orientation: QuaternionWide,
-                               local_inertia: BodyInertiaWide, integration_mask: Vector<i32>,
-                               w_index: i32, dt_vec: Vector<f32>, velocity: &mut BodyVelocityWide| {
+            let velocity_fn = |body_indices: Vector<i32>,
+                               position: Vector3Wide,
+                               orientation: QuaternionWide,
+                               local_inertia: BodyInertiaWide,
+                               integration_mask: Vector<i32>,
+                               w_index: i32,
+                               dt_vec: Vector<f32>,
+                               velocity: &mut BodyVelocityWide| {
                 if let Some(pi) = pose_integrator {
                     pi.integrate_velocity_callback(
-                        body_indices, position, orientation, local_inertia,
-                        integration_mask, w_index, dt_vec, velocity,
+                        body_indices,
+                        position,
+                        orientation,
+                        local_inertia,
+                        integration_mask,
+                        w_index,
+                        dt_vec,
+                        velocity,
                     );
                 }
             };
@@ -388,16 +459,29 @@ impl<
                 let mut inertia_a = BodyInertiaWide::default();
 
                 crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
-                    bodies, angular_mode, &velocity_fn,
-                    integration_flags, 0, batch_integration_mode, allow_pose_integration,
-                    dt, worker_index, i,
+                    bodies,
+                    angular_mode,
+                    &velocity_fn,
+                    integration_flags,
+                    0,
+                    batch_integration_mode,
+                    allow_pose_integration,
+                    dt,
+                    worker_index,
+                    i,
                     references,
-                    &mut position_a, &mut orientation_a, &mut wsv_a, &mut inertia_a,
+                    &mut position_a,
+                    &mut orientation_a,
+                    &mut wsv_a,
+                    &mut inertia_a,
                 );
 
                 TConstraintFunctions::warm_start(
-                    &position_a, &orientation_a, &inertia_a,
-                    prestep, accumulated_impulses,
+                    &position_a,
+                    &orientation_a,
+                    &inertia_a,
+                    prestep,
+                    accumulated_impulses,
                     &mut wsv_a,
                 );
 
@@ -418,7 +502,8 @@ impl<
         unsafe {
             let prestep_bundles = type_batch.prestep_data.as_mut_ptr() as *mut TPrestepData;
             let body_ref_bundles = type_batch.body_references.as_mut_ptr() as *mut Vector<i32>;
-            let impulse_bundles = type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
+            let impulse_bundles =
+                type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
 
             for i in start_bundle..exclusive_end_bundle {
                 let idx = i as usize;
@@ -431,14 +516,22 @@ impl<
                 let mut wsv_a = BodyVelocityWide::default();
                 let mut inertia_a = BodyInertiaWide::default();
                 bodies.gather_state::<TSolveAccessFilterA>(
-                    references, true,
-                    &mut position_a, &mut orientation_a, &mut wsv_a, &mut inertia_a,
+                    references,
+                    true,
+                    &mut position_a,
+                    &mut orientation_a,
+                    &mut wsv_a,
+                    &mut inertia_a,
                 );
 
                 TConstraintFunctions::solve(
-                    &position_a, &orientation_a, &inertia_a,
-                    dt, inverse_dt,
-                    prestep, accumulated_impulses,
+                    &position_a,
+                    &orientation_a,
+                    &inertia_a,
+                    dt,
+                    inverse_dt,
+                    prestep,
+                    accumulated_impulses,
                     &mut wsv_a,
                 );
 
@@ -471,13 +564,15 @@ impl<
                 let mut wsv_a = BodyVelocityWide::default();
                 let mut inertia_a = BodyInertiaWide::default();
                 bodies.gather_state::<AccessOnlyVelocity>(
-                    references, true,
-                    &mut position_a, &mut orientation_a, &mut wsv_a, &mut inertia_a,
+                    references,
+                    true,
+                    &mut position_a,
+                    &mut orientation_a,
+                    &mut wsv_a,
+                    &mut inertia_a,
                 );
 
-                TConstraintFunctions::incrementally_update_for_substep(
-                    &dt_wide, &wsv_a, prestep,
-                );
+                TConstraintFunctions::incrementally_update_for_substep(&dt_wide, &wsv_a, prestep);
             }
         }
     }

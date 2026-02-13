@@ -73,7 +73,10 @@ impl BatchCompressor {
     }
 
     pub fn set_target_candidate_fraction(&mut self, value: f32) {
-        debug_assert!(value >= 0.0 && value <= 1.0, "Fraction must be from 0 to 1.");
+        debug_assert!(
+            value >= 0.0 && value <= 1.0,
+            "Fraction must be from 0 to 1."
+        );
         self.target_candidate_fraction = value;
     }
 
@@ -82,7 +85,10 @@ impl BatchCompressor {
     }
 
     pub fn set_maximum_compression_fraction(&mut self, value: f32) {
-        debug_assert!(value >= 0.0 && value <= 1.0, "Fraction must be from 0 to 1.");
+        debug_assert!(
+            value >= 0.0 && value <= 1.0,
+            "Fraction must be from 0 to 1."
+        );
         self.maximum_compression_fraction = value;
     }
 
@@ -107,13 +113,19 @@ impl BatchCompressor {
     ) {
         let solver = self.solver();
         let bodies = self.bodies();
-        let type_processor = solver.type_processors[type_batch.type_id as usize].as_ref().unwrap();
+        let type_processor = solver.type_processors[type_batch.type_id as usize]
+            .as_ref()
+            .unwrap();
         let bodies_per_constraint = type_processor.bodies_per_constraint;
 
         // Collect dynamic body handles for this constraint (stack alloc — matches C# stackalloc).
         let mut handle_buf = [0i32; 8]; // max bodies per constraint
-        debug_assert!(bodies_per_constraint <= 8, "Bodies per constraint exceeds stack buffer size");
-        let mut collector = ActiveConstraintDynamicBodyHandleCollector::new(bodies, handle_buf.as_mut_ptr());
+        debug_assert!(
+            bodies_per_constraint <= 8,
+            "Bodies per constraint exceeds stack buffer size"
+        );
+        let mut collector =
+            ActiveConstraintDynamicBodyHandleCollector::new(bodies, handle_buf.as_mut_ptr());
         solver.enumerate_connected_raw_body_references_from_type_batch(
             type_batch,
             constraint_index,
@@ -122,7 +134,11 @@ impl BatchCompressor {
         let dynamic_body_handles = &handle_buf[..collector.count as usize];
 
         for batch_index in (0..self.next_batch_index).rev() {
-            if solver.batch_referenced_handles.get(batch_index).can_fit(dynamic_body_handles) {
+            if solver
+                .batch_referenced_handles
+                .get(batch_index)
+                .can_fit(dynamic_body_handles)
+            {
                 compressions.add(
                     Compression {
                         constraint_handle: *type_batch.index_to_handle.get(constraint_index),
@@ -136,7 +152,8 @@ impl BatchCompressor {
     }
 
     unsafe fn do_job(&self, region: &AnalysisRegion, worker_index: i32, pool: &mut BufferPool) {
-        let compressions = &mut *(self.worker_compressions.as_ptr().add(worker_index as usize) as *mut QuickList<Compression>);
+        let compressions = &mut *(self.worker_compressions.as_ptr().add(worker_index as usize)
+            as *mut QuickList<Compression>);
         let solver = self.solver();
         let batch = solver.active_set().batches.get(self.next_batch_index);
         let type_batch = batch.type_batches.get(region.type_batch_index);
@@ -160,7 +177,9 @@ impl BatchCompressor {
             let bc = &*(dispatcher.unmanaged_context() as *const BatchCompressor);
             let pool = &mut *dispatcher.worker_pool_ptr(worker_index);
             loop {
-                let job_index = AtomicI32::from_ptr(bc.analysis_job_index.get()).fetch_add(1, Ordering::AcqRel) + 1;
+                let job_index = AtomicI32::from_ptr(bc.analysis_job_index.get())
+                    .fetch_add(1, Ordering::AcqRel)
+                    + 1;
                 if job_index >= bc.analysis_jobs.count {
                     break;
                 }
@@ -171,28 +190,46 @@ impl BatchCompressor {
 
     unsafe fn apply_compression(&self, source_batch_index: i32, compression: &Compression) {
         let solver = self.solver_mut();
-        let location = *solver.handle_to_constraint.get(compression.constraint_handle.0);
-        let type_processor = solver.type_processors[location.type_id as usize].as_ref().unwrap();
+        let location = *solver
+            .handle_to_constraint
+            .get(compression.constraint_handle.0);
+        let type_processor = solver.type_processors[location.type_id as usize]
+            .as_ref()
+            .unwrap();
 
         if source_batch_index == solver.fallback_batch_threshold() {
             // Fallback batch: check if target batch can still hold the constraint
             // (another compression may have interfered).
             let mut handle_buf = [0i32; 8]; // stack alloc — matches C# stackalloc
             let bodies = self.bodies();
-            let mut collector = ActiveConstraintDynamicBodyHandleCollector::new(bodies, handle_buf.as_mut_ptr());
-            solver.enumerate_connected_raw_body_references(compression.constraint_handle, &mut collector);
+            let mut collector =
+                ActiveConstraintDynamicBodyHandleCollector::new(bodies, handle_buf.as_mut_ptr());
+            solver.enumerate_connected_raw_body_references(
+                compression.constraint_handle,
+                &mut collector,
+            );
             let dynamic_handles = &handle_buf[..collector.count as usize];
-            if !solver.batch_referenced_handles.get(compression.target_batch).can_fit(dynamic_handles) {
+            if !solver
+                .batch_referenced_handles
+                .get(compression.target_batch)
+                .can_fit(dynamic_handles)
+            {
                 return;
             }
         }
 
         let solver_ptr = self.solver;
         let bodies_ptr = self.bodies;
-        let batch = (*solver_ptr).sets.get_mut(0).batches.get_mut(location.batch_index);
+        let batch = (*solver_ptr)
+            .sets
+            .get_mut(0)
+            .batches
+            .get_mut(location.batch_index);
         let type_batch_index = *batch.type_index_to_type_batch_index.get(location.type_id);
         let type_batch = batch.type_batches.get_mut(type_batch_index);
-        let type_proc = (&(*solver_ptr).type_processors)[location.type_id as usize].as_ref().unwrap();
+        let type_proc = (&(*solver_ptr).type_processors)[location.type_id as usize]
+            .as_ref()
+            .unwrap();
         type_proc.inner().transfer_constraint_auto_collect(
             type_batch,
             source_batch_index,
@@ -218,8 +255,11 @@ impl BatchCompressor {
             return;
         }
 
-        let maximum_compression_count = (1.0f32).max((self.maximum_compression_fraction * constraint_count as f32).round()) as i32;
-        let target_candidate_count = (1.0f32).max((self.target_candidate_fraction * constraint_count as f32).round()) as i32;
+        let maximum_compression_count = (1.0f32)
+            .max((self.maximum_compression_fraction * constraint_count as f32).round())
+            as i32;
+        let target_candidate_count =
+            (1.0f32).max((self.target_candidate_fraction * constraint_count as f32).round()) as i32;
 
         // Allocate per-worker compression lists.
         self.worker_compressions = pool.take::<QuickList<Compression>>(worker_count);
@@ -229,7 +269,8 @@ impl BatchCompressor {
             } else {
                 &mut *pool
             };
-            *self.worker_compressions.get_mut(i) = QuickList::with_capacity(maximum_compression_count.max(8), worker_pool);
+            *self.worker_compressions.get_mut(i) =
+                QuickList::with_capacity(maximum_compression_count.max(8), worker_pool);
         }
 
         let batch_count = solver.active_set().batches.count;
@@ -240,7 +281,14 @@ impl BatchCompressor {
             self.next_batch_index = 0;
             self.next_type_batch_index = 0;
         }
-        while self.next_type_batch_index >= solver.active_set().batches.get(self.next_batch_index).type_batches.count {
+        while self.next_type_batch_index
+            >= solver
+                .active_set()
+                .batches
+                .get(self.next_batch_index)
+                .type_batches
+                .count
+        {
             self.next_batch_index += 1;
             if self.next_batch_index >= batch_count {
                 self.next_batch_index = 0;
@@ -249,22 +297,29 @@ impl BatchCompressor {
         }
 
         let batch = solver.active_set().batches.get(self.next_batch_index);
-        self.analysis_jobs = QuickList::with_capacity(512.min(batch.type_batches.count * 4 + 1), pool);
+        self.analysis_jobs =
+            QuickList::with_capacity(512.min(batch.type_batches.count * 4 + 1), pool);
 
         const TARGET_CONSTRAINTS_PER_JOB: i32 = 64;
         let mut total_constraints_scheduled = 0;
 
         let mut tbi = self.next_type_batch_index;
-        while tbi < batch.type_batches.count && total_constraints_scheduled < target_candidate_count {
+        while tbi < batch.type_batches.count && total_constraints_scheduled < target_candidate_count
+        {
             let type_batch = batch.type_batches.get(tbi);
             let job_count = 1 + type_batch.constraint_count / TARGET_CONSTRAINTS_PER_JOB;
             let base_per_job = type_batch.constraint_count / job_count;
             let remainder = type_batch.constraint_count - base_per_job * job_count;
 
             let mut previous_end = 0;
-            self.analysis_jobs.ensure_capacity(self.analysis_jobs.count + job_count, pool);
+            self.analysis_jobs
+                .ensure_capacity(self.analysis_jobs.count + job_count, pool);
             for j in 0..job_count {
-                let constraints_in_job = if j < remainder { base_per_job + 1 } else { base_per_job };
+                let constraints_in_job = if j < remainder {
+                    base_per_job + 1
+                } else {
+                    base_per_job
+                };
                 let job = self.analysis_jobs.allocate_unsafely();
                 job.type_batch_index = tbi;
                 job.start_index_in_type_batch = previous_end;
@@ -304,7 +359,8 @@ impl BatchCompressor {
                 total_compression_count += self.worker_compressions.get(i).count;
             }
             if total_compression_count > 0 {
-                let mut sorted: QuickList<(u16, u16, ConstraintHandle)> = QuickList::with_capacity(total_compression_count, pool);
+                let mut sorted: QuickList<(u16, u16, ConstraintHandle)> =
+                    QuickList::with_capacity(total_compression_count, pool);
                 for i in 0..worker_count {
                     let wc = self.worker_compressions.get(i);
                     for j in 0..wc.count {
@@ -313,7 +369,10 @@ impl BatchCompressor {
                     }
                 }
                 // Sort by constraint handle for determinism.
-                let slice = std::slice::from_raw_parts_mut(sorted.span.get_mut(0) as *mut (u16, u16, ConstraintHandle), sorted.count as usize);
+                let slice = std::slice::from_raw_parts_mut(
+                    sorted.span.get_mut(0) as *mut (u16, u16, ConstraintHandle),
+                    sorted.count as usize,
+                );
                 slice.sort_unstable_by_key(|&(_, _, h)| h.0);
 
                 let limit = sorted.count.min(maximum_compression_count);
@@ -348,7 +407,9 @@ impl BatchCompressor {
         } else {
             let td = thread_dispatcher.unwrap();
             for i in 0..worker_count {
-                self.worker_compressions.get_mut(i).dispose(&mut *td.worker_pool_ptr(i));
+                self.worker_compressions
+                    .get_mut(i)
+                    .dispose(&mut *td.worker_pool_ptr(i));
             }
         }
         pool.return_buffer(&mut self.worker_compressions);

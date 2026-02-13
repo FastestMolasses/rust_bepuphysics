@@ -78,7 +78,11 @@ pub unsafe fn remove_body_references_lane(
 ///
 /// C# equivalent: `Move(...)` in TypeProcessor<TBodyReferences, TPrestepData, TAccumulatedImpulse>.
 #[inline(always)]
-pub unsafe fn move_constraint<TBodyReferences: Copy, TPrestepData: Copy, TAccumulatedImpulse: Copy>(
+pub unsafe fn move_constraint<
+    TBodyReferences: Copy,
+    TPrestepData: Copy,
+    TAccumulatedImpulse: Copy,
+>(
     source_references_bundle: *const TBodyReferences,
     source_prestep_bundle: *const TPrestepData,
     source_accumulated_bundle: *const TAccumulatedImpulse,
@@ -133,7 +137,11 @@ pub fn internal_resize(
         "The constraint capacity should have already been validated."
     );
     let copy_count = type_batch.constraint_count;
-    pool.resize_to_at_least(&mut type_batch.index_to_handle, constraint_capacity, copy_count);
+    pool.resize_to_at_least(
+        &mut type_batch.index_to_handle,
+        constraint_capacity,
+        copy_count,
+    );
     let bundle_capacity =
         BundleIndexing::get_bundle_count(type_batch.index_to_handle.len() as usize);
     let bundle_count = type_batch.bundle_count();
@@ -238,8 +246,8 @@ pub unsafe fn allocate_in_type_batch(
     let mut inner_index = 0usize;
     BundleIndexing::get_bundle_indices(index as usize, &mut bundle_index, &mut inner_index);
 
-    let bundle_ptr = (type_batch.body_references.as_mut_ptr())
-        .add(bundle_index * body_references_bundle_size);
+    let bundle_ptr =
+        (type_batch.body_references.as_mut_ptr()).add(bundle_index * body_references_bundle_size);
     add_body_references_lane(bundle_ptr, inner_index, body_indices, bodies_per_constraint);
 
     // Clear the slot's accumulated impulse. The backing memory could be initialized to any value.
@@ -247,7 +255,11 @@ pub unsafe fn allocate_in_type_batch(
         .accumulated_impulses
         .as_mut_ptr()
         .add(bundle_index * accumulated_impulse_bundle_size);
-    clear_lane_raw(impulse_bundle_ptr, inner_index, accumulated_impulse_bundle_size);
+    clear_lane_raw(
+        impulse_bundle_ptr,
+        inner_index,
+        accumulated_impulse_bundle_size,
+    );
 
     index
 }
@@ -382,14 +394,12 @@ pub unsafe fn remove_from_type_batch_fallback<
             for i in 0..Vector::<i32>::LEN {
                 if *first_body_lane_for_moved_bundle.add(i) >= 0 {
                     let constraint_index = (bundle_start_index_in_constraints + i) as i32;
-                    let new_constraint_index =
-                        constraint_index - constraint_index_shift as i32;
+                    let new_constraint_index = constraint_index - constraint_index_shift as i32;
                     let handle = *type_batch.index_to_handle.get(constraint_index);
                     type_batch.index_to_handle.get_mut(constraint_index).0 = -1;
                     *type_batch.index_to_handle.get_mut(new_constraint_index) = handle;
-                    handles_to_constraints
-                        .get_mut(handle.0)
-                        .index_in_type_batch = new_constraint_index;
+                    handles_to_constraints.get_mut(handle.0).index_in_type_batch =
+                        new_constraint_index;
                 }
             }
             last_bundle_index -= 1;
@@ -397,10 +407,9 @@ pub unsafe fn remove_from_type_batch_fallback<
 
         // Determine the new constraint count from the last bundle.
         let last_bundle_body_refs = *(body_references.add(last_bundle_index) as *const Vector<i32>);
-        let inner_lane_count =
-            BundleIndexing::get_last_set_lane_count(
-                last_bundle_body_refs.simd_ge(Simd::splat(0i32)).to_int(),
-            );
+        let inner_lane_count = BundleIndexing::get_last_set_lane_count(
+            last_bundle_body_refs.simd_ge(Simd::splat(0i32)).to_int(),
+        );
         type_batch.constraint_count =
             (last_bundle_index * Vector::<i32>::LEN + inner_lane_count) as i32;
     }
@@ -525,8 +534,7 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
     // Using a fixed-size array (max 4 bodies per constraint) instead of stackalloc.
     let mut broadcasted_storage = [Simd::splat(0i32); 4];
     for i in 0..bodies_per_constraint {
-        broadcasted_storage[i] =
-            Simd::splat(encoded_body_indices[i] & Bodies::BODY_REFERENCE_MASK);
+        broadcasted_storage[i] = Simd::splat(encoded_body_indices[i] & Bodies::BODY_REFERENCE_MASK);
     }
     let broadcasted_body_indices = broadcasted_storage.as_ptr();
 

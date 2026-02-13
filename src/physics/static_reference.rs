@@ -111,7 +111,8 @@ impl StaticReference {
 
     /// Sets a static's properties according to a description.
     pub fn apply_description(&self, description: &StaticDescription) {
-        self.statics_mut().apply_description(self.handle, description);
+        self.statics_mut()
+            .apply_description(self.handle, description);
     }
 
     /// Changes the shape of a static.

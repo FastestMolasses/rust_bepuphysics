@@ -34,14 +34,22 @@ impl SphereConvexHullTester {
         let mut hull_orientation = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_b, &mut hull_orientation);
         let mut local_offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &hull_orientation, &mut local_offset_b);
+        Matrix3x3Wide::transform_by_transposed_without_overlap(
+            offset_b,
+            &hull_orientation,
+            &mut local_offset_b,
+        );
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
         let identity = Matrix3x3Wide::create_identity();
         let mut center_distance = Vector::<f32>::splat(0.0);
         Vector3Wide::length_into(&local_offset_a, &mut center_distance);
         let mut initial_normal = Vector3Wide::default();
-        Vector3Wide::scale_to(&local_offset_a, &(one_f / center_distance), &mut initial_normal);
+        Vector3Wide::scale_to(
+            &local_offset_a,
+            &(one_f / center_distance),
+            &mut initial_normal,
+        );
         let use_initial_fallback = center_distance.simd_lt(Vector::<f32>::splat(1e-8));
         initial_normal.x = use_initial_fallback.select(zero_f, initial_normal.x);
         initial_normal.y = use_initial_fallback.select(one_f, initial_normal.y);
@@ -49,7 +57,8 @@ impl SphereConvexHullTester {
 
         let hull_support_finder = ConvexHullSupportFinder;
         let sphere_support_finder = SphereSupportFinder;
-        let inactive_lanes = BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
+        let inactive_lanes =
+            BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
         let mut hull_epsilon_scale = Vector::<f32>::splat(0.0);
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
         let epsilon_scale = a.radius.simd_min(hull_epsilon_scale);
@@ -58,18 +67,33 @@ impl SphereConvexHullTester {
         let mut local_normal = Vector3Wide::default();
         let mut closest_on_hull = Vector3Wide::default();
         DepthRefiner::find_minimum_depth_with_witness(
-            b, a, &local_offset_a, &identity,
-            &hull_support_finder, &sphere_support_finder,
-            &initial_normal, &inactive_lanes,
+            b,
+            a,
+            &local_offset_a,
+            &identity,
+            &hull_support_finder,
+            &sphere_support_finder,
+            &initial_normal,
+            &inactive_lanes,
             &(Vector::<f32>::splat(1e-5) * epsilon_scale),
             &(-*speculative_margin),
-            &mut depth, &mut local_normal, &mut closest_on_hull,
+            &mut depth,
+            &mut local_normal,
+            &mut closest_on_hull,
             25,
         );
 
         let mut hull_to_contact = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(&closest_on_hull, &hull_orientation, &mut hull_to_contact);
-        Matrix3x3Wide::transform_without_overlap(&local_normal, &hull_orientation, &mut manifold.normal);
+        Matrix3x3Wide::transform_without_overlap(
+            &closest_on_hull,
+            &hull_orientation,
+            &mut hull_to_contact,
+        );
+        Matrix3x3Wide::transform_without_overlap(
+            &local_normal,
+            &hull_orientation,
+            &mut manifold.normal,
+        );
         Vector3Wide::add(&hull_to_contact, offset_b, &mut manifold.offset_a);
 
         manifold.feature_id = Vector::<i32>::splat(0);

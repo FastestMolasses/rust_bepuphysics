@@ -1,13 +1,12 @@
 // Translated from BepuPhysics/Trees/Tree.cs
 
-use crate::utilities::bounding_box::{BoundingBox, BoundingBox4};
+use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::Vec3;
-use std::mem::MaybeUninit;
 
 use super::leaf::Leaf;
-use super::node::{Metanode, Node, NodeChild, CostOrFlag};
+use super::node::{Metanode, Node, NodeChild};
 
 /// A binary bounding volume tree (BVH).
 ///
@@ -90,7 +89,10 @@ impl Tree {
         let leaf = *self.leaves.get(leaf_index);
         let node_child = (&*self.nodes.get(leaf.node_index()) as *const Node as *const NodeChild)
             .add(leaf.child_index() as usize) as *mut NodeChild;
-        (&mut (*node_child).min as *mut Vec3, &mut (*node_child).max as *mut Vec3)
+        (
+            &mut (*node_child).min as *mut Vec3,
+            &mut (*node_child).max as *mut Vec3,
+        )
     }
 
     /// Applies updated bounds to the given leaf index in the tree, refitting the tree to match.
@@ -106,7 +108,10 @@ impl Tree {
 
     /// Constructs an empty tree.
     pub fn new(pool: &mut BufferPool, initial_leaf_capacity: i32) -> Self {
-        assert!(initial_leaf_capacity > 0, "Initial leaf capacity must be positive.");
+        assert!(
+            initial_leaf_capacity > 0,
+            "Initial leaf capacity must be positive."
+        );
         let mut tree = Self {
             nodes: Buffer::default(),
             metanodes: Buffer::default(),
@@ -132,7 +137,8 @@ impl Tree {
     /// Gets the number of bytes required to store the tree in serialized form.
     pub fn get_serialized_byte_count(&self) -> usize {
         4 + std::mem::size_of::<Leaf>() * self.leaf_count as usize
-            + (std::mem::size_of::<Node>() + std::mem::size_of::<Metanode>()) * self.node_count as usize
+            + (std::mem::size_of::<Node>() + std::mem::size_of::<Metanode>())
+                * self.node_count as usize
     }
 
     /// Serializes the tree into a byte buffer.

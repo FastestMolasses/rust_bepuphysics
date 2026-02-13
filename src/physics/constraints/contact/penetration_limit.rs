@@ -56,13 +56,19 @@ impl PenetrationLimit {
     ) {
         //The normal is calibrated to point from B to A. Any movement of A along N results in a decrease in depth. Any movement of B along N results in an increase in depth.
         //estimatedPenetrationDepthChange = dot(normal, velocityDtA.Linear + velocityDtA.Angular x contactOffsetA) - dot(normal, velocityDtB.Linear + velocityDtB.Angular x contactOffsetB)
-        let wxra = out_unsafe!(Vector3Wide::cross_without_overlap(&velocity_a.angular, contact_offset_a));
+        let wxra = out_unsafe!(Vector3Wide::cross_without_overlap(
+            &velocity_a.angular,
+            contact_offset_a
+        ));
         let mut contact_velocity_a = Vector3Wide::default();
         Vector3Wide::add(&wxra, &velocity_a.linear, &mut contact_velocity_a);
 
         let mut contact_offset_b = Vector3Wide::default();
         Vector3Wide::subtract(contact_offset_a, offset_b, &mut contact_offset_b);
-        let wxrb = out_unsafe!(Vector3Wide::cross_without_overlap(&velocity_b.angular, &contact_offset_b));
+        let wxrb = out_unsafe!(Vector3Wide::cross_without_overlap(
+            &velocity_b.angular,
+            &contact_offset_b
+        ));
         let mut contact_velocity_b = Vector3Wide::default();
         Vector3Wide::add(&wxrb, &velocity_b.linear, &mut contact_velocity_b);
 

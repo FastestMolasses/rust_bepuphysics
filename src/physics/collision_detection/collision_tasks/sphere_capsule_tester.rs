@@ -46,13 +46,18 @@ impl SphereCapsuleTester {
         let normal_is_valid = internal_distance.simd_gt(Vector::<f32>::splat(0.0));
         // If the center of the sphere is on the internal line segment, choose a direction
         // on the plane defined by the capsule's up vector.
-        manifold.normal = Vector3Wide::conditional_select(&normal_is_valid.to_int(), &manifold.normal, &x);
+        manifold.normal =
+            Vector3Wide::conditional_select(&normal_is_valid.to_int(), &manifold.normal, &x);
         manifold.depth = a.radius + b.radius - internal_distance;
         manifold.feature_id = Vector::<i32>::splat(0);
 
         // Contact position from the normal and depth.
         let negative_offset_from_sphere = manifold.depth * Vector::<f32>::splat(0.5) - a.radius;
-        Vector3Wide::scale_to(&manifold.normal, &negative_offset_from_sphere, &mut manifold.offset_a);
+        Vector3Wide::scale_to(
+            &manifold.normal,
+            &negative_offset_from_sphere,
+            &mut manifold.offset_a,
+        );
         manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_int();
     }
 }

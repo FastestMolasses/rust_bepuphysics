@@ -136,7 +136,8 @@ impl TaskStack {
         // C# volatile writes: padded.Stop = false; head = (nuint)null;
         unsafe {
             AtomicBool::from_ptr(self.padded.stop.get()).store(false, Ordering::Release);
-            AtomicPtr::<Job>::from_ptr(self.head.get()).store(std::ptr::null_mut(), Ordering::Release);
+            AtomicPtr::<Job>::from_ptr(self.head.get())
+                .store(std::ptr::null_mut(), Ordering::Release);
         }
     }
 
@@ -157,12 +158,15 @@ impl TaskStack {
     pub fn approximate_task_count(&self) -> i32 {
         let mut sum = 0i32;
         // C# volatile read: var job = (Job*)head;
-        let mut job = unsafe { AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire) };
+        let mut job =
+            unsafe { AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire) };
         while !job.is_null() {
             unsafe {
                 // C# plain read: job->Counter (NOT volatile, NOT Interlocked)
                 // Relaxed = plain load on all architectures, avoids Rust data-race UB.
-                sum += AtomicI32::from_ptr((*job).counter.get()).load(Ordering::Relaxed).max(0);
+                sum += AtomicI32::from_ptr((*job).counter.get())
+                    .load(Ordering::Relaxed)
+                    .max(0);
                 job = (*job).previous;
             }
         }
@@ -188,8 +192,11 @@ impl TaskStack {
         on_completed: Task,
     ) -> ContinuationHandle {
         unsafe {
-            self.worker_mut(worker_index)
-                .allocate_continuation(task_count, dispatcher, on_completed)
+            self.worker_mut(worker_index).allocate_continuation(
+                task_count,
+                dispatcher,
+                on_completed,
+            )
         }
     }
 
@@ -209,14 +216,17 @@ impl TaskStack {
         task: &mut Task,
     ) -> PopTaskResult {
         // C# volatile read: var job = (Job*)head;
-        let mut job = unsafe { AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire) };
+        let mut job =
+            unsafe { AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire) };
 
         loop {
             if job.is_null() {
                 // There is no job to pop from.
                 *task = Task::default();
                 // C# volatile read: padded.Stop
-                return if unsafe { AtomicBool::from_ptr(self.padded.stop.get()).load(Ordering::Acquire) } {
+                return if unsafe {
+                    AtomicBool::from_ptr(self.padded.stop.get()).load(Ordering::Acquire)
+                } {
                     PopTaskResult::Stop
                 } else {
                     PopTaskResult::Empty
@@ -246,8 +256,12 @@ impl TaskStack {
                     let previous = (*job).previous;
                     // C#: Interlocked.CompareExchange(ref head, (nuint)job->Previous, (nuint)job);
                     // C# ignores the return value and always re-reads head.
-                    let _ = AtomicPtr::<Job>::from_ptr(self.head.get())
-                        .compare_exchange(job, previous, Ordering::AcqRel, Ordering::Relaxed);
+                    let _ = AtomicPtr::<Job>::from_ptr(self.head.get()).compare_exchange(
+                        job,
+                        previous,
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    );
                     // C# volatile read: job = (Job*)head;
                     job = AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire);
                 }
@@ -301,7 +315,9 @@ impl TaskStack {
         dispatcher: &dyn IThreadDispatcher,
         tag: u64,
     ) {
-        let job = self.worker_mut(worker_index).allocate_job(tasks, tag, dispatcher);
+        let job = self
+            .worker_mut(worker_index)
+            .allocate_job(tasks, tag, dispatcher);
         // C# volatile read: job->Previous = (Job*)head;
         (*job).previous = AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire);
         // C# volatile write: head = (nuint)job;
@@ -332,11 +348,14 @@ impl TaskStack {
         tag: u64,
     ) {
         unsafe {
-            let job = self.worker_mut(worker_index).allocate_job(tasks, tag, dispatcher);
+            let job = self
+                .worker_mut(worker_index)
+                .allocate_job(tasks, tag, dispatcher);
 
             loop {
                 // C# volatile read: job->Previous = (Job*)head;
-                (*job).previous = AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire);
+                (*job).previous =
+                    AtomicPtr::<Job>::from_ptr(self.head.get()).load(Ordering::Acquire);
 
                 // C#: if ((nuint)job->Previous == Interlocked.CompareExchange(ref head, (nuint)job, (nuint)job->Previous))
                 // CompareExchange is a strong CAS in C#.

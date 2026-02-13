@@ -2,22 +2,24 @@ use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
-use crate::utilities::vector::Vector;
-use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::bundle_indexing::BundleIndexing;
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::symmetric3x3::Symmetric3x3;
-use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::symmetric3x3::Symmetric3x3;
+use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 
-use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
-use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
-use super::mesh_inertia_helper::{MeshInertiaHelper, ITriangleSource};
-use super::shape::{IShape, IConvexShape, IDisposableShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
+use super::mesh_inertia_helper::{ITriangleSource, MeshInertiaHelper};
 use super::ray::RayWide;
+use super::shape::{
+    IConvexShape, IDisposableShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder,
+};
+use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
 
 /// Bounding plane of a convex hull face.
 #[derive(Clone, Copy, Default)]
@@ -254,8 +256,7 @@ impl IConvexShape for ConvexHull {
         let local_origin_bundle = Vector3Wide::broadcast(local_origin);
         let local_direction_bundle = Vector3Wide::broadcast(local_direction);
 
-        let index_offsets =
-            Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
+        let index_offsets = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
         let mut latest_entry_wide = Vector::<f32>::splat(-f32::MAX);
         let mut earliest_exit_wide = Vector::<f32>::splat(f32::MAX);
         let mut latest_entry_index_bundle = Vector::<i32>::splat(0);
@@ -268,7 +269,11 @@ impl IConvexShape for ConvexHull {
             let candidate_indices =
                 Vector::<i32>::splat((i << BundleIndexing::vector_shift()) as i32) + index_offsets;
             let mut normal_dot_origin = Vector::<f32>::splat(0.0);
-            Vector3Wide::dot(&local_origin_bundle, &bounding_plane.normal, &mut normal_dot_origin);
+            Vector3Wide::dot(
+                &local_origin_bundle,
+                &bounding_plane.normal,
+                &mut normal_dot_origin,
+            );
             let numerator = bounding_plane.offset - normal_dot_origin;
             let mut denominator = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(
@@ -281,19 +286,21 @@ impl IConvexShape for ConvexHull {
             let abs_denom = denominator.abs();
             let denom_too_small = abs_denom.simd_lt(epsilon);
             let denom_negative = denominator.simd_lt(zero);
-            denominator = denom_too_small.select(denom_negative.select(neg_eps, epsilon), denominator);
+            denominator =
+                denom_too_small.select(denom_negative.select(neg_eps, epsilon), denominator);
 
             let plane_t = numerator / denominator;
             let exit_candidate = denominator.simd_gt(zero);
             let lane_exists = bounding_plane.offset.simd_gt(min_value);
             earliest_exit_wide = (lane_exists & exit_candidate)
                 .select(plane_t.simd_min(earliest_exit_wide), earliest_exit_wide);
-            let entry_candidate = plane_t.simd_gt(latest_entry_wide)
-                & (lane_exists & !exit_candidate);
+            let entry_candidate =
+                plane_t.simd_gt(latest_entry_wide) & (lane_exists & !exit_candidate);
             latest_entry_wide = entry_candidate.select(plane_t, latest_entry_wide);
-            latest_entry_index_bundle =
-                entry_candidate.to_int().simd_eq(Vector::<i32>::splat(-1))
-                    .select(candidate_indices, latest_entry_index_bundle);
+            latest_entry_index_bundle = entry_candidate
+                .to_int()
+                .simd_eq(Vector::<i32>::splat(-1))
+                .select(candidate_indices, latest_entry_index_bundle);
         }
 
         let mut latest_entry_t = latest_entry_wide[0];
@@ -415,8 +422,8 @@ impl ConvexHullWide {
             debug_assert!((self.hulls.len() as usize) > i);
             Vector3Wide::copy_slot(&self.hulls[i].points[0], 0, &mut bundle, i);
         }
-        *epsilon_scale = (bundle.x.abs() + bundle.y.abs() + bundle.z.abs())
-            * Vector::<f32>::splat(1.0 / 3.0);
+        *epsilon_scale =
+            (bundle.x.abs() + bundle.y.abs() + bundle.z.abs()) * Vector::<f32>::splat(1.0 / 3.0);
     }
 }
 
@@ -509,8 +516,7 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
                 Matrix3x3Wide::transform_without_overlap(local_point, &orientation_matrix, &mut p);
                 let mut length_squared = Vector::<f32>::splat(0.0);
                 Vector3Wide::length_squared_to(local_point, &mut length_squared);
-                maximum_radius_squared_wide =
-                    maximum_radius_squared_wide.simd_max(length_squared);
+                maximum_radius_squared_wide = maximum_radius_squared_wide.simd_max(length_squared);
                 min_wide = Vector3Wide::min_new(&min_wide, &p);
                 max_wide = Vector3Wide::max_new(&max_wide, &p);
             }
@@ -552,8 +558,7 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
     ) {
         debug_assert!(self.hulls.len() > 0 && (self.hulls.len() as usize) <= Vector::<f32>::LEN);
         for i in 0..self.hulls.len() as usize {
-            let offset_pose =
-                unsafe { GatherScatter::get_offset_instance(poses, i) };
+            let offset_pose = unsafe { GatherScatter::get_offset_instance(poses, i) };
             let mut pose = RigidPose::default();
             RigidPoseWide::read_first(offset_pose, &mut pose);
             let offset_ray = unsafe { GatherScatter::get_offset_instance(ray_wide, i) };
@@ -563,13 +568,8 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
             Vector3Wide::read_first(&offset_ray.direction, &mut direction);
             let mut t_narrow = 0.0f32;
             let mut normal_narrow = Vec3::ZERO;
-            let hit = self.hulls[i].ray_test(
-                &pose,
-                origin,
-                direction,
-                &mut t_narrow,
-                &mut normal_narrow,
-            );
+            let hit =
+                self.hulls[i].ray_test(&pose, origin, direction, &mut t_narrow, &mut normal_narrow);
             intersected.as_mut_array()[i] = if hit { -1 } else { 0 };
             t.as_mut_array()[i] = t_narrow;
             Vector3Wide::write_slot(normal_narrow, i, normal);
@@ -598,20 +598,22 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
         terminated_lanes: &Vector<i32>,
         support: &mut Vector3Wide,
     ) {
-        let index_offsets =
-            Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
+        let index_offsets = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
         let lanes = Vector::<f32>::LEN;
         for slot_index in 0..lanes {
             if terminated_lanes[slot_index] < 0 {
                 continue;
             }
             let hull = &shape.hulls[slot_index];
-            debug_assert!(hull.points.allocated(), "If the lane isn't terminated, then the hull should actually exist.");
-            let mut slot_direction = QuaternionWide::default();
+            debug_assert!(
+                hull.points.allocated(),
+                "If the lane isn't terminated, then the hull should actually exist."
+            );
+            let slot_direction = QuaternionWide::default();
             // Rebroadcast the direction for this slot
             // (access lane slot_index and broadcast across all lanes)
             let dir_as_v3w = direction;
-            let mut rebroadcast_dir = Vector3Wide {
+            let rebroadcast_dir = Vector3Wide {
                 x: Vector::<f32>::splat(dir_as_v3w.x[slot_index]),
                 y: Vector::<f32>::splat(dir_as_v3w.y[slot_index]),
                 z: Vector::<f32>::splat(dir_as_v3w.z[slot_index]),
@@ -625,10 +627,14 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
                 let mut dot_candidate = Vector::<f32>::splat(0.0);
                 Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
                 let use_candidate = dot_candidate.simd_gt(dot);
-                best_indices = use_candidate.to_int().simd_eq(Vector::<i32>::splat(-1)).select(
-                    index_offsets + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
-                    best_indices,
-                );
+                best_indices = use_candidate
+                    .to_int()
+                    .simd_eq(Vector::<i32>::splat(-1))
+                    .select(
+                        index_offsets
+                            + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
+                        best_indices,
+                    );
                 dot = use_candidate.select(dot_candidate, dot);
             }
             // Horizontal reduction
@@ -645,12 +651,7 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(support_index, &mut bundle_index, &mut inner_index);
-            Vector3Wide::copy_slot(
-                &hull.points[bundle_index],
-                inner_index,
-                support,
-                slot_index,
-            );
+            Vector3Wide::copy_slot(&hull.points[bundle_index], inner_index, support, slot_index);
         }
     }
 
@@ -670,7 +671,12 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
             &mut local_direction,
         );
         let mut local_support = Vector3Wide::default();
-        self.compute_local_support(shape, &local_direction, terminated_lanes, &mut local_support);
+        self.compute_local_support(
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
+        );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }
 }
@@ -691,15 +697,17 @@ impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
         terminated_lanes: &Vector<i32>,
         support: &mut Vector3Wide,
     ) {
-        let index_offsets =
-            Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
+        let index_offsets = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
         let lanes = Vector::<f32>::LEN;
         for slot_index in 0..lanes {
             if terminated_lanes[slot_index] < 0 {
                 continue;
             }
             let hull = &shape.hulls[slot_index];
-            debug_assert!(hull.points.allocated(), "If the lane isn't terminated, then the hull should actually exist.");
+            debug_assert!(
+                hull.points.allocated(),
+                "If the lane isn't terminated, then the hull should actually exist."
+            );
             let rebroadcast_dir = Vector3Wide {
                 x: Vector::<f32>::splat(direction.x[slot_index]),
                 y: Vector::<f32>::splat(direction.y[slot_index]),
@@ -714,10 +722,14 @@ impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
                 let mut dot_candidate = Vector::<f32>::splat(0.0);
                 Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
                 let use_candidate = dot_candidate.simd_gt(dot);
-                best_indices = use_candidate.to_int().simd_eq(Vector::<i32>::splat(-1)).select(
-                    index_offsets + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
-                    best_indices,
-                );
+                best_indices = use_candidate
+                    .to_int()
+                    .simd_eq(Vector::<i32>::splat(-1))
+                    .select(
+                        index_offsets
+                            + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
+                        best_indices,
+                    );
                 dot = use_candidate.select(dot_candidate, dot);
             }
             let mut best_slot_index = 0usize;
@@ -733,12 +745,7 @@ impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(support_index, &mut bundle_index, &mut inner_index);
-            Vector3Wide::copy_slot(
-                &hull.points[bundle_index],
-                inner_index,
-                support,
-                slot_index,
-            );
+            Vector3Wide::copy_slot(&hull.points[bundle_index], inner_index, support, slot_index);
         }
     }
 
@@ -758,7 +765,10 @@ impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
         );
         let mut local_support = Vector3Wide::default();
         <Self as DepthRefinerSupportFinder<ConvexHullWide>>::compute_local_support(
-            shape, &local_direction, terminated_lanes, &mut local_support,
+            shape,
+            &local_direction,
+            terminated_lanes,
+            &mut local_support,
         );
         Matrix3x3Wide::transform_without_overlap(&local_support, orientation, support);
     }

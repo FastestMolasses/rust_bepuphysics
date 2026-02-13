@@ -45,7 +45,11 @@ impl TangentFrictionOneBody {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut linear_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(corrective_impulse, &jacobians.linear_a, &mut linear_impulse_a);
+        Matrix2x3Wide::transform(
+            corrective_impulse,
+            &jacobians.linear_a,
+            &mut linear_impulse_a,
+        );
         let mut angular_impulse_a = Vector3Wide::default();
         Matrix2x3Wide::transform(
             corrective_impulse,
@@ -65,17 +69,9 @@ impl TangentFrictionOneBody {
             &mut corrective_velocity_a_angular,
         );
         let temp = wsv_a.linear;
-        Vector3Wide::add(
-            &temp,
-            &corrective_velocity_a_linear,
-            &mut wsv_a.linear,
-        );
+        Vector3Wide::add(&temp, &corrective_velocity_a_linear, &mut wsv_a.linear);
         let temp = wsv_a.angular;
-        Vector3Wide::add(
-            &temp,
-            &corrective_velocity_a_angular,
-            &mut wsv_a.angular,
-        );
+        Vector3Wide::add(&temp, &corrective_velocity_a_angular, &mut wsv_a.angular);
     }
 
     #[inline(always)]
@@ -131,7 +127,12 @@ impl TangentFrictionOneBody {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut jacobians = TangentFrictionOneBodyJacobians::default();
-        Self::compute_jacobians(tangent_x, tangent_y, offset_to_manifold_center_a, &mut jacobians);
+        Self::compute_jacobians(
+            tangent_x,
+            tangent_y,
+            offset_to_manifold_center_a,
+            &mut jacobians,
+        );
         //TODO: If the previous frame and current frame are associated with different time steps, the previous frame's solution won't be a good solution anymore.
         //To compensate for this, the accumulated impulse should be scaled if dt changes.
         Self::apply_impulse(&jacobians, inertia_a, accumulated_impulse, wsv_a);
@@ -148,7 +149,12 @@ impl TangentFrictionOneBody {
         wsv_a: &mut BodyVelocityWide,
     ) {
         let mut jacobians = TangentFrictionOneBodyJacobians::default();
-        Self::compute_jacobians(tangent_x, tangent_y, offset_to_manifold_center_a, &mut jacobians);
+        Self::compute_jacobians(
+            tangent_x,
+            tangent_y,
+            offset_to_manifold_center_a,
+            &mut jacobians,
+        );
         //Compute effective mass matrix contributions.
         let mut linear_contribution_a = Symmetric2x2Wide::default();
         Symmetric2x2Wide::sandwich_scale(

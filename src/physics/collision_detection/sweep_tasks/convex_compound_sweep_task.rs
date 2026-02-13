@@ -3,9 +3,11 @@
 use crate::physics::body_properties::{BodyVelocity, RigidPose};
 use crate::physics::collidables::shape::{ICompoundShape, IConvexShape, IShapeWide};
 use crate::physics::collidables::shapes::Shapes;
-use crate::physics::collision_detection::sweep_task_registry::{ISweepFilter, SweepTask, SweepTaskRegistry};
-use crate::physics::collision_detection::sweep_tasks::convex_compound_sweep_overlap_finder::IConvexCompoundSweepOverlapFinder;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
+use crate::physics::collision_detection::sweep_task_registry::{
+    ISweepFilter, SweepTask, SweepTaskRegistry,
+};
+use crate::physics::collision_detection::sweep_tasks::convex_compound_sweep_overlap_finder::IConvexCompoundSweepOverlapFinder;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
 use std::marker::PhantomData;
@@ -37,8 +39,7 @@ impl<
         TShapeWideA: IShapeWide<TShapeA> + 'static,
         TCompound: ICompoundShape + IBoundsQueryableCompound + 'static,
         TOverlapFinder: IConvexCompoundSweepOverlapFinder<TShapeA, TCompound> + 'static,
-    > SweepTask
-    for ConvexCompoundSweepTask<TShapeA, TShapeWideA, TCompound, TOverlapFinder>
+    > SweepTask for ConvexCompoundSweepTask<TShapeA, TShapeWideA, TCompound, TOverlapFinder>
 {
     fn shape_type_index_a(&self) -> i32 {
         self.shape_type_index_a
@@ -101,9 +102,17 @@ impl<
         *hit_normal = Vec3::ZERO;
         let mut overlaps = Default::default();
         TOverlapFinder::find_overlaps(
-            convex, orientation_a, velocity_a,
-            compound, offset_b, orientation_b, velocity_b,
-            maximum_t, &*shapes, &mut *pool, &mut overlaps,
+            convex,
+            orientation_a,
+            velocity_a,
+            compound,
+            offset_b,
+            orientation_b,
+            velocity_b,
+            maximum_t,
+            &*shapes,
+            &mut *pool,
+            &mut overlaps,
         );
         let filter_ref = &**(filter as *const *const dyn ISweepFilter);
         for i in 0..overlaps.count {
@@ -117,7 +126,8 @@ impl<
                 let child = compound.get_child(compound_child_index);
                 let child_type = child.shape_index.type_id();
                 let batch = (&*shapes).get_batch(child_type as usize).unwrap();
-                let (child_shape_data, _) = batch.get_shape_data(child.shape_index.index() as usize);
+                let (child_shape_data, _) =
+                    batch.get_shape_data(child.shape_index.index() as usize);
                 if let Some(task) = (&*sweep_tasks).get_task(TShapeA::type_id(), child_type) {
                     let identity_pose = RigidPose::IDENTITY;
                     let mut t0_candidate = 0.0f32;
@@ -125,10 +135,25 @@ impl<
                     let mut hit_location_candidate = Vec3::ZERO;
                     let mut hit_normal_candidate = Vec3::ZERO;
                     if task.sweep(
-                        shape_data_a, TShapeA::type_id(), &identity_pose, orientation_a, velocity_a,
-                        child_shape_data, child_type, child.as_pose(), offset_b, orientation_b, velocity_b,
-                        maximum_t, minimum_progression, convergence_threshold, maximum_iteration_count,
-                        &mut t0_candidate, &mut t1_candidate, &mut hit_location_candidate, &mut hit_normal_candidate,
+                        shape_data_a,
+                        TShapeA::type_id(),
+                        &identity_pose,
+                        orientation_a,
+                        velocity_a,
+                        child_shape_data,
+                        child_type,
+                        child.as_pose(),
+                        offset_b,
+                        orientation_b,
+                        velocity_b,
+                        maximum_t,
+                        minimum_progression,
+                        convergence_threshold,
+                        maximum_iteration_count,
+                        &mut t0_candidate,
+                        &mut t1_candidate,
+                        &mut hit_location_candidate,
+                        &mut hit_normal_candidate,
                     ) {
                         if t1_candidate < *t1 {
                             *t0 = t0_candidate;

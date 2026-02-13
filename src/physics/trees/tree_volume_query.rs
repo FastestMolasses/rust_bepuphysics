@@ -15,10 +15,12 @@ impl Tree {
     ) {
         debug_assert!(
             (node_index >= 0 && node_index < self.node_count)
-                || (Self::encode(node_index) >= 0
-                    && Self::encode(node_index) < self.leaf_count)
+                || (Self::encode(node_index) >= 0 && Self::encode(node_index) < self.leaf_count)
         );
-        debug_assert!(self.leaf_count >= 2, "This implementation assumes all nodes are filled.");
+        debug_assert!(
+            self.leaf_count >= 2,
+            "This implementation assumes all nodes are filled."
+        );
 
         let mut stack_end: i32 = 0;
         loop {
@@ -36,10 +38,8 @@ impl Tree {
                 node_index = *stack.add(stack_end as usize);
             } else {
                 let node = self.nodes.get(node_index);
-                let a_intersected =
-                    BoundingBox::intersects_unsafe(&node.a, &bounding_box);
-                let b_intersected =
-                    BoundingBox::intersects_unsafe(&node.b, &bounding_box);
+                let a_intersected = BoundingBox::intersects_unsafe(&node.a, &bounding_box);
+                let b_intersected = BoundingBox::intersects_unsafe(&node.b, &bounding_box);
 
                 if a_intersected {
                     node_index = node.a.index;

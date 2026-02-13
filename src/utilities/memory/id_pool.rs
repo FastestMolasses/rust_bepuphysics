@@ -77,9 +77,8 @@ impl IdPool {
         debug_assert!(self.available_ids.allocated());
         if self.available_id_count == self.available_ids.len() {
             let mut old_available_ids = self.available_ids;
-            self.available_ids = pool.take_at_least(
-                (self.available_id_count * 2).max(self.available_ids.len()),
-            );
+            self.available_ids =
+                pool.take_at_least((self.available_id_count * 2).max(self.available_ids.len()));
             old_available_ids.copy_to(0, &mut self.available_ids, 0, self.available_id_count);
             pool.return_buffer(&mut old_available_ids);
         }

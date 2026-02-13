@@ -1,11 +1,11 @@
+use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
+use crate::physics::constraints::inequality_helpers::InequalityHelpers;
+use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
-use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
-use crate::physics::constraints::inequality_helpers::InequalityHelpers;
-use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
@@ -28,7 +28,13 @@ pub struct DistanceLimit {
 
 impl DistanceLimit {
     #[inline(always)]
-    pub fn new(local_offset_a: Vec3, local_offset_b: Vec3, minimum_distance: f32, maximum_distance: f32, spring_settings: SpringSettings) -> Self {
+    pub fn new(
+        local_offset_a: Vec3,
+        local_offset_b: Vec3,
+        minimum_distance: f32,
+        maximum_distance: f32,
+        spring_settings: SpringSettings,
+    ) -> Self {
         Self {
             local_offset_a,
             local_offset_b,
@@ -46,9 +52,18 @@ impl DistanceLimit {
     ) {
         #[cfg(debug_assertions)]
         {
-            debug_assert!(self.minimum_distance >= 0.0, "DistanceLimit.MinimumDistance must be nonnegative.");
-            debug_assert!(self.maximum_distance >= 0.0, "DistanceLimit.MaximumDistance must be nonnegative.");
-            debug_assert!(self.maximum_distance >= self.minimum_distance, "DistanceLimit.MaximumDistance must be >= MinimumDistance.");
+            debug_assert!(
+                self.minimum_distance >= 0.0,
+                "DistanceLimit.MinimumDistance must be nonnegative."
+            );
+            debug_assert!(
+                self.maximum_distance >= 0.0,
+                "DistanceLimit.MaximumDistance must be nonnegative."
+            );
+            debug_assert!(
+                self.maximum_distance >= self.minimum_distance,
+                "DistanceLimit.MaximumDistance must be >= MinimumDistance."
+            );
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "DistanceLimit");
         }
@@ -71,8 +86,10 @@ impl DistanceLimit {
         let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
         Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
         Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        description.minimum_distance = unsafe { *GatherScatter::get_first(&source.minimum_distance) };
-        description.maximum_distance = unsafe { *GatherScatter::get_first(&source.maximum_distance) };
+        description.minimum_distance =
+            unsafe { *GatherScatter::get_first(&source.minimum_distance) };
+        description.maximum_distance =
+            unsafe { *GatherScatter::get_first(&source.maximum_distance) };
         SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
     }
 }
@@ -114,13 +131,21 @@ impl DistanceLimitFunctions {
         // velocityA.Angular += (angularJacobianA * csi) * inertiaA.InverseInertiaTensor
         let angular_impulse_a = *angular_jacobian_a * *csi;
         let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_a, &inertia_a.inverse_inertia_tensor, &mut angular_change_a);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_a,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_change_a,
+        );
         Vector3Wide::add(&velocity_a.angular, &angular_change_a, &mut tmp);
         velocity_a.angular = tmp;
         // velocityB.Angular += (angularJacobianB * csi) * inertiaB.InverseInertiaTensor
         let angular_impulse_b = *angular_jacobian_b * *csi;
         let mut angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&angular_impulse_b, &inertia_b.inverse_inertia_tensor, &mut angular_change_b);
+        Symmetric3x3Wide::transform_without_overlap(
+            &angular_impulse_b,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_change_b,
+        );
         Vector3Wide::add(&velocity_b.angular, &angular_change_b, &mut tmp);
         velocity_b.angular = tmp;
     }
@@ -155,8 +180,13 @@ impl DistanceLimitFunctions {
 
         Vector3Wide::length_into(&anchor_offset, distance);
         // If the current distance is closer to the minimum, calibrate for the minimum.
-        *use_minimum = (*distance - *minimum_distance).abs().simd_lt((*distance - *maximum_distance).abs()).to_int();
-        let sign = use_minimum.simd_lt(Vector::<i32>::splat(0)).select(Vector::<f32>::splat(-1.0), Vector::<f32>::splat(1.0));
+        *use_minimum = (*distance - *minimum_distance)
+            .abs()
+            .simd_lt((*distance - *maximum_distance).abs())
+            .to_int();
+        let sign = use_minimum
+            .simd_lt(Vector::<i32>::splat(0))
+            .select(Vector::<f32>::splat(-1.0), Vector::<f32>::splat(1.0));
         let scale_factor = sign / *distance;
         Vector3Wide::scale_to(&anchor_offset, &scale_factor, direction);
         // If the distance is too short to extract a direction, use a fallback.
@@ -167,7 +197,8 @@ impl DistanceLimitFunctions {
 
         unsafe {
             Vector3Wide::cross_without_overlap(&offset_a, direction, angular_ja);
-            Vector3Wide::cross_without_overlap(direction, &offset_b, angular_jb); // Note flip negation
+            Vector3Wide::cross_without_overlap(direction, &offset_b, angular_jb);
+            // Note flip negation
         }
     }
 
@@ -190,12 +221,30 @@ impl DistanceLimitFunctions {
         let mut angular_ja = Vector3Wide::default();
         let mut angular_jb = Vector3Wide::default();
         Self::compute_jacobians(
-            &prestep.local_offset_a, position_a, orientation_a,
-            &prestep.local_offset_b, position_b, orientation_b,
-            &prestep.minimum_distance, &prestep.maximum_distance,
-            &mut use_minimum, &mut distance, &mut direction, &mut angular_ja, &mut angular_jb,
+            &prestep.local_offset_a,
+            position_a,
+            orientation_a,
+            &prestep.local_offset_b,
+            position_b,
+            orientation_b,
+            &prestep.minimum_distance,
+            &prestep.maximum_distance,
+            &mut use_minimum,
+            &mut distance,
+            &mut direction,
+            &mut angular_ja,
+            &mut angular_jb,
         );
-        Self::apply_impulse(&direction, &angular_ja, &angular_jb, inertia_a, inertia_b, accumulated_impulses, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &direction,
+            &angular_ja,
+            &angular_jb,
+            inertia_a,
+            inertia_b,
+            accumulated_impulses,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     #[inline(always)]
@@ -219,10 +268,19 @@ impl DistanceLimitFunctions {
         let mut angular_ja = Vector3Wide::default();
         let mut angular_jb = Vector3Wide::default();
         Self::compute_jacobians(
-            &prestep.local_offset_a, position_a, orientation_a,
-            &prestep.local_offset_b, position_b, orientation_b,
-            &prestep.minimum_distance, &prestep.maximum_distance,
-            &mut use_minimum, &mut distance, &mut direction, &mut angular_ja, &mut angular_jb,
+            &prestep.local_offset_a,
+            position_a,
+            orientation_a,
+            &prestep.local_offset_b,
+            position_b,
+            orientation_b,
+            &prestep.minimum_distance,
+            &prestep.maximum_distance,
+            &mut use_minimum,
+            &mut distance,
+            &mut direction,
+            &mut angular_ja,
+            &mut angular_jb,
         );
 
         // csi = projection.BiasImpulse - accumulatedImpulse * projection.SoftnessImpulseScale - csv
@@ -238,26 +296,58 @@ impl DistanceLimitFunctions {
 
         // The linear jacobian contributions are just a scalar multiplication by 1 since it's unit length.
         let mut angular_contribution_a = Vector::<f32>::splat(0.0);
-        Symmetric3x3Wide::vector_sandwich(&angular_ja, &inertia_a.inverse_inertia_tensor, &mut angular_contribution_a);
+        Symmetric3x3Wide::vector_sandwich(
+            &angular_ja,
+            &inertia_a.inverse_inertia_tensor,
+            &mut angular_contribution_a,
+        );
         let mut angular_contribution_b = Vector::<f32>::splat(0.0);
-        Symmetric3x3Wide::vector_sandwich(&angular_jb, &inertia_b.inverse_inertia_tensor, &mut angular_contribution_b);
-        let inverse_effective_mass = inertia_a.inverse_mass + inertia_b.inverse_mass + angular_contribution_a + angular_contribution_b;
+        Symmetric3x3Wide::vector_sandwich(
+            &angular_jb,
+            &inertia_b.inverse_inertia_tensor,
+            &mut angular_contribution_b,
+        );
+        let inverse_effective_mass = inertia_a.inverse_mass
+            + inertia_b.inverse_mass
+            + angular_contribution_a
+            + angular_contribution_b;
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
         let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(&prestep.spring_settings, dt, &mut position_error_to_velocity, &mut effective_mass_cfm_scale, &mut softness_impulse_scale);
+        SpringSettingsWide::compute_springiness(
+            &prestep.spring_settings,
+            dt,
+            &mut position_error_to_velocity,
+            &mut effective_mass_cfm_scale,
+            &mut softness_impulse_scale,
+        );
         let effective_mass = effective_mass_cfm_scale / inverse_effective_mass;
         let error = use_minimum.simd_lt(Vector::<i32>::splat(0)).select(
             prestep.minimum_distance - distance,
             distance - prestep.maximum_distance,
         );
         let mut bias_velocity = Vector::<f32>::splat(0.0);
-        InequalityHelpers::compute_bias_velocity(error, &position_error_to_velocity, inverse_dt, &mut bias_velocity);
-        let mut csi = -*accumulated_impulses * softness_impulse_scale - effective_mass * (csv - bias_velocity);
+        InequalityHelpers::compute_bias_velocity(
+            error,
+            &position_error_to_velocity,
+            inverse_dt,
+            &mut bias_velocity,
+        );
+        let mut csi = -*accumulated_impulses * softness_impulse_scale
+            - effective_mass * (csv - bias_velocity);
         InequalityHelpers::clamp_positive(accumulated_impulses, &mut csi);
 
-        Self::apply_impulse(&direction, &angular_ja, &angular_jb, inertia_a, inertia_b, &csi, wsv_a, wsv_b);
+        Self::apply_impulse(
+            &direction,
+            &angular_ja,
+            &angular_jb,
+            inertia_a,
+            inertia_b,
+            &csi,
+            wsv_a,
+            wsv_b,
+        );
     }
 
     pub const REQUIRES_INCREMENTAL_SUBSTEP_UPDATES: bool = false;
