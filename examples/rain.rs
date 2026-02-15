@@ -596,24 +596,24 @@ struct FpsText;
 
 fn setup_counter(mut commands: Commands) {
     commands.spawn((
-        Text::new("Objects: 0"),
+        Text::new("FPS: --"),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(12.0),
             right: Val::Px(12.0),
             ..default()
         },
-        CounterText,
+        FpsText,
     ));
     commands.spawn((
-        Text::new("FPS: --"),
+        Text::new("Objects: 0"),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
+            top: Val::Px(36.0),
+            right: Val::Px(12.0),
             ..default()
         },
-        FpsText,
+        CounterText,
     ));
 }
 
