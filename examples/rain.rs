@@ -254,7 +254,7 @@ fn setup(
 
     // ---- Ground plane ----
     let shapes = unsafe { &mut *(physics.simulation.shapes as *mut Shapes) };
-    let ground_shape = shapes.add(&PhysicsBox::new(120.0, 1.0, 120.0));
+    let ground_shape = shapes.add(&PhysicsBox::new(200.0, 1.0, 200.0));
     let ground_desc = StaticDescription::with_discrete(
         RigidPose::from_position(phys_glam::Vec3::new(0.0, -0.5, 0.0)),
         ground_shape,
@@ -265,13 +265,66 @@ fn setup(
 
     // Ground visual — a slightly dark checkerboard-ish floor
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(120.0, 1.0, 120.0))),
+        Mesh3d(meshes.add(Cuboid::new(200.0, 1.0, 200.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.25, 0.27, 0.3),
             ..default()
         })),
         Transform::from_xyz(0.0, -0.5, 0.0),
     ));
+
+    // ---- Perimeter walls ----
+    let wall_height = 2.0;
+    let wall_thickness = 1.0;
+    let ground_size = 200.0;
+    let wall_positions_sizes: [(phys_glam::Vec3, f32, f32, f32); 4] = [
+        // North wall (along X axis, at +Z)
+        (
+            phys_glam::Vec3::new(0.0, wall_height / 2.0, ground_size / 2.0),
+            ground_size,
+            wall_height,
+            wall_thickness,
+        ),
+        // South wall (along X axis, at -Z)
+        (
+            phys_glam::Vec3::new(0.0, wall_height / 2.0, -ground_size / 2.0),
+            ground_size,
+            wall_height,
+            wall_thickness,
+        ),
+        // East wall (along Z axis, at +X)
+        (
+            phys_glam::Vec3::new(ground_size / 2.0, wall_height / 2.0, 0.0),
+            wall_thickness,
+            wall_height,
+            ground_size,
+        ),
+        // West wall (along Z axis, at -X)
+        (
+            phys_glam::Vec3::new(-ground_size / 2.0, wall_height / 2.0, 0.0),
+            wall_thickness,
+            wall_height,
+            ground_size,
+        ),
+    ];
+
+    for (pos, width, height, depth) in &wall_positions_sizes {
+        let wall_shape = shapes.add(&PhysicsBox::new(*width, *height, *depth));
+        let wall_desc =
+            StaticDescription::with_discrete(RigidPose::from_position(*pos), wall_shape);
+        unsafe {
+            (&mut *physics.simulation.statics).add(&wall_desc);
+        }
+
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::new(*width, *height, *depth))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.35, 0.4),
+                ..default()
+            })),
+            Transform::from_xyz(pos.x, pos.y, pos.z),
+        ));
+    }
 
     // ---- Some angled ramps for fun bouncing ----
     let ramp_positions_rotations: [(phys_glam::Vec3, phys_glam::Quat); 3] = [
@@ -336,9 +389,7 @@ fn setup(
 
     // ---- UI ----
     commands.spawn((
-        Text::new(
-            "Hold SPACE to rain objects\nR to clear\nMouse drag to orbit, scroll to zoom",
-        ),
+        Text::new("Hold SPACE to rain objects\nR to clear\nMouse drag to orbit, scroll to zoom"),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(12.0),
@@ -419,13 +470,25 @@ fn spawn_objects(
                 // Capsule
                 let r = rng.random_range(0.2..0.6f32);
                 let l = rng.random_range(0.5..2.0f32);
-                (ShapeKind::Capsule { radius: r, length: l }, r * r * l * 8.0)
+                (
+                    ShapeKind::Capsule {
+                        radius: r,
+                        length: l,
+                    },
+                    r * r * l * 8.0,
+                )
             }
             _ => {
                 // Cylinder
                 let r = rng.random_range(0.3..0.8f32);
                 let l = rng.random_range(0.4..1.5f32);
-                (ShapeKind::Cylinder { radius: r, length: l }, r * r * l * 6.0)
+                (
+                    ShapeKind::Cylinder {
+                        radius: r,
+                        length: l,
+                    },
+                    r * r * l * 6.0,
+                )
             }
         };
 
@@ -468,9 +531,7 @@ fn spawn_objects(
 
         let mesh_handle = match shape_kind_data {
             ShapeKind::Box { hw, hh, hd } => meshes.add(Cuboid::new(hw * 2.0, hh * 2.0, hd * 2.0)),
-            ShapeKind::Sphere { radius } => {
-                meshes.add(bevy::math::primitives::Sphere::new(radius))
-            }
+            ShapeKind::Sphere { radius } => meshes.add(bevy::math::primitives::Sphere::new(radius)),
             ShapeKind::Capsule { radius, length } => {
                 meshes.add(bevy::math::primitives::Capsule3d::new(radius, length))
             }
@@ -521,19 +582,57 @@ fn clear_objects(
         commands.entity(entity).despawn();
     }
 
-    // Properly dispose and recreate the physics world.
-    // This is the correct way to reset a simulation - the C# library
-    // never uses Clear() followed by continued timesteps.
-    let mut physics = create_physics_world();
+    // Properly dispose and recreate the physics world
+    let physics = create_physics_world();
     let shapes = unsafe { &mut *(physics.simulation.shapes as *mut Shapes) };
 
-    let ground_shape = shapes.add(&PhysicsBox::new(120.0, 1.0, 120.0));
+    let ground_shape = shapes.add(&PhysicsBox::new(200.0, 1.0, 200.0));
     let ground_desc = StaticDescription::with_discrete(
         RigidPose::from_position(phys_glam::Vec3::new(0.0, -0.5, 0.0)),
         ground_shape,
     );
     unsafe {
         (&mut *physics.simulation.statics).add(&ground_desc);
+    }
+
+    // Re-add perimeter walls
+    let wall_height = 2.0;
+    let wall_thickness = 1.0;
+    let ground_size = 200.0;
+    let wall_positions_sizes: [(phys_glam::Vec3, f32, f32, f32); 4] = [
+        (
+            phys_glam::Vec3::new(0.0, wall_height / 2.0, ground_size / 2.0),
+            ground_size,
+            wall_height,
+            wall_thickness,
+        ),
+        (
+            phys_glam::Vec3::new(0.0, wall_height / 2.0, -ground_size / 2.0),
+            ground_size,
+            wall_height,
+            wall_thickness,
+        ),
+        (
+            phys_glam::Vec3::new(ground_size / 2.0, wall_height / 2.0, 0.0),
+            wall_thickness,
+            wall_height,
+            ground_size,
+        ),
+        (
+            phys_glam::Vec3::new(-ground_size / 2.0, wall_height / 2.0, 0.0),
+            wall_thickness,
+            wall_height,
+            ground_size,
+        ),
+    ];
+
+    for (pos, width, height, depth) in &wall_positions_sizes {
+        let wall_shape = shapes.add(&PhysicsBox::new(*width, *height, *depth));
+        let wall_desc =
+            StaticDescription::with_discrete(RigidPose::from_position(*pos), wall_shape);
+        unsafe {
+            (&mut *physics.simulation.statics).add(&wall_desc);
+        }
     }
 
     let ramp_positions_rotations: [(phys_glam::Vec3, phys_glam::Quat); 3] = [
@@ -571,10 +670,7 @@ fn physics_step(mut physics: ResMut<PhysicsWorld>) {
     physics.simulation.timestep(dt, None);
 }
 
-fn sync_transforms(
-    physics: Res<PhysicsWorld>,
-    mut query: Query<(&RigidBody, &mut Transform)>,
-) {
+fn sync_transforms(physics: Res<PhysicsWorld>, mut query: Query<(&RigidBody, &mut Transform)>) {
     let bodies = unsafe { &*physics.simulation.bodies };
     for (body, mut transform) in query.iter_mut() {
         if !bodies.body_exists(body.handle) {
@@ -656,12 +752,12 @@ fn orbit_camera(
     if mouse_button.pressed(MouseButton::Left) {
         let delta = mouse_motion.delta;
         orbit.yaw -= delta.x * 0.005;
-        orbit.pitch = (orbit.pitch - delta.y * 0.005).clamp(-1.4, 1.4);
+        orbit.pitch = (orbit.pitch + delta.y * 0.005).clamp(-1.4, 1.4);
     }
 
     let scroll = mouse_scroll.delta.y;
     if scroll != 0.0 {
-        orbit.distance = (orbit.distance - scroll * 2.0).clamp(5.0, 150.0);
+        orbit.distance = (orbit.distance - scroll * 2.0).clamp(5.0, 200.0);
     }
 
     let x = orbit.distance * orbit.pitch.cos() * orbit.yaw.sin();
