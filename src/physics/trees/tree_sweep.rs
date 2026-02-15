@@ -2,6 +2,8 @@
 
 use super::ray_batcher::TreeRay;
 use super::tree::{Tree, TRAVERSAL_STACK_CAPACITY};
+use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::Vec3;
 
 /// Trait for testing sweep intersections against leaves in the tree.
@@ -17,7 +19,8 @@ impl Tree {
         _origin: Vec3,
         _direction: Vec3,
         tree_ray: *mut TreeRay,
-        stack: *mut i32,
+        mut stack: Buffer<i32>,
+        pool: &mut BufferPool,
         leaf_tester: &mut TLeafTester,
     ) {
         debug_assert!(
@@ -35,10 +38,10 @@ impl Tree {
                 let leaf_index = Self::encode(node_index);
                 leaf_tester.test_leaf(leaf_index, &mut (*tree_ray).maximum_t);
                 if stack_end == 0 {
-                    return;
+                    break;
                 }
                 stack_end -= 1;
-                node_index = *stack.add(stack_end as usize);
+                node_index = *stack.get(stack_end);
             } else {
                 let node = self.nodes.get(node_index);
                 let min_a = node.a.min - expansion;
@@ -52,17 +55,24 @@ impl Tree {
 
                 if a_intersected {
                     if b_intersected {
-                        debug_assert!(
-                            (stack_end as usize) < TRAVERSAL_STACK_CAPACITY - 1,
-                            "Fixed size stack overflow."
-                        );
+                        if stack_end == stack.len() {
+                            if stack.len() == TRAVERSAL_STACK_CAPACITY as i32 {
+                                // First allocation is on the stack.
+                                let mut new_stack: Buffer<i32> =
+                                    pool.take_at_least(TRAVERSAL_STACK_CAPACITY as i32 * 2);
+                                stack.copy_to(0, &mut new_stack, 0, TRAVERSAL_STACK_CAPACITY as i32);
+                                stack = new_stack;
+                            } else {
+                                pool.resize(&mut stack, stack_end * 2, stack_end);
+                            }
+                        }
                         if t_a < t_b {
                             node_index = node.a.index;
-                            *stack.add(stack_end as usize) = node.b.index;
+                            *stack.get_mut(stack_end) = node.b.index;
                             stack_end += 1;
                         } else {
                             node_index = node.b.index;
-                            *stack.add(stack_end as usize) = node.a.index;
+                            *stack.get_mut(stack_end) = node.a.index;
                             stack_end += 1;
                         }
                     } else {
@@ -72,12 +82,16 @@ impl Tree {
                     node_index = node.b.index;
                 } else {
                     if stack_end == 0 {
-                        return;
+                        break;
                     }
                     stack_end -= 1;
-                    node_index = *stack.add(stack_end as usize);
+                    node_index = *stack.get(stack_end);
                 }
             }
+        }
+        if stack.len() > TRAVERSAL_STACK_CAPACITY as i32 {
+            // We rented a larger stack at some point. Return it.
+            pool.return_buffer(&mut stack);
         }
     }
 
@@ -87,6 +101,7 @@ impl Tree {
         origin: Vec3,
         direction: Vec3,
         tree_ray: *mut TreeRay,
+        pool: &mut BufferPool,
         sweep_tester: &mut TLeafTester,
     ) {
         if self.leaf_count == 0 {
@@ -101,14 +116,20 @@ impl Tree {
                 sweep_tester.test_leaf(0, &mut (*tree_ray).maximum_t);
             }
         } else {
-            let mut stack = [0i32; TRAVERSAL_STACK_CAPACITY];
+            let mut stack_memory = [0i32; TRAVERSAL_STACK_CAPACITY];
+            let stack = Buffer::new(
+                stack_memory.as_mut_ptr(),
+                TRAVERSAL_STACK_CAPACITY as i32,
+                -1,
+            );
             self.sweep_node(
                 0,
                 expansion,
                 origin,
                 direction,
                 tree_ray,
-                stack.as_mut_ptr(),
+                stack,
+                pool,
                 sweep_tester,
             );
         }
@@ -128,13 +149,22 @@ impl Tree {
         *origin = half_max + half_min;
     }
 
-    /// Performs a swept bounding box test against the tree.
+    /// Performs a sweep test of an axis-aligned bounding box against the tree and invokes the sweep_tester for each intersecting leaf.
+    ///
+    /// # Arguments
+    /// * `min` - The minimum corner of the axis-aligned bounding box to sweep.
+    /// * `max` - The maximum corner of the axis-aligned bounding box to sweep.
+    /// * `direction` - The direction of the sweep.
+    /// * `maximum_t` - The maximum parametric distance along the sweep direction to test.
+    /// * `pool` - Buffer pool used for temporary allocations if the tree is pathologically deep; stack memory is used preferentially.
+    /// * `sweep_tester` - A reference to the tester that processes the indices of intersecting leaves.
     pub unsafe fn sweep<TLeafTester: ISweepLeafTester>(
         &self,
         min: Vec3,
         max: Vec3,
         direction: Vec3,
         maximum_t: f32,
+        pool: &mut BufferPool,
         sweep_tester: &mut TLeafTester,
     ) {
         let mut origin = Vec3::ZERO;
@@ -152,7 +182,21 @@ impl Tree {
             origin,
             direction,
             tree_ray.as_mut_ptr(),
+            pool,
             sweep_tester,
         );
+    }
+
+    /// Performs a sweep test of a bounding box against the tree and invokes the sweep_tester for each intersecting leaf.
+    #[inline(always)]
+    pub unsafe fn sweep_bbox<TLeafTester: ISweepLeafTester>(
+        &self,
+        bounding_box: &crate::utilities::bounding_box::BoundingBox,
+        direction: Vec3,
+        maximum_t: f32,
+        pool: &mut BufferPool,
+        sweep_tester: &mut TLeafTester,
+    ) {
+        self.sweep(bounding_box.min, bounding_box.max, direction, maximum_t, pool, sweep_tester);
     }
 }

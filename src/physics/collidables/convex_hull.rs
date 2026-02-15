@@ -196,6 +196,8 @@ impl IShape for ConvexHull {
 }
 
 impl IConvexShape for ConvexHull {
+    type Wide = ConvexHullWide;
+
     fn compute_angular_expansion_data(
         &self,
         maximum_radius: &mut f32,

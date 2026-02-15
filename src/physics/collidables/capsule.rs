@@ -57,6 +57,8 @@ impl IShape for Capsule {
 }
 
 impl IConvexShape for Capsule {
+    type Wide = CapsuleWide;
+
     #[inline(always)]
     fn compute_angular_expansion_data(
         &self,

@@ -90,6 +90,8 @@ impl IShape for Triangle {
 }
 
 impl IConvexShape for Triangle {
+    type Wide = TriangleWide;
+
     #[inline(always)]
     fn compute_angular_expansion_data(
         &self,

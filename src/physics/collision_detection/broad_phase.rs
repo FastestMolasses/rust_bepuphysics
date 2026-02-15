@@ -829,6 +829,7 @@ impl BroadPhase {
         origin: Vec3,
         direction: Vec3,
         maximum_t: f32,
+        pool: &mut BufferPool,
         ray_tester: &mut TRayTester,
         id: i32,
     ) {
@@ -849,6 +850,7 @@ impl BroadPhase {
         self.active_tree.ray_cast_internal(
             tree_ray.as_mut_ptr(),
             ray_data.as_mut_ptr(),
+            pool,
             &mut active_tester,
         );
         let mut static_tester = RayLeafTester {
@@ -858,6 +860,7 @@ impl BroadPhase {
         self.static_tree.ray_cast_internal(
             tree_ray.as_mut_ptr(),
             ray_data.as_mut_ptr(),
+            pool,
             &mut static_tester,
         );
     }
@@ -869,6 +872,7 @@ impl BroadPhase {
         max: Vec3,
         direction: Vec3,
         maximum_t: f32,
+        pool: &mut BufferPool,
         sweep_tester: &mut TSweepTester,
     ) {
         let mut origin = Vec3::ZERO;
@@ -885,6 +889,7 @@ impl BroadPhase {
             origin,
             direction,
             tree_ray.as_mut_ptr(),
+            pool,
             &mut active_tester,
         );
         let mut static_tester = SweepLeafTester {
@@ -896,6 +901,7 @@ impl BroadPhase {
             origin,
             direction,
             tree_ray.as_mut_ptr(),
+            pool,
             &mut static_tester,
         );
     }
@@ -906,6 +912,7 @@ impl BroadPhase {
         bounding_box: &BoundingBox,
         direction: Vec3,
         maximum_t: f32,
+        pool: &mut BufferPool,
         sweep_tester: &mut TSweepTester,
     ) {
         self.sweep_minmax(
@@ -913,6 +920,7 @@ impl BroadPhase {
             bounding_box.max,
             direction,
             maximum_t,
+            pool,
             sweep_tester,
         );
     }
@@ -922,6 +930,7 @@ impl BroadPhase {
         &self,
         min: Vec3,
         max: Vec3,
+        pool: &mut BufferPool,
         overlap_enumerator: &mut TOverlapEnumerator,
     ) {
         let mut active_enumerator = BoxQueryEnumerator {
@@ -929,22 +938,23 @@ impl BroadPhase {
             leaves: &self.active_leaves,
         };
         self.active_tree
-            .get_overlaps_minmax(min, max, &mut active_enumerator);
+            .get_overlaps_minmax(min, max, pool, &mut active_enumerator);
         let mut static_enumerator = BoxQueryEnumerator {
             enumerator: overlap_enumerator as *mut TOverlapEnumerator,
             leaves: &self.static_leaves,
         };
         self.static_tree
-            .get_overlaps_minmax(min, max, &mut static_enumerator);
+            .get_overlaps_minmax(min, max, pool, &mut static_enumerator);
     }
 
     /// Finds any overlaps between a bounding box and leaf bounding boxes.
     pub fn get_overlaps<TOverlapEnumerator: IBreakableForEach<CollidableReference>>(
         &self,
         bounding_box: &BoundingBox,
+        pool: &mut BufferPool,
         overlap_enumerator: &mut TOverlapEnumerator,
     ) {
-        self.get_overlaps_minmax(bounding_box.min, bounding_box.max, overlap_enumerator);
+        self.get_overlaps_minmax(bounding_box.min, bounding_box.max, pool, overlap_enumerator);
     }
 }
 
@@ -962,6 +972,7 @@ impl<'a, TRayTester: IBroadPhaseRayTester> IRayLeafTester for RayLeafTester<'a, 
         leaf_index: i32,
         ray_data: *mut TreeRayData,
         maximum_t: *mut f32,
+        _pool: &mut BufferPool,
     ) {
         let collidable = *self.leaves.get(leaf_index);
         (*self.leaf_tester).ray_test(collidable, ray_data as *const RayData, maximum_t);

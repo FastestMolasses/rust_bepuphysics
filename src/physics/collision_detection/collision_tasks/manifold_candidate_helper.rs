@@ -291,7 +291,9 @@ impl ManifoldCandidateHelper {
 
         // 1. Find deepest contact with extremity bias → contact0
         let mut best_score = Vector::<f32>::splat(-f32::MAX);
-        let extremity_scale = *epsilon_scale * Vector::<f32>::splat(1e-2);
+        //While depth is the dominant heuristic, extremity is used as a bias to keep initial contact selection a little more consistent in near-equal cases.
+        const EXTREMITY_SCALE: f32 = 1e-2;
+        let extremity_scale = Vector::<f32>::splat(EXTREMITY_SCALE);
         for i in 0..max_candidate_count {
             let candidate = &*candidates.add(i as usize);
             let mut exists = Vector::<i32>::splat(0);
@@ -512,9 +514,9 @@ impl ManifoldCandidateHelper {
         // Find deepest contact (contact 0).
         let mut best_score0 = f32::MIN;
         let mut best_index0 = 0usize;
-        let extremity_scale = epsilon_scale * 1e-2;
-        let extremity_x = 0.7946897654 * extremity_scale;
-        let extremity_y = 0.60701579614 * extremity_scale;
+        const EXTREMITY_SCALE: f32 = 1e-2;
+        let extremity_x = 0.7946897654 * EXTREMITY_SCALE;
+        let extremity_y = 0.60701579614 * EXTREMITY_SCALE;
         for i in 0..candidate_count as usize {
             let c = &*candidates.add(i);
             let d = *candidate_depths.add(i);

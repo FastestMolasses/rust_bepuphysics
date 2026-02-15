@@ -5,7 +5,8 @@ use crate::physics::body_properties::{BodyVelocity, MotionState, RigidPose};
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
 use crate::physics::collidables::collidable::Collidable;
 use crate::physics::collidables::shape::{
-    ICompoundShape, IConvexShape, IDisposableShape, INonConvexBounds,
+    ICompoundShape, IConvexShape, IDisposableShape, INonConvexBounds, IShapeWide,
+    IShapeWideAllocation,
 };
 use crate::physics::collidables::shapes::{
     CompoundShapeBatch, ConvexShapeBatch, HomogeneousCompoundShapeBatch, ShapeBatch, Shapes,
@@ -15,12 +16,13 @@ use crate::physics::collision_detection::broad_phase::BroadPhase;
 use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
-#[allow(unused_imports)]
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
-#[allow(unused_imports)]
 use std::simd::prelude::*;
+
+use crate::physics::body_properties::BodyVelocityWide;
 
 const VECTOR_WIDTH: usize = crate::utilities::vector::VECTOR_WIDTH;
 
@@ -176,18 +178,31 @@ impl BoundingBoxBatcher {
         }
     }
 
-    /// Executes a batch of convex shape bounding box computations.
+    /// Executes a batch of convex shape bounding box computations using SIMD-width bundles.
     pub unsafe fn execute_convex_batch<TShape: IConvexShape + Copy + Default + 'static>(
         &mut self,
         shape_batch: &ConvexShapeBatch<TShape>,
     ) {
+        let mut shape_wide = TShape::Wide::default();
+        let alloc_size = shape_wide.internal_allocation_size_of();
+        // Stack-allocate internal memory for wide types that need it (e.g. ConvexHullWide).
+        let mut alloc_backing = vec![0u8; alloc_size];
+        if alloc_size > 0 {
+            let alloc_buffer = Buffer::<u8>::new(alloc_backing.as_mut_ptr(), alloc_size as i32, -1);
+            shape_wide.initialize_allocation(&alloc_buffer);
+        }
+
         let batch = self.batches.get(shape_batch.type_id() as i32);
         let shape_indices = &batch.shape_indices;
         let continuations = &batch.continuations;
         let bodies = &mut *self.bodies;
         let active_set = bodies.active_set_mut();
-        let _dt_wide = Vector::<f32>::splat(self.dt);
+        let dt_wide = Vector::<f32>::splat(self.dt);
         let broad_phase = &mut *self.broad_phase;
+
+        let mut minimum_margin_span = [0.0f32; VECTOR_WIDTH];
+        let mut maximum_margin_span = [0.0f32; VECTOR_WIDTH];
+        let mut allow_expansion_beyond_span = [0i32; VECTOR_WIDTH];
 
         let mut bundle_start_index = 0i32;
         while bundle_start_index < batch.count {
@@ -196,82 +211,142 @@ impl BoundingBoxBatcher {
                 count_in_bundle = VECTOR_WIDTH as i32;
             }
 
-            // NOTE: Full wide batch processing with TransposeMotionStates, shapeWide, etc. not yet implemented.
-            // For now, do scalar per-shape processing (functionally correct, not yet SIMD-optimized).
+            // Gather shapes and collidable margins into the wide bundle.
             for inner_index in 0..count_in_bundle {
                 let index_in_batch = bundle_start_index + inner_index;
                 let shape_index = *shape_indices.get(index_in_batch);
-                let continuation = *continuations.get(index_in_batch);
-                let motion_state = batch.motion_states.get(index_in_batch);
-
                 let shape = shape_batch.get(shape_index as usize);
-                let mut min = Vec3::ZERO;
-                let mut max = Vec3::ZERO;
-                shape.compute_bounds(motion_state.pose.orientation, &mut min, &mut max);
-
-                let mut maximum_radius = 0.0f32;
-                let mut maximum_angular_expansion = 0.0f32;
-                shape.compute_angular_expansion_data(
-                    &mut maximum_radius,
-                    &mut maximum_angular_expansion,
-                );
-
-                let angular_bounds_expansion = BoundingBoxHelpers::get_angular_bounds_expansion(
-                    motion_state.velocity.angular.length(),
-                    self.dt,
-                    maximum_radius,
-                    maximum_angular_expansion,
-                );
-                let mut speculative_margin =
-                    motion_state.velocity.linear.length() * self.dt + angular_bounds_expansion;
-
-                let collidable = active_set.collidables.get_mut(continuation.body_index());
-                speculative_margin = speculative_margin
-                    .max(collidable.minimum_speculative_margin)
-                    .min(collidable.maximum_speculative_margin);
-
-                let maximum_allowed_expansion = if collidable
+                shape_wide.write_slot(inner_index as usize, shape);
+                let collidable =
+                    active_set.collidables.get(continuations.get(index_in_batch).body_index());
+                minimum_margin_span[inner_index as usize] =
+                    collidable.minimum_speculative_margin;
+                maximum_margin_span[inner_index as usize] =
+                    collidable.maximum_speculative_margin;
+                allow_expansion_beyond_span[inner_index as usize] = if collidable
                     .continuity
                     .allow_expansion_beyond_speculative_margin()
                 {
-                    f32::MAX
+                    -1i32 // all-ones mask
                 } else {
-                    speculative_margin
+                    0i32
                 };
+            }
 
-                let mut min_expansion = Vec3::ZERO;
-                let mut max_expansion = Vec3::ZERO;
-                BoundingBoxHelpers::get_bounds_expansion_scalar(
-                    motion_state.velocity.linear,
-                    self.dt,
-                    angular_bounds_expansion,
-                    &mut min_expansion,
-                    &mut max_expansion,
+            // Transpose AOS motion states into SOA wide bundles.
+            let motion_slice =
+                batch.motion_states.slice_offset(bundle_start_index, count_in_bundle);
+            let mut positions = Vector3Wide::default();
+            let mut orientations = QuaternionWide::default();
+            let mut velocities = BodyVelocityWide::default();
+            Bodies::transpose_motion_states(
+                &motion_slice,
+                &mut positions,
+                &mut orientations,
+                &mut velocities,
+            );
+
+            // Compute bounds from the wide shape bundle.
+            let mut maximum_radius = Vector::<f32>::default();
+            let mut maximum_angular_expansion = Vector::<f32>::default();
+            let mut bundle_min = Vector3Wide::default();
+            let mut bundle_max = Vector3Wide::default();
+            shape_wide.get_bounds(
+                &mut orientations,
+                count_in_bundle,
+                &mut maximum_radius,
+                &mut maximum_angular_expansion,
+                &mut bundle_min,
+                &mut bundle_max,
+            );
+
+            // Compute angular bounds expansion and speculative margin (wide).
+            let angular_bounds_expansion =
+                BoundingBoxHelpers::get_angular_bounds_expansion_wide(
+                    velocities.angular.length(),
+                    dt_wide,
+                    maximum_radius,
+                    maximum_angular_expansion,
                 );
-                let max_exp_vec = Vec3::splat(maximum_allowed_expansion);
-                min_expansion = min_expansion.max(-max_exp_vec);
-                max_expansion = max_expansion.min(max_exp_vec);
+            let mut speculative_margin =
+                velocities.linear.length() * dt_wide + angular_bounds_expansion;
 
+            let minimum_speculative_margin =
+                Vector::<f32>::from_array(minimum_margin_span);
+            let maximum_speculative_margin =
+                Vector::<f32>::from_array(maximum_margin_span);
+            let allow_expansion_beyond_speculative_margin =
+                Vector::<i32>::from_array(allow_expansion_beyond_span);
+            speculative_margin = minimum_speculative_margin
+                .simd_max(maximum_speculative_margin.simd_min(speculative_margin));
+            let f32_max_wide = Vector::<f32>::splat(f32::MAX);
+            // ConditionalSelect: if mask bit is set (all-ones = -1), pick f32::MAX, else speculative_margin.
+            let maximum_bounds_expansion = Vector::<i32>::from(
+                allow_expansion_beyond_speculative_margin
+                    .simd_ne(Vector::<i32>::splat(0))
+                    .select(f32_max_wide.to_bits().cast(), speculative_margin.to_bits().cast()),
+            );
+            let maximum_bounds_expansion =
+                Vector::<f32>::from_bits(maximum_bounds_expansion.cast());
+
+            // Compute bounds expansion from linear velocity + angular expansion.
+            let mut min_expansion = Vector3Wide::default();
+            let mut max_expansion = Vector3Wide::default();
+            BoundingBoxHelpers::get_bounds_expansion_wide(
+                &velocities.linear,
+                dt_wide,
+                angular_bounds_expansion,
+                &mut min_expansion,
+                &mut max_expansion,
+            );
+            // Clamp expansion to maximum allowed.
+            let neg_max = -maximum_bounds_expansion;
+            let clamped_min = Vector3Wide::max_scalar_new(&neg_max, &min_expansion);
+            let clamped_max = Vector3Wide::min_scalar_new(&maximum_bounds_expansion, &max_expansion);
+            min_expansion = clamped_min;
+            max_expansion = clamped_max;
+
+            // Apply position offsets.
+            bundle_min = positions + (bundle_min + min_expansion);
+            bundle_max = positions + (bundle_max + max_expansion);
+
+            // Scatter results back per-body.
+            for inner_index in 0..count_in_bundle {
+                let continuation = *continuations.get(bundle_start_index + inner_index);
+                let collidable = active_set.collidables.get_mut(continuation.body_index());
                 let (min_ptr, max_ptr) =
                     broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
 
                 if continuation.compound_child() {
-                    collidable.speculative_margin =
-                        collidable.speculative_margin.max(speculative_margin);
-                    let new_min = motion_state.pose.position + (min + min_expansion);
-                    let new_max = motion_state.pose.position + (max + max_expansion);
+                    collidable.speculative_margin = collidable
+                        .speculative_margin
+                        .max(speculative_margin[inner_index as usize]);
+                    let new_min = Vec3::new(
+                        bundle_min.x[inner_index as usize],
+                        bundle_min.y[inner_index as usize],
+                        bundle_min.z[inner_index as usize],
+                    );
+                    let new_max = Vec3::new(
+                        bundle_max.x[inner_index as usize],
+                        bundle_max.y[inner_index as usize],
+                        bundle_max.z[inner_index as usize],
+                    );
                     BoundingBox::create_merged(
-                        *min_ptr,
-                        *max_ptr,
-                        new_min,
-                        new_max,
-                        &mut *min_ptr,
-                        &mut *max_ptr,
+                        *min_ptr, *max_ptr, new_min, new_max, &mut *min_ptr, &mut *max_ptr,
                     );
                 } else {
-                    collidable.speculative_margin = speculative_margin;
-                    *min_ptr = motion_state.pose.position + (min + min_expansion);
-                    *max_ptr = motion_state.pose.position + (max + max_expansion);
+                    collidable.speculative_margin =
+                        speculative_margin[inner_index as usize];
+                    *min_ptr = Vec3::new(
+                        bundle_min.x[inner_index as usize],
+                        bundle_min.y[inner_index as usize],
+                        bundle_min.z[inner_index as usize],
+                    );
+                    *max_ptr = Vec3::new(
+                        bundle_max.x[inner_index as usize],
+                        bundle_max.y[inner_index as usize],
+                        bundle_max.z[inner_index as usize],
+                    );
                 }
             }
 

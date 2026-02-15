@@ -336,7 +336,7 @@ impl Statics {
             // Query the static tree for overlapping leaves.
             broad_phase
                 .static_tree
-                .get_overlaps(*bounds, &mut collector);
+                .get_overlaps(*bounds, &mut *self.pool, &mut collector);
         }
 
         if sleeping_sets.count > 0 {

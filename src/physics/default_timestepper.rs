@@ -11,6 +11,7 @@ use crate::utilities::thread_dispatcher::IThreadDispatcher;
 
 /// Default timestepper that executes:
 /// Sleep -> PredictBBs -> CollisionDetection -> Solve -> OptimizeDataStructures.
+#[derive(Default)]
 pub struct DefaultTimestepper {
     /// Fires after the sleeper completes and before bodies are integrated.
     pub slept: Option<TimestepperStageHandler>,
@@ -21,17 +22,6 @@ pub struct DefaultTimestepper {
     pub collisions_detected: Option<TimestepperStageHandler>,
     /// Fires after the solver executes and before the final integration step.
     pub constraints_solved: Option<TimestepperStageHandler>,
-}
-
-impl Default for DefaultTimestepper {
-    fn default() -> Self {
-        Self {
-            slept: None,
-            before_collision_detection: None,
-            collisions_detected: None,
-            constraints_solved: None,
-        }
-    }
 }
 
 impl ITimestepper for DefaultTimestepper {

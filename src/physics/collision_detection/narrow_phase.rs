@@ -762,6 +762,15 @@ pub struct NarrowPhase {
     pub(crate) flush_job_index: UnsafeCell<i32>,
     /// Flush jobs stored for MT dispatch (valid only during flush).
     pub(crate) flush_jobs: Vec<NarrowPhaseFlushJob>,
+
+    /// Function pointer for preflush dispatch, set by NarrowPhaseGeneric during construction.
+    /// Matches C#'s `abstract void OnPreflush(IThreadDispatcher, bool)`.
+    /// The first argument is `self` as a raw pointer (to the NarrowPhaseGeneric wrapper).
+    pub(crate) on_preflush:
+        Option<unsafe fn(*mut NarrowPhase, Option<&dyn IThreadDispatcher>, bool)>,
+    /// Function pointer for postflush dispatch, set by NarrowPhaseGeneric during construction.
+    /// Matches C#'s `abstract void OnPostflush(IThreadDispatcher)`.
+    pub(crate) on_postflush: Option<unsafe fn(*mut NarrowPhase, Option<&dyn IThreadDispatcher>)>,
 }
 
 impl NarrowPhase {
@@ -805,6 +814,8 @@ impl NarrowPhase {
             worker_pending_constraints: Vec::new(),
             flush_job_index: UnsafeCell::new(-1),
             flush_jobs: Vec::new(),
+            on_preflush: None,
+            on_postflush: None,
         }
     }
 
@@ -949,11 +960,19 @@ impl NarrowPhase {
     }
 
     /// Flushes all pending narrow phase work.
+    /// Calls OnPreflush and OnPostflush if set (matching C#'s NarrowPhase.Flush virtual dispatch).
     pub fn flush(
         &mut self,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
         deterministic: bool,
     ) {
+        // OnPreflush: dispatch to NarrowPhaseGeneric<T>::preflush() if available.
+        if let Some(on_preflush) = self.on_preflush {
+            unsafe {
+                on_preflush(self as *mut NarrowPhase, thread_dispatcher, deterministic);
+            }
+        }
+
         self.flush_jobs = Vec::with_capacity(128);
 
         self.pair_cache.prepare_flush_jobs(&mut self.flush_jobs);
@@ -1017,6 +1036,13 @@ impl NarrowPhase {
         self.constraint_remover
             .mark_affected_constraints_as_removed_from_solver();
         self.constraint_remover.postflush();
+
+        // OnPostflush: dispatch to NarrowPhaseGeneric<T>::postflush() if available.
+        if let Some(on_postflush) = self.on_postflush {
+            unsafe {
+                on_postflush(self as *mut NarrowPhase, thread_dispatcher);
+            }
+        }
     }
 
     /// Worker loop function for multithreaded flush dispatch.
@@ -1127,7 +1153,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         minimum_mapping_size: i32,
         minimum_pending_size: i32,
     ) -> Self {
-        let base = NarrowPhase::new(
+        let mut base = NarrowPhase::new(
             pool,
             bodies,
             statics,
@@ -1141,6 +1167,9 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             minimum_mapping_size,
             minimum_pending_size,
         );
+        // Wire up the virtual dispatch trampolines matching C#'s abstract OnPreflush/OnPostflush.
+        base.on_preflush = Some(Self::preflush_trampoline);
+        base.on_postflush = Some(Self::postflush_trampoline);
         Self {
             base,
             callbacks,
@@ -1149,6 +1178,34 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             preflush_job_index: UnsafeCell::new(-1),
             preflush_jobs: QuickList::default(),
         }
+    }
+
+    /// Trampoline for OnPreflush: casts base NarrowPhase pointer back to NarrowPhaseGeneric<T>.
+    /// The NarrowPhaseGeneric<T> struct has `base: NarrowPhase` as its first field (#[repr(C)]
+    /// not required — but the field is at offset 0 since it's the first field in the struct).
+    ///
+    /// # Safety
+    /// `base_ptr` must point to the `base` field of a valid `NarrowPhaseGeneric<TCallbacks>`.
+    unsafe fn preflush_trampoline(
+        base_ptr: *mut NarrowPhase,
+        thread_dispatcher: Option<&dyn IThreadDispatcher>,
+        deterministic: bool,
+    ) {
+        // NarrowPhaseGeneric<T> { base: NarrowPhase, ... } — base is the first field.
+        let generic_ptr = base_ptr as *mut NarrowPhaseGeneric<TCallbacks>;
+        (*generic_ptr).preflush(thread_dispatcher, deterministic);
+    }
+
+    /// Trampoline for OnPostflush: casts base NarrowPhase pointer back to NarrowPhaseGeneric<T>.
+    ///
+    /// # Safety
+    /// `base_ptr` must point to the `base` field of a valid `NarrowPhaseGeneric<TCallbacks>`.
+    unsafe fn postflush_trampoline(
+        base_ptr: *mut NarrowPhase,
+        thread_dispatcher: Option<&dyn IThreadDispatcher>,
+    ) {
+        let generic_ptr = base_ptr as *mut NarrowPhaseGeneric<TCallbacks>;
+        (*generic_ptr).postflush(thread_dispatcher);
     }
 
     // --- Lifecycle ---

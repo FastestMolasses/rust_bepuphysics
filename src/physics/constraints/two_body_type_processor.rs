@@ -248,7 +248,9 @@ impl<
         unsafe {
             let impulses_base = type_batch.accumulated_impulses.as_mut_ptr()
                 as *mut crate::utilities::vector::Vector<f32>;
-            for i in 0..dof_count {
+            // NOTE: C# bug fix — original iterates 0..dofCount (first bundle only).
+            // Must iterate over ALL bundles: bundleCount * dofCount.
+            for i in 0..(type_batch.bundle_count() as usize * dof_count) {
                 *impulses_base.add(i) *= broadcasted_scale;
             }
         }

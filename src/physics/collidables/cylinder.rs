@@ -57,6 +57,8 @@ impl IShape for Cylinder {
 }
 
 impl IConvexShape for Cylinder {
+    type Wide = CylinderWide;
+
     #[inline(always)]
     fn compute_angular_expansion_data(
         &self,

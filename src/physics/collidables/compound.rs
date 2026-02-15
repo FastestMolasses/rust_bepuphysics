@@ -450,17 +450,21 @@ impl ICompoundShape for Compound {
         &self.children[child_index as usize]
     }
 
-    fn compute_bounds(&self, _orientation: Quat, _min: &mut Vec3, _max: &mut Vec3) {
-        // Note: Compound.compute_bounds requires a Shapes reference which is not
-        // available through this trait signature. This method should not be called
-        // without access to the shapes collection — use the inherent method instead.
-        panic!("Compound::compute_bounds requires Shapes; use the inherent method with shape_batches parameter.");
+    fn compute_bounds(
+        &self,
+        orientation: Quat,
+        shape_batches: &Shapes,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        self.compute_bounds(orientation, shape_batches, min, max);
     }
 
     fn find_local_overlaps<TOverlaps: IOverlapCollector>(
         &self,
         _local_min: &Vec3,
         _local_max: &Vec3,
+        _pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     ) {
         // List-based compounds have no acceleration structure.
@@ -484,6 +488,36 @@ impl ICompoundShape for Compound {
             velocity,
             body_index,
         );
+    }
+
+    unsafe fn ray_test_shape(
+        &self,
+        pose: &RigidPose,
+        ray: &RayData,
+        maximum_t: &mut f32,
+        shape_batches: &Shapes,
+        _pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
+        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
+        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        self.ray_test(pose, ray, maximum_t, shape_batches, &mut wrapper);
     }
 }
 

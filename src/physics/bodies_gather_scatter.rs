@@ -1,9 +1,10 @@
 // Translated from BepuPhysics/Bodies_GatherScatter.cs
 //
 // This file extends Bodies with gather/scatter operations for the solver.
-// The C# version uses AVX intrinsics for 8-wide SIMD on x86. For ARM compatibility
-// (Apple Silicon), we translate only the fallback (scalar) paths. Platform-specific
-// SIMD paths can be added later behind #[cfg(target_arch = "x86_64")] gates.
+// The C# version uses AVX intrinsics for 8-wide SIMD on x86-64. We use portable_simd's
+// simd_swizzle! behind #[cfg(target_feature = "avx")] to generate the same AVX
+// vshufps/vperm2f128 instructions. On ARM (Apple Silicon), scalar fallback is used,
+// matching C# behavior (no AdvSimd path exists for these methods).
 
 use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{
@@ -39,6 +40,74 @@ impl MotionState {
     pub const OFFSET_TO_ANGULAR_X: usize = 12;
     pub const OFFSET_TO_ANGULAR_Y: usize = 13;
     pub const OFFSET_TO_ANGULAR_Z: usize = 14;
+}
+
+/// 8x8 matrix transpose using portable_simd swizzle operations.
+/// On x86-64 with AVX, this compiles to the same vunpcklps/vshufps/vperm2f128
+/// instructions as the C# Avx.UnpackLow/Shuffle/Permute2x128 calls.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+#[inline(always)]
+fn transpose_8x8(
+    m0: Vector<f32>,
+    m1: Vector<f32>,
+    m2: Vector<f32>,
+    m3: Vector<f32>,
+    m4: Vector<f32>,
+    m5: Vector<f32>,
+    m6: Vector<f32>,
+    m7: Vector<f32>,
+) -> [Vector<f32>; 8] {
+    use std::simd::simd_swizzle;
+    // Stage 1: UnpackLow/UnpackHigh (interleave pairs within 128-bit lanes)
+    let n0 = simd_swizzle!(m0, m1, [0, 8, 1, 9, 4, 12, 5, 13]);
+    let n1 = simd_swizzle!(m2, m3, [0, 8, 1, 9, 4, 12, 5, 13]);
+    let n2 = simd_swizzle!(m4, m5, [0, 8, 1, 9, 4, 12, 5, 13]);
+    let n3 = simd_swizzle!(m6, m7, [0, 8, 1, 9, 4, 12, 5, 13]);
+    let n4 = simd_swizzle!(m0, m1, [2, 10, 3, 11, 6, 14, 7, 15]);
+    let n5 = simd_swizzle!(m2, m3, [2, 10, 3, 11, 6, 14, 7, 15]);
+    let n6 = simd_swizzle!(m4, m5, [2, 10, 3, 11, 6, 14, 7, 15]);
+    let n7 = simd_swizzle!(m6, m7, [2, 10, 3, 11, 6, 14, 7, 15]);
+    // Stage 2: Shuffle (group 4-element blocks from pairs)
+    let o0 = simd_swizzle!(n0, n1, [0, 1, 8, 9, 4, 5, 12, 13]);
+    let o1 = simd_swizzle!(n2, n3, [0, 1, 8, 9, 4, 5, 12, 13]);
+    let o2 = simd_swizzle!(n4, n5, [0, 1, 8, 9, 4, 5, 12, 13]);
+    let o3 = simd_swizzle!(n6, n7, [0, 1, 8, 9, 4, 5, 12, 13]);
+    let o4 = simd_swizzle!(n0, n1, [2, 3, 10, 11, 6, 7, 14, 15]);
+    let o5 = simd_swizzle!(n2, n3, [2, 3, 10, 11, 6, 7, 14, 15]);
+    let o6 = simd_swizzle!(n4, n5, [2, 3, 10, 11, 6, 7, 14, 15]);
+    let o7 = simd_swizzle!(n6, n7, [2, 3, 10, 11, 6, 7, 14, 15]);
+    // Stage 3: Permute2x128 (recombine 128-bit halves)
+    [
+        simd_swizzle!(o0, o1, [0, 1, 2, 3, 8, 9, 10, 11]),
+        simd_swizzle!(o4, o5, [0, 1, 2, 3, 8, 9, 10, 11]),
+        simd_swizzle!(o2, o3, [0, 1, 2, 3, 8, 9, 10, 11]),
+        simd_swizzle!(o6, o7, [0, 1, 2, 3, 8, 9, 10, 11]),
+        simd_swizzle!(o0, o1, [4, 5, 6, 7, 12, 13, 14, 15]),
+        simd_swizzle!(o4, o5, [4, 5, 6, 7, 12, 13, 14, 15]),
+        simd_swizzle!(o2, o3, [4, 5, 6, 7, 12, 13, 14, 15]),
+        simd_swizzle!(o6, o7, [4, 5, 6, 7, 12, 13, 14, 15]),
+    ]
+}
+
+/// Load 8 contiguous f32 values into a SIMD vector.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+#[inline(always)]
+unsafe fn load_8f32(ptr: *const f32) -> Vector<f32> {
+    Vector::<f32>::from_array(*(ptr as *const [f32; 8]))
+}
+
+/// Store 8 f32 values from a SIMD vector to contiguous memory.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+#[inline(always)]
+unsafe fn store_8f32(ptr: *mut f32, v: Vector<f32>) {
+    *(ptr as *mut [f32; 8]) = v.to_array();
+}
+
+/// Store 4 f32 values (128-bit lane) to contiguous memory.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+#[inline(always)]
+unsafe fn store_4f32(ptr: *mut f32, v: std::simd::Simd<f32, 4>) {
+    *(ptr as *mut [f32; 4]) = v.to_array();
 }
 
 impl Bodies {
@@ -187,18 +256,67 @@ impl Bodies {
         velocity: &mut BodyVelocityWide,
     ) {
         debug_assert!(states.len() > 0 && (states.len() as usize) <= Vector::<f32>::LEN);
-        // Scalar fallback (works on all architectures).
-        for i in 0..states.len() as usize {
-            let state = states.get(i as i32);
-            Vector3Wide::write_slot(state.pose.position, i, position);
-            QuaternionWide::write_slot(state.pose.orientation, i, orientation);
-            Vector3Wide::write_slot(state.velocity.linear, i, &mut velocity.linear);
-            Vector3Wide::write_slot(state.velocity.angular, i, &mut velocity.angular);
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+        {
+            let len = states.len() as usize;
+            let base = states.as_ptr();
+            let z = Vector::<f32>::splat(0.0);
+            let s = |i: usize| -> *const f32 { base.add(i) as *const f32 };
+
+            // First half: orientation (floats 0-3) + position (floats 4-6) + padding
+            let m0 = load_8f32(s(0));
+            let m1 = if len <= 1 { z } else { load_8f32(s(1)) };
+            let m2 = if len <= 2 { z } else { load_8f32(s(2)) };
+            let m3 = if len <= 3 { z } else { load_8f32(s(3)) };
+            let m4 = if len <= 4 { z } else { load_8f32(s(4)) };
+            let m5 = if len <= 5 { z } else { load_8f32(s(5)) };
+            let m6 = if len <= 6 { z } else { load_8f32(s(6)) };
+            let m7 = if len <= 7 { z } else { load_8f32(s(7)) };
+
+            let t = transpose_8x8(m0, m1, m2, m3, m4, m5, m6, m7);
+            orientation.x = t[0];
+            orientation.y = t[1];
+            orientation.z = t[2];
+            orientation.w = t[3];
+            position.x = t[4];
+            position.y = t[5];
+            position.z = t[6];
+
+            // Second half: velocity (floats 8-10=linear, 12-14=angular, 11&15=padding)
+            let m0 = load_8f32(s(0).add(8));
+            let m1 = if len <= 1 { z } else { load_8f32(s(1).add(8)) };
+            let m2 = if len <= 2 { z } else { load_8f32(s(2).add(8)) };
+            let m3 = if len <= 3 { z } else { load_8f32(s(3).add(8)) };
+            let m4 = if len <= 4 { z } else { load_8f32(s(4).add(8)) };
+            let m5 = if len <= 5 { z } else { load_8f32(s(5).add(8)) };
+            let m6 = if len <= 6 { z } else { load_8f32(s(6).add(8)) };
+            let m7 = if len <= 7 { z } else { load_8f32(s(7).add(8)) };
+
+            let t = transpose_8x8(m0, m1, m2, m3, m4, m5, m6, m7);
+            velocity.linear.x = t[0];
+            velocity.linear.y = t[1];
+            velocity.linear.z = t[2];
+            // t[3] is padding (_pad0), skip
+            velocity.angular.x = t[4];
+            velocity.angular.y = t[5];
+            velocity.angular.z = t[6];
+            // t[7] is padding (_pad1), skip
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+        {
+            // Scalar fallback (works on all architectures).
+            for i in 0..states.len() as usize {
+                let state = states.get(i as i32);
+                Vector3Wide::write_slot(state.pose.position, i, position);
+                QuaternionWide::write_slot(state.pose.orientation, i, orientation);
+                Vector3Wide::write_slot(state.velocity.linear, i, &mut velocity.linear);
+                Vector3Wide::write_slot(state.velocity.angular, i, &mut velocity.angular);
+            }
         }
     }
 
     /// Gathers state (position, orientation, velocity, inertia) from per-body AOS storage into
-    /// AOSOA wide bundles, using the fallback scalar path.
+    /// AOSOA wide bundles. Uses AVX 8x8 transpose on x86-64, scalar fallback on ARM.
     pub unsafe fn gather_state<TAccessFilter: IBodyAccessFilter>(
         &self,
         encoded_body_indices: &Vector<i32>,
@@ -210,16 +328,125 @@ impl Bodies {
     ) {
         let solver_states = self.active_set().dynamics_state.as_ptr();
 
-        // Scalar fallback — works on all architectures.
-        Self::fallback_gather_motion_state(
-            solver_states,
-            encoded_body_indices,
-            position,
-            orientation,
-            velocity,
-        );
-        let offset = if world_inertia { 24 } else { 16 };
-        Self::fallback_gather_inertia(solver_states, encoded_body_indices, inertia, offset);
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+        {
+            let z = Vector::<f32>::splat(0.0);
+
+            // Extract body indices and compute base float pointers.
+            let bi0 = encoded_body_indices[0];
+            let empty0 = bi0 < 0;
+            let s0 = solver_states.offset((bi0 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi1 = encoded_body_indices[1];
+            let empty1 = bi1 < 0;
+            let s1 = solver_states.offset((bi1 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi2 = encoded_body_indices[2];
+            let empty2 = bi2 < 0;
+            let s2 = solver_states.offset((bi2 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi3 = encoded_body_indices[3];
+            let empty3 = bi3 < 0;
+            let s3 = solver_states.offset((bi3 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi4 = encoded_body_indices[4];
+            let empty4 = bi4 < 0;
+            let s4 = solver_states.offset((bi4 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi5 = encoded_body_indices[5];
+            let empty5 = bi5 < 0;
+            let s5 = solver_states.offset((bi5 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi6 = encoded_body_indices[6];
+            let empty6 = bi6 < 0;
+            let s6 = solver_states.offset((bi6 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi7 = encoded_body_indices[7];
+            let empty7 = bi7 < 0;
+            let s7 = solver_states.offset((bi7 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+
+            // First half of MotionState (orientation + position).
+            {
+                let m0 = if empty0 { z } else { load_8f32(s0) };
+                let m1 = if empty1 { z } else { load_8f32(s1) };
+                let m2 = if empty2 { z } else { load_8f32(s2) };
+                let m3 = if empty3 { z } else { load_8f32(s3) };
+                let m4 = if empty4 { z } else { load_8f32(s4) };
+                let m5 = if empty5 { z } else { load_8f32(s5) };
+                let m6 = if empty6 { z } else { load_8f32(s6) };
+                let m7 = if empty7 { z } else { load_8f32(s7) };
+
+                let t = transpose_8x8(m0, m1, m2, m3, m4, m5, m6, m7);
+                if TAccessFilter::gather_orientation() {
+                    orientation.x = t[0];
+                    orientation.y = t[1];
+                    orientation.z = t[2];
+                    orientation.w = t[3];
+                }
+                if TAccessFilter::gather_position() {
+                    position.x = t[4];
+                    position.y = t[5];
+                    position.z = t[6];
+                }
+            }
+
+            // Second half of MotionState (velocity).
+            {
+                let m0 = if empty0 { z } else { load_8f32(s0.add(8)) };
+                let m1 = if empty1 { z } else { load_8f32(s1.add(8)) };
+                let m2 = if empty2 { z } else { load_8f32(s2.add(8)) };
+                let m3 = if empty3 { z } else { load_8f32(s3.add(8)) };
+                let m4 = if empty4 { z } else { load_8f32(s4.add(8)) };
+                let m5 = if empty5 { z } else { load_8f32(s5.add(8)) };
+                let m6 = if empty6 { z } else { load_8f32(s6.add(8)) };
+                let m7 = if empty7 { z } else { load_8f32(s7.add(8)) };
+
+                let t = transpose_8x8(m0, m1, m2, m3, m4, m5, m6, m7);
+                if TAccessFilter::access_linear_velocity() {
+                    velocity.linear.x = t[0];
+                    velocity.linear.y = t[1];
+                    velocity.linear.z = t[2];
+                }
+                if TAccessFilter::access_angular_velocity() {
+                    velocity.angular.x = t[4];
+                    velocity.angular.y = t[5];
+                    velocity.angular.z = t[6];
+                }
+            }
+
+            // Inertia.
+            {
+                let offset_in_floats: usize = if world_inertia { 24 } else { 16 };
+                let m0 = if empty0 { z } else { load_8f32(s0.add(offset_in_floats)) };
+                let m1 = if empty1 { z } else { load_8f32(s1.add(offset_in_floats)) };
+                let m2 = if empty2 { z } else { load_8f32(s2.add(offset_in_floats)) };
+                let m3 = if empty3 { z } else { load_8f32(s3.add(offset_in_floats)) };
+                let m4 = if empty4 { z } else { load_8f32(s4.add(offset_in_floats)) };
+                let m5 = if empty5 { z } else { load_8f32(s5.add(offset_in_floats)) };
+                let m6 = if empty6 { z } else { load_8f32(s6.add(offset_in_floats)) };
+                let m7 = if empty7 { z } else { load_8f32(s7.add(offset_in_floats)) };
+
+                let t = transpose_8x8(m0, m1, m2, m3, m4, m5, m6, m7);
+                if TAccessFilter::gather_inertia_tensor() {
+                    inertia.inverse_inertia_tensor.xx = t[0];
+                    inertia.inverse_inertia_tensor.yx = t[1];
+                    inertia.inverse_inertia_tensor.yy = t[2];
+                    inertia.inverse_inertia_tensor.zx = t[3];
+                    inertia.inverse_inertia_tensor.zy = t[4];
+                    inertia.inverse_inertia_tensor.zz = t[5];
+                }
+                if TAccessFilter::gather_mass() {
+                    inertia.inverse_mass = t[6];
+                }
+            }
+        }
+
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+        {
+            // Scalar fallback — works on all architectures.
+            Self::fallback_gather_motion_state(
+                solver_states,
+                encoded_body_indices,
+                position,
+                orientation,
+                velocity,
+            );
+            let offset = if world_inertia { 24 } else { 16 };
+            Self::fallback_gather_inertia(solver_states, encoded_body_indices, inertia, offset);
+        }
     }
 
     /// Scatters pose (position + orientation) from wide bundles back to per-body AOS storage.
@@ -230,26 +457,69 @@ impl Bodies {
         encoded_body_indices: &Vector<i32>,
         mask: &Vector<i32>,
     ) {
-        // Scalar fallback.
-        for inner_index in 0..Vector::<i32>::LEN {
-            if mask[inner_index] == 0 {
-                continue;
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+        {
+            let states = self.active_set_dynamics_ptr();
+            // Reverse transpose: 7 SOA → 8 AOS (pos.z duplicated as 8th column = padding).
+            let t = transpose_8x8(
+                orientation.x,
+                orientation.y,
+                orientation.z,
+                orientation.w,
+                position.x,
+                position.y,
+                position.z,
+                position.z, // Laze: duplicated, lands in padding slot.
+            );
+            // Store each row to the corresponding body's MotionState (first 8 floats = pose).
+            if mask[0] != 0 {
+                store_8f32(states.add(encoded_body_indices[0] as usize) as *mut f32, t[0]);
             }
-            let body_index = encoded_body_indices[inner_index];
-            let pose = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
-                .motion
-                .pose;
-            pose.position = Vec3::new(
-                position.x[inner_index],
-                position.y[inner_index],
-                position.z[inner_index],
-            );
-            pose.orientation = Quat::from_xyzw(
-                orientation.x[inner_index],
-                orientation.y[inner_index],
-                orientation.z[inner_index],
-                orientation.w[inner_index],
-            );
+            if mask[1] != 0 {
+                store_8f32(states.add(encoded_body_indices[1] as usize) as *mut f32, t[1]);
+            }
+            if mask[2] != 0 {
+                store_8f32(states.add(encoded_body_indices[2] as usize) as *mut f32, t[2]);
+            }
+            if mask[3] != 0 {
+                store_8f32(states.add(encoded_body_indices[3] as usize) as *mut f32, t[3]);
+            }
+            if mask[4] != 0 {
+                store_8f32(states.add(encoded_body_indices[4] as usize) as *mut f32, t[4]);
+            }
+            if mask[5] != 0 {
+                store_8f32(states.add(encoded_body_indices[5] as usize) as *mut f32, t[5]);
+            }
+            if mask[6] != 0 {
+                store_8f32(states.add(encoded_body_indices[6] as usize) as *mut f32, t[6]);
+            }
+            if mask[7] != 0 {
+                store_8f32(states.add(encoded_body_indices[7] as usize) as *mut f32, t[7]);
+            }
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+        {
+            // Scalar fallback.
+            for inner_index in 0..Vector::<i32>::LEN {
+                if mask[inner_index] == 0 {
+                    continue;
+                }
+                let body_index = encoded_body_indices[inner_index];
+                let pose = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
+                    .motion
+                    .pose;
+                pose.position = Vec3::new(
+                    position.x[inner_index],
+                    position.y[inner_index],
+                    position.z[inner_index],
+                );
+                pose.orientation = Quat::from_xyzw(
+                    orientation.x[inner_index],
+                    orientation.y[inner_index],
+                    orientation.z[inner_index],
+                    orientation.w[inner_index],
+                );
+            }
         }
     }
 
@@ -260,22 +530,89 @@ impl Bodies {
         encoded_body_indices: &Vector<i32>,
         mask: &Vector<i32>,
     ) {
-        // Scalar fallback.
-        for inner_index in 0..Vector::<i32>::LEN {
-            if mask[inner_index] == 0 {
-                continue;
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+        {
+            let states = self.active_set_dynamics_ptr();
+            // 7 SOA inertia fields → 8 AOS rows (inverse_mass duplicated as padding).
+            let t = transpose_8x8(
+                inertia.inverse_inertia_tensor.xx,
+                inertia.inverse_inertia_tensor.yx,
+                inertia.inverse_inertia_tensor.yy,
+                inertia.inverse_inertia_tensor.zx,
+                inertia.inverse_inertia_tensor.zy,
+                inertia.inverse_inertia_tensor.zz,
+                inertia.inverse_mass,
+                inertia.inverse_mass, // Laze: duplicated, lands in padding slot.
+            );
+            // Store at offset 24 floats (= world inertia) from each body's BodyDynamics.
+            if mask[0] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[0] as usize) as *mut f32).add(24),
+                    t[0],
+                );
             }
-            let body_index = encoded_body_indices[inner_index];
-            let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
-                .inertia
-                .world;
-            target.inverse_inertia_tensor.xx = inertia.inverse_inertia_tensor.xx[inner_index];
-            target.inverse_inertia_tensor.yx = inertia.inverse_inertia_tensor.yx[inner_index];
-            target.inverse_inertia_tensor.yy = inertia.inverse_inertia_tensor.yy[inner_index];
-            target.inverse_inertia_tensor.zx = inertia.inverse_inertia_tensor.zx[inner_index];
-            target.inverse_inertia_tensor.zy = inertia.inverse_inertia_tensor.zy[inner_index];
-            target.inverse_inertia_tensor.zz = inertia.inverse_inertia_tensor.zz[inner_index];
-            target.inverse_mass = inertia.inverse_mass[inner_index];
+            if mask[1] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[1] as usize) as *mut f32).add(24),
+                    t[1],
+                );
+            }
+            if mask[2] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[2] as usize) as *mut f32).add(24),
+                    t[2],
+                );
+            }
+            if mask[3] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[3] as usize) as *mut f32).add(24),
+                    t[3],
+                );
+            }
+            if mask[4] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[4] as usize) as *mut f32).add(24),
+                    t[4],
+                );
+            }
+            if mask[5] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[5] as usize) as *mut f32).add(24),
+                    t[5],
+                );
+            }
+            if mask[6] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[6] as usize) as *mut f32).add(24),
+                    t[6],
+                );
+            }
+            if mask[7] != 0 {
+                store_8f32(
+                    (states.add(encoded_body_indices[7] as usize) as *mut f32).add(24),
+                    t[7],
+                );
+            }
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+        {
+            // Scalar fallback.
+            for inner_index in 0..Vector::<i32>::LEN {
+                if mask[inner_index] == 0 {
+                    continue;
+                }
+                let body_index = encoded_body_indices[inner_index];
+                let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
+                    .inertia
+                    .world;
+                target.inverse_inertia_tensor.xx = inertia.inverse_inertia_tensor.xx[inner_index];
+                target.inverse_inertia_tensor.yx = inertia.inverse_inertia_tensor.yx[inner_index];
+                target.inverse_inertia_tensor.yy = inertia.inverse_inertia_tensor.yy[inner_index];
+                target.inverse_inertia_tensor.zx = inertia.inverse_inertia_tensor.zx[inner_index];
+                target.inverse_inertia_tensor.zy = inertia.inverse_inertia_tensor.zy[inner_index];
+                target.inverse_inertia_tensor.zz = inertia.inverse_inertia_tensor.zz[inner_index];
+                target.inverse_mass = inertia.inverse_mass[inner_index];
+            }
         }
     }
 
@@ -285,29 +622,190 @@ impl Bodies {
         source_velocities: &BodyVelocityWide,
         encoded_body_indices: &Vector<i32>,
     ) {
-        let indices = encoded_body_indices;
-        // Scalar fallback.
-        for inner_index in 0..Vector::<i32>::LEN {
-            if (indices[inner_index] as u32) >= Bodies::DYNAMIC_LIMIT {
-                continue;
-            }
-            let body_index = indices[inner_index];
-            let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
-                .motion
-                .velocity;
-            if TAccessFilter::access_linear_velocity() {
-                target.linear = Vec3::new(
-                    source_velocities.linear.x[inner_index],
-                    source_velocities.linear.y[inner_index],
-                    source_velocities.linear.z[inner_index],
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+        {
+            use std::simd::{simd_swizzle, Simd};
+            let states = self.active_set_dynamics_ptr();
+
+            if TAccessFilter::access_linear_velocity() ^ TAccessFilter::access_angular_velocity() {
+                // Partial: only linear OR angular velocity (128-bit / 4-float stores).
+                let (m0, m1, m2, target_offset): (Vector<f32>, Vector<f32>, Vector<f32>, usize) =
+                    if TAccessFilter::access_linear_velocity() {
+                        (
+                            source_velocities.linear.x,
+                            source_velocities.linear.y,
+                            source_velocities.linear.z,
+                            8,
+                        )
+                    } else {
+                        (
+                            source_velocities.angular.x,
+                            source_velocities.angular.y,
+                            source_velocities.angular.z,
+                            12,
+                        )
+                    };
+
+                // 3-input partial transpose (m2 self-paired, "laze alert").
+                let n0 = simd_swizzle!(m0, m1, [0, 8, 1, 9, 4, 12, 5, 13]);
+                let n1 = simd_swizzle!(m2, m2, [0, 8, 1, 9, 4, 12, 5, 13]);
+                let n4 = simd_swizzle!(m0, m1, [2, 10, 3, 11, 6, 14, 7, 15]);
+                let n5 = simd_swizzle!(m2, m2, [2, 10, 3, 11, 6, 14, 7, 15]);
+
+                let o0 = simd_swizzle!(n0, n1, [0, 1, 8, 9, 4, 5, 12, 13]);
+                let o2 = simd_swizzle!(n4, n5, [0, 1, 8, 9, 4, 5, 12, 13]);
+                let o4 = simd_swizzle!(n0, n1, [2, 3, 10, 11, 6, 7, 14, 15]);
+                let o6 = simd_swizzle!(n4, n5, [2, 3, 10, 11, 6, 7, 14, 15]);
+
+                // Extract lower 128-bit (bodies 0-3) and upper 128-bit (bodies 4-7).
+                let r0: Simd<f32, 4> = simd_swizzle!(o0, [0, 1, 2, 3]);
+                let r1: Simd<f32, 4> = simd_swizzle!(o4, [0, 1, 2, 3]);
+                let r2: Simd<f32, 4> = simd_swizzle!(o2, [0, 1, 2, 3]);
+                let r3: Simd<f32, 4> = simd_swizzle!(o6, [0, 1, 2, 3]);
+                let r4: Simd<f32, 4> = simd_swizzle!(o0, [4, 5, 6, 7]);
+                let r5: Simd<f32, 4> = simd_swizzle!(o4, [4, 5, 6, 7]);
+                let r6: Simd<f32, 4> = simd_swizzle!(o2, [4, 5, 6, 7]);
+                let r7: Simd<f32, 4> = simd_swizzle!(o6, [4, 5, 6, 7]);
+
+                let indices = encoded_body_indices as *const Vector<i32> as *const u32;
+                if *indices.add(0) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(0) as usize) as *mut f32).add(target_offset),
+                        r0,
+                    );
+                }
+                if *indices.add(1) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(1) as usize) as *mut f32).add(target_offset),
+                        r1,
+                    );
+                }
+                if *indices.add(2) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(2) as usize) as *mut f32).add(target_offset),
+                        r2,
+                    );
+                }
+                if *indices.add(3) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(3) as usize) as *mut f32).add(target_offset),
+                        r3,
+                    );
+                }
+                if *indices.add(4) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(4) as usize) as *mut f32).add(target_offset),
+                        r4,
+                    );
+                }
+                if *indices.add(5) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(5) as usize) as *mut f32).add(target_offset),
+                        r5,
+                    );
+                }
+                if *indices.add(6) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(6) as usize) as *mut f32).add(target_offset),
+                        r6,
+                    );
+                }
+                if *indices.add(7) < Bodies::DYNAMIC_LIMIT {
+                    store_4f32(
+                        (states.add(*indices.add(7) as usize) as *mut f32).add(target_offset),
+                        r7,
+                    );
+                }
+            } else {
+                // Full: both linear and angular velocity (256-bit / 8-float stores).
+                let t = transpose_8x8(
+                    source_velocities.linear.x,
+                    source_velocities.linear.y,
+                    source_velocities.linear.z,
+                    source_velocities.linear.z,  // Laze: duplicated, lands in _pad0.
+                    source_velocities.angular.x,
+                    source_velocities.angular.y,
+                    source_velocities.angular.z,
+                    source_velocities.angular.z, // Laze: duplicated, lands in _pad1.
                 );
+                // Store at offset 8 floats (= velocity section of MotionState).
+                let indices = encoded_body_indices as *const Vector<i32> as *const u32;
+                if *indices.add(0) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(0) as usize) as *mut f32).add(8),
+                        t[0],
+                    );
+                }
+                if *indices.add(1) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(1) as usize) as *mut f32).add(8),
+                        t[1],
+                    );
+                }
+                if *indices.add(2) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(2) as usize) as *mut f32).add(8),
+                        t[2],
+                    );
+                }
+                if *indices.add(3) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(3) as usize) as *mut f32).add(8),
+                        t[3],
+                    );
+                }
+                if *indices.add(4) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(4) as usize) as *mut f32).add(8),
+                        t[4],
+                    );
+                }
+                if *indices.add(5) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(5) as usize) as *mut f32).add(8),
+                        t[5],
+                    );
+                }
+                if *indices.add(6) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(6) as usize) as *mut f32).add(8),
+                        t[6],
+                    );
+                }
+                if *indices.add(7) < Bodies::DYNAMIC_LIMIT {
+                    store_8f32(
+                        (states.add(*indices.add(7) as usize) as *mut f32).add(8),
+                        t[7],
+                    );
+                }
             }
-            if TAccessFilter::access_angular_velocity() {
-                target.angular = Vec3::new(
-                    source_velocities.angular.x[inner_index],
-                    source_velocities.angular.y[inner_index],
-                    source_velocities.angular.z[inner_index],
-                );
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+        {
+            let indices = encoded_body_indices;
+            // Scalar fallback.
+            for inner_index in 0..Vector::<i32>::LEN {
+                if (indices[inner_index] as u32) >= Bodies::DYNAMIC_LIMIT {
+                    continue;
+                }
+                let body_index = indices[inner_index];
+                let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
+                    .motion
+                    .velocity;
+                if TAccessFilter::access_linear_velocity() {
+                    target.linear = Vec3::new(
+                        source_velocities.linear.x[inner_index],
+                        source_velocities.linear.y[inner_index],
+                        source_velocities.linear.z[inner_index],
+                    );
+                }
+                if TAccessFilter::access_angular_velocity() {
+                    target.angular = Vec3::new(
+                        source_velocities.angular.x[inner_index],
+                        source_velocities.angular.y[inner_index],
+                        source_velocities.angular.z[inner_index],
+                    );
+                }
             }
         }
     }

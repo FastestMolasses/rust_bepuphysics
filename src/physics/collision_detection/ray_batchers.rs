@@ -118,7 +118,7 @@ impl<'a, TRayTester: IBroadPhaseRayTester> BroadPhaseRayBatcher<'a, TRayTester> 
     /// Adds a ray to the batcher. Tests immediately via per-ray traversal.
     pub fn add(&mut self, origin: &Vec3, direction: &Vec3, maximum_t: f32, id: i32) {
         unsafe {
-            (&*self.broad_phase).ray_cast(*origin, *direction, maximum_t, self.ray_tester, id);
+            (&*self.broad_phase).ray_cast(*origin, *direction, maximum_t, &mut *self.pool, self.ray_tester, id);
         }
     }
 

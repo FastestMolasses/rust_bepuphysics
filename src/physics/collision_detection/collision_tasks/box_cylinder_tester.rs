@@ -303,11 +303,11 @@ impl BoxCylinderTester {
         let box_face_y_offset = Vector3Wide::scale(&box_face_y, &box_face_half_height);
         let mut v00 = Vector3Wide::default();
         Vector3Wide::subtract(&box_face_center, &box_face_x_offset, &mut v00);
-        let v00_pre_y = v00.clone();
+        let v00_pre_y = v00;
         Vector3Wide::subtract(&v00_pre_y, &box_face_y_offset, &mut v00);
         let mut v11 = Vector3Wide::default();
         Vector3Wide::add(&box_face_center, &box_face_x_offset, &mut v11);
-        let v11_pre_y = v11.clone();
+        let v11_pre_y = v11;
         Vector3Wide::add(&v11_pre_y, &box_face_y_offset, &mut v11);
 
         let cap_center_by = local_normal

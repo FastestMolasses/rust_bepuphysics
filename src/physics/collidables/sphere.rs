@@ -41,6 +41,8 @@ impl IShape for Sphere {
 }
 
 impl IConvexShape for Sphere {
+    type Wide = SphereWide;
+
     #[inline(always)]
     fn compute_angular_expansion_data(
         &self,

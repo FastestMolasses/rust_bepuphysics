@@ -622,15 +622,16 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
 
     unsafe fn ray_test(
         &self,
-        _shape_index: usize,
-        _pose: &RigidPose,
-        _ray: &crate::physics::collision_detection::ray_batchers::RayData,
-        _maximum_t: &mut f32,
-        _hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+        shape_index: usize,
+        pose: &RigidPose,
+        ray: &crate::physics::collision_detection::ray_batchers::RayData,
+        maximum_t: &mut f32,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     ) {
-        // Compound ray tests require the shape's own ray test implementation.
-        // This is a placeholder; compound ray tests go through the shape directly.
-        todo!("HomogeneousCompoundShapeBatch::ray_test not yet specialized");
+        let pool = &mut *self.pool;
+        self.shapes
+            .get(shape_index as i32)
+            .ray_test_shape(pose, ray, maximum_t, pool, hit_handler);
     }
 }
 
@@ -735,14 +736,15 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
 
     fn compute_bounds_by_orientation(
         &self,
-        _shape_index: usize,
-        _orientation: Quat,
-        _min: &mut Vec3,
-        _max: &mut Vec3,
+        shape_index: usize,
+        orientation: Quat,
+        min: &mut Vec3,
+        max: &mut Vec3,
     ) {
-        // Compound bounds computation requires access to the shapes collection.
-        // The batcher path is the primary computation pathway.
-        todo!("CompoundShapeBatch::compute_bounds_by_orientation not yet specialized");
+        let shape_batches = unsafe { &*self.shape_batches };
+        self.shapes
+            .get(shape_index as i32)
+            .compute_bounds(orientation, shape_batches, min, max);
     }
 
     unsafe fn compute_bounds_for_batcher(
@@ -801,14 +803,17 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
 
     unsafe fn ray_test(
         &self,
-        _shape_index: usize,
-        _pose: &RigidPose,
-        _ray: &crate::physics::collision_detection::ray_batchers::RayData,
-        _maximum_t: &mut f32,
-        _hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+        shape_index: usize,
+        pose: &RigidPose,
+        ray: &crate::physics::collision_detection::ray_batchers::RayData,
+        maximum_t: &mut f32,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     ) {
-        // Compound ray tests go through the shape's own implementation, passing the shapes collection.
-        todo!("CompoundShapeBatch::ray_test not yet specialized");
+        let shape_batches = &*self.shape_batches;
+        let pool = &mut *self.pool;
+        self.shapes
+            .get(shape_index as i32)
+            .ray_test_shape(pose, ray, maximum_t, shape_batches, pool, hit_handler);
     }
 }
 

@@ -69,6 +69,8 @@ impl IShape for Box {
 }
 
 impl IConvexShape for Box {
+    type Wide = BoxWide;
+
     #[inline(always)]
     fn compute_bounds(&self, orientation: Quat, min: &mut Vec3, max: &mut Vec3) {
         let mut basis = Matrix3x3::default();

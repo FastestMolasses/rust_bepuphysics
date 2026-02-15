@@ -10,27 +10,18 @@ use std::mem::MaybeUninit;
 /// Marker types for controlling rotation behavior during insertion.
 /// These correspond to C#'s unmanaged marker structs for generic specialization.
 struct InsertShouldNotRotate;
-struct InsertShouldRotateTopDown;
 struct InsertShouldRotateBottomUp;
 
 /// Trait to distinguish rotation strategies at compile time.
 trait InsertionRotation {
-    const ROTATE_TOP_DOWN: bool;
     const ROTATE_BOTTOM_UP: bool;
 }
 
 impl InsertionRotation for InsertShouldNotRotate {
-    const ROTATE_TOP_DOWN: bool = false;
-    const ROTATE_BOTTOM_UP: bool = false;
-}
-
-impl InsertionRotation for InsertShouldRotateTopDown {
-    const ROTATE_TOP_DOWN: bool = true;
     const ROTATE_BOTTOM_UP: bool = false;
 }
 
 impl InsertionRotation for InsertShouldRotateBottomUp {
-    const ROTATE_TOP_DOWN: bool = false;
     const ROTATE_BOTTOM_UP: bool = true;
 }
 
@@ -45,20 +36,12 @@ impl Tree {
 
     /// Adds a leaf to the tree with the given bounding box and returns the index of the added leaf.
     ///
-    /// Performs incrementally refining tree rotations down along the insertion path.
+    /// Performs incrementally refining tree rotations when returning along the insertion path,
+    /// unlike `add_without_refinement`.
+    /// This is about twice the cost of `add_without_refinement` (outside of pathological cases).
+    /// Trees built with repeated insertions of this kind tend to have better quality and fewer
+    /// pathological cases compared to `add_without_refinement`.
     pub fn add(&mut self, bounds: BoundingBox, pool: &mut BufferPool) -> i32 {
-        self.add_internal::<InsertShouldRotateTopDown>(bounds, pool)
-    }
-
-    /// Adds a leaf to the tree with the given bounding box and returns the index of the added leaf.
-    ///
-    /// Performs incrementally refining tree rotations up along the insertion path.
-    /// Slightly better quality than `add`, but also slightly more expensive.
-    pub fn add_with_bottom_up_refinement(
-        &mut self,
-        bounds: BoundingBox,
-        pool: &mut BufferPool,
-    ) -> i32 {
         self.add_internal::<InsertShouldRotateBottomUp>(bounds, pool)
     }
 
@@ -99,17 +82,11 @@ impl Tree {
         let new_leaf_index = self.add_leaf(new_node_index, 0);
 
         loop {
-            // Rotating from the top down produces a tree that's lower quality than rotating from the bottom up.
-            // The advantage is that top down is a little faster.
-            if TShouldRotate::ROTATE_TOP_DOWN {
-                self.try_rotate_node(node_index);
-            }
-
             unsafe {
                 let node =
                     &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
 
-                // Choose whichever child requires less bounds expansion.
+                // Choose whichever child increases the cost estimate less. If they're tied, choose the one with the least leaf count.
                 let mut merged_a = MaybeUninit::<BoundingBox4>::uninit();
                 BoundingBox::create_merged_unsafe(&bounds4, &node.a, &mut merged_a);
                 let mut merged_b = MaybeUninit::<BoundingBox4>::uninit();
@@ -118,15 +95,15 @@ impl Tree {
                 let merged_a = merged_a.assume_init();
                 let merged_b = merged_b.assume_init();
 
-                let bounds_increase_a =
-                    Tree::compute_bounds_metric(&merged_a) - Tree::compute_bounds_metric(&node.a);
-                let bounds_increase_b =
-                    Tree::compute_bounds_metric(&merged_b) - Tree::compute_bounds_metric(&node.b);
+                let cost_increase_a =
+                    Tree::compute_bounds_metric(&merged_a) * (node.a.leaf_count + 1) as f32 - Tree::estimate_cost(&node.a);
+                let cost_increase_b =
+                    Tree::compute_bounds_metric(&merged_b) * (node.b.leaf_count + 1) as f32 - Tree::estimate_cost(&node.b);
 
-                let use_a = if bounds_increase_a == bounds_increase_b {
+                let use_a = if cost_increase_a == cost_increase_b {
                     node.a.leaf_count < node.b.leaf_count
                 } else {
-                    bounds_increase_a < bounds_increase_b
+                    cost_increase_a < cost_increase_b
                 };
 
                 if use_a {
@@ -211,8 +188,9 @@ impl Tree {
             let root = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
                 .add(rotation_root_index as usize);
 
-            let cost_a = Tree::compute_bounds_metric(&root.a);
-            let cost_b = Tree::compute_bounds_metric(&root.b);
+            let cost_a = Tree::estimate_cost(&root.a);
+            let cost_b = Tree::estimate_cost(&root.b);
+            let original_cost = cost_a + cost_b;
             let mut left_rotation_cost_change = 0.0f32;
             let mut left_uses_a = false;
             let mut right_rotation_cost_change = 0.0f32;
@@ -225,23 +203,27 @@ impl Tree {
                 BoundingBox::create_merged_unsafe(&a.a, &root.b, &mut merged_aa_b);
                 let mut merged_ab_b = MaybeUninit::<NodeChild>::uninit();
                 BoundingBox::create_merged_unsafe(&a.b, &root.b, &mut merged_ab_b);
-                let cost_aab = Tree::compute_bounds_metric(&merged_aa_b.assume_init());
-                let cost_abb = Tree::compute_bounds_metric(&merged_ab_b.assume_init());
+                let cost_aa = Tree::estimate_cost(&a.a);
+                let cost_ab = Tree::estimate_cost(&a.b);
+                let cost_aab = Tree::compute_bounds_metric(&merged_aa_b.assume_init()) * (a.a.leaf_count + root.b.leaf_count) as f32 + cost_ab;
+                let cost_abb = Tree::compute_bounds_metric(&merged_ab_b.assume_init()) * (a.b.leaf_count + root.b.leaf_count) as f32 + cost_aa;
                 right_uses_a = cost_aab < cost_abb;
-                right_rotation_cost_change = cost_aab.min(cost_abb) - cost_a;
+                right_rotation_cost_change = cost_aab.min(cost_abb) - original_cost;
             }
 
             if root.b.index >= 0 {
                 // Try a left rotation.
                 let b = &*(self.nodes.as_ptr()).add(root.b.index as usize);
-                let mut merged_ba_b = MaybeUninit::<NodeChild>::uninit();
-                BoundingBox::create_merged_unsafe(&root.a, &b.a, &mut merged_ba_b);
-                let mut merged_bb_b = MaybeUninit::<NodeChild>::uninit();
-                BoundingBox::create_merged_unsafe(&root.a, &b.b, &mut merged_bb_b);
-                let cost_bab = Tree::compute_bounds_metric(&merged_ba_b.assume_init());
-                let cost_bbb = Tree::compute_bounds_metric(&merged_bb_b.assume_init());
-                left_uses_a = cost_bab < cost_bbb;
-                left_rotation_cost_change = cost_bab.min(cost_bbb) - cost_b;
+                let mut merged_ba_a = MaybeUninit::<NodeChild>::uninit();
+                BoundingBox::create_merged_unsafe(&b.a, &root.a, &mut merged_ba_a);
+                let mut merged_bb_a = MaybeUninit::<NodeChild>::uninit();
+                BoundingBox::create_merged_unsafe(&b.b, &root.a, &mut merged_bb_a);
+                let cost_ba = Tree::estimate_cost(&b.a);
+                let cost_bb = Tree::estimate_cost(&b.b);
+                let cost_baa = Tree::compute_bounds_metric(&merged_ba_a.assume_init()) * (b.a.leaf_count + root.a.leaf_count) as f32 + cost_bb;
+                let cost_bba = Tree::compute_bounds_metric(&merged_bb_a.assume_init()) * (b.b.leaf_count + root.a.leaf_count) as f32 + cost_ba;
+                left_uses_a = cost_baa < cost_bba;
+                left_rotation_cost_change = cost_baa.min(cost_bba) - original_cost;
             }
 
             if left_rotation_cost_change.min(right_rotation_cost_change) < 0.0 {

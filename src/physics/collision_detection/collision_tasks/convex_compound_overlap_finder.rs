@@ -44,7 +44,7 @@ pub trait IBoundsQueryableCompound {
         _shapes: &Shapes,
         _overlaps: *mut u8,
     ) {
-        todo!("Sweep-specific overlap finding not yet implemented for this compound type")
+        todo!("Sweep-specific overlap finding not yet implemented for this compound type. All concrete compound types must override find_local_overlaps_sweep.")
     }
 }
 

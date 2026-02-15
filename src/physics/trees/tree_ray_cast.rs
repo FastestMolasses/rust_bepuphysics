@@ -2,12 +2,20 @@
 
 use super::ray_batcher::{RayData, TreeRay};
 use super::tree::{Tree, TRAVERSAL_STACK_CAPACITY};
+use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::Vec3;
 
 /// Trait for testing ray intersections against leaves in the tree.
 pub trait IRayLeafTester {
     /// Tests a leaf for intersection with a ray.
-    unsafe fn test_leaf(&mut self, leaf_index: i32, ray_data: *mut RayData, maximum_t: *mut f32);
+    unsafe fn test_leaf(
+        &mut self,
+        leaf_index: i32,
+        ray_data: *mut RayData,
+        maximum_t: *mut f32,
+        pool: &mut BufferPool,
+    );
 }
 
 impl Tree {
@@ -29,7 +37,8 @@ impl Tree {
         mut node_index: i32,
         tree_ray: *mut TreeRay,
         ray_data: *mut RayData,
-        stack: *mut i32,
+        mut stack: Buffer<i32>,
+        pool: &mut BufferPool,
         leaf_tester: &mut TLeafTester,
     ) {
         debug_assert!(
@@ -46,13 +55,13 @@ impl Tree {
             if node_index < 0 {
                 // This is actually a leaf node.
                 let leaf_index = Self::encode(node_index);
-                leaf_tester.test_leaf(leaf_index, ray_data, &mut (*tree_ray).maximum_t);
+                leaf_tester.test_leaf(leaf_index, ray_data, &mut (*tree_ray).maximum_t, pool);
                 // Leaves have no children; pull from the stack.
                 if stack_end == 0 {
-                    return;
+                    break;
                 }
                 stack_end -= 1;
-                node_index = *stack.add(stack_end as usize);
+                node_index = *stack.get(stack_end);
             } else {
                 let node = self.nodes.get(node_index);
                 let mut t_a = 0.0f32;
@@ -65,17 +74,24 @@ impl Tree {
                 if a_intersected {
                     if b_intersected {
                         // Visit the earlier AABB intersection first.
-                        debug_assert!(
-                            (stack_end as usize) < TRAVERSAL_STACK_CAPACITY - 1,
-                            "Fixed size stack overflow."
-                        );
+                        if stack_end == stack.len() {
+                            if stack.len() == TRAVERSAL_STACK_CAPACITY as i32 {
+                                // First allocation is on the stack.
+                                let mut new_stack: Buffer<i32> =
+                                    pool.take_at_least(TRAVERSAL_STACK_CAPACITY as i32 * 2);
+                                stack.copy_to(0, &mut new_stack, 0, TRAVERSAL_STACK_CAPACITY as i32);
+                                stack = new_stack;
+                            } else {
+                                pool.resize(&mut stack, stack_end * 2, stack_end);
+                            }
+                        }
                         if t_a < t_b {
                             node_index = node.a.index;
-                            *stack.add(stack_end as usize) = node.b.index;
+                            *stack.get_mut(stack_end) = node.b.index;
                             stack_end += 1;
                         } else {
                             node_index = node.b.index;
-                            *stack.add(stack_end as usize) = node.a.index;
+                            *stack.get_mut(stack_end) = node.a.index;
                             stack_end += 1;
                         }
                     } else {
@@ -86,12 +102,16 @@ impl Tree {
                 } else {
                     // No intersection. Pull from stack.
                     if stack_end == 0 {
-                        return;
+                        break;
                     }
                     stack_end -= 1;
-                    node_index = *stack.add(stack_end as usize);
+                    node_index = *stack.get(stack_end);
                 }
             }
+        }
+        if stack.len() > TRAVERSAL_STACK_CAPACITY as i32 {
+            // We rented a larger stack at some point. Return it.
+            pool.return_buffer(&mut stack);
         }
     }
 
@@ -99,6 +119,7 @@ impl Tree {
         &self,
         tree_ray: *mut TreeRay,
         ray_data: *mut RayData,
+        pool: &mut BufferPool,
         leaf_tester: &mut TLeafTester,
     ) {
         if self.leaf_count == 0 {
@@ -114,20 +135,34 @@ impl Tree {
                 tree_ray,
                 &mut t_a,
             ) {
-                leaf_tester.test_leaf(0, ray_data, &mut (*tree_ray).maximum_t);
+                leaf_tester.test_leaf(0, ray_data, &mut (*tree_ray).maximum_t, pool);
             }
         } else {
-            let mut stack = [0i32; TRAVERSAL_STACK_CAPACITY];
-            self.ray_cast_node(0, tree_ray, ray_data, stack.as_mut_ptr(), leaf_tester);
+            let mut stack_memory = [0i32; TRAVERSAL_STACK_CAPACITY];
+            let stack = Buffer::new(
+                stack_memory.as_mut_ptr(),
+                TRAVERSAL_STACK_CAPACITY as i32,
+                -1,
+            );
+            self.ray_cast_node(0, tree_ray, ray_data, stack, pool, leaf_tester);
         }
     }
 
-    /// Casts a ray against the tree and reports leaf hits to the tester.
+    /// Tests a ray against the tree and invokes the leaf tester for each leaf node that the ray intersects.
+    ///
+    /// # Arguments
+    /// * `origin` - The origin point of the ray.
+    /// * `direction` - The direction of the ray.
+    /// * `maximum_t` - The maximum parametric distance along the ray to test. May be modified by the leaf tester.
+    /// * `pool` - Buffer pool used for temporary allocations if the tree is pathologically deep; stack memory is used preferentially.
+    /// * `leaf_tester` - A reference to the tester that processes the indices of intersecting leaves.
+    /// * `id` - An optional identifier for the ray.
     pub unsafe fn ray_cast<TLeafTester: IRayLeafTester>(
         &self,
         origin: Vec3,
         direction: Vec3,
         maximum_t: &mut f32,
+        pool: &mut BufferPool,
         leaf_tester: &mut TLeafTester,
         id: i32,
     ) {
@@ -141,7 +176,7 @@ impl Tree {
             &mut *ray_data.as_mut_ptr(),
             &mut *tree_ray.as_mut_ptr(),
         );
-        self.ray_cast_internal(tree_ray.as_mut_ptr(), ray_data.as_mut_ptr(), leaf_tester);
+        self.ray_cast_internal(tree_ray.as_mut_ptr(), ray_data.as_mut_ptr(), pool, leaf_tester);
         // The maximumT could have been mutated by the leaf tester. Propagate that change.
         *maximum_t = (*tree_ray.as_ptr()).maximum_t;
     }

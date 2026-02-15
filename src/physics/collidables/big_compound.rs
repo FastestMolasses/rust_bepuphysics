@@ -185,6 +185,7 @@ impl BigCompound {
         ray: &RayData,
         maximum_t: &mut f32,
         shapes: &Shapes,
+        pool: &mut BufferPool,
         hit_handler: &mut TRayHitHandler,
     ) {
         let mut orientation = Matrix3x3::default();
@@ -210,6 +211,7 @@ impl BigCompound {
                 leaf_index: i32,
                 ray_data: *mut crate::physics::trees::ray_batcher::RayData,
                 maximum_t: *mut f32,
+                _pool: &mut BufferPool,
             ) {
                 if self.handler.allow_test(leaf_index) {
                     let child = &*self.children.add(leaf_index as usize);
@@ -293,6 +295,7 @@ impl BigCompound {
             local_origin,
             local_direction,
             maximum_t,
+            pool,
             &mut leaf_tester,
             ray.id,
         );
@@ -341,8 +344,9 @@ impl BigCompound {
         pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     ) {
+        let pool_ptr = pool as *mut BufferPool;
         let mut enumerator = ShapeTreeOverlapEnumerator::<TSubpairOverlaps> {
-            pool,
+            pool: &mut *pool_ptr,
             overlaps: std::ptr::null_mut(),
         };
         for i in 0..pairs.len() {
@@ -351,7 +355,7 @@ impl BigCompound {
             let compound = &*(pair.container as *const BigCompound);
             compound
                 .tree
-                .get_overlaps_minmax(pair.min, pair.max, &mut enumerator);
+                .get_overlaps_minmax(pair.min, pair.max, &mut *pool_ptr, &mut enumerator);
         }
     }
 
@@ -365,8 +369,9 @@ impl BigCompound {
         pool: &mut BufferPool,
         overlaps: *mut TOverlaps,
     ) {
-        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> { pool, overlaps };
-        self.tree.sweep(min, max, sweep, maximum_t, &mut enumerator);
+        let pool_ptr = pool as *mut BufferPool;
+        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> { pool: &mut *pool_ptr, overlaps };
+        self.tree.sweep(min, max, sweep, maximum_t, &mut *pool_ptr, &mut enumerator);
     }
 
     /// Computes the inertia of this compound using the shapes collection.
@@ -433,14 +438,21 @@ impl ICompoundShape for BigCompound {
         self.get_child(child_index)
     }
 
-    fn compute_bounds(&self, _orientation: Quat, _min: &mut Vec3, _max: &mut Vec3) {
-        panic!("BigCompound::compute_bounds requires Shapes; use the inherent method with shape_batches parameter.");
+    fn compute_bounds(
+        &self,
+        orientation: Quat,
+        shape_batches: &Shapes,
+        min: &mut Vec3,
+        max: &mut Vec3,
+    ) {
+        self.compute_bounds(orientation, shape_batches, min, max);
     }
 
     fn find_local_overlaps<TOverlaps: IOverlapCollector>(
         &self,
         local_min: &Vec3,
         local_max: &Vec3,
+        pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     ) {
         // Adapter: bridge IOverlapCollector to IBreakableForEach<i32> for tree query.
@@ -453,7 +465,7 @@ impl ICompoundShape for BigCompound {
         }
         let mut adapter = OverlapAdapter(overlaps);
         self.tree
-            .get_overlaps_minmax(*local_min, *local_max, &mut adapter);
+            .get_overlaps_minmax(*local_min, *local_max, pool, &mut adapter);
     }
 
     fn add_child_bounds_to_batcher(
@@ -470,6 +482,36 @@ impl ICompoundShape for BigCompound {
             velocity,
             body_index,
         );
+    }
+
+    unsafe fn ray_test_shape(
+        &self,
+        pose: &RigidPose,
+        ray: &RayData,
+        maximum_t: &mut f32,
+        shape_batches: &Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
+        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
+        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        self.ray_test(pose, ray, maximum_t, shape_batches, pool, &mut wrapper);
     }
 }
 
@@ -488,6 +530,7 @@ impl IBoundsQueryableCompound for BigCompound {
         TSubpairOverlaps: ICollisionTaskSubpairOverlaps,
         TOverlaps: ICollisionTaskOverlaps<TSubpairOverlaps>,
     {
+        let pool_ptr = pool as *mut BufferPool;
         // For each pair, query the tree to find overlapping leaf children.
         for i in 0..query_bounds.len() {
             let pair = &query_bounds[i as usize];
@@ -507,11 +550,11 @@ impl IBoundsQueryableCompound for BigCompound {
             }
             let mut adapter = BigCompoundOverlapAdapter {
                 overlaps: overlaps_for_pair,
-                pool,
+                pool: unsafe { &mut *pool_ptr },
             };
             compound
                 .tree
-                .get_overlaps_minmax(pair.min, pair.max, &mut adapter);
+                .get_overlaps_minmax(pair.min, pair.max, unsafe { &mut *pool_ptr }, &mut adapter);
         }
     }
 
@@ -526,10 +569,11 @@ impl IBoundsQueryableCompound for BigCompound {
         overlaps: *mut u8,
     ) {
         // BigCompound uses tree sweep. The overlaps pointer is type-erased.
+        let pool_ptr = pool as *mut BufferPool;
         let mut enumerator = ShapeTreeSweepLeafTester::<crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::ChildOverlapsCollection> {
-            pool,
+            pool: &mut *pool_ptr,
             overlaps: overlaps as *mut _,
         };
-        self.tree.sweep(min, max, sweep, maximum_t, &mut enumerator);
+        self.tree.sweep(min, max, sweep, maximum_t, &mut *pool_ptr, &mut enumerator);
     }
 }

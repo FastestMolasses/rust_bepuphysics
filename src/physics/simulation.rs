@@ -357,9 +357,8 @@ impl Simulation {
         self.profiler.end("broad_phase_overlap_finder");
 
         self.profiler.start("narrow_phase");
-        // NarrowPhaseGeneric<T>::flush_with_preflush() is the full C# Flush,
-        // but Simulation doesn't know TCallbacks. Call base NarrowPhase::flush()
-        // for constraint removal pipeline. Preflush/postflush need type-erased dispatch (TODO).
+        // NarrowPhase::flush() calls on_preflush/on_postflush trampolines set by
+        // NarrowPhaseGeneric<T> during construction, matching C#'s virtual OnPreflush/OnPostflush.
         let narrow_phase = &mut *(self.narrow_phase as *mut RealNarrowPhase);
         let deterministic = thread_dispatcher.is_some() && self.deterministic;
         narrow_phase.flush(thread_dispatcher, deterministic);
@@ -694,7 +693,7 @@ impl Simulation {
 
         type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
         let broad_phase = &*(self.broad_phase as *const RealBroadPhase);
-        broad_phase.ray_cast(origin, direction, maximum_t, &mut dispatcher, id);
+        broad_phase.ray_cast(origin, direction, maximum_t, &mut *self.buffer_pool, &mut dispatcher, id);
     }
 
     /// Sweeps a shape against the simulation.
@@ -855,7 +854,7 @@ impl Simulation {
 
         type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
         let broad_phase = &*(self.broad_phase as *const RealBroadPhase);
-        broad_phase.sweep_minmax(min, max, velocity.linear, maximum_t, &mut dispatcher);
+        broad_phase.sweep_minmax(min, max, velocity.linear, maximum_t, &mut *self.buffer_pool, &mut dispatcher);
     }
 
     /// Sweeps a convex shape against the simulation with automatically estimated termination conditions.

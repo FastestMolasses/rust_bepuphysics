@@ -20,7 +20,10 @@ pub trait IShape {
 /// Defines functions available on all convex shapes.
 /// Convex shapes have no hollowed out regions; any line passing through a convex shape
 /// will never enter and exit more than once.
-pub trait IConvexShape: IShape {
+pub trait IConvexShape: IShape + Sized {
+    /// The wide (SIMD-bundled) representation of this shape type.
+    type Wide: IShapeWide<Self> + IShapeWideAllocation + Default;
+
     /// Computes the bounding box of a shape given an orientation.
     fn compute_bounds(&self, orientation: Quat, min: &mut Vec3, max: &mut Vec3);
 
@@ -160,15 +163,29 @@ pub trait ISupportFinder<TShape: IConvexShape, TShapeWide: IShapeWide<TShape>> {
 // Forward declarations for compound shape traits.
 use crate::physics::collidables::compound::CompoundChild;
 
-/// Trait for non-convex shapes that can compute their own bounding box from an orientation.
-/// Both compound and homogeneous compound shapes implement this, but the method signature
-/// does not require child type parameters.
+/// Trait for non-convex shapes that can compute their own bounding box from an orientation
+/// and support ray testing. Both compound and homogeneous compound shapes implement this,
+/// but the method signature does not require child type parameters.
 pub trait INonConvexBounds {
     fn compute_bounds_by_orientation(
         &self,
         orientation: glam::Quat,
         min: &mut glam::Vec3,
         max: &mut glam::Vec3,
+    );
+
+    /// Tests a ray against this shape using dynamic dispatch for the hit handler.
+    /// Matches C# `IHomogeneousCompoundShape.RayTest`.
+    ///
+    /// # Safety
+    /// Caller must ensure shape data and pose are valid.
+    unsafe fn ray_test_shape(
+        &self,
+        pose: &RigidPose,
+        ray: &crate::physics::collision_detection::ray_batchers::RayData,
+        maximum_t: &mut f32,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
     );
 }
 
@@ -181,13 +198,21 @@ pub trait ICompoundShape: IDisposableShape {
     fn get_child(&self, child_index: i32) -> &CompoundChild;
 
     /// Computes the bounding box of the compound shape.
-    fn compute_bounds(&self, orientation: glam::Quat, min: &mut glam::Vec3, max: &mut glam::Vec3);
+    /// Matches C# `ICompoundShape.ComputeBounds(orientation, shapeBatches, out min, out max)`.
+    fn compute_bounds(
+        &self,
+        orientation: glam::Quat,
+        shape_batches: &super::shapes::Shapes,
+        min: &mut glam::Vec3,
+        max: &mut glam::Vec3,
+    );
 
     /// Finds overlapping children within a local bounding box.
     fn find_local_overlaps<TOverlaps: super::compound::IOverlapCollector>(
         &self,
         local_min: &glam::Vec3,
         local_max: &glam::Vec3,
+        pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     );
 
@@ -198,6 +223,21 @@ pub trait ICompoundShape: IDisposableShape {
         pose: &crate::physics::body_properties::RigidPose,
         velocity: &crate::physics::body_properties::BodyVelocity,
         body_index: i32,
+    );
+
+    /// Tests a ray against this compound shape using dynamic dispatch for the hit handler.
+    /// Matches C# `ICompoundShape.RayTest(pose, ray, ref maximumT, shapeBatches, ref hitHandler)`.
+    ///
+    /// # Safety
+    /// Caller must ensure shape data and pose are valid.
+    unsafe fn ray_test_shape(
+        &self,
+        pose: &RigidPose,
+        ray: &crate::physics::collision_detection::ray_batchers::RayData,
+        maximum_t: &mut f32,
+        shape_batches: &super::shapes::Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
     );
 }
 
@@ -233,6 +273,7 @@ pub trait IHomogeneousCompoundShape<
         &self,
         local_min: &glam::Vec3,
         local_max: &glam::Vec3,
+        pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     );
 }

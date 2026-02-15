@@ -297,6 +297,12 @@ impl Tree {
         a.nodes.as_ptr() == b.nodes.as_ptr() && a.node_count == b.node_count
     }
 
+    /// Computes a local cost estimate for a node child using its bounds and leaf count.
+    #[inline(always)]
+    pub fn estimate_cost(child: &super::node::NodeChild) -> f32 {
+        Self::compute_bounds_metric(child) * child.leaf_count as f32
+    }
+
     /// Computes the SAH (surface area heuristic) metric for a bounding box.
     #[inline(never)]
     pub fn compute_bounds_metric_bb(bounds: &BoundingBox) -> f32 {

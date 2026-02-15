@@ -99,6 +99,7 @@ impl<THandler: IShapeRayHitHandler> IRayLeafTester for HitLeafTester<THandler> {
         leaf_index: i32,
         ray_data: *mut TreeRayData,
         maximum_t: *mut f32,
+        _pool: &mut BufferPool,
     ) {
         let triangle = &*self.triangles.add(leaf_index as usize);
         let mut t = 0.0f32;
@@ -414,6 +415,7 @@ impl Mesh {
         pose: &RigidPose,
         ray: &RayData,
         maximum_t: &mut f32,
+        pool: &mut BufferPool,
         hit_handler: &mut TRayHitHandler,
     ) {
         let mut leaf_tester = HitLeafTester {
@@ -437,6 +439,7 @@ impl Mesh {
             local_origin,
             local_direction,
             maximum_t,
+            pool,
             &mut leaf_tester,
             0,
         );
@@ -454,8 +457,9 @@ impl Mesh {
         pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     ) {
+        let pool_ptr = pool as *mut BufferPool;
         let mut enumerator = ShapeTreeOverlapEnumerator::<TSubpairOverlaps> {
-            pool,
+            pool: &mut *pool_ptr,
             overlaps: std::ptr::null_mut(),
         };
         for i in 0..pairs.len() {
@@ -468,6 +472,7 @@ impl Mesh {
             mesh.tree.get_overlaps_minmax(
                 scaled_min.min(scaled_max),
                 scaled_min.max(scaled_max),
+                &mut *pool_ptr,
                 &mut enumerator,
             );
         }
@@ -486,13 +491,15 @@ impl Mesh {
         let scaled_min = min * self.inverse_scale;
         let scaled_max = max * self.inverse_scale;
         let scaled_sweep = sweep * self.inverse_scale;
-        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> { pool, overlaps };
+        let pool_ptr = pool as *mut BufferPool;
+        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> { pool: &mut *pool_ptr, overlaps };
         // Take a min/max to compensate for negative scales.
         self.tree.sweep(
             scaled_min.min(scaled_max),
             scaled_min.max(scaled_max),
             scaled_sweep,
             maximum_t,
+            &mut *pool_ptr,
             &mut enumerator,
         );
     }
@@ -640,6 +647,36 @@ impl super::shape::INonConvexBounds for Mesh {
     fn compute_bounds_by_orientation(&self, orientation: Quat, min: &mut Vec3, max: &mut Vec3) {
         self.compute_bounds(orientation, min, max);
     }
+
+    unsafe fn ray_test_shape(
+        &self,
+        pose: &RigidPose,
+        ray: &RayData,
+        maximum_t: &mut f32,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type
+        // for Mesh::ray_test which requires Sized (stores handler by value in HitLeafTester).
+        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
+        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        self.ray_test(pose, ray, maximum_t, pool, &mut wrapper);
+    }
 }
 
 impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
@@ -672,6 +709,7 @@ impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
         &self,
         local_min: &Vec3,
         local_max: &Vec3,
+        pool: &mut BufferPool,
         overlaps: &mut TOverlaps,
     ) {
         // Adapter: bridge IOverlapCollector to IBreakableForEach<i32> for tree query.
@@ -684,7 +722,7 @@ impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
         }
         let mut adapter = OverlapAdapter(overlaps);
         self.tree
-            .get_overlaps_minmax(*local_min, *local_max, &mut adapter);
+            .get_overlaps_minmax(*local_min, *local_max, pool, &mut adapter);
     }
 }
 
@@ -714,6 +752,7 @@ impl IBoundsQueryableCompound for Mesh {
             }
         }
 
+        let pool_ptr = pool as *mut BufferPool;
         for i in 0..query_bounds.len() {
             let pair = &query_bounds[i as usize];
             let mesh = unsafe { &*(pair.container as *const Mesh) };
@@ -722,12 +761,13 @@ impl IBoundsQueryableCompound for Mesh {
             let overlaps_for_pair = overlaps.get_overlaps_for_pair(i);
             let mut adapter = MeshOverlapAdapter {
                 overlaps: overlaps_for_pair,
-                pool,
+                pool: unsafe { &mut *pool_ptr },
             };
             // Take a min/max to compensate for negative scales.
             mesh.tree.get_overlaps_minmax(
                 scaled_min.min(scaled_max),
                 scaled_min.max(scaled_max),
+                unsafe { &mut *pool_ptr },
                 &mut adapter,
             );
         }
@@ -746,8 +786,9 @@ impl IBoundsQueryableCompound for Mesh {
         let scaled_min = min * self.inverse_scale;
         let scaled_max = max * self.inverse_scale;
         let scaled_sweep = sweep * self.inverse_scale;
+        let pool_ptr = pool as *mut BufferPool;
         let mut enumerator = ShapeTreeSweepLeafTester::<crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::ChildOverlapsCollection> {
-            pool,
+            pool: &mut *pool_ptr,
             overlaps: overlaps as *mut _,
         };
         // Take a min/max to compensate for negative scales.
@@ -756,6 +797,7 @@ impl IBoundsQueryableCompound for Mesh {
             scaled_min.max(scaled_max),
             scaled_sweep,
             maximum_t,
+            &mut *pool_ptr,
             &mut enumerator,
         );
     }
