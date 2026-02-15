@@ -12,6 +12,7 @@ use crate::physics::constraints::batch_integration_mode::{
 };
 use crate::physics::constraints::body_access_filter::{AccessAll, IBodyAccessFilter};
 use crate::physics::pose_integration::{AngularIntegrationMode, PoseIntegration};
+use crate::physics::solver::VelocityIntegrationCallbacks;
 use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
@@ -81,16 +82,7 @@ pub fn decode_body_indices(
 #[inline(always)]
 pub unsafe fn integrate_pose_and_velocity(
     angular_integration_mode: AngularIntegrationMode,
-    integrate_velocity_fn: &impl Fn(
-        Vector<i32>,           // body_indices
-        Vector3Wide,           // position
-        QuaternionWide,        // orientation
-        BodyInertiaWide,       // local_inertia
-        Vector<i32>,           // integration_mask
-        i32,                   // worker_index
-        Vector<f32>,           // dt
-        &mut BodyVelocityWide, // velocity
-    ),
+    velocity_callbacks: &VelocityIntegrationCallbacks,
     body_indices: &Vector<i32>,
     local_inertia: &BodyInertiaWide,
     dt: f32,
@@ -190,8 +182,9 @@ pub unsafe fn integrate_pose_and_velocity(
         }
     }
 
-    // Call the velocity integration callback
-    integrate_velocity_fn(
+    // Call the velocity integration callback — direct fn ptr call, no vtable.
+    (velocity_callbacks.fn_ptr)(
+        velocity_callbacks.context,
         *body_indices,
         position.clone(),
         orientation.clone(),
@@ -221,16 +214,7 @@ pub unsafe fn integrate_pose_and_velocity(
 pub unsafe fn integrate_velocity(
     angular_integration_mode: AngularIntegrationMode,
     batch_integration_mode: BatchIntegrationMode,
-    integrate_velocity_fn: &impl Fn(
-        Vector<i32>,
-        Vector3Wide,
-        QuaternionWide,
-        BodyInertiaWide,
-        Vector<i32>,
-        i32,
-        Vector<f32>,
-        &mut BodyVelocityWide,
-    ),
+    velocity_callbacks: &VelocityIntegrationCallbacks,
     body_indices: &Vector<i32>,
     local_inertia: &BodyInertiaWide,
     dt: f32,
@@ -284,7 +268,8 @@ pub unsafe fn integrate_velocity(
     if batch_integration_mode == BatchIntegrationMode::Conditional {
         // Conditional: must mask velocity changes
         let previous_velocity = velocity.clone();
-        integrate_velocity_fn(
+        (velocity_callbacks.fn_ptr)(
+            velocity_callbacks.context,
             *body_indices,
             position.clone(),
             orientation.clone(),
@@ -306,7 +291,8 @@ pub unsafe fn integrate_velocity(
         );
     } else {
         // Always: no masking needed
-        integrate_velocity_fn(
+        (velocity_callbacks.fn_ptr)(
+            velocity_callbacks.context,
             *body_indices,
             position.clone(),
             orientation.clone(),
@@ -342,16 +328,7 @@ fn build_dynamic_integration_mask(encoded_body_indices: &Vector<i32>) -> Vector<
 pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
     bodies: &Bodies,
     angular_integration_mode: AngularIntegrationMode,
-    integrate_velocity_fn: &impl Fn(
-        Vector<i32>,
-        Vector3Wide,
-        QuaternionWide,
-        BodyInertiaWide,
-        Vector<i32>,
-        i32,
-        Vector<f32>,
-        &mut BodyVelocityWide,
-    ),
+    velocity_callbacks: Option<&VelocityIntegrationCallbacks>,
     integration_flags: &Buffer<IndexSet>,
     body_index_in_constraint: i32,
     batch_integration_mode: BatchIntegrationMode,
@@ -385,7 +362,7 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                 let decoded_indices = decode_body_indices(encoded_body_indices, &integration_mask);
                 integrate_pose_and_velocity(
                     angular_integration_mode,
-                    integrate_velocity_fn,
+                    velocity_callbacks.unwrap(),
                     &decoded_indices,
                     &local_inertia,
                     dt,
@@ -436,7 +413,7 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                         decode_body_indices(encoded_body_indices, &integration_mask);
                     integrate_pose_and_velocity(
                         angular_integration_mode,
-                        integrate_velocity_fn,
+                        velocity_callbacks.unwrap(),
                         &decoded_indices,
                         &gathered_inertia,
                         dt,
@@ -476,7 +453,7 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                 integrate_velocity(
                     angular_integration_mode,
                     BatchIntegrationMode::Always,
-                    integrate_velocity_fn,
+                    velocity_callbacks.unwrap(),
                     &decoded_indices,
                     &local_inertia,
                     dt,
@@ -519,7 +496,7 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                     integrate_velocity(
                         angular_integration_mode,
                         BatchIntegrationMode::Conditional,
-                        integrate_velocity_fn,
+                        velocity_callbacks.unwrap(),
                         &decoded_indices,
                         &gathered_inertia,
                         dt,

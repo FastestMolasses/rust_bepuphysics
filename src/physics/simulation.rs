@@ -180,6 +180,10 @@ impl Simulation {
         )));
         (*solver).pose_integrator =
             Some(pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator);
+        // Set up monomorphized velocity integration callbacks — avoids vtable in the hot loop.
+        (*solver).velocity_callbacks = Some(
+            crate::physics::solver::create_velocity_integration_callbacks(pose_integrator),
+        );
 
         // Create constraint remover.
         let constraint_remover = RealConstraintRemover::with_defaults(buffer_pool, bodies, solver);

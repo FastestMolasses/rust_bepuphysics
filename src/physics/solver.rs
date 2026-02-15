@@ -1,6 +1,7 @@
 // Translated from BepuPhysics/Solver.cs
 
 use crate::physics::bodies::Bodies;
+use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::collidables::collidable_reference::CollidableMobility;
 use crate::physics::collision_detection::pair_cache::{CollidablePair, PairCache};
 use crate::physics::constraint_batch::ConstraintBatch;
@@ -15,6 +16,7 @@ use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::constraints::type_processor::TypeProcessor;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::pose_integrator::IPoseIntegrator;
+use crate::physics::pose_integration::{AngularIntegrationMode, IPoseIntegratorCallbacks};
 use crate::physics::solve_description::{SolveDescription, SubstepVelocityIterationScheduler};
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::index_set::IndexSet;
@@ -24,8 +26,92 @@ use crate::utilities::for_each_ref::IForEach;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
+use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
+use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+
+/// Type alias for the monomorphized velocity integration function pointer.
+/// This replaces `dyn IPoseIntegrator` in the warm_start inner loop — the single most
+/// performance-critical devirtualization in the engine.
+///
+/// In C#, `Solver<TIntegrationCallbacks>` is generic, so the JIT monomorphizes the entire
+/// warm_start → GatherAndIntegrate → IntegrateVelocity chain. In Rust, we achieve the same
+/// codegen by storing a raw function pointer that was monomorphized at `Simulation::create` time.
+/// The `context` param is a pointer to `PoseIntegrator<TCallbacks>`.
+pub type IntegrateVelocityFn = unsafe fn(
+    context: *const u8,       // &PoseIntegrator<TCallbacks> as *const u8
+    body_indices: Vector<i32>,
+    position: Vector3Wide,
+    orientation: QuaternionWide,
+    local_inertia: BodyInertiaWide,
+    integration_mask: Vector<i32>,
+    worker_index: i32,
+    dt: Vector<f32>,
+    velocity: &mut BodyVelocityWide,
+);
+
+/// Devirtualized velocity integration callbacks for the solver's warm_start inner loop.
+/// Replaces `Option<&dyn IPoseIntegrator>` — no vtable, just a direct function pointer call.
+///
+/// Created once at `Simulation::create` time with the concrete `TCallbacks` type known,
+/// then passed through `ITypeProcessor::warm_start` → `gather_and_integrate` → inner loop.
+#[derive(Clone, Copy)]
+pub struct VelocityIntegrationCallbacks {
+    /// Monomorphized function pointer to `PoseIntegrator<T>::integrate_velocity_callback`.
+    pub fn_ptr: IntegrateVelocityFn,
+    /// Pointer to the `PoseIntegrator<TCallbacks>` instance.
+    pub context: *const u8,
+    /// Cached angular integration mode (avoids any dispatch to query it).
+    pub angular_mode: AngularIntegrationMode,
+}
+
+// SAFETY: The context pointer is only dereferenced during solver execution which
+// is already synchronized by the solver's thread dispatch mechanism.
+unsafe impl Send for VelocityIntegrationCallbacks {}
+unsafe impl Sync for VelocityIntegrationCallbacks {}
+
+/// Creates a `VelocityIntegrationCallbacks` for a concrete `PoseIntegrator<TCallbacks>`.
+/// Called once at `Simulation::create` time where `TCallbacks` is known.
+///
+/// # Safety
+/// The `pose_integrator` pointer must remain valid for the lifetime of the returned callbacks.
+pub unsafe fn create_velocity_integration_callbacks<
+    TCallbacks: IPoseIntegratorCallbacks + 'static,
+>(
+    pose_integrator: *const crate::physics::pose_integrator::PoseIntegrator<TCallbacks>,
+) -> VelocityIntegrationCallbacks {
+    /// Monomorphized trampoline that calls the concrete callback with zero vtable overhead.
+    unsafe fn trampoline<T: IPoseIntegratorCallbacks>(
+        context: *const u8,
+        body_indices: Vector<i32>,
+        position: Vector3Wide,
+        orientation: QuaternionWide,
+        local_inertia: BodyInertiaWide,
+        integration_mask: Vector<i32>,
+        worker_index: i32,
+        dt: Vector<f32>,
+        velocity: &mut BodyVelocityWide,
+    ) {
+        let pi = &*(context as *const crate::physics::pose_integrator::PoseIntegrator<T>);
+        pi.callbacks.integrate_velocity(
+            body_indices,
+            position,
+            orientation,
+            local_inertia,
+            integration_mask,
+            worker_index,
+            dt,
+            velocity,
+        );
+    }
+
+    VelocityIntegrationCallbacks {
+        fn_ptr: trampoline::<TCallbacks>,
+        context: pose_integrator as *const u8,
+        angular_mode: (*pose_integrator).callbacks.angular_integration_mode(),
+    }
+}
 
 /// Holds and solves constraints between bodies in a simulation.
 pub struct Solver {
@@ -44,6 +130,11 @@ pub struct Solver {
     pub(crate) pair_cache: *mut PairCache,
     pub(crate) awakener: *mut IslandAwakener,
     pub(crate) pose_integrator: Option<*mut dyn IPoseIntegrator>,
+
+    /// Devirtualized velocity integration callbacks — monomorphized fn ptr + context.
+    /// Used in the warm_start inner loop instead of `dyn IPoseIntegrator` to avoid vtable overhead.
+    /// Set at `Simulation::create` time when the concrete `TCallbacks` type is known.
+    pub(crate) velocity_callbacks: Option<VelocityIntegrationCallbacks>,
 
     /// Pool to retrieve constraint handles from when creating new constraints.
     pub handle_pool: IdPool,
@@ -293,6 +384,7 @@ impl Solver {
             pair_cache: std::ptr::null_mut(),
             awakener: std::ptr::null_mut(),
             pose_integrator: None,
+            velocity_callbacks: None,
             handle_pool: IdPool::new(128, pool_ref),
             pool,
             handle_to_constraint: Buffer::default(),
@@ -2222,7 +2314,7 @@ impl Solver {
                 type_batch,
                 bodies,
                 &no_flags,
-                self.pose_integrator.map(|p| &*p),
+                self.velocity_callbacks.as_ref(),
                 BatchIntegrationMode::Always,
                 allow_pose_integration,
                 dt,
@@ -2245,7 +2337,7 @@ impl Solver {
                     type_batch,
                     bodies,
                     flags,
-                    self.pose_integrator.map(|p| &*p),
+                    self.velocity_callbacks.as_ref(),
                     BatchIntegrationMode::Conditional,
                     allow_pose_integration,
                     dt,
@@ -2263,7 +2355,7 @@ impl Solver {
                     type_batch,
                     bodies,
                     flags,
-                    self.pose_integrator.map(|p| &*p),
+                    self.velocity_callbacks.as_ref(),
                     BatchIntegrationMode::Never,
                     allow_pose_integration,
                     dt,

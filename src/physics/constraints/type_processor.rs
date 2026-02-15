@@ -439,7 +439,7 @@ pub trait ITypeProcessor {
         integration_flags: &crate::utilities::memory::buffer::Buffer<
             crate::utilities::collections::index_set::IndexSet,
         >,
-        pose_integrator: Option<&dyn crate::physics::pose_integrator::IPoseIntegrator>,
+        velocity_callbacks: Option<&crate::physics::solver::VelocityIntegrationCallbacks>,
         batch_integration_mode: crate::physics::constraints::batch_integration_mode::BatchIntegrationMode,
         allow_pose_integration: bool,
         dt: f32,
@@ -453,7 +453,7 @@ pub trait ITypeProcessor {
             type_batch,
             bodies,
             integration_flags,
-            pose_integrator,
+            velocity_callbacks,
             batch_integration_mode,
             allow_pose_integration,
             dt,

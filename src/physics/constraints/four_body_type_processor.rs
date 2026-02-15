@@ -451,7 +451,7 @@ impl<
         integration_flags: &crate::utilities::memory::buffer::Buffer<
             crate::utilities::collections::index_set::IndexSet,
         >,
-        pose_integrator: Option<&dyn crate::physics::pose_integrator::IPoseIntegrator>,
+        velocity_callbacks: Option<&crate::physics::solver::VelocityIntegrationCallbacks>,
         batch_integration_mode: crate::physics::constraints::batch_integration_mode::BatchIntegrationMode,
         allow_pose_integration: bool,
         dt: f32,
@@ -469,30 +469,9 @@ impl<
             let impulse_bundles =
                 type_batch.accumulated_impulses.as_mut_ptr() as *mut TAccumulatedImpulse;
 
-            let angular_mode = pose_integrator
-                .map(|pi| pi.angular_integration_mode())
+            let angular_mode = velocity_callbacks
+                .map(|cb| cb.angular_mode)
                 .unwrap_or(crate::physics::pose_integration::AngularIntegrationMode::Nonconserving);
-            let velocity_fn = |body_indices: Vector<i32>,
-                               position: Vector3Wide,
-                               orientation: QuaternionWide,
-                               local_inertia: BodyInertiaWide,
-                               integration_mask: Vector<i32>,
-                               w_index: i32,
-                               dt_vec: Vector<f32>,
-                               velocity: &mut BodyVelocityWide| {
-                if let Some(pi) = pose_integrator {
-                    pi.integrate_velocity_callback(
-                        body_indices,
-                        position,
-                        orientation,
-                        local_inertia,
-                        integration_mask,
-                        w_index,
-                        dt_vec,
-                        velocity,
-                    );
-                }
-            };
 
             for i in start_bundle..exclusive_end_bundle {
                 let idx = i as usize;
@@ -507,7 +486,7 @@ impl<
                 crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
                     bodies,
                     angular_mode,
-                    &velocity_fn,
+                    velocity_callbacks,
                     integration_flags,
                     0,
                     batch_integration_mode,
@@ -529,7 +508,7 @@ impl<
                 crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
                     bodies,
                     angular_mode,
-                    &velocity_fn,
+                    velocity_callbacks,
                     integration_flags,
                     1,
                     batch_integration_mode,
@@ -551,7 +530,7 @@ impl<
                 crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
                     bodies,
                     angular_mode,
-                    &velocity_fn,
+                    velocity_callbacks,
                     integration_flags,
                     2,
                     batch_integration_mode,
@@ -573,7 +552,7 @@ impl<
                 crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
                     bodies,
                     angular_mode,
-                    &velocity_fn,
+                    velocity_callbacks,
                     integration_flags,
                     3,
                     batch_integration_mode,
