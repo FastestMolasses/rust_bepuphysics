@@ -400,7 +400,7 @@ impl PairCache {
         self.cached_dispatcher = None;
     }
 
-    /// Clears all sleeping sets and the active overlap mapping.
+    /// Clears all sleeping sets.
     pub(crate) fn clear(&mut self) {
         let pool_ref = unsafe { &mut *self.pool };
         for i in 1..self.sleeping_sets.len() {
@@ -411,12 +411,6 @@ impl PairCache {
                 }
             }
         }
-        // Clear the active overlap mapping so that stale pairs from before the
-        // clear don't trigger constraint removal on the next timestep. Without
-        // this, the freshness checker would attempt to remove constraints whose
-        // handles no longer exist in the solver, causing an index-out-of-bounds
-        // panic when accessing the (now empty) solver batches QuickList.
-        self.mapping.fast_clear();
         debug_assert!(!self.worker_pending_changes.allocated());
     }
 

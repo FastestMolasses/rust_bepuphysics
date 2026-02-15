@@ -219,12 +219,8 @@ enum ShapeKind {
 // Setup
 // ============================================================================
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // ---- Physics world ----
+/// Creates a new physics world with default settings.
+fn create_physics_world() -> PhysicsWorld {
     let mut buffer_pool = Box::new(BufferPool::new(131072, 16));
     let pool_ptr: *mut BufferPool = &mut *buffer_pool;
 
@@ -242,15 +238,29 @@ fn setup(
         )
     };
 
+    PhysicsWorld {
+        simulation,
+        _buffer_pool: buffer_pool,
+    }
+}
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // ---- Physics world ----
+    let mut physics = create_physics_world();
+
     // ---- Ground plane ----
-    let shapes = unsafe { &mut *(simulation.shapes as *mut Shapes) };
+    let shapes = unsafe { &mut *(physics.simulation.shapes as *mut Shapes) };
     let ground_shape = shapes.add(&PhysicsBox::new(120.0, 1.0, 120.0));
     let ground_desc = StaticDescription::with_discrete(
         RigidPose::from_position(phys_glam::Vec3::new(0.0, -0.5, 0.0)),
         ground_shape,
     );
     unsafe {
-        (&mut *simulation.statics).add(&ground_desc);
+        (&mut *physics.simulation.statics).add(&ground_desc);
     }
 
     // Ground visual — a slightly dark checkerboard-ish floor
@@ -282,7 +292,7 @@ fn setup(
         let ramp_shape = shapes.add(&PhysicsBox::new(12.0, 0.5, 6.0));
         let ramp_desc = StaticDescription::with_discrete(RigidPose::new(*pos, *rot), ramp_shape);
         unsafe {
-            (&mut *simulation.statics).add(&ramp_desc);
+            (&mut *physics.simulation.statics).add(&ramp_desc);
         }
 
         commands.spawn((
@@ -299,10 +309,7 @@ fn setup(
         ));
     }
 
-    commands.insert_resource(PhysicsWorld {
-        simulation,
-        _buffer_pool: buffer_pool,
-    });
+    commands.insert_resource(physics);
     commands.insert_resource(SpawnedBodies::default());
 
     // ---- Camera ----
@@ -499,7 +506,6 @@ fn spawn_objects(
 fn clear_objects(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    mut physics: ResMut<PhysicsWorld>,
     mut spawned: ResMut<SpawnedBodies>,
     query: Query<Entity, With<Spawned>>,
 ) {
@@ -507,10 +513,6 @@ fn clear_objects(
         return;
     }
 
-    // Clear the whole simulation (removes all bodies, statics, constraints).
-    unsafe {
-        physics.simulation.clear();
-    }
     spawned.handles.clear();
     spawned.count = 0;
 
@@ -519,7 +521,10 @@ fn clear_objects(
         commands.entity(entity).despawn();
     }
 
-    // Re-add statics (ground + ramps).
+    // Properly dispose and recreate the physics world.
+    // This is the correct way to reset a simulation - the C# library
+    // never uses Clear() followed by continued timesteps.
+    let mut physics = create_physics_world();
     let shapes = unsafe { &mut *(physics.simulation.shapes as *mut Shapes) };
 
     let ground_shape = shapes.add(&PhysicsBox::new(120.0, 1.0, 120.0));
@@ -553,7 +558,8 @@ fn clear_objects(
         }
     }
 
-    info!("Cleared all spawned objects");
+    commands.insert_resource(physics);
+    info!("Reset simulation (disposed old, created new)");
 }
 
 // ============================================================================
