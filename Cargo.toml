@@ -16,6 +16,7 @@ num-traits = "0.2"
 bevy = "0.18"
 rand = "0.9"
 bepuvy-sys = { git = "https://github.com/DrewRidley/bepuvy-sys.git", rev = "bdb4f4d" }
+avian3d = "0.5"
 
 [[example]]
 name = "tower"
@@ -28,3 +29,7 @@ path = "examples/rain.rs"
 [[example]]
 name = "rain_csharp"
 path = "examples/rain_csharp.rs"
+
+[[example]]
+name = "rain_avian"
+path = "examples/rain_avian.rs"
