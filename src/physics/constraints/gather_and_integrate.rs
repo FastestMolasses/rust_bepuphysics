@@ -81,7 +81,7 @@ pub fn decode_body_indices(
 #[inline(always)]
 pub unsafe fn integrate_pose_and_velocity(
     angular_integration_mode: AngularIntegrationMode,
-    integrate_velocity_fn: &dyn Fn(
+    integrate_velocity_fn: &impl Fn(
         Vector<i32>,           // body_indices
         Vector3Wide,           // position
         QuaternionWide,        // orientation
@@ -221,7 +221,7 @@ pub unsafe fn integrate_pose_and_velocity(
 pub unsafe fn integrate_velocity(
     angular_integration_mode: AngularIntegrationMode,
     batch_integration_mode: BatchIntegrationMode,
-    integrate_velocity_fn: &dyn Fn(
+    integrate_velocity_fn: &impl Fn(
         Vector<i32>,
         Vector3Wide,
         QuaternionWide,
@@ -342,7 +342,7 @@ fn build_dynamic_integration_mask(encoded_body_indices: &Vector<i32>) -> Vector<
 pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
     bodies: &Bodies,
     angular_integration_mode: AngularIntegrationMode,
-    integrate_velocity_fn: &dyn Fn(
+    integrate_velocity_fn: &impl Fn(
         Vector<i32>,
         Vector3Wide,
         QuaternionWide,

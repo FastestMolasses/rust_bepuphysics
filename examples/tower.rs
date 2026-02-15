@@ -46,6 +46,7 @@ use rust_bepuphysics::physics::solve_description::SolveDescription;
 use rust_bepuphysics::physics::static_description::StaticDescription;
 use rust_bepuphysics::utilities::memory::buffer_pool::BufferPool;
 use rust_bepuphysics::utilities::quaternion_wide::QuaternionWide;
+use rust_bepuphysics::utilities::thread_dispatcher::ThreadDispatcher;
 use rust_bepuphysics::utilities::vector::Vector;
 use rust_bepuphysics::utilities::vector3_wide::Vector3Wide;
 
@@ -173,6 +174,15 @@ impl Drop for PhysicsWorld {
 
 unsafe impl Send for PhysicsWorld {}
 unsafe impl Sync for PhysicsWorld {}
+
+/// Separate resource for the thread dispatcher so we can borrow it independently.
+#[derive(Resource)]
+struct PhysicsDispatcher {
+    dispatcher: ThreadDispatcher,
+}
+
+unsafe impl Send for PhysicsDispatcher {}
+unsafe impl Sync for PhysicsDispatcher {}
 
 #[derive(Component)]
 struct RigidBody {
@@ -375,6 +385,14 @@ fn setup(
     );
     commands.insert_resource(physics);
 
+    // Thread dispatcher
+    let thread_count = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(6);
+    commands.insert_resource(PhysicsDispatcher {
+        dispatcher: ThreadDispatcher::new(thread_count, 16384),
+    });
+
     // Camera
     commands.spawn((
         Camera3d::default(),
@@ -483,8 +501,10 @@ fn throw_ball(
 // Physics + sync
 // ============================================================================
 
-fn physics_step(mut physics: ResMut<PhysicsWorld>) {
-    physics.simulation.timestep(1.0 / 60.0, None);
+fn physics_step(mut physics: ResMut<PhysicsWorld>, dispatcher: Res<PhysicsDispatcher>) {
+    physics
+        .simulation
+        .timestep(1.0 / 60.0, Some(&dispatcher.dispatcher));
 }
 
 fn sync_transforms(physics: Res<PhysicsWorld>, mut query: Query<(&RigidBody, &mut Transform)>) {

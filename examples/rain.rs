@@ -48,6 +48,7 @@ use rust_bepuphysics::physics::solve_description::SolveDescription;
 use rust_bepuphysics::physics::static_description::StaticDescription;
 use rust_bepuphysics::utilities::memory::buffer_pool::BufferPool;
 use rust_bepuphysics::utilities::quaternion_wide::QuaternionWide;
+use rust_bepuphysics::utilities::thread_dispatcher::ThreadDispatcher;
 use rust_bepuphysics::utilities::vector::Vector;
 use rust_bepuphysics::utilities::vector3_wide::Vector3Wide;
 
@@ -180,6 +181,16 @@ impl Drop for PhysicsWorld {
 unsafe impl Send for PhysicsWorld {}
 unsafe impl Sync for PhysicsWorld {}
 
+/// Separate resource for the thread dispatcher so we can borrow it independently
+/// from PhysicsWorld (avoids split-borrow issues with ResMut).
+#[derive(Resource)]
+struct PhysicsDispatcher {
+    dispatcher: ThreadDispatcher,
+}
+
+unsafe impl Send for PhysicsDispatcher {}
+unsafe impl Sync for PhysicsDispatcher {}
+
 /// Tracks spawned rigid bodies so we can clear them.
 #[derive(Resource, Default)]
 struct SpawnedBodies {
@@ -250,7 +261,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // ---- Physics world ----
-    let mut physics = create_physics_world();
+    let physics = create_physics_world();
 
     // ---- Ground plane ----
     let shapes = unsafe { &mut *(physics.simulation.shapes as *mut Shapes) };
@@ -364,6 +375,14 @@ fn setup(
 
     commands.insert_resource(physics);
     commands.insert_resource(SpawnedBodies::default());
+
+    // ---- Thread dispatcher (match C# FFI example's thread count) ----
+    let thread_count = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(6);
+    commands.insert_resource(PhysicsDispatcher {
+        dispatcher: ThreadDispatcher::new(thread_count, 16384),
+    });
 
     // ---- Camera ----
     commands.spawn((
@@ -665,9 +684,11 @@ fn clear_objects(
 // Physics step + transform sync
 // ============================================================================
 
-fn physics_step(mut physics: ResMut<PhysicsWorld>) {
+fn physics_step(mut physics: ResMut<PhysicsWorld>, dispatcher: Res<PhysicsDispatcher>) {
     let dt = 1.0 / 60.0;
-    physics.simulation.timestep(dt, None);
+    physics
+        .simulation
+        .timestep(dt, Some(&dispatcher.dispatcher));
 }
 
 fn sync_transforms(physics: Res<PhysicsWorld>, mut query: Query<(&RigidBody, &mut Transform)>) {
