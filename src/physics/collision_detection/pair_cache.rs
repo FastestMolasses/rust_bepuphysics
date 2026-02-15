@@ -576,11 +576,12 @@ impl PairCache {
                             unsafe { &mut *self.constraint_handle_to_pair.get_mut(handle.0) };
                         let mut table_index = 0i32;
                         let mut element_index = 0i32;
-                        self.mapping.get_table_indices(
+                        let found = self.mapping.get_table_indices(
                             &pair_location.pair,
                             &mut table_index,
                             &mut element_index,
                         );
+                        debug_assert!(found, "If a pair was in the mapping, we should be able to find it.");
                         let cache = unsafe { *self.mapping.values.get(element_index) };
                         pair_location.inactive_set_index = set_index;
                         pair_location.inactive_pair_index = builder.add(

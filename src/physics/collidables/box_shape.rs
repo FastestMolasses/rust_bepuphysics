@@ -17,7 +17,7 @@ use crate::physics::collision_detection::support_finder::ISupportFinder as Depth
 
 /// Collision shape representing a solid cuboid.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Box {
     /// Half of the box's width along its local X axis.
     pub half_width: f32,
@@ -226,7 +226,9 @@ impl IShapeWide<Box> for BoxWide {
     #[inline(always)]
     fn write_slot(&mut self, index: usize, source: &Box) {
         unsafe {
-            GatherScatter::get_offset_instance_mut(self, index).write_first(source);
+            *GatherScatter::get_mut(&mut self.half_width, index) = source.half_width;
+            *GatherScatter::get_mut(&mut self.half_height, index) = source.half_height;
+            *GatherScatter::get_mut(&mut self.half_length, index) = source.half_length;
         }
     }
 

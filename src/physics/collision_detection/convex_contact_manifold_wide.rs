@@ -9,8 +9,8 @@ pub trait IContactManifoldWide {
     /// Applies a flip mask to swap the roles of A and B in the manifold.
     fn apply_flip_mask(&mut self, offset_b: &mut Vector3Wide, flip_mask: &Vector<i32>);
 
-    /// Reads the first lane of the wide manifold into a scalar manifold.
-    fn read_first(&self, offset_b: &Vector3Wide, target: &mut ConvexContactManifold);
+    /// Reads lane `lane` of the wide manifold into a scalar manifold.
+    fn read_first(&self, offset_b: &Vector3Wide, lane: usize, target: &mut ConvexContactManifold);
 }
 
 /// Wide manifold for single-contact convex pairs.
@@ -38,20 +38,20 @@ impl IContactManifoldWide for Convex1ContactManifoldWide {
     }
 
     #[inline(always)]
-    fn read_first(&self, offset_b: &Vector3Wide, target: &mut ConvexContactManifold) {
-        if self.contact_exists[0] < 0 {
+    fn read_first(&self, offset_b: &Vector3Wide, lane: usize, target: &mut ConvexContactManifold) {
+        if self.contact_exists[lane] < 0 {
             target.count = 1;
-            target.offset_b.x = offset_b.x[0];
-            target.offset_b.y = offset_b.y[0];
-            target.offset_b.z = offset_b.z[0];
-            target.contact0.offset.x = self.offset_a.x[0];
-            target.contact0.offset.y = self.offset_a.y[0];
-            target.contact0.offset.z = self.offset_a.z[0];
-            target.contact0.depth = self.depth[0];
-            target.contact0.feature_id = self.feature_id[0];
-            target.normal.x = self.normal.x[0];
-            target.normal.y = self.normal.y[0];
-            target.normal.z = self.normal.z[0];
+            target.offset_b.x = offset_b.x[lane];
+            target.offset_b.y = offset_b.y[lane];
+            target.offset_b.z = offset_b.z[lane];
+            target.contact0.offset.x = self.offset_a.x[lane];
+            target.contact0.offset.y = self.offset_a.y[lane];
+            target.contact0.offset.z = self.offset_a.z[lane];
+            target.contact0.depth = self.depth[lane];
+            target.contact0.feature_id = self.feature_id[lane];
+            target.normal.x = self.normal.x[lane];
+            target.normal.y = self.normal.y[lane];
+            target.normal.z = self.normal.z[lane];
         } else {
             target.count = 0;
         }
@@ -89,36 +89,36 @@ impl IContactManifoldWide for Convex2ContactManifoldWide {
     }
 
     #[inline(always)]
-    fn read_first(&self, offset_b: &Vector3Wide, target: &mut ConvexContactManifold) {
+    fn read_first(&self, offset_b: &Vector3Wide, lane: usize, target: &mut ConvexContactManifold) {
         target.count = 0;
-        if self.contact0_exists[0] < 0 {
+        if self.contact0_exists[lane] < 0 {
             target.count += 1;
-            target.contact0.offset.x = self.offset_a0.x[0];
-            target.contact0.offset.y = self.offset_a0.y[0];
-            target.contact0.offset.z = self.offset_a0.z[0];
-            target.contact0.depth = self.depth0[0];
-            target.contact0.feature_id = self.feature_id0[0];
+            target.contact0.offset.x = self.offset_a0.x[lane];
+            target.contact0.offset.y = self.offset_a0.y[lane];
+            target.contact0.offset.z = self.offset_a0.z[lane];
+            target.contact0.depth = self.depth0[lane];
+            target.contact0.feature_id = self.feature_id0[lane];
         }
-        if self.contact1_exists[0] < 0 {
+        if self.contact1_exists[lane] < 0 {
             unsafe {
                 let contact = &mut *(&mut target.contact0 as *mut _
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
-                contact.offset.x = self.offset_a1.x[0];
-                contact.offset.y = self.offset_a1.y[0];
-                contact.offset.z = self.offset_a1.z[0];
-                contact.depth = self.depth1[0];
-                contact.feature_id = self.feature_id1[0];
+                contact.offset.x = self.offset_a1.x[lane];
+                contact.offset.y = self.offset_a1.y[lane];
+                contact.offset.z = self.offset_a1.z[lane];
+                contact.depth = self.depth1[lane];
+                contact.feature_id = self.feature_id1[lane];
             }
         }
         if target.count > 0 {
-            target.offset_b.x = offset_b.x[0];
-            target.offset_b.y = offset_b.y[0];
-            target.offset_b.z = offset_b.z[0];
-            target.normal.x = self.normal.x[0];
-            target.normal.y = self.normal.y[0];
-            target.normal.z = self.normal.z[0];
+            target.offset_b.x = offset_b.x[lane];
+            target.offset_b.y = offset_b.y[lane];
+            target.offset_b.z = offset_b.z[lane];
+            target.normal.x = self.normal.x[lane];
+            target.normal.y = self.normal.y[lane];
+            target.normal.z = self.normal.z[lane];
         }
     }
 }
@@ -168,58 +168,58 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
     }
 
     #[inline(always)]
-    fn read_first(&self, offset_b: &Vector3Wide, target: &mut ConvexContactManifold) {
+    fn read_first(&self, offset_b: &Vector3Wide, lane: usize, target: &mut ConvexContactManifold) {
         target.count = 0;
-        if self.contact0_exists[0] < 0 {
+        if self.contact0_exists[lane] < 0 {
             target.count += 1;
-            target.contact0.offset.x = self.offset_a0.x[0];
-            target.contact0.offset.y = self.offset_a0.y[0];
-            target.contact0.offset.z = self.offset_a0.z[0];
-            target.contact0.depth = self.depth0[0];
-            target.contact0.feature_id = self.feature_id0[0];
+            target.contact0.offset.x = self.offset_a0.x[lane];
+            target.contact0.offset.y = self.offset_a0.y[lane];
+            target.contact0.offset.z = self.offset_a0.z[lane];
+            target.contact0.depth = self.depth0[lane];
+            target.contact0.feature_id = self.feature_id0[lane];
         }
         unsafe {
-            if self.contact1_exists[0] < 0 {
+            if self.contact1_exists[lane] < 0 {
                 let contact = &mut *(&mut target.contact0 as *mut _
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
-                contact.offset.x = self.offset_a1.x[0];
-                contact.offset.y = self.offset_a1.y[0];
-                contact.offset.z = self.offset_a1.z[0];
-                contact.depth = self.depth1[0];
-                contact.feature_id = self.feature_id1[0];
+                contact.offset.x = self.offset_a1.x[lane];
+                contact.offset.y = self.offset_a1.y[lane];
+                contact.offset.z = self.offset_a1.z[lane];
+                contact.depth = self.depth1[lane];
+                contact.feature_id = self.feature_id1[lane];
             }
-            if self.contact2_exists[0] < 0 {
+            if self.contact2_exists[lane] < 0 {
                 let contact = &mut *(&mut target.contact0 as *mut _
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
-                contact.offset.x = self.offset_a2.x[0];
-                contact.offset.y = self.offset_a2.y[0];
-                contact.offset.z = self.offset_a2.z[0];
-                contact.depth = self.depth2[0];
-                contact.feature_id = self.feature_id2[0];
+                contact.offset.x = self.offset_a2.x[lane];
+                contact.offset.y = self.offset_a2.y[lane];
+                contact.offset.z = self.offset_a2.z[lane];
+                contact.depth = self.depth2[lane];
+                contact.feature_id = self.feature_id2[lane];
             }
-            if self.contact3_exists[0] < 0 {
+            if self.contact3_exists[lane] < 0 {
                 let contact = &mut *(&mut target.contact0 as *mut _
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
-                contact.offset.x = self.offset_a3.x[0];
-                contact.offset.y = self.offset_a3.y[0];
-                contact.offset.z = self.offset_a3.z[0];
-                contact.depth = self.depth3[0];
-                contact.feature_id = self.feature_id3[0];
+                contact.offset.x = self.offset_a3.x[lane];
+                contact.offset.y = self.offset_a3.y[lane];
+                contact.offset.z = self.offset_a3.z[lane];
+                contact.depth = self.depth3[lane];
+                contact.feature_id = self.feature_id3[lane];
             }
         }
         if target.count > 0 {
-            target.offset_b.x = offset_b.x[0];
-            target.offset_b.y = offset_b.y[0];
-            target.offset_b.z = offset_b.z[0];
-            target.normal.x = self.normal.x[0];
-            target.normal.y = self.normal.y[0];
-            target.normal.z = self.normal.z[0];
+            target.offset_b.x = offset_b.x[lane];
+            target.offset_b.y = offset_b.y[lane];
+            target.offset_b.z = offset_b.z[lane];
+            target.normal.x = self.normal.x[lane];
+            target.normal.y = self.normal.y[lane];
+            target.normal.z = self.normal.z[lane];
         }
     }
 }

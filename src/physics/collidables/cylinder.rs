@@ -18,7 +18,7 @@ use crate::physics::collision_detection::support_finder::ISupportFinder as Depth
 
 /// Collision shape representing a cylinder.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Cylinder {
     /// Radius of the cylinder.
     pub radius: f32,
@@ -221,7 +221,8 @@ impl IShapeWide<Cylinder> for CylinderWide {
     #[inline(always)]
     fn write_slot(&mut self, index: usize, source: &Cylinder) {
         unsafe {
-            GatherScatter::get_offset_instance_mut(self, index).write_first(source);
+            *GatherScatter::get_mut(&mut self.radius, index) = source.radius;
+            *GatherScatter::get_mut(&mut self.half_length, index) = source.half_length;
         }
     }
 

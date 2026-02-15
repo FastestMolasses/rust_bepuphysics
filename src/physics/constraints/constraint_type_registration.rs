@@ -177,7 +177,7 @@ macro_rules! impl_one_body_functions {
 
 /// Generates an `IConstraintDescription` impl for a two-body constraint.
 macro_rules! impl_two_body_description {
-    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $solve_a:ty, $solve_b:ty) => {
+    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $warm_a:ty, $warm_b:ty, $solve_a:ty, $solve_b:ty) => {
         impl IConstraintDescription for $desc {
             fn apply_description(
                 &self,
@@ -219,6 +219,8 @@ macro_rules! impl_two_body_description {
                         $prestep,
                         $impulse,
                         $funcs,
+                        $warm_a,
+                        $warm_b,
                         $solve_a,
                         $solve_b,
                     >::new($type_id, $dof)),
@@ -230,7 +232,7 @@ macro_rules! impl_two_body_description {
 
 /// Generates an `IConstraintDescription` impl for a one-body constraint.
 macro_rules! impl_one_body_description {
-    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $solve_a:ty) => {
+    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $warm_a:ty, $solve_a:ty) => {
         impl IConstraintDescription for $desc {
             fn apply_description(
                 &self,
@@ -272,6 +274,7 @@ macro_rules! impl_one_body_description {
                         $prestep,
                         $impulse,
                         $funcs,
+                        $warm_a,
                         $solve_a,
                     >::new($type_id, $dof)),
                 )
@@ -1406,6 +1409,8 @@ impl_two_body_description!(
     BallSocketFunctions,
     22,
     3,
+    AccessNoPosition,
+    AccessNoPosition,
     AccessAll,
     AccessAll
 );
@@ -1418,6 +1423,8 @@ impl_two_body_description!(
     23,
     2,
     AccessOnlyAngular,
+    AccessOnlyAngularWithoutPose,
+    AccessOnlyAngular,
     AccessOnlyAngular
 );
 
@@ -1428,6 +1435,8 @@ impl_two_body_description!(
     AngularSwivelHingeFunctions,
     24,
     1,
+    AccessOnlyAngular,
+    AccessOnlyAngular,
     AccessOnlyAngular,
     AccessOnlyAngular
 );
@@ -1440,6 +1449,8 @@ impl_two_body_description!(
     25,
     1,
     AccessOnlyAngular,
+    AccessOnlyAngular,
+    AccessOnlyAngular,
     AccessOnlyAngular
 );
 
@@ -1450,6 +1461,8 @@ impl_two_body_description!(
     TwistServoFunctions,
     26,
     1,
+    AccessOnlyAngular,
+    AccessOnlyAngular,
     AccessOnlyAngular,
     AccessOnlyAngular
 );
@@ -1462,6 +1475,8 @@ impl_two_body_description!(
     27,
     1,
     AccessOnlyAngular,
+    AccessOnlyAngular,
+    AccessOnlyAngular,
     AccessOnlyAngular
 );
 
@@ -1473,6 +1488,8 @@ impl_two_body_description!(
     28,
     1,
     AccessOnlyAngular,
+    AccessOnlyAngular,
+    AccessOnlyAngular,
     AccessOnlyAngular
 );
 
@@ -1483,6 +1500,8 @@ impl_two_body_description!(
     AngularServoFunctions,
     29,
     3,
+    AccessOnlyAngularWithoutPose,
+    AccessOnlyAngularWithoutPose,
     AccessOnlyAngular,
     AccessOnlyAngular
 );
@@ -1494,6 +1513,8 @@ impl_two_body_description!(
     AngularMotorFunctions,
     30,
     3,
+    AccessOnlyAngularWithoutPose,
+    AccessOnlyAngularWithoutPose,
     AccessOnlyAngular,
     AccessOnlyAngularWithoutPose
 );
@@ -1505,6 +1526,8 @@ impl_two_body_description!(
     WeldFunctions,
     31,
     6,
+    AccessNoPosition,
+    AccessNoPose,
     AccessAll,
     AccessAll
 );
@@ -1544,6 +1567,8 @@ impl_two_body_description!(
     33,
     1,
     AccessAll,
+    AccessAll,
+    AccessAll,
     AccessAll
 );
 
@@ -1554,6 +1579,8 @@ impl_two_body_description!(
     DistanceLimitFunctions,
     34,
     1,
+    AccessAll,
+    AccessAll,
     AccessAll,
     AccessAll
 );
@@ -1566,6 +1593,8 @@ impl_two_body_description!(
     35,
     1,
     AccessOnlyLinear,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
     AccessOnlyLinear
 );
 
@@ -1576,6 +1605,8 @@ impl_two_body_description!(
     PointOnLineServoFunctions,
     37,
     2,
+    AccessAll,
+    AccessAll,
     AccessAll,
     AccessAll
 );
@@ -1588,6 +1619,8 @@ impl_two_body_description!(
     38,
     1,
     AccessAll,
+    AccessAll,
+    AccessAll,
     AccessAll
 );
 
@@ -1598,6 +1631,8 @@ impl_two_body_description!(
     LinearAxisMotorFunctions,
     39,
     1,
+    AccessAll,
+    AccessAll,
     AccessAll,
     AccessAll
 );
@@ -1610,6 +1645,8 @@ impl_two_body_description!(
     40,
     1,
     AccessAll,
+    AccessAll,
+    AccessAll,
     AccessAll
 );
 
@@ -1621,6 +1658,8 @@ impl_two_body_description!(
     41,
     1,
     AccessOnlyAngular,
+    AccessOnlyAngularWithoutPose,
+    AccessOnlyAngular,
     AccessOnlyAngular
 );
 
@@ -1631,6 +1670,8 @@ impl_two_body_description!(
     SwivelHingeFunctions,
     46,
     4,
+    AccessNoPosition,
+    AccessNoPosition,
     AccessAll,
     AccessAll
 );
@@ -1642,6 +1683,8 @@ impl_two_body_description!(
     HingeFunctions,
     47,
     5,
+    AccessNoPosition,
+    AccessNoPosition,
     AccessAll,
     AccessAll
 );
@@ -1653,6 +1696,8 @@ impl_two_body_description!(
     BallSocketMotorFunctions,
     52,
     3,
+    AccessNoOrientation,
+    AccessAll,
     AccessAll,
     AccessAll
 );
@@ -1664,6 +1709,8 @@ impl_two_body_description!(
     BallSocketServoFunctions,
     53,
     3,
+    AccessNoPosition,
+    AccessNoPosition,
     AccessAll,
     AccessAll
 );
@@ -1676,6 +1723,8 @@ impl_two_body_description!(
     54,
     1,
     AccessOnlyAngular,
+    AccessOnlyAngularWithoutPose,
+    AccessOnlyAngular,
     AccessOnlyAngularWithoutPose
 );
 
@@ -1686,6 +1735,8 @@ impl_two_body_description!(
     CenterDistanceLimitFunctions,
     55,
     1,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
     AccessOnlyLinear,
     AccessOnlyLinear
 );
@@ -1699,6 +1750,7 @@ impl_one_body_description!(
     OneBodyAngularServoFunctions,
     42,
     3,
+    AccessOnlyAngular,
     AccessOnlyAngular
 );
 
@@ -1709,6 +1761,7 @@ impl_one_body_description!(
     OneBodyAngularMotorFunctions,
     43,
     3,
+    AccessOnlyAngularWithoutPose,
     AccessOnlyAngular
 );
 
@@ -1719,6 +1772,7 @@ impl_one_body_description!(
     OneBodyLinearServoFunctions,
     44,
     3,
+    AccessAll,
     AccessAll
 );
 
@@ -1729,6 +1783,7 @@ impl_one_body_description!(
     OneBodyLinearMotorFunctions,
     45,
     3,
+    AccessNoPosition,
     AccessNoPosition
 );
 
@@ -1780,7 +1835,8 @@ macro_rules! impl_contact_one_body_description {
                         $prestep,
                         $impulse,
                         $funcs,
-                        AccessAll,
+                        AccessNoPose,
+                        AccessNoPose,
                     >::new($type_id, $dof)),
                 )
             }
@@ -1830,8 +1886,10 @@ macro_rules! impl_contact_two_body_description {
                         $prestep,
                         $impulse,
                         $funcs,
-                        AccessAll,
-                        AccessAll,
+                        AccessNoPose,
+                        AccessNoPose,
+                        AccessNoPose,
+                        AccessNoPose,
                     >::new($type_id, $dof)),
                 )
             }

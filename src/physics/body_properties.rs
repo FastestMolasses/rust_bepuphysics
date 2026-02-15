@@ -285,6 +285,12 @@ impl RigidPoseWide {
     }
 
     #[inline(always)]
+    pub fn write_slot(pose: &RigidPose, slot_index: usize, poses: &mut RigidPoseWide) {
+        Vector3Wide::write_slot(pose.position, slot_index, &mut poses.position);
+        QuaternionWide::write_slot(pose.orientation, slot_index, &mut poses.orientation);
+    }
+
+    #[inline(always)]
     pub fn read_first(poses: &RigidPoseWide, pose: &mut RigidPose) {
         Vector3Wide::read_first(&poses.position, &mut pose.position);
         QuaternionWide::read_first(&poses.orientation, &mut pose.orientation);

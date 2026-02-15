@@ -331,21 +331,25 @@ impl CylinderConvexHullTester {
                 let slot_inverse_local_normal_dot_cap_normal =
                     inverse_local_normal_dot_cap_normal.as_array()[slot_index];
 
-                let interior0_slot = GatherScatter::get_offset_instance(&interior0, slot_index);
-                let interior1_slot = GatherScatter::get_offset_instance(&interior1, slot_index);
-                let interior2_slot = GatherScatter::get_offset_instance(&interior2, slot_index);
-                let interior3_slot = GatherScatter::get_offset_instance(&interior3, slot_index);
+                let interior0_x = *GatherScatter::get(&interior0.x, slot_index);
+                let interior0_y = *GatherScatter::get(&interior0.y, slot_index);
+                let interior1_x = *GatherScatter::get(&interior1.x, slot_index);
+                let interior1_y = *GatherScatter::get(&interior1.y, slot_index);
+                let interior2_x = *GatherScatter::get(&interior2.x, slot_index);
+                let interior2_y = *GatherScatter::get(&interior2.y, slot_index);
+                let interior3_x = *GatherScatter::get(&interior3.x, slot_index);
+                let interior3_y = *GatherScatter::get(&interior3.y, slot_index);
                 let interior_points_x = [
-                    interior0_slot.x[0],
-                    interior1_slot.x[0],
-                    interior2_slot.x[0],
-                    interior3_slot.x[0],
+                    interior0_x,
+                    interior1_x,
+                    interior2_x,
+                    interior3_x,
                 ];
                 let interior_points_y = [
-                    interior0_slot.y[0],
-                    interior1_slot.y[0],
-                    interior2_slot.y[0],
-                    interior3_slot.y[0],
+                    interior0_y,
+                    interior1_y,
+                    interior2_y,
+                    interior3_y,
                 ];
                 let slot_radius = a.radius.as_array()[slot_index];
                 let mut slot_cylinder_orientation = Matrix3x3::default();

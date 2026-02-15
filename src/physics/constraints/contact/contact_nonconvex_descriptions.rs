@@ -21,15 +21,16 @@ use glam::Vec3;
 #[inline(always)]
 unsafe fn copy_contact_data_to_prestep(
     contact_count: i32,
+    inner_index: usize,
     source_contacts: *const NonconvexConstraintContactData,
     target_contacts: *mut NonconvexContactPrestepData,
 ) {
     for i in 0..contact_count as isize {
         let source = &*source_contacts.offset(i);
         let target = &mut *target_contacts.offset(i);
-        Vector3Wide::write_first(source.offset_a, &mut target.offset);
-        *GatherScatter::get_first_mut(&mut target.depth) = source.penetration_depth;
-        Vector3Wide::write_first(source.normal, &mut target.normal);
+        Vector3Wide::write_slot(source.offset_a, inner_index, &mut target.offset);
+        *GatherScatter::get_mut(&mut target.depth, inner_index) = source.penetration_depth;
+        Vector3Wide::write_slot(source.normal, inner_index, &mut target.normal);
     }
 }
 
@@ -37,15 +38,16 @@ unsafe fn copy_contact_data_to_prestep(
 #[inline(always)]
 unsafe fn copy_contact_data_from_prestep(
     contact_count: i32,
+    inner_index: usize,
     source_contacts: *const NonconvexContactPrestepData,
     target_contacts: *mut NonconvexConstraintContactData,
 ) {
     for i in 0..contact_count as isize {
         let source = &*source_contacts.offset(i);
         let target = &mut *target_contacts.offset(i);
-        Vector3Wide::read_first(&source.offset, &mut target.offset_a);
-        target.penetration_depth = *GatherScatter::get_first(&source.depth);
-        Vector3Wide::read_first(&source.normal, &mut target.normal);
+        Vector3Wide::read_slot(&source.offset, inner_index, &mut target.offset_a);
+        target.penetration_depth = *GatherScatter::get(&source.depth, inner_index);
+        Vector3Wide::read_slot(&source.normal, inner_index, &mut target.normal);
     }
 }
 
@@ -74,29 +76,25 @@ macro_rules! impl_nonconvex_two_body_description {
                 _bundle_index: usize,
                 inner_index: usize,
             ) {
-                let target = unsafe {
-                    GatherScatter::get_offset_instance_mut(prestep_bundle, inner_index)
-                };
                 // Copy common two-body properties
-                Vector3Wide::write_first(self.common.offset_b, &mut target.offset_b);
+                Vector3Wide::write_slot(self.common.offset_b, inner_index, &mut prestep_bundle.offset_b);
                 unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.friction_coefficient) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.friction_coefficient, inner_index) =
                         self.common.friction_coefficient;
-                }
-                SpringSettingsWide::write_first(
-                    &self.common.spring_settings,
-                    &mut target.material_properties.spring_settings,
-                );
-                unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.maximum_recovery_velocity) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index) =
+                        self.common.spring_settings.angular_frequency;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index) =
+                        self.common.spring_settings.twice_damping_ratio;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.maximum_recovery_velocity, inner_index) =
                         self.common.maximum_recovery_velocity;
                 }
                 // Copy per-contact data
                 unsafe {
                     copy_contact_data_to_prestep(
                         $count,
+                        inner_index,
                         &self.contact0 as *const NonconvexConstraintContactData,
-                        &mut target.contact0 as *mut NonconvexContactPrestepData,
+                        &mut prestep_bundle.contact0 as *mut NonconvexContactPrestepData,
                     );
                 }
             }
@@ -108,22 +106,20 @@ macro_rules! impl_nonconvex_two_body_description {
                 inner_index: usize,
                 description: &mut $name,
             ) {
-                let source = unsafe {
-                    GatherScatter::get_offset_instance(prestep_bundle, inner_index)
-                };
-                Vector3Wide::read_first(&source.offset_b, &mut description.common.offset_b);
-                description.common.friction_coefficient =
-                    unsafe { *GatherScatter::get_first(&source.material_properties.friction_coefficient) };
-                SpringSettingsWide::read_first(
-                    &source.material_properties.spring_settings,
-                    &mut description.common.spring_settings,
-                );
-                description.common.maximum_recovery_velocity =
-                    unsafe { *GatherScatter::get_first(&source.material_properties.maximum_recovery_velocity) };
+                Vector3Wide::read_slot(&prestep_bundle.offset_b, inner_index, &mut description.common.offset_b);
                 unsafe {
+                    description.common.friction_coefficient =
+                        *GatherScatter::get(&prestep_bundle.material_properties.friction_coefficient, inner_index);
+                    description.common.spring_settings.angular_frequency =
+                        *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index);
+                    description.common.spring_settings.twice_damping_ratio =
+                        *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index);
+                    description.common.maximum_recovery_velocity =
+                        *GatherScatter::get(&prestep_bundle.material_properties.maximum_recovery_velocity, inner_index);
                     copy_contact_data_from_prestep(
                         $count,
-                        &source.contact0 as *const NonconvexContactPrestepData,
+                        inner_index,
+                        &prestep_bundle.contact0 as *const NonconvexContactPrestepData,
                         &mut description.contact0 as *mut NonconvexConstraintContactData,
                     );
                 }
@@ -171,28 +167,24 @@ macro_rules! impl_nonconvex_one_body_description {
                 _bundle_index: usize,
                 inner_index: usize,
             ) {
-                let target = unsafe {
-                    GatherScatter::get_offset_instance_mut(prestep_bundle, inner_index)
-                };
                 // Copy common one-body properties (no offsetB)
                 unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.friction_coefficient) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.friction_coefficient, inner_index) =
                         self.common.friction_coefficient;
-                }
-                SpringSettingsWide::write_first(
-                    &self.common.spring_settings,
-                    &mut target.material_properties.spring_settings,
-                );
-                unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.maximum_recovery_velocity) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index) =
+                        self.common.spring_settings.angular_frequency;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index) =
+                        self.common.spring_settings.twice_damping_ratio;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.maximum_recovery_velocity, inner_index) =
                         self.common.maximum_recovery_velocity;
                 }
                 // Copy per-contact data
                 unsafe {
                     copy_contact_data_to_prestep(
                         $count,
+                        inner_index,
                         &self.contact0 as *const NonconvexConstraintContactData,
-                        &mut target.contact0 as *mut NonconvexContactPrestepData,
+                        &mut prestep_bundle.contact0 as *mut NonconvexContactPrestepData,
                     );
                 }
             }
@@ -204,21 +196,19 @@ macro_rules! impl_nonconvex_one_body_description {
                 inner_index: usize,
                 description: &mut $name,
             ) {
-                let source = unsafe {
-                    GatherScatter::get_offset_instance(prestep_bundle, inner_index)
-                };
                 description.common.friction_coefficient =
-                    unsafe { *GatherScatter::get_first(&source.material_properties.friction_coefficient) };
-                SpringSettingsWide::read_first(
-                    &source.material_properties.spring_settings,
-                    &mut description.common.spring_settings,
-                );
+                    unsafe { *GatherScatter::get(&prestep_bundle.material_properties.friction_coefficient, inner_index) };
+                description.common.spring_settings.angular_frequency =
+                    unsafe { *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index) };
+                description.common.spring_settings.twice_damping_ratio =
+                    unsafe { *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index) };
                 description.common.maximum_recovery_velocity =
-                    unsafe { *GatherScatter::get_first(&source.material_properties.maximum_recovery_velocity) };
+                    unsafe { *GatherScatter::get(&prestep_bundle.material_properties.maximum_recovery_velocity, inner_index) };
                 unsafe {
                     copy_contact_data_from_prestep(
                         $count,
-                        &source.contact0 as *const NonconvexContactPrestepData,
+                        inner_index,
+                        &prestep_bundle.contact0 as *const NonconvexContactPrestepData,
                         &mut description.contact0 as *mut NonconvexConstraintContactData,
                     );
                 }

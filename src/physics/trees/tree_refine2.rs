@@ -443,7 +443,7 @@ impl Tree {
         // Use ST BinnedBuild. MT BinnedBuild would be used here when taskCount > 1,
         // but requires MT BinnedBuilder which is not yet implemented.
         Tree::binned_build_static(
-            root_refinement_subtrees.span,
+            root_refinement_subtrees.span.slice_count(root_refinement_subtrees.count),
             root_refinement_nodes,
             Buffer::default(),
             Buffer::default(),
@@ -518,7 +518,7 @@ impl Tree {
             pool.take_at_least(subtree_refinement_node_indices.count);
         // Use ST BinnedBuild. MT BinnedBuild would be used here when taskCount > 1.
         Tree::binned_build_static(
-            subtree_refinement_leaves.span,
+            subtree_refinement_leaves.span.slice_count(subtree_refinement_leaves.count),
             refinement_nodes,
             Buffer::default(),
             Buffer::default(),
@@ -1159,7 +1159,7 @@ impl Tree {
             // Run the binned builder over the collected subtrees.
             unsafe {
                 Self::binned_build_static(
-                    root_refinement_subtrees.span,
+                    root_refinement_subtrees.span.slice_count(root_refinement_subtrees.count),
                     root_refinement_nodes,
                     Buffer::default(),
                     Buffer::default(),
@@ -1202,7 +1202,7 @@ impl Tree {
             );
             unsafe {
                 Self::binned_build_static(
-                    subtree_refinement_leaves.span,
+                    subtree_refinement_leaves.span.slice_count(subtree_refinement_leaves.count),
                     refinement_nodes,
                     Buffer::default(),
                     Buffer::default(),

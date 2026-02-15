@@ -3,8 +3,11 @@
 #![feature(generic_const_exprs)]
 #![allow(unused_unsafe)]
 
-mod physics;
+pub mod physics;
 pub mod utilities;
+
+/// Re-export glam so consumers use the exact same version as the physics crate.
+pub use glam;
 
 // NOTE: Could replace is_x86_feature_detected with cfg, maybe OnceLock and do feature detection in build script.
 // NOTE: SVE intrinsics not yet implemented for aarch64.

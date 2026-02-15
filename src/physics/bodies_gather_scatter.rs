@@ -161,21 +161,19 @@ impl Bodies {
     ) {
         let source = &states.get(index).inertia.world;
         unsafe {
-            let target_slot =
-                GatherScatter::get_offset_instance_mut(gathered_inertias, body_index_in_bundle);
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.xx) =
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.xx, body_index_in_bundle) =
                 source.inverse_inertia_tensor.xx;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.yx) =
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.yx, body_index_in_bundle) =
                 source.inverse_inertia_tensor.yx;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.yy) =
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.yy, body_index_in_bundle) =
                 source.inverse_inertia_tensor.yy;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.zx) =
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.zx, body_index_in_bundle) =
                 source.inverse_inertia_tensor.zx;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.zy) =
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.zy, body_index_in_bundle) =
                 source.inverse_inertia_tensor.zy;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_inertia_tensor.zz) =
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.zz, body_index_in_bundle) =
                 source.inverse_inertia_tensor.zz;
-            *GatherScatter::get_first_mut(&mut target_slot.inverse_mass) = source.inverse_mass;
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_mass, body_index_in_bundle) = source.inverse_mass;
         }
     }
 
@@ -190,21 +188,25 @@ impl Bodies {
     ) {
         let state = &states.get(index).motion;
         unsafe {
-            Vector3Wide::write_first(
+            Vector3Wide::write_slot(
                 state.pose.position,
-                GatherScatter::get_offset_instance_mut(position, body_index_in_bundle),
+                body_index_in_bundle,
+                position,
             );
-            QuaternionWide::write_first(
+            QuaternionWide::write_slot(
                 state.pose.orientation,
-                GatherScatter::get_offset_instance_mut(orientation, body_index_in_bundle),
+                body_index_in_bundle,
+                orientation,
             );
-            Vector3Wide::write_first(
+            Vector3Wide::write_slot(
                 state.velocity.linear,
-                GatherScatter::get_offset_instance_mut(&mut velocity.linear, body_index_in_bundle),
+                body_index_in_bundle,
+                &mut velocity.linear,
             );
-            Vector3Wide::write_first(
+            Vector3Wide::write_slot(
                 state.velocity.angular,
-                GatherScatter::get_offset_instance_mut(&mut velocity.angular, body_index_in_bundle),
+                body_index_in_bundle,
+                &mut velocity.angular,
             );
         }
     }

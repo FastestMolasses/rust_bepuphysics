@@ -38,10 +38,12 @@ impl OneBodyLinearMotor {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "OneBodyLinearMotor");
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset, &mut target.local_offset);
-        Vector3Wide::write_first(self.target_velocity, &mut target.target_velocity);
-        MotorSettingsWide::write_first(&self.settings, &mut target.settings);
+        Vector3Wide::write_slot(self.local_offset, inner_index, &mut prestep_data.local_offset);
+        Vector3Wide::write_slot(self.target_velocity, inner_index, &mut prestep_data.target_velocity);
+        unsafe {
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
+        }
     }
 
     pub fn build_description(
@@ -50,10 +52,12 @@ impl OneBodyLinearMotor {
         inner_index: usize,
         description: &mut OneBodyLinearMotor,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset, &mut description.local_offset);
-        Vector3Wide::read_first(&source.target_velocity, &mut description.target_velocity);
-        MotorSettingsWide::read_first(&source.settings, &mut description.settings);
+        Vector3Wide::read_slot(&prestep_data.local_offset, inner_index, &mut description.local_offset);
+        Vector3Wide::read_slot(&prestep_data.target_velocity, inner_index, &mut description.target_velocity);
+        unsafe {
+            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+        }
     }
 }
 

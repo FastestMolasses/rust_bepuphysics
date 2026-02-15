@@ -73,6 +73,7 @@ pub trait ITwoBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> {
 /// - `TPrestepData`: The AOSOA-layout prestep data for one bundle of constraints.
 /// - `TAccumulatedImpulse`: The AOSOA-layout accumulated impulse data for one bundle.
 /// - `TConstraintFunctions`: The struct implementing `ITwoBodyConstraintFunctions`.
+/// - `TWarmStartAccessFilterA/B`: Body access filters used during warm start gather/scatter.
 /// - `TSolveAccessFilterA/B`: Body access filters used during the solve iteration.
 ///
 /// This corresponds to C#'s `TwoBodyTypeProcessor<TPrestepData, TAccumulatedImpulse, TConstraintFunctions, ...>`.
@@ -80,6 +81,8 @@ pub struct TwoBodyTypeProcessorImpl<
     TPrestepData: Copy + 'static,
     TAccumulatedImpulse: Copy + 'static,
     TConstraintFunctions: ITwoBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
+    TWarmStartAccessFilterA: IBodyAccessFilter + 'static,
+    TWarmStartAccessFilterB: IBodyAccessFilter + 'static,
     TSolveAccessFilterA: IBodyAccessFilter + 'static,
     TSolveAccessFilterB: IBodyAccessFilter + 'static,
 > {
@@ -89,6 +92,8 @@ pub struct TwoBodyTypeProcessorImpl<
         TPrestepData,
         TAccumulatedImpulse,
         TConstraintFunctions,
+        TWarmStartAccessFilterA,
+        TWarmStartAccessFilterB,
         TSolveAccessFilterA,
         TSolveAccessFilterB,
     )>,
@@ -98,6 +103,8 @@ impl<
         TPrestepData: Copy + 'static,
         TAccumulatedImpulse: Copy + 'static,
         TConstraintFunctions: ITwoBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
+        TWarmStartAccessFilterA: IBodyAccessFilter + 'static,
+        TWarmStartAccessFilterB: IBodyAccessFilter + 'static,
         TSolveAccessFilterA: IBodyAccessFilter + 'static,
         TSolveAccessFilterB: IBodyAccessFilter + 'static,
     >
@@ -105,6 +112,8 @@ impl<
         TPrestepData,
         TAccumulatedImpulse,
         TConstraintFunctions,
+        TWarmStartAccessFilterA,
+        TWarmStartAccessFilterB,
         TSolveAccessFilterA,
         TSolveAccessFilterB,
     >
@@ -122,6 +131,8 @@ impl<
         TPrestepData: Copy + 'static,
         TAccumulatedImpulse: Copy + 'static,
         TConstraintFunctions: ITwoBodyConstraintFunctions<TPrestepData, TAccumulatedImpulse> + 'static,
+        TWarmStartAccessFilterA: IBodyAccessFilter + 'static,
+        TWarmStartAccessFilterB: IBodyAccessFilter + 'static,
         TSolveAccessFilterA: IBodyAccessFilter + 'static,
         TSolveAccessFilterB: IBodyAccessFilter + 'static,
     > ITypeProcessor
@@ -129,6 +140,8 @@ impl<
         TPrestepData,
         TAccumulatedImpulse,
         TConstraintFunctions,
+        TWarmStartAccessFilterA,
+        TWarmStartAccessFilterB,
         TSolveAccessFilterA,
         TSolveAccessFilterB,
     >
@@ -316,7 +329,7 @@ impl<
                 let mut wsv_a = BodyVelocityWide::default();
                 let mut inertia_a = BodyInertiaWide::default();
 
-                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<TWarmStartAccessFilterA>(
                     bodies,
                     angular_mode,
                     &velocity_fn,
@@ -339,7 +352,7 @@ impl<
                 let mut wsv_b = BodyVelocityWide::default();
                 let mut inertia_b = BodyInertiaWide::default();
 
-                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<AccessAll>(
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<TWarmStartAccessFilterB>(
                     bodies,
                     angular_mode,
                     &velocity_fn,
@@ -373,8 +386,8 @@ impl<
                 // When integration happens, all velocities are gathered fully → scatter with AccessAll.
                 // When no integration, use the warm start access filter.
                 if batch_integration_mode == crate::physics::constraints::batch_integration_mode::BatchIntegrationMode::Never {
-                    bodies.scatter_velocities::<AccessAll>(&wsv_a, &references.index_a);
-                    bodies.scatter_velocities::<AccessAll>(&wsv_b, &references.index_b);
+                    bodies.scatter_velocities::<TWarmStartAccessFilterA>(&wsv_a, &references.index_a);
+                    bodies.scatter_velocities::<TWarmStartAccessFilterB>(&wsv_b, &references.index_b);
                 } else {
                     bodies.scatter_velocities::<AccessAll>(&wsv_a, &references.index_a);
                     bodies.scatter_velocities::<AccessAll>(&wsv_b, &references.index_b);

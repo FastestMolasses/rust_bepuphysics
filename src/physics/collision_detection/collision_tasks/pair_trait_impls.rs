@@ -381,18 +381,10 @@ impl ICollisionPairWide<SphereWide, SphereWide, SpherePair> for SpherePairWide {
         let idx = index as usize;
         Vector3Wide::write_slot(source.offset_b, idx, &mut self.offset_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.speculative_margin,
-                idx,
-            )) = source.speculative_margin;
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.a,
-                idx,
-            )) = source.a;
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.b,
-                idx,
-            )) = source.b;
+            *GatherScatter::get_mut(&mut self.speculative_margin, idx) =
+                source.speculative_margin;
+            *GatherScatter::get_mut(&mut self.a, idx) = source.a;
+            *GatherScatter::get_mut(&mut self.b, idx) = source.b;
         }
     }
 }
@@ -442,16 +434,10 @@ impl<TShapeWide: Default + IShapeWideAllocation>
         Vector3Wide::write_slot(source.offset_b, idx, &mut self.offset_b);
         QuaternionWide::write_slot(source.orientation_b, idx, &mut self.orientation_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.speculative_margin,
-                idx,
-            )) = source.speculative_margin;
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.a,
-                idx,
-            )) = source.a;
-            *(GatherScatter::get_offset_instance_mut(&mut self.flip_mask, idx) as *mut Vector<i32>
-                as *mut i32) = source.flip_mask;
+            *GatherScatter::get_mut(&mut self.speculative_margin, idx) =
+                source.speculative_margin;
+            *GatherScatter::get_mut(&mut self.a, idx) = source.a;
+            *GatherScatter::get_mut(&mut self.flip_mask, idx) = source.flip_mask;
             // Shape B: copy scalar shape into wide lane
             self.b.write_slot_raw(idx, source.b);
         }
@@ -502,10 +488,8 @@ impl<TShapeWide: Default + IShapeWideAllocation>
         QuaternionWide::write_slot(source.orientation_a, idx, &mut self.orientation_a);
         QuaternionWide::write_slot(source.orientation_b, idx, &mut self.orientation_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.speculative_margin,
-                idx,
-            )) = source.speculative_margin;
+            *GatherScatter::get_mut(&mut self.speculative_margin, idx) =
+                source.speculative_margin;
             self.a.write_slot_raw(idx, source.a);
             self.b.write_slot_raw(idx, source.b);
         }
@@ -557,12 +541,9 @@ impl<TShapeWideA: Default + IShapeWideAllocation, TShapeWideB: Default + IShapeW
         QuaternionWide::write_slot(source.orientation_a, idx, &mut self.orientation_a);
         QuaternionWide::write_slot(source.orientation_b, idx, &mut self.orientation_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut *GatherScatter::get_offset_instance_mut(
-                &mut self.speculative_margin,
-                idx,
-            )) = source.speculative_margin;
-            *(GatherScatter::get_offset_instance_mut(&mut self.flip_mask, idx) as *mut Vector<i32>
-                as *mut i32) = source.flip_mask;
+            *GatherScatter::get_mut(&mut self.speculative_margin, idx) =
+                source.speculative_margin;
+            *GatherScatter::get_mut(&mut self.flip_mask, idx) = source.flip_mask;
             self.a.write_slot_raw(idx, source.a);
             self.b.write_slot_raw(idx, source.b);
         }

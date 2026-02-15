@@ -91,8 +91,13 @@ impl WideRayTester {
                 let ray_data =
                     &*(ray_ref as *const crate::physics::trees::ray_batcher::RayData
                         as *const crate::physics::collidables::ray::RayData);
-                let target = GatherScatter::get_offset_instance_mut(&mut ray_wide, j as usize);
-                target.gather(ray_data);
+                let slot = j as usize;
+                *GatherScatter::get_mut(&mut ray_wide.origin.x, slot) = ray_data.origin.x;
+                *GatherScatter::get_mut(&mut ray_wide.origin.y, slot) = ray_data.origin.y;
+                *GatherScatter::get_mut(&mut ray_wide.origin.z, slot) = ray_data.origin.z;
+                *GatherScatter::get_mut(&mut ray_wide.direction.x, slot) = ray_data.direction.x;
+                *GatherScatter::get_mut(&mut ray_wide.direction.y, slot) = ray_data.direction.y;
+                *GatherScatter::get_mut(&mut ray_wide.direction.z, slot) = ray_data.direction.z;
             }
 
             // Perform SIMD-wide ray test.

@@ -246,6 +246,9 @@ impl Simulation {
         // Register default constraint types.
         DefaultTypes::register_defaults(&mut *solver, &mut (*narrow_phase).base);
 
+        // Initialize the freshness checker now that the struct is at its final heap location.
+        (*narrow_phase).init_freshness_checker();
+
         // Wire pair cache into sleeper, awakener, solver.
         let pair_cache_ptr = &mut (*narrow_phase).base.pair_cache
             as *mut crate::physics::collision_detection::pair_cache::PairCache;

@@ -16,7 +16,7 @@ use crate::physics::collision_detection::support_finder::ISupportFinder as Depth
 
 /// Collision shape representing a sphere.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Sphere {
     /// Radius of the sphere.
     pub radius: f32,
@@ -153,8 +153,7 @@ impl IShapeWide<Sphere> for SphereWide {
     #[inline(always)]
     fn write_slot(&mut self, index: usize, source: &Sphere) {
         unsafe {
-            let slot = GatherScatter::get_offset_instance_mut(self, index);
-            slot.write_first(source);
+            *GatherScatter::get_mut(&mut self.radius, index) = source.radius;
         }
     }
 

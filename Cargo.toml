@@ -11,3 +11,15 @@ profile = []
 [dependencies]
 glam = { version = "0.32" }
 num-traits = "0.2"
+
+[dev-dependencies]
+bevy = "0.18"
+rand = "0.9"
+
+[[example]]
+name = "tower"
+path = "examples/tower.rs"
+
+[[example]]
+name = "rain"
+path = "examples/rain.rs"

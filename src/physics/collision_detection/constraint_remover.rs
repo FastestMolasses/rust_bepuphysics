@@ -181,7 +181,7 @@ impl WorkerCache {
         let type_processor = solver.type_processors[constraint.type_id as usize]
             .as_ref()
             .unwrap();
-        let bodies_per_constraint = type_processor.bodies_per_constraint as i32;
+        let bodies_per_constraint = type_processor.bodies_per_constraint;
 
         let pool = &mut *self.pool;
         let linear_type_batch_index = self.removals.allocate_space_for_targets(
@@ -528,7 +528,7 @@ impl ConstraintRemover {
         }
     }
 
-    /// Marks affected constraints as removed from the solver.
+    /// Marks affected cobatches.removals_for_type_batches.get(i)
     pub fn mark_affected_constraints_as_removed_from_solver(&mut self) {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
@@ -537,7 +537,7 @@ impl ConstraintRemover {
                         &(*batches.removals_for_type_batches.get(i)).constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
-                        (*solver.handle_to_constraint.get_mut(batch_handles.get(j).0)).set_index =
+                        solver.handle_to_constraint.get_mut(batch_handles.get(j).0).set_index =
                             -1;
                     }
                 }
@@ -578,7 +578,7 @@ impl ConstraintRemover {
                         continue;
                     }
                     let removals =
-                        &(*batches.removals_for_type_batches.get(i)).per_body_removal_targets;
+                        &batches.removals_for_type_batches.get(i).per_body_removal_targets;
                     for j in 0..removals.count {
                         let target = removals.get(j);
                         solver
@@ -604,7 +604,7 @@ impl ConstraintRemover {
                         continue;
                     }
                     let removals =
-                        &(*batches.removals_for_type_batches.get(i)).per_body_removal_targets;
+                        &batches.removals_for_type_batches.get(i).per_body_removal_targets;
                     for j in 0..removals.count {
                         let target = removals.get(j);
                         let encoded = target.encoded_body_index & Bodies::BODY_REFERENCE_MASK;
@@ -632,8 +632,7 @@ impl ConstraintRemover {
         unsafe {
             if !self.removed_type_batches.is_empty() {
                 // Sort removed batches from highest to lowest so higher index batches get removed first.
-                self.removed_type_batches
-                    .sort_unstable_by(|a, b| b.as_i32().cmp(&a.as_i32()));
+                self.removed_type_batches.sort_unstable_by_key(|b| std::cmp::Reverse(b.as_i32()));
                 let solver_ptr = self.solver;
                 for i in 0..self.removed_type_batches.len() {
                     let batch_indices = self.removed_type_batches[i];
@@ -667,7 +666,7 @@ impl ConstraintRemover {
             let worker_cache = &mut self.worker_caches[i];
             for j in 0..worker_cache.removals.batch_count {
                 unsafe {
-                    let removals = &*worker_cache.removals.removals_for_type_batches.get(j);
+                    let removals = worker_cache.removals.removals_for_type_batches.get(j);
                     let count = removals.constraint_handles_to_remove.count;
                     if self.previous_capacity_per_batch < count {
                         self.previous_capacity_per_batch = count;

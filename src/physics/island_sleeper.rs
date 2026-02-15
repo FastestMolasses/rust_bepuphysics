@@ -1178,7 +1178,11 @@ impl IslandSleeper {
         let solver = unsafe { &mut *self.solver };
         let min_allocated =
             unsafe { (*(&self.set_id_pool as *const IdPool)).highest_possibly_claimed_id() } + 1;
-        let potentially_allocated = min_allocated.min(bodies.sets.len()).min(solver.sets.len());
+        let mut potentially_allocated = min_allocated.min(bodies.sets.len()).min(solver.sets.len());
+        if !self.pair_cache.is_null() {
+            let pair_cache = unsafe { &mut *self.pair_cache };
+            potentially_allocated = potentially_allocated.min(pair_cache.sleeping_sets.len());
+        }
 
         if sets_capacity > bodies.sets.len() {
             bodies.resize_sets_capacity(sets_capacity, potentially_allocated);
@@ -1200,7 +1204,11 @@ impl IslandSleeper {
         let solver = unsafe { &mut *self.solver };
         let min_allocated =
             unsafe { (*(&self.set_id_pool as *const IdPool)).highest_possibly_claimed_id() } + 1;
-        let potentially_allocated = min_allocated.min(bodies.sets.len()).min(solver.sets.len());
+        let mut potentially_allocated = min_allocated.min(bodies.sets.len()).min(solver.sets.len());
+        if !self.pair_cache.is_null() {
+            let pair_cache = unsafe { &mut *self.pair_cache };
+            potentially_allocated = potentially_allocated.min(pair_cache.sleeping_sets.len());
+        }
         let target = potentially_allocated.max(sets_capacity);
 
         bodies.resize_sets_capacity(target, potentially_allocated);

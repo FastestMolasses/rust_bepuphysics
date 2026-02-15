@@ -61,13 +61,13 @@ impl SwingLimit {
             );
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "SwingLimit");
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.axis_local_a, &mut target.axis_local_a);
-        Vector3Wide::write_first(self.axis_local_b, &mut target.axis_local_b);
+        Vector3Wide::write_slot(self.axis_local_a, inner_index, &mut prestep_data.axis_local_a);
+        Vector3Wide::write_slot(self.axis_local_b, inner_index, &mut prestep_data.axis_local_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.minimum_dot) = self.minimum_dot;
+            *GatherScatter::get_mut(&mut prestep_data.minimum_dot, inner_index) = self.minimum_dot;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
         }
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
     }
 
     pub fn build_description(
@@ -76,11 +76,13 @@ impl SwingLimit {
         inner_index: usize,
         description: &mut SwingLimit,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.axis_local_a, &mut description.axis_local_a);
-        Vector3Wide::read_first(&source.axis_local_b, &mut description.axis_local_b);
-        description.minimum_dot = unsafe { *GatherScatter::get_first(&source.minimum_dot) };
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+        Vector3Wide::read_slot(&prestep_data.axis_local_a, inner_index, &mut description.axis_local_a);
+        Vector3Wide::read_slot(&prestep_data.axis_local_b, inner_index, &mut description.axis_local_b);
+        unsafe {
+            description.minimum_dot = *GatherScatter::get(&prestep_data.minimum_dot, inner_index);
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 

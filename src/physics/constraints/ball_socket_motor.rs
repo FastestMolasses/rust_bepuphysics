@@ -37,13 +37,16 @@ impl BallSocketMotor {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "BallSocketMotor");
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
-        Vector3Wide::write_first(
+        Vector3Wide::write_slot(self.local_offset_b, inner_index, &mut prestep_data.local_offset_b);
+        Vector3Wide::write_slot(
             self.target_velocity_local_a,
-            &mut target.target_velocity_local_a,
+            inner_index,
+            &mut prestep_data.target_velocity_local_a,
         );
-        MotorSettingsWide::write_first(&self.settings, &mut target.settings);
+        unsafe {
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
+        }
     }
 
     pub fn build_description(
@@ -52,13 +55,16 @@ impl BallSocketMotor {
         inner_index: usize,
         description: &mut BallSocketMotor,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        Vector3Wide::read_first(
-            &source.target_velocity_local_a,
+        Vector3Wide::read_slot(&prestep_data.local_offset_b, inner_index, &mut description.local_offset_b);
+        Vector3Wide::read_slot(
+            &prestep_data.target_velocity_local_a,
+            inner_index,
             &mut description.target_velocity_local_a,
         );
-        MotorSettingsWide::read_first(&source.settings, &mut description.settings);
+        unsafe {
+            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+        }
     }
 }
 

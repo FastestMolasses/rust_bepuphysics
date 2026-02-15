@@ -176,8 +176,12 @@ impl Vector4Wide {
     /// Pulls one lane out of the wide representation.
     #[inline(always)]
     pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Vec4) {
-        let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
-        Self::read_first(offset, narrow);
+        unsafe {
+            narrow.x = *GatherScatter::get(&wide.x, slot_index);
+            narrow.y = *GatherScatter::get(&wide.y, slot_index);
+            narrow.z = *GatherScatter::get(&wide.z, slot_index);
+            narrow.w = *GatherScatter::get(&wide.w, slot_index);
+        }
     }
 
     /// Pulls the first lane out of the wide representation.

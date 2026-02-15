@@ -560,14 +560,13 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
     ) {
         debug_assert!(self.hulls.len() > 0 && (self.hulls.len() as usize) <= Vector::<f32>::LEN);
         for i in 0..self.hulls.len() as usize {
-            let offset_pose = unsafe { GatherScatter::get_offset_instance(poses, i) };
             let mut pose = RigidPose::default();
-            RigidPoseWide::read_first(offset_pose, &mut pose);
-            let offset_ray = unsafe { GatherScatter::get_offset_instance(ray_wide, i) };
+            Vector3Wide::read_slot(&poses.position, i, &mut pose.position);
+            QuaternionWide::read_slot(&poses.orientation, i, &mut pose.orientation);
             let mut origin = Vec3::ZERO;
             let mut direction = Vec3::ZERO;
-            Vector3Wide::read_first(&offset_ray.origin, &mut origin);
-            Vector3Wide::read_first(&offset_ray.direction, &mut direction);
+            Vector3Wide::read_slot(&ray_wide.origin, i, &mut origin);
+            Vector3Wide::read_slot(&ray_wide.direction, i, &mut direction);
             let mut t_narrow = 0.0f32;
             let mut normal_narrow = Vec3::ZERO;
             let hit =

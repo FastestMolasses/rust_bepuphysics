@@ -169,17 +169,9 @@ unsafe fn execute_batch_inner<
         }
 
         // Extract per-lane results and dispatch to callbacks
-        let offset_b_ptr = pair_wide.get_offset_b() as *const Vector3Wide;
+        let offset_b = pair_wide.get_offset_b();
         for j in 0..count_in_bundle {
-            // Use raw pointer offset to get lane-offset views (like C#'s GetOffsetInstance).
-            // This adds j * sizeof(f32) bytes to the struct pointer, giving a "view" into lane j.
-            let manifold_source = (&manifold_wide as *const TManifoldWide as *const u8)
-                .add(j as usize * std::mem::size_of::<f32>())
-                as *const TManifoldWide;
-            let offset_source = (offset_b_ptr as *const u8)
-                .add(j as usize * std::mem::size_of::<f32>())
-                as *const Vector3Wide;
-            (*manifold_source).read_first(&*offset_source, &mut manifold);
+            manifold_wide.read_first(offset_b, j as usize, &mut manifold);
             let pair = &*bundle_start.add(j as usize);
             (vtable.process_convex_result)(vtable.batcher, &mut manifold, pair.get_continuation());
         }

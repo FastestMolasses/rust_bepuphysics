@@ -37,14 +37,14 @@ impl LinearAxisMotor {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
-        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
-        Vector3Wide::write_first(self.local_axis, &mut target.local_plane_normal);
+        Vector3Wide::write_slot(self.local_offset_a, inner_index, &mut prestep_data.local_offset_a);
+        Vector3Wide::write_slot(self.local_offset_b, inner_index, &mut prestep_data.local_offset_b);
+        Vector3Wide::write_slot(self.local_axis, inner_index, &mut prestep_data.local_plane_normal);
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.target_velocity) = self.target_velocity;
+            *GatherScatter::get_mut(&mut prestep_data.target_velocity, inner_index) = self.target_velocity;
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
         }
-        MotorSettingsWide::write_first(&self.settings, &mut target.settings);
     }
 
     pub fn build_description(
@@ -53,12 +53,14 @@ impl LinearAxisMotor {
         inner_index: usize,
         description: &mut LinearAxisMotor,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
-        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        Vector3Wide::read_first(&source.local_plane_normal, &mut description.local_axis);
-        description.target_velocity = unsafe { *GatherScatter::get_first(&source.target_velocity) };
-        MotorSettingsWide::read_first(&source.settings, &mut description.settings);
+        Vector3Wide::read_slot(&prestep_data.local_offset_a, inner_index, &mut description.local_offset_a);
+        Vector3Wide::read_slot(&prestep_data.local_offset_b, inner_index, &mut description.local_offset_b);
+        Vector3Wide::read_slot(&prestep_data.local_plane_normal, inner_index, &mut description.local_axis);
+        unsafe {
+            description.target_velocity = *GatherScatter::get(&prestep_data.target_velocity, inner_index);
+            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+        }
     }
 }
 

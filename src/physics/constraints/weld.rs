@@ -26,10 +26,12 @@ impl Weld {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset, &mut target.local_offset);
-        QuaternionWide::write_first(self.local_orientation, &mut target.local_orientation);
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
+        Vector3Wide::write_slot(self.local_offset, inner_index, &mut prestep_data.local_offset);
+        QuaternionWide::write_slot(self.local_orientation, inner_index, &mut prestep_data.local_orientation);
+        unsafe {
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+        }
     }
 
     pub fn build_description(
@@ -38,13 +40,16 @@ impl Weld {
         inner_index: usize,
         description: &mut Weld,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset, &mut description.local_offset);
-        QuaternionWide::read_first(
-            &source.local_orientation,
+        Vector3Wide::read_slot(&prestep_data.local_offset, inner_index, &mut description.local_offset);
+        QuaternionWide::read_slot(
+            &prestep_data.local_orientation,
+            inner_index,
             &mut description.local_orientation,
         );
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+        unsafe {
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 

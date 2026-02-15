@@ -109,26 +109,32 @@ impl GatherScatter {
         }
     }
 
-    /// Gets a reference to a shifted bundle container.
+    /// Gets a raw pointer to a shifted bundle container.
+    /// The returned pointer is intentionally misaligned for the type T —
+    /// it points `slot_index` f32 positions into the original struct.
+    /// Do NOT dereference to create a reference; use per-field
+    /// `GatherScatter::get`/`get_mut` on the original aligned fields instead.
     #[inline(always)]
-    pub unsafe fn get_offset_instance<T>(bundle_container: &T, slot_index: usize) -> &T
+    pub unsafe fn get_offset_instance<T>(bundle_container: &T, slot_index: usize) -> *const T
     where
         T: Copy,
     {
         let ptr = bundle_container as *const T as *const f32;
-        let shifted_ptr = ptr.add(slot_index);
-        &*(shifted_ptr as *const T)
+        ptr.add(slot_index) as *const T
     }
 
-    /// Gets a mutable reference to a shifted bundle container.
+    /// Gets a mutable raw pointer to a shifted bundle container.
+    /// The returned pointer is intentionally misaligned for the type T —
+    /// it points `slot_index` f32 positions into the original struct.
+    /// Do NOT dereference to create a reference; use per-field
+    /// `GatherScatter::get`/`get_mut` on the original aligned fields instead.
     #[inline(always)]
-    pub unsafe fn get_offset_instance_mut<T>(bundle_container: &mut T, slot_index: usize) -> &mut T
+    pub unsafe fn get_offset_instance_mut<T>(bundle_container: &mut T, slot_index: usize) -> *mut T
     where
         T: Copy,
     {
         let ptr = bundle_container as *mut T as *mut f32;
-        let shifted_ptr = ptr.add(slot_index);
-        &mut *(shifted_ptr as *mut T)
+        ptr.add(slot_index) as *mut T
     }
 
     /// Gets a reference to the first element in the vector reference.

@@ -1122,12 +1122,9 @@ impl ConvexHullHelper {
                     .bounding_planes
                     .get_mut(bounding_plane_bundle_index as i32)
             };
-            let bounding_offset_bundle = unsafe {
-                GatherScatter::get_offset_instance_mut(bounding_bundle, bounding_plane_inner_index)
-            };
-            Vector3Wide::write_first(face_normal, &mut bounding_offset_bundle.normal);
+            Vector3Wide::write_slot(face_normal, bounding_plane_inner_index, &mut bounding_bundle.normal);
             unsafe {
-                *GatherScatter::get_first_mut(&mut bounding_offset_bundle.offset) =
+                *GatherScatter::get_mut(&mut bounding_bundle.offset, bounding_plane_inner_index) =
                     face_pivot.dot(face_normal);
             }
         }
@@ -1138,15 +1135,12 @@ impl ConvexHullHelper {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(i, &mut bundle_index, &mut inner_index);
-            let offset_instance = unsafe {
-                GatherScatter::get_offset_instance_mut(
-                    hull_shape.bounding_planes.get_mut(bundle_index as i32),
-                    inner_index,
-                )
+            let bp = unsafe {
+                hull_shape.bounding_planes.get_mut(bundle_index as i32)
             };
-            Vector3Wide::write_first(Vec3::ZERO, &mut offset_instance.normal);
+            Vector3Wide::write_slot(Vec3::ZERO, inner_index, &mut bp.normal);
             unsafe {
-                *GatherScatter::get_first_mut(&mut offset_instance.offset) = f32::MIN;
+                *GatherScatter::get_mut(&mut bp.offset, inner_index) = f32::MIN;
             }
         }
 
@@ -1251,15 +1245,12 @@ impl ConvexHullHelper {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(i, &mut bundle_index, &mut inner_index);
-            let offset_instance = unsafe {
-                GatherScatter::get_offset_instance_mut(
-                    target_bounding_planes.get_mut(bundle_index as i32),
-                    inner_index,
-                )
+            let bp = unsafe {
+                target_bounding_planes.get_mut(bundle_index as i32)
             };
-            Vector3Wide::write_first(Vec3::ZERO, &mut offset_instance.normal);
+            Vector3Wide::write_slot(Vec3::ZERO, inner_index, &mut bp.normal);
             unsafe {
-                *GatherScatter::get_first_mut(&mut offset_instance.offset) = f32::MIN;
+                *GatherScatter::get_mut(&mut bp.offset, inner_index) = f32::MIN;
             }
         }
     }

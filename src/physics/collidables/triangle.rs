@@ -313,9 +313,9 @@ impl IShapeWide<Triangle> for TriangleWide {
 
     #[inline(always)]
     fn write_slot(&mut self, index: usize, source: &Triangle) {
-        unsafe {
-            GatherScatter::get_offset_instance_mut(self, index).write_first(source);
-        }
+        Vector3Wide::write_slot(source.a, index, &mut self.a);
+        Vector3Wide::write_slot(source.b, index, &mut self.b);
+        Vector3Wide::write_slot(source.c, index, &mut self.c);
     }
 
     fn get_bounds(

@@ -43,11 +43,11 @@ impl CenterDistanceConstraint {
                 "CenterDistanceConstraint",
             );
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.target_distance) = self.target_distance;
+            *GatherScatter::get_mut(&mut prestep_data.target_distance, inner_index) = self.target_distance;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
         }
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
     }
 
     pub fn build_description(
@@ -56,9 +56,11 @@ impl CenterDistanceConstraint {
         inner_index: usize,
         description: &mut Self,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        description.target_distance = unsafe { *GatherScatter::get_first(&source.target_distance) };
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+        unsafe {
+            description.target_distance = *GatherScatter::get(&prestep_data.target_distance, inner_index);
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 

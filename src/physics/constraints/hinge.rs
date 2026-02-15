@@ -43,12 +43,14 @@ impl Hinge {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
-        Vector3Wide::write_first(self.local_hinge_axis_a, &mut target.local_hinge_axis_a);
-        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
-        Vector3Wide::write_first(self.local_hinge_axis_b, &mut target.local_hinge_axis_b);
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
+        Vector3Wide::write_slot(self.local_offset_a, inner_index, &mut prestep_data.local_offset_a);
+        Vector3Wide::write_slot(self.local_hinge_axis_a, inner_index, &mut prestep_data.local_hinge_axis_a);
+        Vector3Wide::write_slot(self.local_offset_b, inner_index, &mut prestep_data.local_offset_b);
+        Vector3Wide::write_slot(self.local_hinge_axis_b, inner_index, &mut prestep_data.local_hinge_axis_b);
+        unsafe {
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+        }
     }
 
     pub fn build_description(
@@ -57,18 +59,22 @@ impl Hinge {
         inner_index: usize,
         description: &mut Hinge,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
-        Vector3Wide::read_first(
-            &source.local_hinge_axis_a,
+        Vector3Wide::read_slot(&prestep_data.local_offset_a, inner_index, &mut description.local_offset_a);
+        Vector3Wide::read_slot(
+            &prestep_data.local_hinge_axis_a,
+            inner_index,
             &mut description.local_hinge_axis_a,
         );
-        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        Vector3Wide::read_first(
-            &source.local_hinge_axis_b,
+        Vector3Wide::read_slot(&prestep_data.local_offset_b, inner_index, &mut description.local_offset_b);
+        Vector3Wide::read_slot(
+            &prestep_data.local_hinge_axis_b,
+            inner_index,
             &mut description.local_hinge_axis_b,
         );
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+        unsafe {
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 

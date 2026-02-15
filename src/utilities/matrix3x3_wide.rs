@@ -288,8 +288,9 @@ impl Matrix3x3Wide {
     /// Pulls one lane out of the wide representation.
     #[inline(always)]
     pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Matrix3x3) {
-        let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
-        Self::read_first(offset, narrow);
+        Vector3Wide::read_slot(&wide.x, slot_index, &mut narrow.x);
+        Vector3Wide::read_slot(&wide.y, slot_index, &mut narrow.y);
+        Vector3Wide::read_slot(&wide.z, slot_index, &mut narrow.z);
     }
 }
 

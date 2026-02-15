@@ -254,35 +254,47 @@ impl BoxConvexHullTester {
             let slot_face_normal = slot_hull_face_normals[slot_index];
             let slot_local_normal = slot_local_normals[slot_index];
 
-            // Get box face vertex positions for this slot via pointer offset.
-            let v00_slot = GatherScatter::get_offset_instance(&v00, slot_index);
-            let v10_slot = GatherScatter::get_offset_instance(&v10, slot_index);
-            let v11_slot = GatherScatter::get_offset_instance(&v11, slot_index);
-            let v01_slot = GatherScatter::get_offset_instance(&v01, slot_index);
-            let slot_face_x = GatherScatter::get_offset_instance(&box_face_x, slot_index);
-            let slot_face_y = GatherScatter::get_offset_instance(&box_face_y, slot_index);
+            // Get box face vertex positions for this slot via per-field scalar access.
+            let v00_x = *GatherScatter::get(&v00.x, slot_index);
+            let v00_y = *GatherScatter::get(&v00.y, slot_index);
+            let v00_z = *GatherScatter::get(&v00.z, slot_index);
+            let v10_x = *GatherScatter::get(&v10.x, slot_index);
+            let v10_y = *GatherScatter::get(&v10.y, slot_index);
+            let v10_z = *GatherScatter::get(&v10.z, slot_index);
+            let v11_x = *GatherScatter::get(&v11.x, slot_index);
+            let v11_y = *GatherScatter::get(&v11.y, slot_index);
+            let v11_z = *GatherScatter::get(&v11.z, slot_index);
+            let v01_x = *GatherScatter::get(&v01.x, slot_index);
+            let v01_y = *GatherScatter::get(&v01.y, slot_index);
+            let v01_z = *GatherScatter::get(&v01.z, slot_index);
+            let face_x_x = *GatherScatter::get(&box_face_x.x, slot_index);
+            let face_x_y = *GatherScatter::get(&box_face_x.y, slot_index);
+            let face_x_z = *GatherScatter::get(&box_face_x.z, slot_index);
+            let face_y_x = *GatherScatter::get(&box_face_y.x, slot_index);
+            let face_y_y = *GatherScatter::get(&box_face_y.y, slot_index);
+            let face_y_z = *GatherScatter::get(&box_face_y.z, slot_index);
 
             // 4 box edges: X is 00->10, Y is 10->11, Z is 11->01, W is 01->00
-            let box_edge_start_x = [v00_slot.x[0], v10_slot.x[0], v11_slot.x[0], v01_slot.x[0]];
-            let box_edge_start_y = [v00_slot.y[0], v10_slot.y[0], v11_slot.y[0], v01_slot.y[0]];
-            let box_edge_start_z = [v00_slot.z[0], v10_slot.z[0], v11_slot.z[0], v01_slot.z[0]];
+            let box_edge_start_x = [v00_x, v10_x, v11_x, v01_x];
+            let box_edge_start_y = [v00_y, v10_y, v11_y, v01_y];
+            let box_edge_start_z = [v00_z, v10_z, v11_z, v01_z];
             let edge_direction_x = [
-                slot_face_x.x[0],
-                slot_face_y.x[0],
-                -slot_face_x.x[0],
-                -slot_face_y.x[0],
+                face_x_x,
+                face_y_x,
+                -face_x_x,
+                -face_y_x,
             ];
             let edge_direction_y = [
-                slot_face_x.y[0],
-                slot_face_y.y[0],
-                -slot_face_x.y[0],
-                -slot_face_y.y[0],
+                face_x_y,
+                face_y_y,
+                -face_x_y,
+                -face_y_y,
             ];
             let edge_direction_z = [
-                slot_face_x.z[0],
-                slot_face_y.z[0],
-                -slot_face_x.z[0],
-                -slot_face_y.z[0],
+                face_x_z,
+                face_y_z,
+                -face_x_z,
+                -face_y_z,
             ];
 
             let slot_local_normal_x4 = [slot_local_normal.x; 4];

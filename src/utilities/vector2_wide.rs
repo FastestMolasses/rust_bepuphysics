@@ -101,8 +101,10 @@ impl Vector2Wide {
     /// Pulls one lane out of the wide representation.
     #[inline(always)]
     pub fn read_slot(wide: &Self, slot_index: usize, narrow: &mut Vec2) {
-        let offset = unsafe { GatherScatter::get_offset_instance(wide, slot_index) };
-        Self::read_first(offset, narrow);
+        unsafe {
+            narrow.x = *GatherScatter::get(&wide.x, slot_index);
+            narrow.y = *GatherScatter::get(&wide.y, slot_index);
+        }
     }
 
     /// Gathers values from a vector and places them into the first indices of the target vector.
@@ -117,8 +119,10 @@ impl Vector2Wide {
     /// Writes a value into a slot of the target bundle.
     #[inline(always)]
     pub fn write_slot(source: &Vec2, slot_index: usize, target: &mut Self) {
-        let offset = unsafe { GatherScatter::get_offset_instance_mut(target, slot_index) };
-        Self::write_first(source, offset);
+        unsafe {
+            *GatherScatter::get_mut(&mut target.x, slot_index) = source.x;
+            *GatherScatter::get_mut(&mut target.y, slot_index) = source.y;
+        }
     }
 }
 

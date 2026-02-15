@@ -39,12 +39,12 @@ impl AngularAxisGearMotor {
             );
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "AngularAxisGearMotor");
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_axis_a, &mut target.local_axis_a);
+        Vector3Wide::write_slot(self.local_axis_a, inner_index, &mut prestep_data.local_axis_a);
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.velocity_scale) = self.velocity_scale;
+            *GatherScatter::get_mut(&mut prestep_data.velocity_scale, inner_index) = self.velocity_scale;
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
         }
-        MotorSettingsWide::write_first(&self.settings, &mut target.settings);
     }
 
     pub fn build_description(
@@ -53,10 +53,12 @@ impl AngularAxisGearMotor {
         inner_index: usize,
         description: &mut Self,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_axis_a, &mut description.local_axis_a);
-        description.velocity_scale = unsafe { *GatherScatter::get_first(&source.velocity_scale) };
-        MotorSettingsWide::read_first(&source.settings, &mut description.settings);
+        Vector3Wide::read_slot(&prestep_data.local_axis_a, inner_index, &mut description.local_axis_a);
+        unsafe {
+            description.velocity_scale = *GatherScatter::get(&prestep_data.velocity_scale, inner_index);
+            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+        }
     }
 }
 

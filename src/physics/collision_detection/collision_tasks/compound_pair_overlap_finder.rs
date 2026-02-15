@@ -108,37 +108,20 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
                 let pair = &*subpair.pair;
                 let child = &*subpair.child;
 
-                Vector3Wide::write_first(
-                    pair.offset_b,
-                    GatherScatter::get_offset_instance_mut(&mut offset_b, j),
-                );
-                QuaternionWide::write_first(
-                    pair.orientation_a,
-                    GatherScatter::get_offset_instance_mut(&mut orientation_a, j),
-                );
-                QuaternionWide::write_first(
-                    pair.orientation_b,
-                    GatherScatter::get_offset_instance_mut(&mut orientation_b, j),
-                );
-                Vector3Wide::write_first(
+                Vector3Wide::write_slot(pair.offset_b, j, &mut offset_b);
+                QuaternionWide::write_slot(pair.orientation_a, j, &mut orientation_a);
+                QuaternionWide::write_slot(pair.orientation_b, j, &mut orientation_b);
+                Vector3Wide::write_slot(
                     pair.relative_linear_velocity_a,
-                    GatherScatter::get_offset_instance_mut(&mut relative_linear_velocity_a, j),
+                    j,
+                    &mut relative_linear_velocity_a,
                 );
-                Vector3Wide::write_first(
-                    pair.angular_velocity_a,
-                    GatherScatter::get_offset_instance_mut(&mut angular_velocity_a, j),
-                );
-                Vector3Wide::write_first(
-                    pair.angular_velocity_b,
-                    GatherScatter::get_offset_instance_mut(&mut angular_velocity_b, j),
-                );
+                Vector3Wide::write_slot(pair.angular_velocity_a, j, &mut angular_velocity_a);
+                Vector3Wide::write_slot(pair.angular_velocity_b, j, &mut angular_velocity_b);
                 *(&mut maximum_allowed_expansion as *mut Vector<f32> as *mut f32).add(j) =
                     pair.maximum_expansion;
 
-                RigidPoseWide::write_first(
-                    child.as_pose(),
-                    GatherScatter::get_offset_instance_mut(&mut local_poses_a, j),
-                );
+                RigidPoseWide::write_slot(child.as_pose(), j, &mut local_poses_a);
             }
 
             // Transform child poses from compound A space to compound B's local space.
@@ -171,8 +154,8 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
                 let shape_index = (*subpair_data[i as usize + j].child).shape_index;
                 let mut local_child_orientation_a = glam::Quat::IDENTITY;
                 QuaternionWide::read_slot(
-                    GatherScatter::get_offset_instance(&local_child_orientations_a, j),
-                    0,
+                    &local_child_orientations_a,
+                    j,
                     &mut local_child_orientation_a,
                 );
                 let batch = shapes
@@ -190,11 +173,8 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
                     &mut min,
                     &mut max,
                 );
-                Vector3Wide::write_first(min, GatherScatter::get_offset_instance_mut(&mut mins, j));
-                Vector3Wide::write_first(
-                    max,
-                    GatherScatter::get_offset_instance_mut(&mut maxes, j),
-                );
+                Vector3Wide::write_slot(min, j, &mut mins);
+                Vector3Wide::write_slot(max, j, &mut maxes);
             }
 
             // Expand bounds for velocity, angular motion, and speculative margin.

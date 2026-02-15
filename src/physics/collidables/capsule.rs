@@ -18,7 +18,7 @@ use crate::physics::collision_detection::support_finder::ISupportFinder as Depth
 
 /// Collision shape representing a sphere-expanded line segment.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Capsule {
     /// Spherical expansion applied to the internal line segment.
     pub radius: f32,
@@ -237,7 +237,8 @@ impl IShapeWide<Capsule> for CapsuleWide {
     #[inline(always)]
     fn write_slot(&mut self, index: usize, source: &Capsule) {
         unsafe {
-            GatherScatter::get_offset_instance_mut(self, index).write_first(source);
+            *GatherScatter::get_mut(&mut self.radius, index) = source.radius;
+            *GatherScatter::get_mut(&mut self.half_length, index) = source.half_length;
         }
     }
 

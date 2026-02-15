@@ -40,11 +40,15 @@ impl BallSocketServo {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
             ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "BallSocketServo");
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
-        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
-        ServoSettingsWide::write_first(&self.servo_settings, &mut target.servo_settings);
+        Vector3Wide::write_slot(self.local_offset_a, inner_index, &mut prestep_data.local_offset_a);
+        Vector3Wide::write_slot(self.local_offset_b, inner_index, &mut prestep_data.local_offset_b);
+        unsafe {
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_speed, inner_index) = self.servo_settings.maximum_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.base_speed, inner_index) = self.servo_settings.base_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_force, inner_index) = self.servo_settings.maximum_force;
+        }
     }
 
     pub fn build_description(
@@ -53,11 +57,15 @@ impl BallSocketServo {
         inner_index: usize,
         description: &mut BallSocketServo,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
-        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
-        ServoSettingsWide::read_first(&source.servo_settings, &mut description.servo_settings);
+        Vector3Wide::read_slot(&prestep_data.local_offset_a, inner_index, &mut description.local_offset_a);
+        Vector3Wide::read_slot(&prestep_data.local_offset_b, inner_index, &mut description.local_offset_b);
+        unsafe {
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.servo_settings.maximum_speed = *GatherScatter::get(&prestep_data.servo_settings.maximum_speed, inner_index);
+            description.servo_settings.base_speed = *GatherScatter::get(&prestep_data.servo_settings.base_speed, inner_index);
+            description.servo_settings.maximum_force = *GatherScatter::get(&prestep_data.servo_settings.maximum_force, inner_index);
+        }
     }
 }
 

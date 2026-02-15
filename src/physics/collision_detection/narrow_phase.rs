@@ -1170,6 +1170,12 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         // Wire up the virtual dispatch trampolines matching C#'s abstract OnPreflush/OnPostflush.
         base.on_preflush = Some(Self::preflush_trampoline);
         base.on_postflush = Some(Self::postflush_trampoline);
+
+        // NOTE: Do NOT initialize freshness_checker here.
+        // The pair_cache/constraint_remover raw pointers would be invalidated when `base` is
+        // moved into `Self`. The caller must call `init_freshness_checker()` after the struct
+        // is at its final heap location (e.g., after Box::new).
+
         Self {
             base,
             callbacks,
@@ -1178,6 +1184,14 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             preflush_job_index: UnsafeCell::new(-1),
             preflush_jobs: QuickList::default(),
         }
+    }
+
+    /// Initialize the freshness checker with stable pointers.
+    /// Must be called after the struct is at its final heap location.
+    pub unsafe fn init_freshness_checker(&mut self) {
+        let pair_cache_ptr = &mut self.base.pair_cache as *mut PairCache;
+        let constraint_remover_ptr = &mut self.base.constraint_remover as *mut ConstraintRemover;
+        self.base.freshness_checker = Some(FreshnessChecker::new(pair_cache_ptr, constraint_remover_ptr));
     }
 
     /// Trampoline for OnPreflush: casts base NarrowPhase pointer back to NarrowPhaseGeneric<T>.
@@ -2286,9 +2300,18 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                     pool,
                 );
             }
-            // Create freshness check jobs (matching FreshnessChecker.CreateJobs logic).
+            // Create freshness check jobs.
+            // IMPORTANT: Must set cached_dispatcher on the freshness checker so that
+            // enqueue_stale_removal uses per-worker pools instead of the shared main pool.
+            // Without this, multiple threads would concurrently allocate from the same
+            // non-thread-safe BufferPool, causing data races and pool corruption.
             if self.base.freshness_checker.is_some() && original_pair_cache_mapping_count > 0 {
                 let pool = unsafe { &mut *self.base.pool };
+                let dispatcher_ptr = dispatcher as *const dyn IThreadDispatcher
+                    as *mut dyn IThreadDispatcher;
+                if let Some(ref mut checker) = self.base.freshness_checker {
+                    checker.cached_dispatcher = Some(dispatcher_ptr);
+                }
                 if thread_count > 1 {
                     const JOBS_PER_THREAD: i32 = 2;
                     let mapping_count = original_pair_cache_mapping_count;
@@ -2342,6 +2365,11 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                     self_ptr,
                     None,
                 );
+            }
+
+            // Clear cached_dispatcher after Phase 3 dispatch (matches C#).
+            if let Some(ref mut checker) = self.base.freshness_checker {
+                checker.cached_dispatcher = None;
             }
 
             // Cleanup

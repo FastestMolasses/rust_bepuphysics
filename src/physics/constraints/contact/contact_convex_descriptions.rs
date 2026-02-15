@@ -38,26 +38,24 @@ macro_rules! impl_convex_one_body_description {
                 _bundle_index: usize,
                 inner_index: usize,
             ) {
-                let target = unsafe {
-                    GatherScatter::get_offset_instance_mut(prestep_bundle, inner_index)
-                };
                 let mut _i = 0;
                 $(
                     {
-                        let contact = unsafe { &mut *(&mut target.contact0 as *mut ConvexContactWide).add(_i) };
-                        Vector3Wide::write_first(self.$contact_field.offset_a, &mut contact.offset_a);
-                        unsafe { *GatherScatter::get_first_mut(&mut contact.depth) = self.$contact_field.penetration_depth };
+                        let contact = unsafe { &mut *(&mut prestep_bundle.contact0 as *mut ConvexContactWide).add(_i) };
+                        Vector3Wide::write_slot(self.$contact_field.offset_a, inner_index, &mut contact.offset_a);
+                        unsafe { *GatherScatter::get_mut(&mut contact.depth, inner_index) = self.$contact_field.penetration_depth };
                         _i += 1;
                     }
                 )+
-                Vector3Wide::write_first(self.normal, &mut target.normal);
+                Vector3Wide::write_slot(self.normal, inner_index, &mut prestep_bundle.normal);
                 unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.friction_coefficient) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.friction_coefficient, inner_index) =
                         self.friction_coefficient;
-                }
-                SpringSettingsWide::write_first(&self.spring_settings, &mut target.material_properties.spring_settings);
-                unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.maximum_recovery_velocity) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index) =
+                        self.spring_settings.angular_frequency;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index) =
+                        self.spring_settings.twice_damping_ratio;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.maximum_recovery_velocity, inner_index) =
                         self.maximum_recovery_velocity;
                 }
             }
@@ -69,22 +67,22 @@ macro_rules! impl_convex_one_body_description {
                 inner_index: usize,
                 description: &mut $name,
             ) {
-                let source = unsafe {
-                    GatherScatter::get_offset_instance(prestep_bundle, inner_index)
-                };
                 let mut _i = 0;
                 $(
                     {
-                        let contact = unsafe { &*(&source.contact0 as *const ConvexContactWide).add(_i) };
-                        Vector3Wide::read_first(&contact.offset_a, &mut description.$contact_field.offset_a);
-                        description.$contact_field.penetration_depth = unsafe { *GatherScatter::get_first(&contact.depth) };
+                        let contact = unsafe { &*(&prestep_bundle.contact0 as *const ConvexContactWide).add(_i) };
+                        Vector3Wide::read_slot(&contact.offset_a, inner_index, &mut description.$contact_field.offset_a);
+                        description.$contact_field.penetration_depth = unsafe { *GatherScatter::get(&contact.depth, inner_index) };
                         _i += 1;
                     }
                 )+
-                Vector3Wide::read_first(&source.normal, &mut description.normal);
-                description.friction_coefficient = unsafe { *GatherScatter::get_first(&source.material_properties.friction_coefficient) };
-                SpringSettingsWide::read_first(&source.material_properties.spring_settings, &mut description.spring_settings);
-                description.maximum_recovery_velocity = unsafe { *GatherScatter::get_first(&source.material_properties.maximum_recovery_velocity) };
+                Vector3Wide::read_slot(&prestep_bundle.normal, inner_index, &mut description.normal);
+                unsafe {
+                    description.friction_coefficient = *GatherScatter::get(&prestep_bundle.material_properties.friction_coefficient, inner_index);
+                    description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index);
+                    description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index);
+                    description.maximum_recovery_velocity = *GatherScatter::get(&prestep_bundle.material_properties.maximum_recovery_velocity, inner_index);
+                }
             }
 
             /// Copies shared manifold-wide properties (normal, material) into this description.
@@ -134,27 +132,25 @@ macro_rules! impl_convex_two_body_description {
                 _bundle_index: usize,
                 inner_index: usize,
             ) {
-                let target = unsafe {
-                    GatherScatter::get_offset_instance_mut(prestep_bundle, inner_index)
-                };
                 let mut _i = 0;
                 $(
                     {
-                        let contact = unsafe { &mut *(&mut target.contact0 as *mut ConvexContactWide).add(_i) };
-                        Vector3Wide::write_first(self.$contact_field.offset_a, &mut contact.offset_a);
-                        unsafe { *GatherScatter::get_first_mut(&mut contact.depth) = self.$contact_field.penetration_depth };
+                        let contact = unsafe { &mut *(&mut prestep_bundle.contact0 as *mut ConvexContactWide).add(_i) };
+                        Vector3Wide::write_slot(self.$contact_field.offset_a, inner_index, &mut contact.offset_a);
+                        unsafe { *GatherScatter::get_mut(&mut contact.depth, inner_index) = self.$contact_field.penetration_depth };
                         _i += 1;
                     }
                 )+
-                Vector3Wide::write_first(self.offset_b, &mut target.offset_b);
-                Vector3Wide::write_first(self.normal, &mut target.normal);
+                Vector3Wide::write_slot(self.offset_b, inner_index, &mut prestep_bundle.offset_b);
+                Vector3Wide::write_slot(self.normal, inner_index, &mut prestep_bundle.normal);
                 unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.friction_coefficient) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.friction_coefficient, inner_index) =
                         self.friction_coefficient;
-                }
-                SpringSettingsWide::write_first(&self.spring_settings, &mut target.material_properties.spring_settings);
-                unsafe {
-                    *GatherScatter::get_first_mut(&mut target.material_properties.maximum_recovery_velocity) =
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index) =
+                        self.spring_settings.angular_frequency;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index) =
+                        self.spring_settings.twice_damping_ratio;
+                    *GatherScatter::get_mut(&mut prestep_bundle.material_properties.maximum_recovery_velocity, inner_index) =
                         self.maximum_recovery_velocity;
                 }
             }
@@ -166,23 +162,23 @@ macro_rules! impl_convex_two_body_description {
                 inner_index: usize,
                 description: &mut $name,
             ) {
-                let source = unsafe {
-                    GatherScatter::get_offset_instance(prestep_bundle, inner_index)
-                };
                 let mut _i = 0;
                 $(
                     {
-                        let contact = unsafe { &*(&source.contact0 as *const ConvexContactWide).add(_i) };
-                        Vector3Wide::read_first(&contact.offset_a, &mut description.$contact_field.offset_a);
-                        description.$contact_field.penetration_depth = unsafe { *GatherScatter::get_first(&contact.depth) };
+                        let contact = unsafe { &*(&prestep_bundle.contact0 as *const ConvexContactWide).add(_i) };
+                        Vector3Wide::read_slot(&contact.offset_a, inner_index, &mut description.$contact_field.offset_a);
+                        description.$contact_field.penetration_depth = unsafe { *GatherScatter::get(&contact.depth, inner_index) };
                         _i += 1;
                     }
                 )+
-                Vector3Wide::read_first(&source.offset_b, &mut description.offset_b);
-                Vector3Wide::read_first(&source.normal, &mut description.normal);
-                description.friction_coefficient = unsafe { *GatherScatter::get_first(&source.material_properties.friction_coefficient) };
-                SpringSettingsWide::read_first(&source.material_properties.spring_settings, &mut description.spring_settings);
-                description.maximum_recovery_velocity = unsafe { *GatherScatter::get_first(&source.material_properties.maximum_recovery_velocity) };
+                Vector3Wide::read_slot(&prestep_bundle.offset_b, inner_index, &mut description.offset_b);
+                Vector3Wide::read_slot(&prestep_bundle.normal, inner_index, &mut description.normal);
+                unsafe {
+                    description.friction_coefficient = *GatherScatter::get(&prestep_bundle.material_properties.friction_coefficient, inner_index);
+                    description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.angular_frequency, inner_index);
+                    description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_bundle.material_properties.spring_settings.twice_damping_ratio, inner_index);
+                    description.maximum_recovery_velocity = *GatherScatter::get(&prestep_bundle.material_properties.maximum_recovery_velocity, inner_index);
+                }
             }
 
             /// Copies shared manifold-wide properties (offsetB, normal, material) into this description.

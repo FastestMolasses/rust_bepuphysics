@@ -54,13 +54,12 @@ impl AngularHinge {
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "AngularHinge");
         }
 
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_hinge_axis_a, &mut target.local_hinge_axis_a);
-        Vector3Wide::write_first(self.local_hinge_axis_b, &mut target.local_hinge_axis_b);
+        Vector3Wide::write_slot(self.local_hinge_axis_a, inner_index, &mut prestep_data.local_hinge_axis_a);
+        Vector3Wide::write_slot(self.local_hinge_axis_b, inner_index, &mut prestep_data.local_hinge_axis_b);
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.spring_settings.angular_frequency) =
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) =
                 self.spring_settings.angular_frequency;
-            *GatherScatter::get_first_mut(&mut target.spring_settings.twice_damping_ratio) =
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) =
                 self.spring_settings.twice_damping_ratio;
         }
     }
@@ -71,18 +70,20 @@ impl AngularHinge {
         inner_index: usize,
         description: &mut AngularHinge,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(
-            &source.local_hinge_axis_a,
+        Vector3Wide::read_slot(
+            &prestep_data.local_hinge_axis_a,
+            inner_index,
             &mut description.local_hinge_axis_a,
         );
-        Vector3Wide::read_first(
-            &source.local_hinge_axis_b,
+        Vector3Wide::read_slot(
+            &prestep_data.local_hinge_axis_b,
+            inner_index,
             &mut description.local_hinge_axis_b,
         );
-        description.spring_settings.angular_frequency = source.spring_settings.angular_frequency[0];
-        description.spring_settings.twice_damping_ratio =
-            source.spring_settings.twice_damping_ratio[0];
+        unsafe {
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 

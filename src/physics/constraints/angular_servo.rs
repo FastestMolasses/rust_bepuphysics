@@ -43,13 +43,18 @@ impl AngularServo {
             );
             ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "AngularServo");
         }
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        QuaternionWide::write_first(
+        QuaternionWide::write_slot(
             self.target_relative_rotation_local_a,
-            &mut target.target_relative_rotation_local_a,
+            inner_index,
+            &mut prestep_data.target_relative_rotation_local_a,
         );
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
-        ServoSettingsWide::write_first(&self.servo_settings, &mut target.servo_settings);
+        unsafe {
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_speed, inner_index) = self.servo_settings.maximum_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.base_speed, inner_index) = self.servo_settings.base_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_force, inner_index) = self.servo_settings.maximum_force;
+        }
     }
 
     pub fn build_description(
@@ -58,13 +63,18 @@ impl AngularServo {
         inner_index: usize,
         description: &mut AngularServo,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        QuaternionWide::read_first(
-            &source.target_relative_rotation_local_a,
+        QuaternionWide::read_slot(
+            &prestep_data.target_relative_rotation_local_a,
+            inner_index,
             &mut description.target_relative_rotation_local_a,
         );
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
-        ServoSettingsWide::read_first(&source.servo_settings, &mut description.servo_settings);
+        unsafe {
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.servo_settings.maximum_speed = *GatherScatter::get(&prestep_data.servo_settings.maximum_speed, inner_index);
+            description.servo_settings.base_speed = *GatherScatter::get(&prestep_data.servo_settings.base_speed, inner_index);
+            description.servo_settings.maximum_force = *GatherScatter::get(&prestep_data.servo_settings.maximum_force, inner_index);
+        }
     }
 }
 

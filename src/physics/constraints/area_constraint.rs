@@ -29,11 +29,11 @@ impl AreaConstraint {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.target_scaled_area) = self.target_scaled_area;
+            *GatherScatter::get_mut(&mut prestep_data.target_scaled_area, inner_index) = self.target_scaled_area;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
         }
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
     }
 
     pub fn build_description(
@@ -42,10 +42,11 @@ impl AreaConstraint {
         inner_index: usize,
         description: &mut AreaConstraint,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        description.target_scaled_area =
-            unsafe { *GatherScatter::get_first(&source.target_scaled_area) };
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+        unsafe {
+            description.target_scaled_area = *GatherScatter::get(&prestep_data.target_scaled_area, inner_index);
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 

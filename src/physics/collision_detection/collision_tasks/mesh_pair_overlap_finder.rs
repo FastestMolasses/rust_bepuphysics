@@ -104,13 +104,13 @@ impl<
                     count = lanes;
                 }
                 for inner_index in 0..count {
-                    mesh_a.get_local_child_wide(
-                        j + inner_index,
-                        GatherScatter::get_offset_instance_mut(
-                            &mut triangles,
-                            inner_index as usize,
-                        ),
-                    );
+                    // Write the child into slot 0 of a temp, then copy to the correct slot.
+                    let mut temp = triangles;
+                    mesh_a.get_local_child_wide(j + inner_index, &mut temp);
+                    let slot = inner_index as usize;
+                    Vector3Wide::copy_slot(&temp.a, 0, &mut triangles.a, slot);
+                    Vector3Wide::copy_slot(&temp.b, 0, &mut triangles.b, slot);
+                    Vector3Wide::copy_slot(&temp.c, 0, &mut triangles.c, slot);
                 }
 
                 let mut maximum_radius = Vector::<f32>::default();

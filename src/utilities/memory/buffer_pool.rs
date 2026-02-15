@@ -186,10 +186,10 @@ impl PowerPool {
             "If a raw buffer points to a given block as its source, the address should be within the block's memory region."
         );
         debug_assert!(
-            unsafe {
+            std::ptr::eq(unsafe {
                 self.blocks[block_index as usize]
                     .add((index_in_block * self.suballocation_size) as usize)
-            } == byte_buffer.as_ptr() as *mut u8,
+            }, byte_buffer.as_ptr()),
             "The implied address of a buffer in its block should match its actual address."
         );
         debug_assert!(
@@ -329,7 +329,7 @@ impl BufferPool {
     /// Takes a buffer large enough to contain a number of bytes given by a power.
     #[inline(always)]
     pub fn take_for_power(&mut self, power: i32) -> Buffer<u8> {
-        debug_assert!(power >= 0 && power <= span_helper::MAXIMUM_SPAN_SIZE_POWER);
+        debug_assert!((0..=span_helper::MAXIMUM_SPAN_SIZE_POWER).contains(&power));
         self.pools[power as usize].take()
     }
 
@@ -376,7 +376,7 @@ impl BufferPool {
 
         if !buffer.allocated() {
             debug_assert!(
-                buffer.len() == 0,
+                buffer.is_empty(),
                 "If a buffer is pointing at null, then it should be default initialized and have a length of zero too."
             );
             *buffer = self.take_at_least(target_size);

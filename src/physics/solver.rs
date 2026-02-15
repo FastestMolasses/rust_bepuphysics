@@ -694,7 +694,7 @@ impl Solver {
         let batch_count = self.active_set().batches.count;
         for i in 0..=batch_count {
             if let Some((handle, reference)) =
-                self.try_allocate_in_batch(type_id, i, &blocking, &encoded_body_indices)
+                self.try_allocate_in_batch(type_id, i, &blocking, &encoded_body_indices[..body_handles.len()])
             {
                 let (mut bundle_index, mut inner_index) = (0usize, 0usize);
                 BundleIndexing::get_bundle_indices(
@@ -2534,7 +2534,10 @@ impl Solver {
         let batch_count = active_set.batches.count;
 
         // Compute per-batch starting positions for constraint work blocks.
-        let mut batch_starts_storage = vec![0i32; batch_count as usize];
+        // Use stack array instead of heap allocation (C# uses stackalloc).
+        // Maximum batch count is bounded by CPU count + 1 (fallback); 64 is more than sufficient.
+        let mut batch_starts_storage = [0i32; 64];
+        debug_assert!((batch_count as usize) <= 64, "batch_count exceeds stack buffer");
         let (synchronized_batch_count, _fallback_exists) =
             (*self_ptr).get_synchronized_batch_count();
         for batch_index in 0..synchronized_batch_count {

@@ -58,15 +58,15 @@ impl LinearAxisLimit {
             );
         }
 
-        let target = unsafe { GatherScatter::get_offset_instance_mut(prestep_data, inner_index) };
-        Vector3Wide::write_first(self.local_offset_a, &mut target.local_offset_a);
-        Vector3Wide::write_first(self.local_offset_b, &mut target.local_offset_b);
-        Vector3Wide::write_first(self.local_axis, &mut target.local_plane_normal);
+        Vector3Wide::write_slot(self.local_offset_a, inner_index, &mut prestep_data.local_offset_a);
+        Vector3Wide::write_slot(self.local_offset_b, inner_index, &mut prestep_data.local_offset_b);
+        Vector3Wide::write_slot(self.local_axis, inner_index, &mut prestep_data.local_plane_normal);
         unsafe {
-            *GatherScatter::get_first_mut(&mut target.minimum_offset) = self.minimum_offset;
-            *GatherScatter::get_first_mut(&mut target.maximum_offset) = self.maximum_offset;
+            *GatherScatter::get_mut(&mut prestep_data.minimum_offset, inner_index) = self.minimum_offset;
+            *GatherScatter::get_mut(&mut prestep_data.maximum_offset, inner_index) = self.maximum_offset;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
         }
-        SpringSettingsWide::write_first(&self.spring_settings, &mut target.spring_settings);
     }
 
     pub fn build_description(
@@ -75,13 +75,15 @@ impl LinearAxisLimit {
         inner_index: usize,
         description: &mut LinearAxisLimit,
     ) {
-        let source = unsafe { GatherScatter::get_offset_instance(prestep_data, inner_index) };
-        Vector3Wide::read_first(&source.local_offset_a, &mut description.local_offset_a);
-        Vector3Wide::read_first(&source.local_offset_b, &mut description.local_offset_b);
-        Vector3Wide::read_first(&source.local_plane_normal, &mut description.local_axis);
-        description.minimum_offset = source.minimum_offset[0];
-        description.maximum_offset = source.maximum_offset[0];
-        SpringSettingsWide::read_first(&source.spring_settings, &mut description.spring_settings);
+        Vector3Wide::read_slot(&prestep_data.local_offset_a, inner_index, &mut description.local_offset_a);
+        Vector3Wide::read_slot(&prestep_data.local_offset_b, inner_index, &mut description.local_offset_b);
+        Vector3Wide::read_slot(&prestep_data.local_plane_normal, inner_index, &mut description.local_axis);
+        unsafe {
+            description.minimum_offset = *GatherScatter::get(&prestep_data.minimum_offset, inner_index);
+            description.maximum_offset = *GatherScatter::get(&prestep_data.maximum_offset, inner_index);
+            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+        }
     }
 }
 
