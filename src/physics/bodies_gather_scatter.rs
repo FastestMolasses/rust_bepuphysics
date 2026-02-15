@@ -3,8 +3,8 @@
 // This file extends Bodies with gather/scatter operations for the solver.
 // The C# version uses AVX intrinsics for 8-wide SIMD on x86-64. We use portable_simd's
 // simd_swizzle! behind #[cfg(target_feature = "avx")] to generate the same AVX
-// vshufps/vperm2f128 instructions. On ARM (Apple Silicon), scalar fallback is used,
-// matching C# behavior (no AdvSimd path exists for these methods).
+// vshufps/vperm2f128 instructions. On non-AVX platforms (ARM NEON, x86 SSE),
+// a 4×4 transpose path using portable_simd compiles to native shuffle instructions.
 
 use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{
@@ -16,6 +16,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+#[allow(unused_imports)]
 use glam::{Quat, Vec3};
 
 // Float offsets within a MotionState (64 bytes = 16 floats):
@@ -110,6 +111,46 @@ unsafe fn store_4f32(ptr: *mut f32, v: std::simd::Simd<f32, 4>) {
     *(ptr as *mut [f32; 4]) = v.to_array();
 }
 
+/// 4x4 matrix transpose using portable_simd swizzle operations.
+/// On ARM (aarch64), compiles to NEON vzip/vtrn instructions.
+/// On x86-64 (SSE), compiles to unpcklps/unpckhps/movlhps/movehlps.
+#[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+#[inline(always)]
+fn transpose_4x4(
+    m0: Vector<f32>,
+    m1: Vector<f32>,
+    m2: Vector<f32>,
+    m3: Vector<f32>,
+) -> [Vector<f32>; 4] {
+    use std::simd::simd_swizzle;
+    // Stage 1: interleave pairs
+    let n0 = simd_swizzle!(m0, m1, [0, 4, 1, 5]);
+    let n1 = simd_swizzle!(m2, m3, [0, 4, 1, 5]);
+    let n2 = simd_swizzle!(m0, m1, [2, 6, 3, 7]);
+    let n3 = simd_swizzle!(m2, m3, [2, 6, 3, 7]);
+    // Stage 2: merge
+    [
+        simd_swizzle!(n0, n1, [0, 1, 4, 5]),
+        simd_swizzle!(n0, n1, [2, 3, 6, 7]),
+        simd_swizzle!(n2, n3, [0, 1, 4, 5]),
+        simd_swizzle!(n2, n3, [2, 3, 6, 7]),
+    ]
+}
+
+/// Load 4 contiguous f32 values into a SIMD vector (non-AVX path).
+#[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+#[inline(always)]
+unsafe fn load_4f32(ptr: *const f32) -> Vector<f32> {
+    Vector::<f32>::from_array(*(ptr as *const [f32; 4]))
+}
+
+/// Store 4 f32 values from a SIMD vector to contiguous memory (non-AVX path).
+#[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+#[inline(always)]
+unsafe fn store_4f32_v(ptr: *mut f32, v: Vector<f32>) {
+    *(ptr as *mut [f32; 4]) = v.to_array();
+}
+
 impl Bodies {
     #[inline(always)]
     fn write_gather_inertia(
@@ -168,6 +209,7 @@ impl Bodies {
         }
     }
 
+    #[allow(dead_code)]
     unsafe fn fallback_gather_motion_state(
         states: *const BodyDynamics,
         encoded_body_indices: &Vector<i32>,
@@ -213,6 +255,7 @@ impl Bodies {
         }
     }
 
+    #[allow(dead_code)]
     unsafe fn fallback_gather_inertia(
         states: *const BodyDynamics,
         encoded_body_indices: &Vector<i32>,
@@ -304,13 +347,62 @@ impl Bodies {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
         {
-            // Scalar fallback (works on all architectures).
-            for i in 0..states.len() as usize {
-                let state = states.get(i as i32);
-                Vector3Wide::write_slot(state.pose.position, i, position);
-                QuaternionWide::write_slot(state.pose.orientation, i, orientation);
-                Vector3Wide::write_slot(state.velocity.linear, i, &mut velocity.linear);
-                Vector3Wide::write_slot(state.velocity.angular, i, &mut velocity.angular);
+            // 4×4 SIMD transpose — compiles to NEON vzip/vtrn on ARM, SSE unpack on x86.
+            let len = states.len() as usize;
+            let base = states.as_ptr();
+            let z = Vector::<f32>::splat(0.0);
+            let s = |i: usize| -> *const f32 { base.add(i) as *const f32 };
+
+            // Block 1: orientation (floats 0-3: ori.x, ori.y, ori.z, ori.w)
+            {
+                let m0 = load_4f32(s(0));
+                let m1 = if len <= 1 { z } else { load_4f32(s(1)) };
+                let m2 = if len <= 2 { z } else { load_4f32(s(2)) };
+                let m3 = if len <= 3 { z } else { load_4f32(s(3)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                orientation.x = t[0];
+                orientation.y = t[1];
+                orientation.z = t[2];
+                orientation.w = t[3];
+            }
+
+            // Block 2: position + padding (floats 4-7: pos.x, pos.y, pos.z, pad)
+            {
+                let m0 = load_4f32(s(0).add(4));
+                let m1 = if len <= 1 { z } else { load_4f32(s(1).add(4)) };
+                let m2 = if len <= 2 { z } else { load_4f32(s(2).add(4)) };
+                let m3 = if len <= 3 { z } else { load_4f32(s(3).add(4)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                position.x = t[0];
+                position.y = t[1];
+                position.z = t[2];
+                // t[3] is padding, skip
+            }
+
+            // Block 3: linear velocity + padding (floats 8-11: lin.x, lin.y, lin.z, pad)
+            {
+                let m0 = load_4f32(s(0).add(8));
+                let m1 = if len <= 1 { z } else { load_4f32(s(1).add(8)) };
+                let m2 = if len <= 2 { z } else { load_4f32(s(2).add(8)) };
+                let m3 = if len <= 3 { z } else { load_4f32(s(3).add(8)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                velocity.linear.x = t[0];
+                velocity.linear.y = t[1];
+                velocity.linear.z = t[2];
+                // t[3] is padding, skip
+            }
+
+            // Block 4: angular velocity + padding (floats 12-15: ang.x, ang.y, ang.z, pad)
+            {
+                let m0 = load_4f32(s(0).add(12));
+                let m1 = if len <= 1 { z } else { load_4f32(s(1).add(12)) };
+                let m2 = if len <= 2 { z } else { load_4f32(s(2).add(12)) };
+                let m3 = if len <= 3 { z } else { load_4f32(s(3).add(12)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                velocity.angular.x = t[0];
+                velocity.angular.y = t[1];
+                velocity.angular.z = t[2];
+                // t[3] is padding, skip
             }
         }
     }
@@ -436,16 +528,101 @@ impl Bodies {
 
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
         {
-            // Scalar fallback — works on all architectures.
-            Self::fallback_gather_motion_state(
-                solver_states,
-                encoded_body_indices,
-                position,
-                orientation,
-                velocity,
-            );
-            let offset = if world_inertia { 24 } else { 16 };
-            Self::fallback_gather_inertia(solver_states, encoded_body_indices, inertia, offset);
+            // 4×4 SIMD transpose path for non-AVX (ARM NEON, x86 SSE).
+            let z = Vector::<f32>::splat(0.0);
+
+            // Extract body indices and compute base float pointers.
+            let bi0 = encoded_body_indices[0];
+            let empty0 = bi0 < 0;
+            let s0 = solver_states.offset((bi0 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi1 = encoded_body_indices[1];
+            let empty1 = bi1 < 0;
+            let s1 = solver_states.offset((bi1 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi2 = encoded_body_indices[2];
+            let empty2 = bi2 < 0;
+            let s2 = solver_states.offset((bi2 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let bi3 = encoded_body_indices[3];
+            let empty3 = bi3 < 0;
+            let s3 = solver_states.offset((bi3 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+
+            // Block 1: orientation (floats 0-3)
+            if TAccessFilter::gather_orientation() {
+                let m0 = if empty0 { z } else { load_4f32(s0) };
+                let m1 = if empty1 { z } else { load_4f32(s1) };
+                let m2 = if empty2 { z } else { load_4f32(s2) };
+                let m3 = if empty3 { z } else { load_4f32(s3) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                orientation.x = t[0];
+                orientation.y = t[1];
+                orientation.z = t[2];
+                orientation.w = t[3];
+            }
+
+            // Block 2: position (floats 4-7)
+            if TAccessFilter::gather_position() {
+                let m0 = if empty0 { z } else { load_4f32(s0.add(4)) };
+                let m1 = if empty1 { z } else { load_4f32(s1.add(4)) };
+                let m2 = if empty2 { z } else { load_4f32(s2.add(4)) };
+                let m3 = if empty3 { z } else { load_4f32(s3.add(4)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                position.x = t[0];
+                position.y = t[1];
+                position.z = t[2];
+            }
+
+            // Block 3: linear velocity (floats 8-11)
+            if TAccessFilter::access_linear_velocity() {
+                let m0 = if empty0 { z } else { load_4f32(s0.add(8)) };
+                let m1 = if empty1 { z } else { load_4f32(s1.add(8)) };
+                let m2 = if empty2 { z } else { load_4f32(s2.add(8)) };
+                let m3 = if empty3 { z } else { load_4f32(s3.add(8)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                velocity.linear.x = t[0];
+                velocity.linear.y = t[1];
+                velocity.linear.z = t[2];
+            }
+
+            // Block 4: angular velocity (floats 12-15)
+            if TAccessFilter::access_angular_velocity() {
+                let m0 = if empty0 { z } else { load_4f32(s0.add(12)) };
+                let m1 = if empty1 { z } else { load_4f32(s1.add(12)) };
+                let m2 = if empty2 { z } else { load_4f32(s2.add(12)) };
+                let m3 = if empty3 { z } else { load_4f32(s3.add(12)) };
+                let t = transpose_4x4(m0, m1, m2, m3);
+                velocity.angular.x = t[0];
+                velocity.angular.y = t[1];
+                velocity.angular.z = t[2];
+            }
+
+            // Inertia (7 useful values across 2 blocks of 4 floats)
+            {
+                let offset: usize = if world_inertia { 24 } else { 16 };
+                // Block 5: [xx, yx, yy, zx]
+                let m0 = if empty0 { z } else { load_4f32(s0.add(offset)) };
+                let m1 = if empty1 { z } else { load_4f32(s1.add(offset)) };
+                let m2 = if empty2 { z } else { load_4f32(s2.add(offset)) };
+                let m3 = if empty3 { z } else { load_4f32(s3.add(offset)) };
+                let t_a = transpose_4x4(m0, m1, m2, m3);
+
+                // Block 6: [zy, zz, inv_mass, pad]
+                let m0 = if empty0 { z } else { load_4f32(s0.add(offset + 4)) };
+                let m1 = if empty1 { z } else { load_4f32(s1.add(offset + 4)) };
+                let m2 = if empty2 { z } else { load_4f32(s2.add(offset + 4)) };
+                let m3 = if empty3 { z } else { load_4f32(s3.add(offset + 4)) };
+                let t_b = transpose_4x4(m0, m1, m2, m3);
+
+                if TAccessFilter::gather_inertia_tensor() {
+                    inertia.inverse_inertia_tensor.xx = t_a[0];
+                    inertia.inverse_inertia_tensor.yx = t_a[1];
+                    inertia.inverse_inertia_tensor.yy = t_a[2];
+                    inertia.inverse_inertia_tensor.zx = t_a[3];
+                    inertia.inverse_inertia_tensor.zy = t_b[0];
+                    inertia.inverse_inertia_tensor.zz = t_b[1];
+                }
+                if TAccessFilter::gather_mass() {
+                    inertia.inverse_mass = t_b[2];
+                }
+            }
         }
     }
 
@@ -499,26 +676,28 @@ impl Bodies {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
         {
-            // Scalar fallback.
-            for inner_index in 0..Vector::<i32>::LEN {
-                if mask[inner_index] == 0 {
-                    continue;
+            let states = self.active_set_dynamics_ptr();
+            // Reverse transpose: 4 SOA orientation → 4 AOS rows.
+            let t_ori = transpose_4x4(
+                orientation.x,
+                orientation.y,
+                orientation.z,
+                orientation.w,
+            );
+            // Reverse transpose: 3 SOA position → 4 AOS rows (pos.z duplicated as padding).
+            let t_pos = transpose_4x4(
+                position.x,
+                position.y,
+                position.z,
+                position.z, // Laze: duplicated, lands in padding slot.
+            );
+            // Store each row: 4 floats at offset 0 (orientation) + 4 floats at offset 4 (position).
+            for i in 0..4 {
+                if mask[i] != 0 {
+                    let base = states.add(encoded_body_indices[i] as usize) as *mut f32;
+                    store_4f32_v(base, t_ori[i]);
+                    store_4f32_v(base.add(4), t_pos[i]);
                 }
-                let body_index = encoded_body_indices[inner_index];
-                let pose = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
-                    .motion
-                    .pose;
-                pose.position = Vec3::new(
-                    position.x[inner_index],
-                    position.y[inner_index],
-                    position.z[inner_index],
-                );
-                pose.orientation = Quat::from_xyzw(
-                    orientation.x[inner_index],
-                    orientation.y[inner_index],
-                    orientation.z[inner_index],
-                    orientation.w[inner_index],
-                );
             }
         }
     }
@@ -596,22 +775,29 @@ impl Bodies {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
         {
-            // Scalar fallback.
-            for inner_index in 0..Vector::<i32>::LEN {
-                if mask[inner_index] == 0 {
-                    continue;
+            let states = self.active_set_dynamics_ptr();
+            // Reverse transpose: 7 SOA inertia fields → 4 AOS rows across 2 blocks.
+            // Block A: [xx, yx, yy, zx]
+            let t_a = transpose_4x4(
+                inertia.inverse_inertia_tensor.xx,
+                inertia.inverse_inertia_tensor.yx,
+                inertia.inverse_inertia_tensor.yy,
+                inertia.inverse_inertia_tensor.zx,
+            );
+            // Block B: [zy, zz, inv_mass, inv_mass] (padding slot)
+            let t_b = transpose_4x4(
+                inertia.inverse_inertia_tensor.zy,
+                inertia.inverse_inertia_tensor.zz,
+                inertia.inverse_mass,
+                inertia.inverse_mass, // Laze: duplicated, lands in padding slot.
+            );
+            // Store at offset 24 floats (= world inertia) from each body's BodyDynamics.
+            for i in 0..4 {
+                if mask[i] != 0 {
+                    let base = (states.add(encoded_body_indices[i] as usize) as *mut f32).add(24);
+                    store_4f32_v(base, t_a[i]);
+                    store_4f32_v(base.add(4), t_b[i]);
                 }
-                let body_index = encoded_body_indices[inner_index];
-                let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
-                    .inertia
-                    .world;
-                target.inverse_inertia_tensor.xx = inertia.inverse_inertia_tensor.xx[inner_index];
-                target.inverse_inertia_tensor.yx = inertia.inverse_inertia_tensor.yx[inner_index];
-                target.inverse_inertia_tensor.yy = inertia.inverse_inertia_tensor.yy[inner_index];
-                target.inverse_inertia_tensor.zx = inertia.inverse_inertia_tensor.zx[inner_index];
-                target.inverse_inertia_tensor.zy = inertia.inverse_inertia_tensor.zy[inner_index];
-                target.inverse_inertia_tensor.zz = inertia.inverse_inertia_tensor.zz[inner_index];
-                target.inverse_mass = inertia.inverse_mass[inner_index];
             }
         }
     }
@@ -782,29 +968,41 @@ impl Bodies {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
         {
-            let indices = encoded_body_indices;
-            // Scalar fallback.
-            for inner_index in 0..Vector::<i32>::LEN {
-                if (indices[inner_index] as u32) >= Bodies::DYNAMIC_LIMIT {
-                    continue;
+            let states = self.active_set_dynamics_ptr();
+
+            if TAccessFilter::access_linear_velocity() {
+                // Transpose [lin.x, lin.y, lin.z, lin.z] → 4 AOS rows.
+                let t = transpose_4x4(
+                    source_velocities.linear.x,
+                    source_velocities.linear.y,
+                    source_velocities.linear.z,
+                    source_velocities.linear.z, // Laze: duplicated, lands in padding slot.
+                );
+                for i in 0..4 {
+                    if (encoded_body_indices[i] as u32) < Bodies::DYNAMIC_LIMIT {
+                        store_4f32_v(
+                            (states.add(encoded_body_indices[i] as usize) as *mut f32).add(8),
+                            t[i],
+                        );
+                    }
                 }
-                let body_index = indices[inner_index];
-                let target = &mut (*self.active_set_dynamics_ptr().add(body_index as usize))
-                    .motion
-                    .velocity;
-                if TAccessFilter::access_linear_velocity() {
-                    target.linear = Vec3::new(
-                        source_velocities.linear.x[inner_index],
-                        source_velocities.linear.y[inner_index],
-                        source_velocities.linear.z[inner_index],
-                    );
-                }
-                if TAccessFilter::access_angular_velocity() {
-                    target.angular = Vec3::new(
-                        source_velocities.angular.x[inner_index],
-                        source_velocities.angular.y[inner_index],
-                        source_velocities.angular.z[inner_index],
-                    );
+            }
+
+            if TAccessFilter::access_angular_velocity() {
+                // Transpose [ang.x, ang.y, ang.z, ang.z] → 4 AOS rows.
+                let t = transpose_4x4(
+                    source_velocities.angular.x,
+                    source_velocities.angular.y,
+                    source_velocities.angular.z,
+                    source_velocities.angular.z, // Laze: duplicated, lands in padding slot.
+                );
+                for i in 0..4 {
+                    if (encoded_body_indices[i] as u32) < Bodies::DYNAMIC_LIMIT {
+                        store_4f32_v(
+                            (states.add(encoded_body_indices[i] as usize) as *mut f32).add(12),
+                            t[i],
+                        );
+                    }
                 }
             }
         }
