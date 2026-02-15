@@ -15,6 +15,7 @@ num-traits = "0.2"
 [dev-dependencies]
 bevy = "0.18"
 rand = "0.9"
+bepuvy-sys = { git = "https://github.com/DrewRidley/bepuvy-sys.git", rev = "bdb4f4d" }
 
 [[example]]
 name = "tower"
@@ -23,3 +24,7 @@ path = "examples/tower.rs"
 [[example]]
 name = "rain"
 path = "examples/rain.rs"
+
+[[example]]
+name = "rain_csharp"
+path = "examples/rain_csharp.rs"
