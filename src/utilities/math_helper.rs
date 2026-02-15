@@ -313,25 +313,37 @@ pub fn get_signed_angle_difference(a: &Vector<f32>, b: &Vector<f32>, difference:
 
 #[inline(always)]
 pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
-    // NOTE: CHECK PRECISION ACROSS PLATFORMS
-    #[cfg(target_arch = "x86_64")]
+    // The Vector<f32> width is fixed at compile time via target features,
+    // so intrinsic selection must use cfg(target_feature) — not runtime detection.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
     unsafe {
-        if is_x86_feature_detected!("avx512f") {
-            let v512 = _mm512_load_ps(v.as_ptr());
-            let result512 = _mm512_rcp14_ps(v512);
-            std::mem::transmute(result512)
-        } else if is_x86_feature_detected!("avx") {
-            let v256 = _mm256_load_ps(v.as_ptr());
-            let result256 = _mm256_rcp_ps(v256);
-            let result128 = _mm256_castps256_ps128(result256);
-            std::mem::transmute(result128)
-        } else if is_x86_feature_detected!("sse") {
-            let v128 = _mm_load_ps(v.as_ptr());
-            let result128 = _mm_rcp_ps(v128);
-            std::mem::transmute(result128)
-        } else {
-            v.recip()
-        }
+        let v512 = _mm512_load_ps(v.as_array().as_ptr());
+        let result512 = _mm512_rcp14_ps(v512);
+        std::mem::transmute(result512)
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx",
+        not(target_feature = "avx512f")
+    ))]
+    unsafe {
+        let v256 = _mm256_load_ps(v.as_array().as_ptr());
+        let result256 = _mm256_rcp_ps(v256);
+        std::mem::transmute(result256)
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "sse",
+        not(target_feature = "avx")
+    ))]
+    unsafe {
+        let v128 = _mm_load_ps(v.as_array().as_ptr());
+        let result128 = _mm_rcp_ps(v128);
+        std::mem::transmute(result128)
+    }
+    #[cfg(all(target_arch = "x86_64", not(target_feature = "sse")))]
+    {
+        v.recip()
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
@@ -347,25 +359,37 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
 
 #[inline(always)]
 pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
-    // NOTE: CHECK PRECISION ACROSS PLATFORMS
-    #[cfg(target_arch = "x86_64")]
+    // The Vector<f32> width is fixed at compile time via target features,
+    // so intrinsic selection must use cfg(target_feature) — not runtime detection.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
     unsafe {
-        if is_x86_feature_detected!("avx512f") {
-            let v512 = _mm512_load_ps(v.as_ptr());
-            let result512 = _mm512_rsqrt14_ps(v512);
-            std::mem::transmute(result512)
-        } else if is_x86_feature_detected!("avx") {
-            let v256 = _mm256_load_ps(v.as_ptr());
-            let result256 = _mm256_rsqrt_ps(v256);
-            let result128 = _mm256_castps256_ps128(result256);
-            std::mem::transmute(result128)
-        } else if is_x86_feature_detected!("sse") {
-            let v128 = _mm_load_ps(v.as_ptr());
-            let result128 = _mm_rsqrt_ps(v128);
-            std::mem::transmute(result128)
-        } else {
-            Vector::<f32>::splat(1.0) / v.sqrt()
-        }
+        let v512 = _mm512_load_ps(v.as_array().as_ptr());
+        let result512 = _mm512_rsqrt14_ps(v512);
+        std::mem::transmute(result512)
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx",
+        not(target_feature = "avx512f")
+    ))]
+    unsafe {
+        let v256 = _mm256_load_ps(v.as_array().as_ptr());
+        let result256 = _mm256_rsqrt_ps(v256);
+        std::mem::transmute(result256)
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "sse",
+        not(target_feature = "avx")
+    ))]
+    unsafe {
+        let v128 = _mm_load_ps(v.as_array().as_ptr());
+        let result128 = _mm_rsqrt_ps(v128);
+        std::mem::transmute(result128)
+    }
+    #[cfg(all(target_arch = "x86_64", not(target_feature = "sse")))]
+    {
+        Vector::<f32>::splat(1.0) / v.sqrt()
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
