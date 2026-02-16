@@ -4,10 +4,11 @@
 //! colors, and bounce. Release spacebar to stop spawning; objects stay and pile up.
 //!
 //! Controls:
-//!   Hold SPACE  — spawn random objects
-//!   R           — clear all objects
-//!   Mouse drag  — orbit camera
-//!   Scroll      — zoom
+//!   Hold SPACE     — spawn random objects
+//!   R              — clear all objects
+//!   Right-click    — create explosion at cursor
+//!   Left drag      — orbit camera
+//!   Scroll         — zoom
 
 #![feature(portable_simd)]
 #![feature(generic_const_exprs)]
@@ -16,6 +17,7 @@ use bevy::color::palettes::css;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use rand::Rng;
 
 use rust_bepuphysics::glam as phys_glam;
@@ -25,6 +27,7 @@ use rust_bepuphysics::physics::body_description::BodyDescription;
 use rust_bepuphysics::physics::body_properties::{
     BodyInertiaWide, BodyVelocity, BodyVelocityWide, RigidPose,
 };
+use rust_bepuphysics::physics::body_reference::BodyReference;
 use rust_bepuphysics::physics::collidables::box_shape::Box as PhysicsBox;
 use rust_bepuphysics::physics::collidables::capsule::Capsule;
 use rust_bepuphysics::physics::collidables::collidable_reference::CollidableReference;
@@ -196,6 +199,18 @@ unsafe impl Sync for PhysicsDispatcher {}
 struct SpawnedBodies {
     handles: Vec<BodyHandle>,
     count: usize,
+}
+
+/// Queue of explosion events to process in the physics step.
+#[derive(Resource, Default)]
+struct ExplosionQueue {
+    explosions: Vec<ExplosionEvent>,
+}
+
+struct ExplosionEvent {
+    position: phys_glam::Vec3,
+    force: f32,
+    radius: f32,
 }
 
 /// Component tagging a Bevy entity as a dynamic rigid body.
@@ -375,6 +390,7 @@ fn setup(
 
     commands.insert_resource(physics);
     commands.insert_resource(SpawnedBodies::default());
+    commands.insert_resource(ExplosionQueue::default());
 
     // ---- Thread dispatcher (match C# FFI example's thread count) ----
     let thread_count = std::thread::available_parallelism()
@@ -408,7 +424,7 @@ fn setup(
 
     // ---- UI ----
     commands.spawn((
-        Text::new("Hold SPACE to rain objects\nR to clear\nMouse drag to orbit, scroll to zoom"),
+        Text::new("Hold SPACE to rain objects\nR to clear\nRight-click for explosion\nLeft drag to orbit, scroll to zoom"),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(12.0),
@@ -681,6 +697,125 @@ fn clear_objects(
 }
 
 // ============================================================================
+// Explosion system — right-click to create explosions
+// ============================================================================
+
+/// Detects right mouse clicks and raycasts to find explosion position.
+fn handle_explosion_input(
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    camera_query: Query<(&Camera, &GlobalTransform, &OrbitCamera)>,
+    mut explosion_queue: ResMut<ExplosionQueue>,
+) {
+    if !mouse_button.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+
+    let Ok((camera, camera_transform, orbit)) = camera_query.single() else {
+        return;
+    };
+
+    // Convert screen space to world space ray
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
+        return;
+    };
+
+    // Raycast to ground plane (y = 0)
+    let ground_y = 0.0;
+    let ray_origin_y = ray.origin.y;
+    let ray_dir_y = ray.direction.y;
+
+    if ray_dir_y.abs() < 0.001 {
+        return; // Ray is parallel to ground
+    }
+
+    let t = (ground_y - ray_origin_y) / ray_dir_y;
+    if t < 0.0 {
+        return; // Intersection is behind camera
+    }
+
+    let hit_point = ray.origin + ray.direction * t;
+
+    // Queue the explosion
+    explosion_queue.explosions.push(ExplosionEvent {
+        position: phys_glam::Vec3::new(hit_point.x, hit_point.y, hit_point.z),
+        force: 500.0,  // Explosion impulse strength
+        radius: 15.0,   // Explosion radius
+    });
+}
+
+/// Applies queued explosions to physics bodies.
+fn apply_explosions(
+    mut physics: ResMut<PhysicsWorld>,
+    mut explosion_queue: ResMut<ExplosionQueue>,
+    spawned: Res<SpawnedBodies>,
+) {
+    if explosion_queue.explosions.is_empty() {
+        return;
+    }
+
+    let bodies = unsafe { &mut *physics.simulation.bodies };
+
+    for explosion in explosion_queue.explosions.drain(..) {
+        let exp_pos = explosion.position;
+        let force = explosion.force;
+        let radius = explosion.radius;
+        let radius_sq = radius * radius;
+
+        // Apply force to all spawned bodies within radius
+        for &handle in &spawned.handles {
+            if !bodies.body_exists(handle) {
+                continue;
+            }
+
+            // Get body position
+            let mut desc = std::mem::MaybeUninit::<BodyDescription>::uninit();
+            unsafe {
+                bodies.get_description(handle, &mut *desc.as_mut_ptr());
+                let desc = desc.assume_init();
+                let body_pos = desc.pose.position;
+
+                // Calculate direction and distance from explosion
+                let delta = body_pos - exp_pos;
+                let dist_sq = delta.length_squared();
+
+                if dist_sq < radius_sq && dist_sq > 0.001 {
+                    // Calculate impulse falloff (inverse square with distance)
+                    let dist = dist_sq.sqrt();
+                    let falloff = 1.0 - (dist / radius);
+                    let impulse_magnitude = force * falloff;
+
+                    // Apply impulse in direction away from explosion
+                    let impulse_dir = delta.normalize();
+                    let impulse = impulse_dir * impulse_magnitude;
+
+                    // Apply linear impulse using BodyReference
+                    let body_ref = BodyReference::new(handle, bodies);
+                    let velocity = body_ref.velocity_mut();
+                    velocity.linear += impulse / desc.local_inertia.inverse_mass;
+
+                    // Add some angular velocity for visual effect
+                    let angular_impulse = phys_glam::Vec3::new(
+                        (delta.z * impulse.y - delta.y * impulse.z) * 0.1,
+                        (delta.x * impulse.z - delta.z * impulse.x) * 0.1,
+                        (delta.y * impulse.x - delta.x * impulse.y) * 0.1,
+                    );
+                    velocity.angular += angular_impulse;
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Physics step + transform sync
 // ============================================================================
 
@@ -804,10 +939,10 @@ fn main() {
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .add_systems(Startup, (setup, setup_counter))
-        .add_systems(Update, (orbit_camera, update_counter, update_fps))
+        .add_systems(Update, (orbit_camera, update_counter, update_fps, handle_explosion_input))
         .add_systems(
             FixedUpdate,
-            (spawn_objects, clear_objects, physics_step, sync_transforms).chain(),
+            (spawn_objects, clear_objects, apply_explosions, physics_step, sync_transforms).chain(),
         )
         .run();
 }
