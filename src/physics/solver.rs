@@ -2611,13 +2611,13 @@ impl Solver {
 
         let incremental_update_worker_start = Self::get_uniformly_distributed_start(
             worker_index,
-            ctx.incremental_update_blocks.len() as i32,
+            ctx.incremental_update_blocks.len(),
             worker_count,
             0,
         );
         let kinematic_integration_worker_start = Self::get_uniformly_distributed_start(
             worker_index,
-            ctx.kinematic_integration_blocks.len() as i32,
+            ctx.kinematic_integration_blocks.len(),
             worker_count,
             0,
         );
@@ -2627,9 +2627,10 @@ impl Solver {
 
         // Compute per-batch starting positions for constraint work blocks.
         // Use stack array instead of heap allocation (C# uses stackalloc).
-        // Maximum batch count is bounded by CPU count + 1 (fallback); 64 is more than sufficient.
-        let mut batch_starts_storage = [0i32; 64];
-        debug_assert!((batch_count as usize) <= 64, "batch_count exceeds stack buffer");
+        // C# stackalloc is dynamically sized to activeSet.Batches.Count.
+        // 256 is conservative upper bound for any realistic scenario.
+        let mut batch_starts_storage = [0i32; 256];
+        debug_assert!((batch_count as usize) <= 256, "batch_count ({batch_count}) exceeds stack buffer of 256");
         let (synchronized_batch_count, _fallback_exists) =
             (*self_ptr).get_synchronized_batch_count();
         for batch_index in 0..synchronized_batch_count {

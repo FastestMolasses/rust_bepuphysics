@@ -73,6 +73,13 @@ fn to_bevy_quat(q: phys_glam::Quat) -> Quat {
 
 struct GravityCallbacks {
     gravity: phys_glam::Vec3,
+    /// Fraction of velocity lost per second. 0.03 = 3% per second (C# BepuPhysics demo default).
+    linear_damping: f32,
+    /// Fraction of angular velocity lost per second. 0.03 = 3% per second.
+    angular_damping: f32,
+    // Precomputed per-dt damping multipliers (set in prepare_for_integration).
+    linear_damping_dt: f32,
+    angular_damping_dt: f32,
 }
 
 impl IPoseIntegratorCallbacks for GravityCallbacks {
@@ -86,7 +93,10 @@ impl IPoseIntegratorCallbacks for GravityCallbacks {
         false
     }
     unsafe fn initialize(&mut self, _simulation: *mut u8) {}
-    fn prepare_for_integration(&mut self, _dt: f32) {}
+    fn prepare_for_integration(&mut self, dt: f32) {
+        self.linear_damping_dt = (1.0 - self.linear_damping).clamp(0.0, 1.0).powf(dt);
+        self.angular_damping_dt = (1.0 - self.angular_damping).clamp(0.0, 1.0).powf(dt);
+    }
 
     fn integrate_velocity(
         &self,
@@ -99,12 +109,20 @@ impl IPoseIntegratorCallbacks for GravityCallbacks {
         dt: Vector<f32>,
         velocity: &mut BodyVelocityWide,
     ) {
+        // Apply gravity then damping
+        // velocity.Linear = (velocity.Linear + gravityDt) * linearDampingDt;
+        // velocity.Angular = velocity.Angular * angularDampingDt;
         let gx = Vector::<f32>::splat(self.gravity.x);
         let gy = Vector::<f32>::splat(self.gravity.y);
         let gz = Vector::<f32>::splat(self.gravity.z);
-        velocity.linear.x += gx * dt;
-        velocity.linear.y += gy * dt;
-        velocity.linear.z += gz * dt;
+        let lin_damp = Vector::<f32>::splat(self.linear_damping_dt);
+        let ang_damp = Vector::<f32>::splat(self.angular_damping_dt);
+        velocity.linear.x = (velocity.linear.x + gx * dt) * lin_damp;
+        velocity.linear.y = (velocity.linear.y + gy * dt) * lin_damp;
+        velocity.linear.z = (velocity.linear.z + gz * dt) * lin_damp;
+        velocity.angular.x = velocity.angular.x * ang_damp;
+        velocity.angular.y = velocity.angular.y * ang_damp;
+        velocity.angular.z = velocity.angular.z * ang_damp;
     }
 }
 
@@ -256,6 +274,10 @@ fn create_physics_world() -> PhysicsWorld {
             BouncyNarrowPhaseCallbacks,
             GravityCallbacks {
                 gravity: phys_glam::Vec3::new(0.0, -20.0, 0.0),
+                linear_damping: 0.03,
+                angular_damping: 0.03,
+                linear_damping_dt: 1.0,
+                angular_damping_dt: 1.0,
             },
             SolveDescription::with_defaults(4, 1),
             None,

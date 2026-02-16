@@ -2121,12 +2121,9 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                 }
                 unique_set.dispose(pool);
                 for i in 0..thread_count {
-                    let worker_pool = if thread_count > 1 {
-                        // Multi-threaded: use per-worker pool (but currently not available, use main)
-                        pool as *mut BufferPool
-                    } else {
-                        pool as *mut BufferPool
-                    };
+                    // C#: overlapWorkers[i].PendingSetAwakenings.Dispose(overlapWorkers[i].Batcher.Pool);
+                    // The QuickList was allocated in the worker's batcher pool, so it must be returned there.
+                    let worker_pool = self.overlap_workers[i].batcher.pool;
                     self.overlap_workers[i]
                         .pending_set_awakenings
                         .dispose(&mut *worker_pool);

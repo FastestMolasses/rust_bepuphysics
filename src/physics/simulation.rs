@@ -253,6 +253,9 @@ impl Simulation {
         // Initialize the freshness checker now that the struct is at its final heap location.
         (*narrow_phase).init_freshness_checker();
 
+        // Wire awakener into narrow phase so sleeping bodies can be woken during collision detection.
+        (*narrow_phase).base.awakener = awakener;
+
         // Wire pair cache into sleeper, awakener, solver.
         let pair_cache_ptr = &mut (*narrow_phase).base.pair_cache
             as *mut crate::physics::collision_detection::pair_cache::PairCache;
