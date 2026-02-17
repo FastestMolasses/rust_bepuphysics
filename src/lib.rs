@@ -6,6 +6,9 @@
 pub mod physics;
 pub mod utilities;
 
+#[cfg(feature = "bevy")]
+pub mod bevy_bepu;
+
 /// Re-export glam so consumers use the exact same version as the physics crate.
 pub use glam;
 

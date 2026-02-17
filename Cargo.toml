@@ -6,14 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = []
+bevy = ["dep:bevy"]
 profile = []
 
 [dependencies]
-glam = { version = "0.32" }
+glam = { version = "0.30.7" }
 num-traits = "0.2"
+bevy = { version = "0.18", optional = true, default-features = false, features = ["std", "bevy_log"] }
 
 [dev-dependencies]
-bevy = "0.18"
+bevy = { version = "0.18", features = ["default"] }
 rand = "0.9"
 bepuvy-sys = { git = "https://github.com/DrewRidley/bepuvy-sys.git", rev = "bdb4f4d" }
 avian3d = "0.5"
@@ -21,10 +24,16 @@ avian3d = "0.5"
 [[example]]
 name = "tower"
 path = "examples/tower.rs"
+required-features = ["bevy"]
 
 [[example]]
 name = "rain"
 path = "examples/rain.rs"
+required-features = ["bevy"]
+
+[[example]]
+name = "rain_old"
+path = "examples/rain_old.rs"
 
 [[example]]
 name = "rain_csharp"
@@ -33,3 +42,8 @@ path = "examples/rain_csharp.rs"
 [[example]]
 name = "rain_avian"
 path = "examples/rain_avian.rs"
+
+[[example]]
+name = "hello_physics"
+path = "examples/hello_physics.rs"
+required-features = ["bevy"]
