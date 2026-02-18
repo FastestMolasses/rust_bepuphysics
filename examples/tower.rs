@@ -18,8 +18,6 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 
-use rust_bepuphysics::glam as phys_glam;
-
 // --- Physics crate imports ---
 use rust_bepuphysics::physics::body_description::BodyDescription;
 use rust_bepuphysics::physics::body_properties::{
@@ -51,12 +49,12 @@ use rust_bepuphysics::utilities::vector::Vector;
 use rust_bepuphysics::utilities::vector3_wide::Vector3Wide;
 
 /// Convert physics glam Vec3 -> Bevy Vec3
-fn to_bevy_vec3(v: phys_glam::Vec3) -> Vec3 {
+fn to_bevy_vec3(v: Vec3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
 }
 
 /// Convert physics glam Quat -> Bevy Quat
-fn to_bevy_quat(q: phys_glam::Quat) -> Quat {
+fn to_bevy_quat(q: Quat) -> Quat {
     Quat::from_xyzw(q.x, q.y, q.z, q.w)
 }
 
@@ -65,7 +63,7 @@ fn to_bevy_quat(q: phys_glam::Quat) -> Quat {
 // ============================================================================
 
 struct GravityCallbacks {
-    gravity: phys_glam::Vec3,
+    gravity: Vec3,
     linear_damping: f32,
     angular_damping: f32,
     linear_damping_dt: f32,
@@ -250,7 +248,7 @@ fn create_physics_world() -> PhysicsWorld {
             pool_ptr,
             DemoNarrowPhaseCallbacks,
             GravityCallbacks {
-                gravity: phys_glam::Vec3::new(0.0, -20.0, 0.0),
+                gravity: Vec3::new(0.0, -20.0, 0.0),
                 linear_damping: 0.03,
                 angular_damping: 0.03,
                 linear_damping_dt: 1.0,
@@ -285,7 +283,7 @@ fn spawn_circular_tower(
     // --- Ground ---
     let ground_shape = shapes.add(&PhysicsBox::new(200.0, 1.0, 200.0));
     let ground_desc = StaticDescription::with_discrete(
-        RigidPose::from_position(phys_glam::Vec3::new(0.0, -0.5, 0.0)),
+        RigidPose::from_position(Vec3::new(0.0, -0.5, 0.0)),
         ground_shape,
     );
     unsafe {
@@ -354,10 +352,10 @@ fn spawn_circular_tower(
             let z = radius * angle.sin();
 
             // Orient cube to face center (tangent to ring).
-            let rot = phys_glam::Quat::from_rotation_y(-angle);
+            let rot = Quat::from_rotation_y(-angle);
 
             let desc = BodyDescription::create_convex_dynamic_no_velocity(
-                RigidPose::new(phys_glam::Vec3::new(x, y, z), rot),
+                RigidPose::new(Vec3::new(x, y, z), rot),
                 1.0,
                 shapes,
                 &box_shape,
@@ -486,14 +484,14 @@ fn throw_ball(
     let speed = 80.0f32;
 
     let desc = BodyDescription::create_convex_dynamic(
-        RigidPose::from_position(phys_glam::Vec3::new(spawn_pos.x, spawn_pos.y, spawn_pos.z)),
+        RigidPose::from_position(Vec3::new(spawn_pos.x, spawn_pos.y, spawn_pos.z)),
         BodyVelocity::new(
-            phys_glam::Vec3::new(
+            Vec3::new(
                 direction.x * speed,
                 direction.y * speed,
                 direction.z * speed,
             ),
-            phys_glam::Vec3::ZERO,
+            Vec3::ZERO,
         ),
         5.0,
         shapes,
