@@ -18,7 +18,6 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 
-// --- Physics crate imports ---
 use rust_bepuphysics::physics::body_description::BodyDescription;
 use rust_bepuphysics::physics::body_properties::{
     BodyInertiaWide, BodyVelocity, BodyVelocityWide, RigidPose,
@@ -47,16 +46,6 @@ use rust_bepuphysics::utilities::quaternion_wide::QuaternionWide;
 use rust_bepuphysics::utilities::thread_dispatcher::ThreadDispatcher;
 use rust_bepuphysics::utilities::vector::Vector;
 use rust_bepuphysics::utilities::vector3_wide::Vector3Wide;
-
-/// Convert physics glam Vec3 -> Bevy Vec3
-fn to_bevy_vec3(v: Vec3) -> Vec3 {
-    Vec3::new(v.x, v.y, v.z)
-}
-
-/// Convert physics glam Quat -> Bevy Quat
-fn to_bevy_quat(q: Quat) -> Quat {
-    Quat::from_xyzw(q.x, q.y, q.z, q.w)
-}
 
 // ============================================================================
 // Physics callbacks
@@ -365,7 +354,7 @@ fn spawn_circular_tower(
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(x, y, z).with_rotation(to_bevy_quat(rot)),
+                Transform::from_xyz(x, y, z).with_rotation(rot),
                 RigidBody { handle },
                 PhysicsEntity,
             ));
@@ -531,8 +520,8 @@ fn sync_transforms(physics: Res<PhysicsWorld>, mut query: Query<(&RigidBody, &mu
             }
             bodies.get_description(body.handle, &mut *desc.as_mut_ptr());
             let desc = desc.assume_init();
-            transform.translation = to_bevy_vec3(desc.pose.position);
-            transform.rotation = to_bevy_quat(desc.pose.orientation);
+            transform.translation = desc.pose.position;
+            transform.rotation = desc.pose.orientation;
         }
     }
 }
@@ -646,7 +635,7 @@ fn orbit_camera(
         return;
     };
 
-    // Use right-drag for orbit so left-click can throw balls.
+    // Use right-drag for orbit so left-click can throw balls
     if mouse_button.pressed(MouseButton::Right) {
         let delta = mouse_motion.delta;
         orbit.yaw -= delta.x * 0.005;

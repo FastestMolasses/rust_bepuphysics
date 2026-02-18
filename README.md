@@ -49,7 +49,7 @@ fn setup(
     // Static ground
     commands.spawn((
         RigidBody::Static,
-        BepuCollider::cuboid(100.0, 1.0, 100.0),
+        BepuCollider::cuboid(200.0, 2.0, 200.0),
         Transform::from_xyz(0.0, -0.5, 0.0),
         Mesh3d(meshes.add(Cuboid::new(200.0, 2.0, 200.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.3, 0.35))),
