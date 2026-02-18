@@ -50,7 +50,11 @@ impl BepuSpatialQuery<'_> {
             fn allow_test_collidable(&self, _collidable: &CollidableReference) -> bool {
                 true
             }
-            fn allow_test_child(&self, _collidable: &CollidableReference, _child_index: i32) -> bool {
+            fn allow_test_child(
+                &self,
+                _collidable: &CollidableReference,
+                _child_index: i32,
+            ) -> bool {
                 true
             }
             fn on_ray_hit(
@@ -65,7 +69,8 @@ impl BepuSpatialQuery<'_> {
                 if t < self.best_t {
                     self.best_t = t;
                     self.best_normal = normal;
-                    self.best_collidable = Some((collidable.mobility(), collidable.raw_handle_value()));
+                    self.best_collidable =
+                        Some((collidable.mobility(), collidable.raw_handle_value()));
                     *maximum_t = t; // Narrow the search to closer hits only.
                 }
             }
@@ -102,7 +107,11 @@ impl BepuSpatialQuery<'_> {
             RayHit {
                 entity,
                 t: handler.best_t,
-                normal: Vec3::new(handler.best_normal.x, handler.best_normal.y, handler.best_normal.z),
+                normal: Vec3::new(
+                    handler.best_normal.x,
+                    handler.best_normal.y,
+                    handler.best_normal.z,
+                ),
             }
         })
     }

@@ -8,7 +8,6 @@ use crate::physics::collidables::compound::CompoundChild;
 use crate::physics::collidables::shape::ICompoundShape;
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;

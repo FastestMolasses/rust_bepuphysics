@@ -67,13 +67,29 @@ impl DistanceLimit {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "DistanceLimit");
         }
-        Vector3Wide::write_slot(self.local_offset_a, inner_index, &mut prestep_data.local_offset_a);
-        Vector3Wide::write_slot(self.local_offset_b, inner_index, &mut prestep_data.local_offset_b);
+        Vector3Wide::write_slot(
+            self.local_offset_a,
+            inner_index,
+            &mut prestep_data.local_offset_a,
+        );
+        Vector3Wide::write_slot(
+            self.local_offset_b,
+            inner_index,
+            &mut prestep_data.local_offset_b,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.minimum_distance, inner_index) = self.minimum_distance;
-            *GatherScatter::get_mut(&mut prestep_data.maximum_distance, inner_index) = self.maximum_distance;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.minimum_distance, inner_index) =
+                self.minimum_distance;
+            *GatherScatter::get_mut(&mut prestep_data.maximum_distance, inner_index) =
+                self.maximum_distance;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -83,13 +99,27 @@ impl DistanceLimit {
         inner_index: usize,
         description: &mut DistanceLimit,
     ) {
-        Vector3Wide::read_slot(&prestep_data.local_offset_a, inner_index, &mut description.local_offset_a);
-        Vector3Wide::read_slot(&prestep_data.local_offset_b, inner_index, &mut description.local_offset_b);
+        Vector3Wide::read_slot(
+            &prestep_data.local_offset_a,
+            inner_index,
+            &mut description.local_offset_a,
+        );
+        Vector3Wide::read_slot(
+            &prestep_data.local_offset_b,
+            inner_index,
+            &mut description.local_offset_b,
+        );
         unsafe {
-            description.minimum_distance = *GatherScatter::get(&prestep_data.minimum_distance, inner_index);
-            description.maximum_distance = *GatherScatter::get(&prestep_data.maximum_distance, inner_index);
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.minimum_distance =
+                *GatherScatter::get(&prestep_data.minimum_distance, inner_index);
+            description.maximum_distance =
+                *GatherScatter::get(&prestep_data.maximum_distance, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

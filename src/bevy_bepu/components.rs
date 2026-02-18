@@ -6,8 +6,8 @@
 use bevy::prelude::*;
 use glam::Vec3;
 
-use crate::physics::handles::{BodyHandle, ConstraintHandle, StaticHandle};
 use crate::physics::collidables::typed_index::TypedIndex;
+use crate::physics::handles::{BodyHandle, ConstraintHandle, StaticHandle};
 
 // ---------------------------------------------------------------------------
 // Rigid body

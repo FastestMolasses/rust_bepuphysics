@@ -50,15 +50,33 @@ impl TwistServo {
             );
             ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "TwistServo");
         }
-        QuaternionWide::write_slot(self.local_basis_a, inner_index, &mut prestep_data.local_basis_a);
-        QuaternionWide::write_slot(self.local_basis_b, inner_index, &mut prestep_data.local_basis_b);
+        QuaternionWide::write_slot(
+            self.local_basis_a,
+            inner_index,
+            &mut prestep_data.local_basis_a,
+        );
+        QuaternionWide::write_slot(
+            self.local_basis_b,
+            inner_index,
+            &mut prestep_data.local_basis_b,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.target_angle, inner_index) = self.target_angle;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
-            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_speed, inner_index) = self.servo_settings.maximum_speed;
-            *GatherScatter::get_mut(&mut prestep_data.servo_settings.base_speed, inner_index) = self.servo_settings.base_speed;
-            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_force, inner_index) = self.servo_settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.target_angle, inner_index) =
+                self.target_angle;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_speed, inner_index) =
+                self.servo_settings.maximum_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.base_speed, inner_index) =
+                self.servo_settings.base_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_force, inner_index) =
+                self.servo_settings.maximum_force;
         }
     }
 
@@ -68,15 +86,30 @@ impl TwistServo {
         inner_index: usize,
         description: &mut Self,
     ) {
-        QuaternionWide::read_slot(&prestep_data.local_basis_a, inner_index, &mut description.local_basis_a);
-        QuaternionWide::read_slot(&prestep_data.local_basis_b, inner_index, &mut description.local_basis_b);
+        QuaternionWide::read_slot(
+            &prestep_data.local_basis_a,
+            inner_index,
+            &mut description.local_basis_a,
+        );
+        QuaternionWide::read_slot(
+            &prestep_data.local_basis_b,
+            inner_index,
+            &mut description.local_basis_b,
+        );
         unsafe {
             description.target_angle = *GatherScatter::get(&prestep_data.target_angle, inner_index);
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
-            description.servo_settings.maximum_speed = *GatherScatter::get(&prestep_data.servo_settings.maximum_speed, inner_index);
-            description.servo_settings.base_speed = *GatherScatter::get(&prestep_data.servo_settings.base_speed, inner_index);
-            description.servo_settings.maximum_force = *GatherScatter::get(&prestep_data.servo_settings.maximum_force, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
+            description.servo_settings.maximum_speed =
+                *GatherScatter::get(&prestep_data.servo_settings.maximum_speed, inner_index);
+            description.servo_settings.base_speed =
+                *GatherScatter::get(&prestep_data.servo_settings.base_speed, inner_index);
+            description.servo_settings.maximum_force =
+                *GatherScatter::get(&prestep_data.servo_settings.maximum_force, inner_index);
         }
     }
 }

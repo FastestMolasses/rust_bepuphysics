@@ -73,16 +73,6 @@ impl Tree {
         index
     }
 
-    fn allocate_leaf(&mut self) -> i32 {
-        debug_assert!(
-            self.leaf_count < self.leaves.len(),
-            "Any attempt to allocate a leaf should not overrun the allocated leaves."
-        );
-        let index = self.leaf_count;
-        self.leaf_count += 1;
-        index
-    }
-
     /// Gets bounds pointers for a leaf in the tree.
     #[inline(always)]
     pub unsafe fn get_bounds_pointers(&self, leaf_index: i32) -> (*mut Vec3, *mut Vec3) {

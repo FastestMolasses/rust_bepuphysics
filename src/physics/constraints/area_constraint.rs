@@ -30,9 +30,16 @@ impl AreaConstraint {
         inner_index: usize,
     ) {
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.target_scaled_area, inner_index) = self.target_scaled_area;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.target_scaled_area, inner_index) =
+                self.target_scaled_area;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -43,9 +50,14 @@ impl AreaConstraint {
         description: &mut AreaConstraint,
     ) {
         unsafe {
-            description.target_scaled_area = *GatherScatter::get(&prestep_data.target_scaled_area, inner_index);
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.target_scaled_area =
+                *GatherScatter::get(&prestep_data.target_scaled_area, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

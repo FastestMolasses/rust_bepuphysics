@@ -181,9 +181,8 @@ impl Simulation {
         (*solver).pose_integrator =
             Some(pose_integrator as *mut dyn crate::physics::pose_integrator::IPoseIntegrator);
         // Set up monomorphized velocity integration callbacks — avoids vtable in the hot loop.
-        (*solver).velocity_callbacks = Some(
-            crate::physics::solver::create_velocity_integration_callbacks(pose_integrator),
-        );
+        (*solver).velocity_callbacks =
+            Some(crate::physics::solver::create_velocity_integration_callbacks(pose_integrator));
 
         // Create constraint remover.
         let constraint_remover = RealConstraintRemover::with_defaults(buffer_pool, bodies, solver);
@@ -291,7 +290,7 @@ impl Simulation {
             constraint_remover: &mut (*narrow_phase).base.constraint_remover
                 as *mut RealConstraintRemover
                 as *mut ConstraintRemover,
-            buffer_pool: buffer_pool,
+            buffer_pool,
             timestepper,
             deterministic: false,
         });
@@ -703,7 +702,14 @@ impl Simulation {
 
         type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
         let broad_phase = &*(self.broad_phase as *const RealBroadPhase);
-        broad_phase.ray_cast(origin, direction, maximum_t, &mut *self.buffer_pool, &mut dispatcher, id);
+        broad_phase.ray_cast(
+            origin,
+            direction,
+            maximum_t,
+            &mut *self.buffer_pool,
+            &mut dispatcher,
+            id,
+        );
     }
 
     /// Sweeps a shape against the simulation.
@@ -864,7 +870,14 @@ impl Simulation {
 
         type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
         let broad_phase = &*(self.broad_phase as *const RealBroadPhase);
-        broad_phase.sweep_minmax(min, max, velocity.linear, maximum_t, &mut *self.buffer_pool, &mut dispatcher);
+        broad_phase.sweep_minmax(
+            min,
+            max,
+            velocity.linear,
+            maximum_t,
+            &mut *self.buffer_pool,
+            &mut dispatcher,
+        );
     }
 
     /// Sweeps a convex shape against the simulation with automatically estimated termination conditions.

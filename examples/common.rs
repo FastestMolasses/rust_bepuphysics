@@ -63,10 +63,8 @@ pub fn setup_counter(mut commands: Commands) {
 }
 
 /// Updates the object counter text based on a value resource.
-pub fn update_counter<T: Resource>(
-    counter: Res<T>,
-    mut query: Query<&mut Text, With<CounterText>>,
-) where
+pub fn update_counter<T: Resource>(counter: Res<T>, mut query: Query<&mut Text, With<CounterText>>)
+where
     T: ObjectCounter,
 {
     if let Ok(mut text) = query.single_mut() {

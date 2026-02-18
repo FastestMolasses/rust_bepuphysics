@@ -43,8 +43,10 @@ impl AngularMotor {
             &mut prestep_data.target_velocity_local_a,
         );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
-            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) =
+                self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) =
+                self.settings.damping;
         }
     }
 
@@ -60,8 +62,10 @@ impl AngularMotor {
             &mut description.target_velocity_local_a,
         );
         unsafe {
-            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
-            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+            description.settings.maximum_force =
+                *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping =
+                *GatherScatter::get(&prestep_data.settings.damping, inner_index);
         }
     }
 }

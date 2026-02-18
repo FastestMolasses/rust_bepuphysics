@@ -39,11 +39,18 @@ impl AngularAxisGearMotor {
             );
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "AngularAxisGearMotor");
         }
-        Vector3Wide::write_slot(self.local_axis_a, inner_index, &mut prestep_data.local_axis_a);
+        Vector3Wide::write_slot(
+            self.local_axis_a,
+            inner_index,
+            &mut prestep_data.local_axis_a,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.velocity_scale, inner_index) = self.velocity_scale;
-            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
-            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
+            *GatherScatter::get_mut(&mut prestep_data.velocity_scale, inner_index) =
+                self.velocity_scale;
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) =
+                self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) =
+                self.settings.damping;
         }
     }
 
@@ -53,11 +60,18 @@ impl AngularAxisGearMotor {
         inner_index: usize,
         description: &mut Self,
     ) {
-        Vector3Wide::read_slot(&prestep_data.local_axis_a, inner_index, &mut description.local_axis_a);
+        Vector3Wide::read_slot(
+            &prestep_data.local_axis_a,
+            inner_index,
+            &mut description.local_axis_a,
+        );
         unsafe {
-            description.velocity_scale = *GatherScatter::get(&prestep_data.velocity_scale, inner_index);
-            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
-            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+            description.velocity_scale =
+                *GatherScatter::get(&prestep_data.velocity_scale, inner_index);
+            description.settings.maximum_force =
+                *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping =
+                *GatherScatter::get(&prestep_data.settings.damping, inner_index);
         }
     }
 }

@@ -278,24 +278,9 @@ impl BoxConvexHullTester {
             let box_edge_start_x = [v00_x, v10_x, v11_x, v01_x];
             let box_edge_start_y = [v00_y, v10_y, v11_y, v01_y];
             let box_edge_start_z = [v00_z, v10_z, v11_z, v01_z];
-            let edge_direction_x = [
-                face_x_x,
-                face_y_x,
-                -face_x_x,
-                -face_y_x,
-            ];
-            let edge_direction_y = [
-                face_x_y,
-                face_y_y,
-                -face_x_y,
-                -face_y_y,
-            ];
-            let edge_direction_z = [
-                face_x_z,
-                face_y_z,
-                -face_x_z,
-                -face_y_z,
-            ];
+            let edge_direction_x = [face_x_x, face_y_x, -face_x_x, -face_y_x];
+            let edge_direction_y = [face_x_y, face_y_y, -face_x_y, -face_y_y];
+            let edge_direction_z = [face_x_z, face_y_z, -face_x_z, -face_y_z];
 
             let slot_local_normal_x4 = [slot_local_normal.x; 4];
             let slot_local_normal_y4 = [slot_local_normal.y; 4];

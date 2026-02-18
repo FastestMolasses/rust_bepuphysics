@@ -5,7 +5,7 @@ use crate::physics::collision_detection::narrow_phase_callbacks::PairMaterialPro
 use crate::physics::constraints::contact::contact_constraint_description::ConstraintContactData;
 use crate::physics::constraints::contact::contact_convex_common::ConvexContactWide;
 use crate::physics::constraints::contact::contact_convex_types::*;
-use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
+use crate::physics::constraints::spring_settings::SpringSettings;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;

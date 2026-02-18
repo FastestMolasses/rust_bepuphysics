@@ -58,10 +58,18 @@ impl CenterDistanceLimit {
             );
         }
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.minimum_distance, inner_index) = self.minimum_distance;
-            *GatherScatter::get_mut(&mut prestep_data.maximum_distance, inner_index) = self.maximum_distance;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.minimum_distance, inner_index) =
+                self.minimum_distance;
+            *GatherScatter::get_mut(&mut prestep_data.maximum_distance, inner_index) =
+                self.maximum_distance;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -72,10 +80,16 @@ impl CenterDistanceLimit {
         description: &mut Self,
     ) {
         unsafe {
-            description.minimum_distance = *GatherScatter::get(&prestep_data.minimum_distance, inner_index);
-            description.maximum_distance = *GatherScatter::get(&prestep_data.maximum_distance, inner_index);
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.minimum_distance =
+                *GatherScatter::get(&prestep_data.minimum_distance, inner_index);
+            description.maximum_distance =
+                *GatherScatter::get(&prestep_data.maximum_distance, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

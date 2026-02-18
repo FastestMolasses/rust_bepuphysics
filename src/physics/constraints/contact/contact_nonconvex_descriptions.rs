@@ -8,7 +8,6 @@ use crate::physics::constraints::contact::contact_constraint_description::{
 };
 use crate::physics::constraints::contact::contact_nonconvex_common::NonconvexContactPrestepData;
 use crate::physics::constraints::contact::contact_nonconvex_types::*;
-use crate::physics::constraints::spring_settings::SpringSettingsWide;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;

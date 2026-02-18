@@ -75,29 +75,6 @@ impl Worker {
         self.worker_index
     }
 
-    /// Gets the continuation head pointer.
-    #[inline(always)]
-    pub fn continuation_head(&self) -> *mut ContinuationBlock {
-        self.continuation_head
-    }
-
-    /// Validates the integrity of tasks within jobs for debugging purposes.
-    #[cfg(debug_assertions)]
-    pub fn validate_tasks(&self) {
-        for i in 0..self.allocated_jobs.count {
-            let job_ptr = self.allocated_jobs.span[i] as *const Job;
-            unsafe {
-                let job = &*job_ptr;
-                for j in 0..job.tasks.len() {
-                    debug_assert!(
-                        job.tasks[j].function.is_some(),
-                        "Task function should not be null."
-                    );
-                }
-            }
-        }
-    }
-
     /// Disposes of the worker, cleaning up any allocated jobs and continuation blocks.
     ///
     /// # Safety

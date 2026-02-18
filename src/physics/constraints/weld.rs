@@ -26,11 +26,25 @@ impl Weld {
         _bundle_index: usize,
         inner_index: usize,
     ) {
-        Vector3Wide::write_slot(self.local_offset, inner_index, &mut prestep_data.local_offset);
-        QuaternionWide::write_slot(self.local_orientation, inner_index, &mut prestep_data.local_orientation);
+        Vector3Wide::write_slot(
+            self.local_offset,
+            inner_index,
+            &mut prestep_data.local_offset,
+        );
+        QuaternionWide::write_slot(
+            self.local_orientation,
+            inner_index,
+            &mut prestep_data.local_orientation,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -40,15 +54,23 @@ impl Weld {
         inner_index: usize,
         description: &mut Weld,
     ) {
-        Vector3Wide::read_slot(&prestep_data.local_offset, inner_index, &mut description.local_offset);
+        Vector3Wide::read_slot(
+            &prestep_data.local_offset,
+            inner_index,
+            &mut description.local_offset,
+        );
         QuaternionWide::read_slot(
             &prestep_data.local_orientation,
             inner_index,
             &mut description.local_orientation,
         );
         unsafe {
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

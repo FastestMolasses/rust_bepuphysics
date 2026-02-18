@@ -302,8 +302,7 @@ impl IThreadDispatcher for ThreadDispatcher {
         // Set the worker body and contexts (C# volatile writes, before signaling)
         *self.state.worker_body.get() = Some(worker_body);
         *self.state.unmanaged_ctx.get() = unmanaged_context;
-        *self.state.managed_ctx.get() =
-            managed_context.map(|c| c as *const dyn std::any::Any);
+        *self.state.managed_ctx.get() = managed_context.map(|c| c as *const dyn std::any::Any);
         *self.state.dispatcher_ptr.get() =
             Some(self as &dyn IThreadDispatcher as *const dyn IThreadDispatcher);
 

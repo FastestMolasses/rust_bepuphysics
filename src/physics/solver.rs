@@ -15,8 +15,8 @@ use crate::physics::constraints::constraint_description::{
 use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::constraints::type_processor::TypeProcessor;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
-use crate::physics::pose_integrator::IPoseIntegrator;
 use crate::physics::pose_integration::{AngularIntegrationMode, IPoseIntegratorCallbacks};
+use crate::physics::pose_integrator::IPoseIntegrator;
 use crate::physics::solve_description::{SolveDescription, SubstepVelocityIterationScheduler};
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::index_set::IndexSet;
@@ -40,7 +40,7 @@ use std::simd::prelude::*;
 /// codegen by storing a raw function pointer that was monomorphized at `Simulation::create` time.
 /// The `context` param is a pointer to `PoseIntegrator<TCallbacks>`.
 pub type IntegrateVelocityFn = unsafe fn(
-    context: *const u8,       // &PoseIntegrator<TCallbacks> as *const u8
+    context: *const u8, // &PoseIntegrator<TCallbacks> as *const u8
     body_indices: Vector<i32>,
     position: Vector3Wide,
     orientation: QuaternionWide,
@@ -655,8 +655,7 @@ impl Solver {
         for (i, &handle) in body_handles.iter().enumerate() {
             let location = bodies.handle_to_location.get(handle.0);
             debug_assert!(location.set_index == 0);
-            if Bodies::is_kinematic(unsafe { &(*solver_states.get(location.index)).inertia.local })
-            {
+            if Bodies::is_kinematic(unsafe { &solver_states.get(location.index).inertia.local }) {
                 encoded_body_indices[i] = location.index | Bodies::KINEMATIC_MASK as i32;
             } else {
                 blocking.push(handle);
@@ -785,9 +784,12 @@ impl Solver {
 
         let batch_count = self.active_set().batches.count;
         for i in 0..=batch_count {
-            if let Some((handle, reference)) =
-                self.try_allocate_in_batch(type_id, i, &blocking, &encoded_body_indices[..body_handles.len()])
-            {
+            if let Some((handle, reference)) = self.try_allocate_in_batch(
+                type_id,
+                i,
+                &blocking,
+                &encoded_body_indices[..body_handles.len()],
+            ) {
                 let (mut bundle_index, mut inner_index) = (0usize, 0usize);
                 BundleIndexing::get_bundle_indices(
                     reference.index_in_type_batch as usize,
@@ -1124,7 +1126,10 @@ impl Solver {
         debug_assert!({
             let loc = *bodies.handle_to_location.get(body_handle.0);
             Bodies::is_kinematic(unsafe {
-                &(*bodies.active_set().dynamics_state.get(loc.index))
+                &bodies
+                    .active_set()
+                    .dynamics_state
+                    .get(loc.index)
                     .inertia
                     .local
             })
@@ -2630,7 +2635,10 @@ impl Solver {
         // C# stackalloc is dynamically sized to activeSet.Batches.Count.
         // 256 is conservative upper bound for any realistic scenario.
         let mut batch_starts_storage = [0i32; 256];
-        debug_assert!((batch_count as usize) <= 256, "batch_count ({batch_count}) exceeds stack buffer of 256");
+        debug_assert!(
+            (batch_count as usize) <= 256,
+            "batch_count ({batch_count}) exceeds stack buffer of 256"
+        );
         let (synchronized_batch_count, _fallback_exists) =
             (*self_ptr).get_synchronized_batch_count();
         for batch_index in 0..synchronized_batch_count {
@@ -2716,7 +2724,7 @@ impl Solver {
                         &integrate_constrained_kinematics_stage,
                         worker_index,
                         kinematic_integration_worker_start,
-                        &(*self_ptr).substep_context.stages.get(1),
+                        (*self_ptr).substep_context.stages.get(1),
                         (*self_ptr).get_previous_sync_index_for_integrate_constrained_kinematics(
                             substep_index,
                             sync_index,
@@ -2736,7 +2744,7 @@ impl Solver {
                         &warmstart_stage,
                         worker_index,
                         batch_starts_storage[batch_index as usize],
-                        &(*self_ptr).substep_context.stages.get(batch_index + 2),
+                        (*self_ptr).substep_context.stages.get(batch_index + 2),
                         Self::get_previous_sync_index_for_warm_start(
                             sync_index,
                             warm_start_lookback,
@@ -2783,7 +2791,7 @@ impl Solver {
                             &solve_stage,
                             worker_index,
                             batch_starts_storage[batch_index as usize],
-                            &(*self_ptr).substep_context.stages.get(batch_index + 2),
+                            (*self_ptr).substep_context.stages.get(batch_index + 2),
                             Self::get_previous_sync_index_for_solve(
                                 sync_index,
                                 synchronized_batch_count,
@@ -2980,13 +2988,12 @@ impl Solver {
         type_batch_filter: &TFilter,
     ) -> (QuickList<WorkBlock>, Buffer<i32>) {
         let active_set = self.sets.get(0);
-        let batch_count;
-        if type_batch_filter.include_fallback_batch_for_work_blocks() {
-            batch_count = active_set.batches.count;
+        let batch_count = if type_batch_filter.include_fallback_batch_for_work_blocks() {
+            active_set.batches.count
         } else {
             let (sync_count, _) = self.get_synchronized_batch_count();
-            batch_count = sync_count;
-        }
+            sync_count
+        };
 
         let mut work_blocks: QuickList<WorkBlock> =
             QuickList::with_capacity(target_blocks_per_batch * batch_count, pool);
@@ -3114,7 +3121,7 @@ impl Solver {
         let ctx = &mut (*self_ptr).substep_context;
         *ctx.sync_index.get_mut() = 0;
 
-        let total_constraint_batch_work_block_count = if ctx.constraint_batch_boundaries.len() == 0
+        let total_constraint_batch_work_block_count = if ctx.constraint_batch_boundaries.is_empty()
         {
             0
         } else {
@@ -3263,7 +3270,7 @@ impl Solver {
         exclusive_constraint_end: i32,
         is_fallback_batch: bool,
     ) -> bool {
-        let first_observed_for_batch = &*self.bodies_first_observed_in_batches.get(batch_index);
+        let first_observed_for_batch = self.bodies_first_observed_in_batches.get(batch_index);
         // Use raw pointer to get mutable access to integration flags (safe: we guarantee exclusive access by design)
         let integration_flags_ptr = self.integration_flags.as_ptr().add(batch_index as usize)
             as *mut Buffer<Buffer<IndexSet>>;

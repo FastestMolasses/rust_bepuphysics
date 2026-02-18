@@ -29,9 +29,16 @@ impl VolumeConstraint {
         inner_index: usize,
     ) {
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.target_scaled_volume, inner_index) = self.target_scaled_volume;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.target_scaled_volume, inner_index) =
+                self.target_scaled_volume;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -42,9 +49,14 @@ impl VolumeConstraint {
         description: &mut VolumeConstraint,
     ) {
         unsafe {
-            description.target_scaled_volume = *GatherScatter::get(&prestep_data.target_scaled_volume, inner_index);
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.target_scaled_volume =
+                *GatherScatter::get(&prestep_data.target_scaled_volume, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

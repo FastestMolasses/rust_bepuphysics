@@ -370,8 +370,12 @@ impl BigCompound {
         overlaps: *mut TOverlaps,
     ) {
         let pool_ptr = pool as *mut BufferPool;
-        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> { pool: &mut *pool_ptr, overlaps };
-        self.tree.sweep(min, max, sweep, maximum_t, &mut *pool_ptr, &mut enumerator);
+        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> {
+            pool: &mut *pool_ptr,
+            overlaps,
+        };
+        self.tree
+            .sweep(min, max, sweep, maximum_t, &mut *pool_ptr, &mut enumerator);
     }
 
     /// Computes the inertia of this compound using the shapes collection.
@@ -552,9 +556,12 @@ impl IBoundsQueryableCompound for BigCompound {
                 overlaps: overlaps_for_pair,
                 pool: unsafe { &mut *pool_ptr },
             };
-            compound
-                .tree
-                .get_overlaps_minmax(pair.min, pair.max, unsafe { &mut *pool_ptr }, &mut adapter);
+            compound.tree.get_overlaps_minmax(
+                pair.min,
+                pair.max,
+                unsafe { &mut *pool_ptr },
+                &mut adapter,
+            );
         }
     }
 
@@ -574,6 +581,7 @@ impl IBoundsQueryableCompound for BigCompound {
             pool: &mut *pool_ptr,
             overlaps: overlaps as *mut _,
         };
-        self.tree.sweep(min, max, sweep, maximum_t, &mut *pool_ptr, &mut enumerator);
+        self.tree
+            .sweep(min, max, sweep, maximum_t, &mut *pool_ptr, &mut enumerator);
     }
 }

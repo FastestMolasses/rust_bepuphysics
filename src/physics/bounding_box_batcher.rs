@@ -28,7 +28,7 @@ const VECTOR_WIDTH: usize = crate::utilities::vector::VECTOR_WIDTH;
 
 /// Continuation data for a bounding box computation.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct BoundsContinuation {
     packed: u32,
 }
@@ -63,12 +63,6 @@ impl BoundsContinuation {
     }
 }
 
-impl Default for BoundsContinuation {
-    fn default() -> Self {
-        Self { packed: 0 }
-    }
-}
-
 /// A single bounding box computation instance.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -78,6 +72,7 @@ pub struct BoundingBoxInstance {
 }
 
 /// A batch of bounding box computations for a single shape type.
+#[derive(Default)]
 pub struct BoundingBoxBatch {
     pub shape_indices: Buffer<i32>,
     pub continuations: Buffer<BoundsContinuation>,
@@ -123,17 +118,6 @@ impl BoundingBoxBatch {
             pool.return_buffer(&mut self.continuations);
             pool.return_buffer(&mut self.motion_states);
             self.count = 0;
-        }
-    }
-}
-
-impl Default for BoundingBoxBatch {
-    fn default() -> Self {
-        Self {
-            shape_indices: Buffer::default(),
-            continuations: Buffer::default(),
-            motion_states: Buffer::default(),
-            count: 0,
         }
     }
 }
@@ -192,7 +176,7 @@ impl BoundingBoxBatcher {
             shape_wide.initialize_allocation(&alloc_buffer);
         }
 
-        let batch = self.batches.get(shape_batch.type_id() as i32);
+        let batch = self.batches.get(shape_batch.type_id());
         let shape_indices = &batch.shape_indices;
         let continuations = &batch.continuations;
         let bodies = &mut *self.bodies;
@@ -217,12 +201,11 @@ impl BoundingBoxBatcher {
                 let shape_index = *shape_indices.get(index_in_batch);
                 let shape = shape_batch.get(shape_index as usize);
                 shape_wide.write_slot(inner_index as usize, shape);
-                let collidable =
-                    active_set.collidables.get(continuations.get(index_in_batch).body_index());
-                minimum_margin_span[inner_index as usize] =
-                    collidable.minimum_speculative_margin;
-                maximum_margin_span[inner_index as usize] =
-                    collidable.maximum_speculative_margin;
+                let collidable = active_set
+                    .collidables
+                    .get(continuations.get(index_in_batch).body_index());
+                minimum_margin_span[inner_index as usize] = collidable.minimum_speculative_margin;
+                maximum_margin_span[inner_index as usize] = collidable.maximum_speculative_margin;
                 allow_expansion_beyond_span[inner_index as usize] = if collidable
                     .continuity
                     .allow_expansion_beyond_speculative_margin()
@@ -234,8 +217,9 @@ impl BoundingBoxBatcher {
             }
 
             // Transpose AOS motion states into SOA wide bundles.
-            let motion_slice =
-                batch.motion_states.slice_offset(bundle_start_index, count_in_bundle);
+            let motion_slice = batch
+                .motion_states
+                .slice_offset(bundle_start_index, count_in_bundle);
             let mut positions = Vector3Wide::default();
             let mut orientations = QuaternionWide::default();
             let mut velocities = BodyVelocityWide::default();
@@ -261,20 +245,17 @@ impl BoundingBoxBatcher {
             );
 
             // Compute angular bounds expansion and speculative margin (wide).
-            let angular_bounds_expansion =
-                BoundingBoxHelpers::get_angular_bounds_expansion_wide(
-                    velocities.angular.length(),
-                    dt_wide,
-                    maximum_radius,
-                    maximum_angular_expansion,
-                );
+            let angular_bounds_expansion = BoundingBoxHelpers::get_angular_bounds_expansion_wide(
+                velocities.angular.length(),
+                dt_wide,
+                maximum_radius,
+                maximum_angular_expansion,
+            );
             let mut speculative_margin =
                 velocities.linear.length() * dt_wide + angular_bounds_expansion;
 
-            let minimum_speculative_margin =
-                Vector::<f32>::from_array(minimum_margin_span);
-            let maximum_speculative_margin =
-                Vector::<f32>::from_array(maximum_margin_span);
+            let minimum_speculative_margin = Vector::<f32>::from_array(minimum_margin_span);
+            let maximum_speculative_margin = Vector::<f32>::from_array(maximum_margin_span);
             let allow_expansion_beyond_speculative_margin =
                 Vector::<i32>::from_array(allow_expansion_beyond_span);
             speculative_margin = minimum_speculative_margin
@@ -284,7 +265,10 @@ impl BoundingBoxBatcher {
             let maximum_bounds_expansion = Vector::<i32>::from(
                 allow_expansion_beyond_speculative_margin
                     .simd_ne(Vector::<i32>::splat(0))
-                    .select(f32_max_wide.to_bits().cast(), speculative_margin.to_bits().cast()),
+                    .select(
+                        f32_max_wide.to_bits().cast(),
+                        speculative_margin.to_bits().cast(),
+                    ),
             );
             let maximum_bounds_expansion =
                 Vector::<f32>::from_bits(maximum_bounds_expansion.cast());
@@ -302,7 +286,8 @@ impl BoundingBoxBatcher {
             // Clamp expansion to maximum allowed.
             let neg_max = -maximum_bounds_expansion;
             let clamped_min = Vector3Wide::max_scalar_new(&neg_max, &min_expansion);
-            let clamped_max = Vector3Wide::min_scalar_new(&maximum_bounds_expansion, &max_expansion);
+            let clamped_max =
+                Vector3Wide::min_scalar_new(&maximum_bounds_expansion, &max_expansion);
             min_expansion = clamped_min;
             max_expansion = clamped_max;
 
@@ -332,11 +317,15 @@ impl BoundingBoxBatcher {
                         bundle_max.z[inner_index as usize],
                     );
                     BoundingBox::create_merged(
-                        *min_ptr, *max_ptr, new_min, new_max, &mut *min_ptr, &mut *max_ptr,
+                        *min_ptr,
+                        *max_ptr,
+                        new_min,
+                        new_max,
+                        &mut *min_ptr,
+                        &mut *max_ptr,
                     );
                 } else {
-                    collidable.speculative_margin =
-                        speculative_margin[inner_index as usize];
+                    collidable.speculative_margin = speculative_margin[inner_index as usize];
                     *min_ptr = Vec3::new(
                         bundle_min.x[inner_index as usize],
                         bundle_min.y[inner_index as usize],
@@ -368,7 +357,7 @@ impl BoundingBoxBatcher {
             + Default
             + 'static,
     {
-        let batch = self.batches.get(shape_batch.type_id() as i32);
+        let batch = self.batches.get(shape_batch.type_id());
         let bodies = &mut *self.bodies;
         let active_set = bodies.active_set_mut();
         let broad_phase = &mut *self.broad_phase;
@@ -447,7 +436,7 @@ impl BoundingBoxBatcher {
             ICompoundShape + crate::physics::collidables::shape::IShape + Copy + Default + 'static,
     {
         let batcher_ptr = self as *mut BoundingBoxBatcher;
-        let batch = self.batches.get(shape_batch.type_id() as i32);
+        let batch = self.batches.get(shape_batch.type_id());
         let bodies = &mut *self.bodies;
         let active_set = bodies.active_set_mut();
         let broad_phase = &mut *self.broad_phase;

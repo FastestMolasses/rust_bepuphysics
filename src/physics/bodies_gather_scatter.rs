@@ -161,19 +161,32 @@ impl Bodies {
     ) {
         let source = &states.get(index).inertia.world;
         unsafe {
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.xx, body_index_in_bundle) =
-                source.inverse_inertia_tensor.xx;
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.yx, body_index_in_bundle) =
-                source.inverse_inertia_tensor.yx;
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.yy, body_index_in_bundle) =
-                source.inverse_inertia_tensor.yy;
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.zx, body_index_in_bundle) =
-                source.inverse_inertia_tensor.zx;
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.zy, body_index_in_bundle) =
-                source.inverse_inertia_tensor.zy;
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_inertia_tensor.zz, body_index_in_bundle) =
-                source.inverse_inertia_tensor.zz;
-            *GatherScatter::get_mut(&mut gathered_inertias.inverse_mass, body_index_in_bundle) = source.inverse_mass;
+            *GatherScatter::get_mut(
+                &mut gathered_inertias.inverse_inertia_tensor.xx,
+                body_index_in_bundle,
+            ) = source.inverse_inertia_tensor.xx;
+            *GatherScatter::get_mut(
+                &mut gathered_inertias.inverse_inertia_tensor.yx,
+                body_index_in_bundle,
+            ) = source.inverse_inertia_tensor.yx;
+            *GatherScatter::get_mut(
+                &mut gathered_inertias.inverse_inertia_tensor.yy,
+                body_index_in_bundle,
+            ) = source.inverse_inertia_tensor.yy;
+            *GatherScatter::get_mut(
+                &mut gathered_inertias.inverse_inertia_tensor.zx,
+                body_index_in_bundle,
+            ) = source.inverse_inertia_tensor.zx;
+            *GatherScatter::get_mut(
+                &mut gathered_inertias.inverse_inertia_tensor.zy,
+                body_index_in_bundle,
+            ) = source.inverse_inertia_tensor.zy;
+            *GatherScatter::get_mut(
+                &mut gathered_inertias.inverse_inertia_tensor.zz,
+                body_index_in_bundle,
+            ) = source.inverse_inertia_tensor.zz;
+            *GatherScatter::get_mut(&mut gathered_inertias.inverse_mass, body_index_in_bundle) =
+                source.inverse_mass;
         }
     }
 
@@ -188,16 +201,8 @@ impl Bodies {
     ) {
         let state = &states.get(index).motion;
         unsafe {
-            Vector3Wide::write_slot(
-                state.pose.position,
-                body_index_in_bundle,
-                position,
-            );
-            QuaternionWide::write_slot(
-                state.pose.orientation,
-                body_index_in_bundle,
-                orientation,
-            );
+            Vector3Wide::write_slot(state.pose.position, body_index_in_bundle, position);
+            QuaternionWide::write_slot(state.pose.orientation, body_index_in_bundle, orientation);
             Vector3Wide::write_slot(
                 state.velocity.linear,
                 body_index_in_bundle,
@@ -429,28 +434,36 @@ impl Bodies {
             // Extract body indices and compute base float pointers.
             let bi0 = encoded_body_indices[0];
             let empty0 = bi0 < 0;
-            let s0 = solver_states.offset((bi0 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s0 =
+                solver_states.offset((bi0 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi1 = encoded_body_indices[1];
             let empty1 = bi1 < 0;
-            let s1 = solver_states.offset((bi1 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s1 =
+                solver_states.offset((bi1 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi2 = encoded_body_indices[2];
             let empty2 = bi2 < 0;
-            let s2 = solver_states.offset((bi2 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s2 =
+                solver_states.offset((bi2 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi3 = encoded_body_indices[3];
             let empty3 = bi3 < 0;
-            let s3 = solver_states.offset((bi3 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s3 =
+                solver_states.offset((bi3 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi4 = encoded_body_indices[4];
             let empty4 = bi4 < 0;
-            let s4 = solver_states.offset((bi4 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s4 =
+                solver_states.offset((bi4 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi5 = encoded_body_indices[5];
             let empty5 = bi5 < 0;
-            let s5 = solver_states.offset((bi5 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s5 =
+                solver_states.offset((bi5 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi6 = encoded_body_indices[6];
             let empty6 = bi6 < 0;
-            let s6 = solver_states.offset((bi6 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s6 =
+                solver_states.offset((bi6 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi7 = encoded_body_indices[7];
             let empty7 = bi7 < 0;
-            let s7 = solver_states.offset((bi7 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s7 =
+                solver_states.offset((bi7 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
 
             // First half of MotionState (orientation + position).
             {
@@ -504,14 +517,46 @@ impl Bodies {
             // Inertia.
             {
                 let offset_in_floats: usize = if world_inertia { 24 } else { 16 };
-                let m0 = if empty0 { z } else { load_8f32(s0.add(offset_in_floats)) };
-                let m1 = if empty1 { z } else { load_8f32(s1.add(offset_in_floats)) };
-                let m2 = if empty2 { z } else { load_8f32(s2.add(offset_in_floats)) };
-                let m3 = if empty3 { z } else { load_8f32(s3.add(offset_in_floats)) };
-                let m4 = if empty4 { z } else { load_8f32(s4.add(offset_in_floats)) };
-                let m5 = if empty5 { z } else { load_8f32(s5.add(offset_in_floats)) };
-                let m6 = if empty6 { z } else { load_8f32(s6.add(offset_in_floats)) };
-                let m7 = if empty7 { z } else { load_8f32(s7.add(offset_in_floats)) };
+                let m0 = if empty0 {
+                    z
+                } else {
+                    load_8f32(s0.add(offset_in_floats))
+                };
+                let m1 = if empty1 {
+                    z
+                } else {
+                    load_8f32(s1.add(offset_in_floats))
+                };
+                let m2 = if empty2 {
+                    z
+                } else {
+                    load_8f32(s2.add(offset_in_floats))
+                };
+                let m3 = if empty3 {
+                    z
+                } else {
+                    load_8f32(s3.add(offset_in_floats))
+                };
+                let m4 = if empty4 {
+                    z
+                } else {
+                    load_8f32(s4.add(offset_in_floats))
+                };
+                let m5 = if empty5 {
+                    z
+                } else {
+                    load_8f32(s5.add(offset_in_floats))
+                };
+                let m6 = if empty6 {
+                    z
+                } else {
+                    load_8f32(s6.add(offset_in_floats))
+                };
+                let m7 = if empty7 {
+                    z
+                } else {
+                    load_8f32(s7.add(offset_in_floats))
+                };
 
                 let t = transpose_8x8(m0, m1, m2, m3, m4, m5, m6, m7);
                 if TAccessFilter::gather_inertia_tensor() {
@@ -536,16 +581,20 @@ impl Bodies {
             // Extract body indices and compute base float pointers.
             let bi0 = encoded_body_indices[0];
             let empty0 = bi0 < 0;
-            let s0 = solver_states.offset((bi0 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s0 =
+                solver_states.offset((bi0 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi1 = encoded_body_indices[1];
             let empty1 = bi1 < 0;
-            let s1 = solver_states.offset((bi1 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s1 =
+                solver_states.offset((bi1 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi2 = encoded_body_indices[2];
             let empty2 = bi2 < 0;
-            let s2 = solver_states.offset((bi2 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s2 =
+                solver_states.offset((bi2 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
             let bi3 = encoded_body_indices[3];
             let empty3 = bi3 < 0;
-            let s3 = solver_states.offset((bi3 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
+            let s3 =
+                solver_states.offset((bi3 & Bodies::BODY_REFERENCE_MASK) as isize) as *const f32;
 
             // Block 1: orientation (floats 0-3)
             if TAccessFilter::gather_orientation() {
@@ -607,10 +656,26 @@ impl Bodies {
                 let t_a = transpose_4x4(m0, m1, m2, m3);
 
                 // Block 6: [zy, zz, inv_mass, pad]
-                let m0 = if empty0 { z } else { load_4f32(s0.add(offset + 4)) };
-                let m1 = if empty1 { z } else { load_4f32(s1.add(offset + 4)) };
-                let m2 = if empty2 { z } else { load_4f32(s2.add(offset + 4)) };
-                let m3 = if empty3 { z } else { load_4f32(s3.add(offset + 4)) };
+                let m0 = if empty0 {
+                    z
+                } else {
+                    load_4f32(s0.add(offset + 4))
+                };
+                let m1 = if empty1 {
+                    z
+                } else {
+                    load_4f32(s1.add(offset + 4))
+                };
+                let m2 = if empty2 {
+                    z
+                } else {
+                    load_4f32(s2.add(offset + 4))
+                };
+                let m3 = if empty3 {
+                    z
+                } else {
+                    load_4f32(s3.add(offset + 4))
+                };
                 let t_b = transpose_4x4(m0, m1, m2, m3);
 
                 if TAccessFilter::gather_inertia_tensor() {
@@ -652,45 +717,62 @@ impl Bodies {
             );
             // Store each row to the corresponding body's MotionState (first 8 floats = pose).
             if mask[0] != 0 {
-                store_8f32(states.add(encoded_body_indices[0] as usize) as *mut f32, t[0]);
+                store_8f32(
+                    states.add(encoded_body_indices[0] as usize) as *mut f32,
+                    t[0],
+                );
             }
             if mask[1] != 0 {
-                store_8f32(states.add(encoded_body_indices[1] as usize) as *mut f32, t[1]);
+                store_8f32(
+                    states.add(encoded_body_indices[1] as usize) as *mut f32,
+                    t[1],
+                );
             }
             if mask[2] != 0 {
-                store_8f32(states.add(encoded_body_indices[2] as usize) as *mut f32, t[2]);
+                store_8f32(
+                    states.add(encoded_body_indices[2] as usize) as *mut f32,
+                    t[2],
+                );
             }
             if mask[3] != 0 {
-                store_8f32(states.add(encoded_body_indices[3] as usize) as *mut f32, t[3]);
+                store_8f32(
+                    states.add(encoded_body_indices[3] as usize) as *mut f32,
+                    t[3],
+                );
             }
             if mask[4] != 0 {
-                store_8f32(states.add(encoded_body_indices[4] as usize) as *mut f32, t[4]);
+                store_8f32(
+                    states.add(encoded_body_indices[4] as usize) as *mut f32,
+                    t[4],
+                );
             }
             if mask[5] != 0 {
-                store_8f32(states.add(encoded_body_indices[5] as usize) as *mut f32, t[5]);
+                store_8f32(
+                    states.add(encoded_body_indices[5] as usize) as *mut f32,
+                    t[5],
+                );
             }
             if mask[6] != 0 {
-                store_8f32(states.add(encoded_body_indices[6] as usize) as *mut f32, t[6]);
+                store_8f32(
+                    states.add(encoded_body_indices[6] as usize) as *mut f32,
+                    t[6],
+                );
             }
             if mask[7] != 0 {
-                store_8f32(states.add(encoded_body_indices[7] as usize) as *mut f32, t[7]);
+                store_8f32(
+                    states.add(encoded_body_indices[7] as usize) as *mut f32,
+                    t[7],
+                );
             }
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
         {
             let states = self.active_set_dynamics_ptr();
             // Reverse transpose: 4 SOA orientation → 4 AOS rows.
-            let t_ori = transpose_4x4(
-                orientation.x,
-                orientation.y,
-                orientation.z,
-                orientation.w,
-            );
+            let t_ori = transpose_4x4(orientation.x, orientation.y, orientation.z, orientation.w);
             // Reverse transpose: 3 SOA position → 4 AOS rows (pos.z duplicated as padding).
             let t_pos = transpose_4x4(
-                position.x,
-                position.y,
-                position.z,
+                position.x, position.y, position.z,
                 position.z, // Laze: duplicated, lands in padding slot.
             );
             // Store each row: 4 floats at offset 0 (orientation) + 4 floats at offset 4 (position).
@@ -910,7 +992,7 @@ impl Bodies {
                     source_velocities.linear.x,
                     source_velocities.linear.y,
                     source_velocities.linear.z,
-                    source_velocities.linear.z,  // Laze: duplicated, lands in _pad0.
+                    source_velocities.linear.z, // Laze: duplicated, lands in _pad0.
                     source_velocities.angular.x,
                     source_velocities.angular.y,
                     source_velocities.angular.z,

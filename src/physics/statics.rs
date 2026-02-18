@@ -106,14 +106,14 @@ pub struct Statics {
 
 impl Statics {
     /// Creates a new Statics collection.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         shapes: *mut Shapes,
         bodies: *mut Bodies,
         broad_phase: *mut BroadPhase,
         initial_capacity: i32,
     ) -> Self {
-        let pool_ref = unsafe { &mut *pool };
+        let pool_ref = &mut *pool;
         let handle_pool = IdPool::new(initial_capacity, pool_ref);
         let mut statics = Statics {
             handle_to_index: Buffer::default(),
@@ -124,7 +124,7 @@ impl Statics {
             pool,
             shapes,
             bodies,
-            broad_phase: broad_phase,
+            broad_phase,
             awakener: std::ptr::null_mut(),
         };
         statics.internal_resize(initial_capacity.max(1));
@@ -355,9 +355,11 @@ impl Statics {
     ) {
         let broad_phase = &*self.broad_phase;
         let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(broad_phase_index);
-        let mut old_bounds = BoundingBox::default();
-        old_bounds.min = *min_ptr;
-        old_bounds.max = *max_ptr;
+        let old_bounds = BoundingBox {
+            min: *min_ptr,
+            max: *max_ptr,
+            ..Default::default()
+        };
         self.awaken_bodies_in_bounds(&old_bounds, filter);
     }
 

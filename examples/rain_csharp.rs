@@ -20,6 +20,7 @@ use bevy::color::palettes::css;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use rand::Rng;
 
 // ============================================================================
@@ -65,10 +66,15 @@ unsafe extern "C" fn integrate_velocity_cb(
     dt: f32,
     velocity: *mut BodyVelocity,
 ) {
-    // Gravity = (0, -20, 0) — same as the Rust version
-    (*velocity).linear.x += 0.0;
-    (*velocity).linear.y += -20.0 * dt;
-    (*velocity).linear.z += 0.0;
+    // Gravity (0, -20, 0) + 3% linear/angular damping (same as C# demo default)
+    let linear_damp = (0.97f32).powf(dt);
+    let angular_damp = (0.97f32).powf(dt);
+    (*velocity).linear.x = (*velocity).linear.x * linear_damp;
+    (*velocity).linear.y = ((*velocity).linear.y + -20.0 * dt) * linear_damp;
+    (*velocity).linear.z = (*velocity).linear.z * linear_damp;
+    (*velocity).angular.x *= angular_damp;
+    (*velocity).angular.y *= angular_damp;
+    (*velocity).angular.z *= angular_damp;
 }
 
 fn create_narrow_phase_callbacks() -> NarrowPhaseCallbacks {
@@ -180,6 +186,17 @@ impl Drop for PhysicsWorld {
 struct SpawnedBodies {
     handles: Vec<BodyHandle>,
     count: usize,
+}
+
+struct ExplosionEvent {
+    position: Vec3,
+    force: f32,
+    radius: f32,
+}
+
+#[derive(Resource, Default)]
+struct ExplosionQueue {
+    events: Vec<ExplosionEvent>,
 }
 
 #[derive(Component)]
@@ -330,11 +347,8 @@ fn add_statics(sim: SimulationHandle) {
     // Ramps
     for ramp in ramp_defs() {
         let shape = unsafe { AddBox(sim, BepuBox::new(12.0, 0.5, 6.0)) };
-        let desc = StaticDescription::create_with_position_orientation_discrete(
-            ramp.pos,
-            ramp.rot,
-            shape,
-        );
+        let desc =
+            StaticDescription::create_with_position_orientation_discrete(ramp.pos, ramp.rot, shape);
         unsafe { AddStatic(sim, desc) };
     }
 }
@@ -418,7 +432,7 @@ fn setup(
     // ---- UI ----
     commands.spawn((
         Text::new(
-            "Hold SPACE to rain objects\nR to clear\nMouse drag to orbit, scroll to zoom\n\n[C# BepuPhysics via FFI]",
+            "Hold SPACE to rain objects\nR to clear\nRight-click for explosion\nLeft drag to orbit, scroll to zoom\n[C# BepuPhysics via FFI]",
         ),
         Node {
             position_type: PositionType::Absolute,
@@ -479,8 +493,12 @@ fn spawn_objects(
                 let hw = rng.random_range(0.3..1.2f32);
                 let hh = rng.random_range(0.3..1.2f32);
                 let hd = rng.random_range(0.3..1.2f32);
-                let shape =
-                    unsafe { AddBox(physics.simulation, BepuBox::new(hw * 2.0, hh * 2.0, hd * 2.0)) };
+                let shape = unsafe {
+                    AddBox(
+                        physics.simulation,
+                        BepuBox::new(hw * 2.0, hh * 2.0, hd * 2.0),
+                    )
+                };
                 (ShapeKind::Box { hw, hh, hd }, shape, hw * hh * hd * 4.0)
             }
             1 => {
@@ -537,9 +555,7 @@ fn spawn_objects(
                 ShapeKind::Box { hw, hh, hd } => {
                     ComputeBoxInertia(BepuBox::new(hw * 2.0, hh * 2.0, hd * 2.0), mass)
                 }
-                ShapeKind::Sphere { radius } => {
-                    ComputeSphereInertia(BepuSphere { radius }, mass)
-                }
+                ShapeKind::Sphere { radius } => ComputeSphereInertia(BepuSphere { radius }, mass),
                 ShapeKind::Capsule { radius, length } => ComputeCapsuleInertia(
                     BepuCapsule {
                         radius,
@@ -727,6 +743,79 @@ fn update_fps(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, Wi
 }
 
 // ============================================================================
+// Explosion
+// ============================================================================
+
+fn handle_explosion_input(
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut explosion_queue: ResMut<ExplosionQueue>,
+) {
+    if !mouse_button.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let Some(cursor_position) = window.cursor_position() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        return;
+    };
+
+    // Find intersection with ground plane (y = 0)
+    let t = -ray.origin.y / ray.direction.y;
+    if t <= 0.0 {
+        return;
+    }
+    let explosion_pos = ray.origin + ray.direction * t;
+
+    explosion_queue.events.push(ExplosionEvent {
+        position: explosion_pos,
+        force: 500.0,
+        radius: 15.0,
+    });
+}
+
+fn apply_explosions(
+    physics: Res<PhysicsWorld>,
+    mut explosion_queue: ResMut<ExplosionQueue>,
+    spawned: Res<SpawnedBodies>,
+) {
+    for event in explosion_queue.events.drain(..) {
+        for &handle in &spawned.handles {
+            let dynamics = unsafe { GetBodyDynamics(physics.simulation, handle) };
+            if dynamics.is_null() {
+                continue;
+            }
+            unsafe {
+                let body_pos = Vec3::new(
+                    (*dynamics).motion.pose.position.x,
+                    (*dynamics).motion.pose.position.y,
+                    (*dynamics).motion.pose.position.z,
+                );
+                let offset = body_pos - event.position;
+                let distance = offset.length();
+                if distance < event.radius && distance > 0.01 {
+                    let direction = offset / distance;
+                    let falloff = 1.0 - (distance / event.radius);
+                    let impulse = direction * event.force * falloff;
+                    (*dynamics).motion.velocity.linear.x += impulse.x;
+                    (*dynamics).motion.velocity.linear.y += impulse.y;
+                    (*dynamics).motion.velocity.linear.z += impulse.z;
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Camera orbit (identical to rain.rs)
 // ============================================================================
 
@@ -773,11 +862,12 @@ fn main() {
         }))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .insert_resource(Time::<Fixed>::from_hz(60.0))
+        .insert_resource(ExplosionQueue::default())
         .add_systems(Startup, (setup, setup_counter))
-        .add_systems(Update, (orbit_camera, update_counter, update_fps))
+        .add_systems(Update, (orbit_camera, update_counter, update_fps, handle_explosion_input))
         .add_systems(
             FixedUpdate,
-            (spawn_objects, clear_objects, physics_step, sync_transforms).chain(),
+            (spawn_objects, clear_objects, apply_explosions, physics_step, sync_transforms).chain(),
         )
         .run();
 }

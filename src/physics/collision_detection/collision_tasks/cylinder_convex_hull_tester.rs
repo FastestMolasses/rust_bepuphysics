@@ -339,18 +339,8 @@ impl CylinderConvexHullTester {
                 let interior2_y = *GatherScatter::get(&interior2.y, slot_index);
                 let interior3_x = *GatherScatter::get(&interior3.x, slot_index);
                 let interior3_y = *GatherScatter::get(&interior3.y, slot_index);
-                let interior_points_x = [
-                    interior0_x,
-                    interior1_x,
-                    interior2_x,
-                    interior3_x,
-                ];
-                let interior_points_y = [
-                    interior0_y,
-                    interior1_y,
-                    interior2_y,
-                    interior3_y,
-                ];
+                let interior_points_x = [interior0_x, interior1_x, interior2_x, interior3_x];
+                let interior_points_y = [interior0_y, interior1_y, interior2_y, interior3_y];
                 let slot_radius = a.radius.as_array()[slot_index];
                 let mut slot_cylinder_orientation = Matrix3x3::default();
                 Matrix3x3Wide::read_slot(

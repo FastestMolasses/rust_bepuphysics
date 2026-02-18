@@ -492,7 +492,10 @@ impl Mesh {
         let scaled_max = max * self.inverse_scale;
         let scaled_sweep = sweep * self.inverse_scale;
         let pool_ptr = pool as *mut BufferPool;
-        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> { pool: &mut *pool_ptr, overlaps };
+        let mut enumerator = ShapeTreeSweepLeafTester::<TOverlaps> {
+            pool: &mut *pool_ptr,
+            overlaps,
+        };
         // Take a min/max to compensate for negative scales.
         self.tree.sweep(
             scaled_min.min(scaled_max),

@@ -95,10 +95,12 @@ impl Tree {
                 let merged_a = merged_a.assume_init();
                 let merged_b = merged_b.assume_init();
 
-                let cost_increase_a =
-                    Tree::compute_bounds_metric(&merged_a) * (node.a.leaf_count + 1) as f32 - Tree::estimate_cost(&node.a);
-                let cost_increase_b =
-                    Tree::compute_bounds_metric(&merged_b) * (node.b.leaf_count + 1) as f32 - Tree::estimate_cost(&node.b);
+                let cost_increase_a = Tree::compute_bounds_metric(&merged_a)
+                    * (node.a.leaf_count + 1) as f32
+                    - Tree::estimate_cost(&node.a);
+                let cost_increase_b = Tree::compute_bounds_metric(&merged_b)
+                    * (node.b.leaf_count + 1) as f32
+                    - Tree::estimate_cost(&node.b);
 
                 let use_a = if cost_increase_a == cost_increase_b {
                     node.a.leaf_count < node.b.leaf_count
@@ -205,8 +207,12 @@ impl Tree {
                 BoundingBox::create_merged_unsafe(&a.b, &root.b, &mut merged_ab_b);
                 let cost_aa = Tree::estimate_cost(&a.a);
                 let cost_ab = Tree::estimate_cost(&a.b);
-                let cost_aab = Tree::compute_bounds_metric(&merged_aa_b.assume_init()) * (a.a.leaf_count + root.b.leaf_count) as f32 + cost_ab;
-                let cost_abb = Tree::compute_bounds_metric(&merged_ab_b.assume_init()) * (a.b.leaf_count + root.b.leaf_count) as f32 + cost_aa;
+                let cost_aab = Tree::compute_bounds_metric(&merged_aa_b.assume_init())
+                    * (a.a.leaf_count + root.b.leaf_count) as f32
+                    + cost_ab;
+                let cost_abb = Tree::compute_bounds_metric(&merged_ab_b.assume_init())
+                    * (a.b.leaf_count + root.b.leaf_count) as f32
+                    + cost_aa;
                 right_uses_a = cost_aab < cost_abb;
                 right_rotation_cost_change = cost_aab.min(cost_abb) - original_cost;
             }
@@ -220,8 +226,12 @@ impl Tree {
                 BoundingBox::create_merged_unsafe(&b.b, &root.a, &mut merged_bb_a);
                 let cost_ba = Tree::estimate_cost(&b.a);
                 let cost_bb = Tree::estimate_cost(&b.b);
-                let cost_baa = Tree::compute_bounds_metric(&merged_ba_a.assume_init()) * (b.a.leaf_count + root.a.leaf_count) as f32 + cost_bb;
-                let cost_bba = Tree::compute_bounds_metric(&merged_bb_a.assume_init()) * (b.b.leaf_count + root.a.leaf_count) as f32 + cost_ba;
+                let cost_baa = Tree::compute_bounds_metric(&merged_ba_a.assume_init())
+                    * (b.a.leaf_count + root.a.leaf_count) as f32
+                    + cost_bb;
+                let cost_bba = Tree::compute_bounds_metric(&merged_bb_a.assume_init())
+                    * (b.b.leaf_count + root.a.leaf_count) as f32
+                    + cost_ba;
                 left_uses_a = cost_baa < cost_bba;
                 left_rotation_cost_change = cost_baa.min(cost_bba) - original_cost;
             }

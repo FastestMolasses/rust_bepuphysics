@@ -49,7 +49,7 @@ fn setup(
     // ---- Ground plane ----
     commands.spawn((
         RigidBody::Static,
-        BepuCollider::cuboid(100.0, 0.5, 100.0),
+        BepuCollider::cuboid(200.0, 1.0, 200.0),
         Mesh3d(meshes.add(Cuboid::new(200.0, 1.0, 200.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.25, 0.27, 0.3),
@@ -66,7 +66,7 @@ fn setup(
     // North wall (along X axis, at +Z)
     commands.spawn((
         RigidBody::Static,
-        BepuCollider::cuboid(ground_size / 2.0, wall_height / 2.0, wall_thickness / 2.0),
+        BepuCollider::cuboid(ground_size, wall_height, wall_thickness),
         Mesh3d(meshes.add(Cuboid::new(ground_size, wall_height, wall_thickness))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.35, 0.35, 0.4),
@@ -78,7 +78,7 @@ fn setup(
     // South wall
     commands.spawn((
         RigidBody::Static,
-        BepuCollider::cuboid(ground_size / 2.0, wall_height / 2.0, wall_thickness / 2.0),
+        BepuCollider::cuboid(ground_size, wall_height, wall_thickness),
         Mesh3d(meshes.add(Cuboid::new(ground_size, wall_height, wall_thickness))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.35, 0.35, 0.4),
@@ -90,7 +90,7 @@ fn setup(
     // East wall
     commands.spawn((
         RigidBody::Static,
-        BepuCollider::cuboid(wall_thickness / 2.0, wall_height / 2.0, ground_size / 2.0),
+        BepuCollider::cuboid(wall_thickness, wall_height, ground_size),
         Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, ground_size))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.35, 0.35, 0.4),
@@ -102,7 +102,7 @@ fn setup(
     // West wall
     commands.spawn((
         RigidBody::Static,
-        BepuCollider::cuboid(wall_thickness / 2.0, wall_height / 2.0, ground_size / 2.0),
+        BepuCollider::cuboid(wall_thickness, wall_height, ground_size),
         Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, ground_size))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.35, 0.35, 0.4),
@@ -113,24 +113,15 @@ fn setup(
 
     // ---- Some angled ramps for fun bouncing ----
     let ramp_positions_rotations: [(Vec3, Quat); 3] = [
-        (
-            Vec3::new(-8.0, 3.0, 0.0),
-            Quat::from_rotation_z(0.3),
-        ),
-        (
-            Vec3::new(8.0, 5.0, 4.0),
-            Quat::from_rotation_z(-0.25),
-        ),
-        (
-            Vec3::new(0.0, 7.0, -6.0),
-            Quat::from_rotation_x(0.2),
-        ),
+        (Vec3::new(-8.0, 3.0, 0.0), Quat::from_rotation_z(0.3)),
+        (Vec3::new(8.0, 5.0, 4.0), Quat::from_rotation_z(-0.25)),
+        (Vec3::new(0.0, 7.0, -6.0), Quat::from_rotation_x(0.2)),
     ];
 
     for (pos, rot) in &ramp_positions_rotations {
         commands.spawn((
             RigidBody::Static,
-            BepuCollider::cuboid(6.0, 0.25, 3.0),
+            BepuCollider::cuboid(12.0, 0.5, 6.0),
             Mesh3d(meshes.add(Cuboid::new(12.0, 0.5, 6.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.4, 0.4, 0.45),
@@ -236,7 +227,7 @@ fn spawn_objects(
                     0.1
                 };
                 (
-                    BepuCollider::cuboid(hw, hh, hd),
+                    BepuCollider::cuboid(hw * 2.0, hh * 2.0, hd * 2.0),
                     meshes.add(Cuboid::new(hw * 2.0, hh * 2.0, hd * 2.0)),
                     hw * hh * hd * 4.0,
                     bounce,

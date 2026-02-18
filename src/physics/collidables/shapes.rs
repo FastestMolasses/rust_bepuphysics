@@ -811,9 +811,14 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
     ) {
         let shape_batches = &*self.shape_batches;
         let pool = &mut *self.pool;
-        self.shapes
-            .get(shape_index as i32)
-            .ray_test_shape(pose, ray, maximum_t, shape_batches, pool, hit_handler);
+        self.shapes.get(shape_index as i32).ray_test_shape(
+            pose,
+            ray,
+            maximum_t,
+            shape_batches,
+            pool,
+            hit_handler,
+        );
     }
 }
 

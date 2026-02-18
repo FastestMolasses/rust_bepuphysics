@@ -42,14 +42,27 @@ impl OneBodyLinearServo {
                 "OneBodyLinearServo",
             );
         }
-        Vector3Wide::write_slot(self.local_offset, inner_index, &mut prestep_data.local_offset);
+        Vector3Wide::write_slot(
+            self.local_offset,
+            inner_index,
+            &mut prestep_data.local_offset,
+        );
         Vector3Wide::write_slot(self.target, inner_index, &mut prestep_data.target);
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
-            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_speed, inner_index) = self.servo_settings.maximum_speed;
-            *GatherScatter::get_mut(&mut prestep_data.servo_settings.base_speed, inner_index) = self.servo_settings.base_speed;
-            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_force, inner_index) = self.servo_settings.maximum_force;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_speed, inner_index) =
+                self.servo_settings.maximum_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.base_speed, inner_index) =
+                self.servo_settings.base_speed;
+            *GatherScatter::get_mut(&mut prestep_data.servo_settings.maximum_force, inner_index) =
+                self.servo_settings.maximum_force;
         }
     }
 
@@ -59,14 +72,25 @@ impl OneBodyLinearServo {
         inner_index: usize,
         description: &mut OneBodyLinearServo,
     ) {
-        Vector3Wide::read_slot(&prestep_data.local_offset, inner_index, &mut description.local_offset);
+        Vector3Wide::read_slot(
+            &prestep_data.local_offset,
+            inner_index,
+            &mut description.local_offset,
+        );
         Vector3Wide::read_slot(&prestep_data.target, inner_index, &mut description.target);
         unsafe {
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
-            description.servo_settings.maximum_speed = *GatherScatter::get(&prestep_data.servo_settings.maximum_speed, inner_index);
-            description.servo_settings.base_speed = *GatherScatter::get(&prestep_data.servo_settings.base_speed, inner_index);
-            description.servo_settings.maximum_force = *GatherScatter::get(&prestep_data.servo_settings.maximum_force, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
+            description.servo_settings.maximum_speed =
+                *GatherScatter::get(&prestep_data.servo_settings.maximum_speed, inner_index);
+            description.servo_settings.base_speed =
+                *GatherScatter::get(&prestep_data.servo_settings.base_speed, inner_index);
+            description.servo_settings.maximum_force =
+                *GatherScatter::get(&prestep_data.servo_settings.maximum_force, inner_index);
         }
     }
 }

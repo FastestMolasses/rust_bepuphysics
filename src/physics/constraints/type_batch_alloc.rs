@@ -575,7 +575,8 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
             let mut next_probe_index =
                 ((HashHelper::rehash(handle.0) & 0x7FFF_FFFF) as usize) % last_bundle_index;
             let bundle_jump = bundle_count / PROBE_LOCATION_COUNT;
-            let remainder = last_bundle_index as isize - (bundle_jump * PROBE_LOCATION_COUNT) as isize;
+            let remainder =
+                last_bundle_index as isize - (bundle_jump * PROBE_LOCATION_COUNT) as isize;
             for probe_index in 0..PROBE_LOCATION_COUNT {
                 if probe_bundle_for_fallback(
                     body_references_ptr,

@@ -1122,7 +1122,11 @@ impl ConvexHullHelper {
                     .bounding_planes
                     .get_mut(bounding_plane_bundle_index as i32)
             };
-            Vector3Wide::write_slot(face_normal, bounding_plane_inner_index, &mut bounding_bundle.normal);
+            Vector3Wide::write_slot(
+                face_normal,
+                bounding_plane_inner_index,
+                &mut bounding_bundle.normal,
+            );
             unsafe {
                 *GatherScatter::get_mut(&mut bounding_bundle.offset, bounding_plane_inner_index) =
                     face_pivot.dot(face_normal);
@@ -1135,9 +1139,7 @@ impl ConvexHullHelper {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(i, &mut bundle_index, &mut inner_index);
-            let bp = unsafe {
-                hull_shape.bounding_planes.get_mut(bundle_index as i32)
-            };
+            let bp = unsafe { hull_shape.bounding_planes.get_mut(bundle_index as i32) };
             Vector3Wide::write_slot(Vec3::ZERO, inner_index, &mut bp.normal);
             unsafe {
                 *GatherScatter::get_mut(&mut bp.offset, inner_index) = f32::MIN;
@@ -1245,9 +1247,7 @@ impl ConvexHullHelper {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(i, &mut bundle_index, &mut inner_index);
-            let bp = unsafe {
-                target_bounding_planes.get_mut(bundle_index as i32)
-            };
+            let bp = unsafe { target_bounding_planes.get_mut(bundle_index as i32) };
             Vector3Wide::write_slot(Vec3::ZERO, inner_index, &mut bp.normal);
             unsafe {
                 *GatherScatter::get_mut(&mut bp.offset, inner_index) = f32::MIN;

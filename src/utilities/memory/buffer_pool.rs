@@ -186,10 +186,13 @@ impl PowerPool {
             "If a raw buffer points to a given block as its source, the address should be within the block's memory region."
         );
         debug_assert!(
-            std::ptr::eq(unsafe {
-                self.blocks[block_index as usize]
-                    .add((index_in_block * self.suballocation_size) as usize)
-            }, byte_buffer.as_ptr()),
+            std::ptr::eq(
+                unsafe {
+                    self.blocks[block_index as usize]
+                        .add((index_in_block * self.suballocation_size) as usize)
+                },
+                byte_buffer.as_ptr()
+            ),
             "The implied address of a buffer in its block should match its actual address."
         );
         debug_assert!(

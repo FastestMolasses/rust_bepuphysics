@@ -50,8 +50,8 @@ pub mod systems;
 /// ```
 pub mod prelude {
     pub use super::components::{
-        AngularDamping, AngularVelocity, BepuBodyHandle, BepuCollider, BepuStaticHandle,
-        Friction, LinearDamping, LinearVelocity, Mass, Restitution, RigidBody,
+        AngularDamping, AngularVelocity, BepuBodyHandle, BepuCollider, BepuStaticHandle, Friction,
+        LinearDamping, LinearVelocity, Mass, Restitution, RigidBody,
     };
     pub use super::joints::{BallSocketJoint, DistanceJoint, WeldJoint};
     pub use super::plugin::{BepuPhysicsPlugin, BepuPhysicsPlugins, BepuSet};

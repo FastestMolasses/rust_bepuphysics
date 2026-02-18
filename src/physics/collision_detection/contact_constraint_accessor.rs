@@ -435,8 +435,10 @@ unsafe fn extract_two_body_contact_data<TPrestep: Copy, TImpulses: Copy>(
     let body_refs_ptr =
         (type_batch.body_references.as_ptr() as *const TwoBodyReferences).add(bundle_index);
     let body_refs = &*body_refs_ptr;
-    let index_a = *GatherScatter::get(&body_refs.index_a, inner_index) & Bodies::BODY_REFERENCE_MASK;
-    let index_b = *GatherScatter::get(&body_refs.index_b, inner_index) & Bodies::BODY_REFERENCE_MASK;
+    let index_a =
+        *GatherScatter::get(&body_refs.index_a, inner_index) & Bodies::BODY_REFERENCE_MASK;
+    let index_b =
+        *GatherScatter::get(&body_refs.index_b, inner_index) & Bodies::BODY_REFERENCE_MASK;
 
     let (body_handle_a, body_handle_b) = if constraint_location.set_index == 0 {
         let bodies = &*solver.bodies;

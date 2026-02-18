@@ -35,10 +35,16 @@ impl OneBodyAngularMotor {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "OneBodyAngularMotor");
         }
-        Vector3Wide::write_slot(self.target_velocity, inner_index, &mut prestep_data.target_velocity);
+        Vector3Wide::write_slot(
+            self.target_velocity,
+            inner_index,
+            &mut prestep_data.target_velocity,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
-            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) =
+                self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) =
+                self.settings.damping;
         }
     }
 
@@ -48,10 +54,16 @@ impl OneBodyAngularMotor {
         inner_index: usize,
         description: &mut OneBodyAngularMotor,
     ) {
-        Vector3Wide::read_slot(&prestep_data.target_velocity, inner_index, &mut description.target_velocity);
+        Vector3Wide::read_slot(
+            &prestep_data.target_velocity,
+            inner_index,
+            &mut description.target_velocity,
+        );
         unsafe {
-            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
-            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+            description.settings.maximum_force =
+                *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping =
+                *GatherScatter::get(&prestep_data.settings.damping, inner_index);
         }
     }
 }

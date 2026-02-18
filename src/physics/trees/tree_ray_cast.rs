@@ -79,7 +79,12 @@ impl Tree {
                                 // First allocation is on the stack.
                                 let mut new_stack: Buffer<i32> =
                                     pool.take_at_least(TRAVERSAL_STACK_CAPACITY as i32 * 2);
-                                stack.copy_to(0, &mut new_stack, 0, TRAVERSAL_STACK_CAPACITY as i32);
+                                stack.copy_to(
+                                    0,
+                                    &mut new_stack,
+                                    0,
+                                    TRAVERSAL_STACK_CAPACITY as i32,
+                                );
                                 stack = new_stack;
                             } else {
                                 pool.resize(&mut stack, stack_end * 2, stack_end);
@@ -176,7 +181,12 @@ impl Tree {
             &mut *ray_data.as_mut_ptr(),
             &mut *tree_ray.as_mut_ptr(),
         );
-        self.ray_cast_internal(tree_ray.as_mut_ptr(), ray_data.as_mut_ptr(), pool, leaf_tester);
+        self.ray_cast_internal(
+            tree_ray.as_mut_ptr(),
+            ray_data.as_mut_ptr(),
+            pool,
+            leaf_tester,
+        );
         // The maximumT could have been mutated by the leaf tester. Propagate that change.
         *maximum_t = (*tree_ray.as_ptr()).maximum_t;
     }

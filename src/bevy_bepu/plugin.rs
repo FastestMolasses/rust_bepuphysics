@@ -105,7 +105,6 @@ pub struct BepuPhysicsPlugins;
 
 impl PluginGroup for BepuPhysicsPlugins {
     fn build(self) -> bevy::app::PluginGroupBuilder {
-        bevy::app::PluginGroupBuilder::start::<Self>()
-            .add(BepuPhysicsPlugin)
+        bevy::app::PluginGroupBuilder::start::<Self>().add(BepuPhysicsPlugin)
     }
 }

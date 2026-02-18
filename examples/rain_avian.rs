@@ -14,6 +14,7 @@ use bevy::color::palettes::css;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use rand::Rng;
 
 // ============================================================================
@@ -164,7 +165,7 @@ fn setup(
     // ---- UI ----
     commands.spawn((
         Text::new(
-            "Hold SPACE to rain objects | R to clear | Mouse drag to orbit, scroll to zoom\n[Avian3D]",
+            "Hold SPACE to rain objects\nR to clear\nRight-click for explosion\nLeft drag to orbit, scroll to zoom\n[Avian3D]",
         ),
         Node {
             position_type: PositionType::Absolute,
@@ -231,14 +232,20 @@ fn spawn_objects(
 
         // Random shape
         let shape_kind: u32 = rng.random_range(0..4);
-        let (collider, mesh_handle) = match shape_kind {
+        let bounce: f32 = if rng.random::<f32>() < 0.3 {
+            rng.random_range(0.6..0.95)
+        } else {
+            0.1
+        };
+        let (collider, mesh_handle, mass) = match shape_kind {
             0 => {
-                let w = rng.random_range(0.6..2.4f32);
-                let h = rng.random_range(0.6..2.4f32);
-                let d = rng.random_range(0.6..2.4f32);
+                let hw = rng.random_range(0.3..1.2f32);
+                let hh = rng.random_range(0.3..1.2f32);
+                let hd = rng.random_range(0.3..1.2f32);
                 (
-                    Collider::cuboid(w, h, d),
-                    meshes.add(Cuboid::new(w, h, d)),
+                    Collider::cuboid(hw * 2.0, hh * 2.0, hd * 2.0),
+                    meshes.add(Cuboid::new(hw * 2.0, hh * 2.0, hd * 2.0)),
+                    hw * hh * hd * 4.0,
                 )
             }
             1 => {
@@ -246,6 +253,7 @@ fn spawn_objects(
                 (
                     Collider::sphere(r),
                     meshes.add(bevy::math::primitives::Sphere::new(r)),
+                    r * r * r * 6.0,
                 )
             }
             2 => {
@@ -254,6 +262,7 @@ fn spawn_objects(
                 (
                     Collider::capsule(r, l),
                     meshes.add(bevy::math::primitives::Capsule3d::new(r, l)),
+                    r * r * l * 8.0,
                 )
             }
             _ => {
@@ -262,6 +271,7 @@ fn spawn_objects(
                 (
                     Collider::cylinder(r, l),
                     meshes.add(bevy::math::primitives::Cylinder::new(r, l)),
+                    r * r * l * 6.0,
                 )
             }
         };
@@ -269,8 +279,9 @@ fn spawn_objects(
         commands.spawn((
             RigidBody::Dynamic,
             collider,
-            Friction::new(0.7),
-            Restitution::new(0.3),
+            Friction::new(0.5),
+            Restitution::new(bounce),
+            Mass(mass),
             LinearVelocity(linvel),
             AngularVelocity(angvel),
             Mesh3d(mesh_handle),
@@ -363,6 +374,55 @@ fn update_fps(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, Wi
 }
 
 // ============================================================================
+// Explosion
+// ============================================================================
+
+fn handle_explosion_input(
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut bodies_query: Query<(&Transform, &mut LinearVelocity)>,
+) {
+    if !mouse_button.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let Some(cursor_position) = window.cursor_position() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        return;
+    };
+
+    // Find intersection with ground plane (y = 0)
+    let t = -ray.origin.y / ray.direction.y;
+    if t <= 0.0 {
+        return;
+    }
+    let explosion_pos = ray.origin + ray.direction * t;
+
+    let explosion_force = 500.0;
+    let explosion_radius = 15.0;
+
+    for (transform, mut velocity) in bodies_query.iter_mut() {
+        let offset = transform.translation - explosion_pos;
+        let distance = offset.length();
+        if distance < explosion_radius && distance > 0.01 {
+            let direction = offset / distance;
+            let falloff = 1.0 - (distance / explosion_radius);
+            let impulse = direction * explosion_force * falloff;
+            velocity.0 += impulse;
+        }
+    }
+}
+
+// ============================================================================
 // Camera orbit
 // ============================================================================
 
@@ -412,7 +472,7 @@ fn main() {
         .insert_resource(Gravity(Vec3::new(0.0, -20.0, 0.0)))
         .insert_resource(SpawnedBodies::default())
         .add_systems(Startup, (setup, setup_counter))
-        .add_systems(Update, (orbit_camera, update_counter, update_fps))
+        .add_systems(Update, (orbit_camera, update_counter, update_fps, handle_explosion_input))
         .add_systems(FixedUpdate, (spawn_objects, clear_objects).chain())
         .run();
 }

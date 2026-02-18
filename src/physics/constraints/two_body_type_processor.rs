@@ -308,7 +308,9 @@ impl<
                 let mut wsv_a = BodyVelocityWide::default();
                 let mut inertia_a = BodyInertiaWide::default();
 
-                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<TWarmStartAccessFilterA>(
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<
+                    TWarmStartAccessFilterA,
+                >(
                     bodies,
                     angular_mode,
                     velocity_callbacks,
@@ -331,7 +333,9 @@ impl<
                 let mut wsv_b = BodyVelocityWide::default();
                 let mut inertia_b = BodyInertiaWide::default();
 
-                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<TWarmStartAccessFilterB>(
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<
+                    TWarmStartAccessFilterB,
+                >(
                     bodies,
                     angular_mode,
                     velocity_callbacks,

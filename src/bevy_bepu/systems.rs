@@ -25,7 +25,11 @@ use crate::utilities::thread_dispatcher::ThreadDispatcher;
 // ---------------------------------------------------------------------------
 
 /// Creates the [`BepuSimulation`] resource from [`BepuConfig`] and [`Gravity`].
-pub(crate) fn initialize_simulation(mut commands: Commands, config: Res<BepuConfig>, gravity: Res<Gravity>) {
+pub(crate) fn initialize_simulation(
+    mut commands: Commands,
+    config: Res<BepuConfig>,
+    gravity: Res<Gravity>,
+) {
     let thread_count = config.thread_count.unwrap_or_else(|| {
         std::thread::available_parallelism()
             .map(|n| n.get() as u32)
@@ -53,7 +57,10 @@ pub(crate) fn initialize_simulation(mut commands: Commands, config: Res<BepuConf
             pool_ptr,
             narrow_callbacks,
             pose_callbacks,
-            SolveDescription::with_defaults(config.velocity_iterations as i32, config.substep_count as i32),
+            SolveDescription::with_defaults(
+                config.velocity_iterations as i32,
+                config.substep_count as i32,
+            ),
             None,
             None,
             None,
@@ -93,12 +100,20 @@ pub(crate) fn add_new_bodies(
             Option<&LinearVelocity>,
             Option<&AngularVelocity>,
         ),
-        (Added<RigidBody>, Without<BepuBodyHandle>, Without<BepuStaticHandle>),
+        (
+            Added<RigidBody>,
+            Without<BepuBodyHandle>,
+            Without<BepuStaticHandle>,
+        ),
     >,
     mut commands: Commands,
 ) {
     for (entity, rb, collider, transform, mass, lin_vel, ang_vel) in query.iter() {
-        let pos = glam::Vec3::new(transform.translation.x, transform.translation.y, transform.translation.z);
+        let pos = glam::Vec3::new(
+            transform.translation.x,
+            transform.translation.y,
+            transform.translation.z,
+        );
         let rot = glam::Quat::from_xyzw(
             transform.rotation.x,
             transform.rotation.y,
@@ -108,8 +123,12 @@ pub(crate) fn add_new_bodies(
         let pose = RigidPose::new(pos, rot);
         let mass_val = mass.map(|m| m.0).unwrap_or(1.0);
 
-        let lin = lin_vel.map(|v| glam::Vec3::new(v.0.x, v.0.y, v.0.z)).unwrap_or(glam::Vec3::ZERO);
-        let ang = ang_vel.map(|v| glam::Vec3::new(v.0.x, v.0.y, v.0.z)).unwrap_or(glam::Vec3::ZERO);
+        let lin = lin_vel
+            .map(|v| glam::Vec3::new(v.0.x, v.0.y, v.0.z))
+            .unwrap_or(glam::Vec3::ZERO);
+        let ang = ang_vel
+            .map(|v| glam::Vec3::new(v.0.x, v.0.y, v.0.z))
+            .unwrap_or(glam::Vec3::ZERO);
         let velocity = BodyVelocity::new(lin, ang);
 
         unsafe {
@@ -120,22 +139,34 @@ pub(crate) fn add_new_bodies(
                     let handle = match collider {
                         BepuCollider::Sphere { radius } => {
                             let shape = Sphere::new(*radius);
-                            let desc = BodyDescription::create_convex_dynamic(pose, velocity, mass_val, shapes, &shape);
+                            let desc = BodyDescription::create_convex_dynamic(
+                                pose, velocity, mass_val, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
-                        BepuCollider::Box { width, height, depth } => {
+                        BepuCollider::Box {
+                            width,
+                            height,
+                            depth,
+                        } => {
                             let shape = PhysicsBox::new(*width, *height, *depth);
-                            let desc = BodyDescription::create_convex_dynamic(pose, velocity, mass_val, shapes, &shape);
+                            let desc = BodyDescription::create_convex_dynamic(
+                                pose, velocity, mass_val, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
                         BepuCollider::Capsule { radius, length } => {
                             let shape = Capsule::new(*radius, *length);
-                            let desc = BodyDescription::create_convex_dynamic(pose, velocity, mass_val, shapes, &shape);
+                            let desc = BodyDescription::create_convex_dynamic(
+                                pose, velocity, mass_val, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
                         BepuCollider::Cylinder { radius, length } => {
                             let shape = Cylinder::new(*radius, *length);
-                            let desc = BodyDescription::create_convex_dynamic(pose, velocity, mass_val, shapes, &shape);
+                            let desc = BodyDescription::create_convex_dynamic(
+                                pose, velocity, mass_val, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
                     };
@@ -148,22 +179,34 @@ pub(crate) fn add_new_bodies(
                     let handle = match collider {
                         BepuCollider::Sphere { radius } => {
                             let shape = Sphere::new(*radius);
-                            let desc = BodyDescription::create_convex_kinematic(pose, velocity, shapes, &shape);
+                            let desc = BodyDescription::create_convex_kinematic(
+                                pose, velocity, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
-                        BepuCollider::Box { width, height, depth } => {
+                        BepuCollider::Box {
+                            width,
+                            height,
+                            depth,
+                        } => {
                             let shape = PhysicsBox::new(*width, *height, *depth);
-                            let desc = BodyDescription::create_convex_kinematic(pose, velocity, shapes, &shape);
+                            let desc = BodyDescription::create_convex_kinematic(
+                                pose, velocity, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
                         BepuCollider::Capsule { radius, length } => {
                             let shape = Capsule::new(*radius, *length);
-                            let desc = BodyDescription::create_convex_kinematic(pose, velocity, shapes, &shape);
+                            let desc = BodyDescription::create_convex_kinematic(
+                                pose, velocity, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
                         BepuCollider::Cylinder { radius, length } => {
                             let shape = Cylinder::new(*radius, *length);
-                            let desc = BodyDescription::create_convex_kinematic(pose, velocity, shapes, &shape);
+                            let desc = BodyDescription::create_convex_kinematic(
+                                pose, velocity, shapes, &shape,
+                            );
                             sim.bodies_mut().add(&desc)
                         }
                     };
@@ -175,9 +218,11 @@ pub(crate) fn add_new_bodies(
                 RigidBody::Static => {
                     let shape_index = match collider {
                         BepuCollider::Sphere { radius } => shapes.add(&Sphere::new(*radius)),
-                        BepuCollider::Box { width, height, depth } => {
-                            shapes.add(&PhysicsBox::new(*width, *height, *depth))
-                        }
+                        BepuCollider::Box {
+                            width,
+                            height,
+                            depth,
+                        } => shapes.add(&PhysicsBox::new(*width, *height, *depth)),
                         BepuCollider::Capsule { radius, length } => {
                             shapes.add(&Capsule::new(*radius, *length))
                         }
@@ -260,10 +305,7 @@ pub(crate) fn sync_velocities_to_bepu(
 /// Pushes user-side Transform changes into Bepu poses for kinematic bodies.
 pub(crate) fn sync_transforms_to_bepu(
     mut sim: ResMut<BepuSimulation>,
-    query: Query<
-        (&BepuBodyHandle, &RigidBody, &Transform),
-        Changed<Transform>,
-    >,
+    query: Query<(&BepuBodyHandle, &RigidBody, &Transform), Changed<Transform>>,
 ) {
     for (bh, rb, transform) in query.iter() {
         // Only push transform changes for kinematic bodies.
@@ -278,7 +320,11 @@ pub(crate) fn sync_transforms_to_bepu(
             }
             let body_ref = BodyReference::new(bh.0, bodies);
             let pose = body_ref.pose_mut();
-            pose.position = glam::Vec3::new(transform.translation.x, transform.translation.y, transform.translation.z);
+            pose.position = glam::Vec3::new(
+                transform.translation.x,
+                transform.translation.y,
+                transform.translation.z,
+            );
             pose.orientation = glam::Quat::from_xyzw(
                 transform.rotation.x,
                 transform.rotation.y,
@@ -291,10 +337,7 @@ pub(crate) fn sync_transforms_to_bepu(
 
 /// Copies current Gravity resource and damping config into the pose integrator
 /// callbacks before stepping.
-pub(crate) fn update_callback_data(
-    sim: ResMut<BepuSimulation>,
-    gravity: Res<Gravity>,
-) {
+pub(crate) fn update_callback_data(sim: ResMut<BepuSimulation>, gravity: Res<Gravity>) {
     // The pose integrator is a PoseIntegrator<DefaultPoseCallbacks> behind a
     // dyn IPoseIntegrator. We stored the gravity/damping in DefaultPoseCallbacks
     // at creation. To update it we need to access the concrete type.

@@ -581,7 +581,10 @@ impl PairCache {
                             &mut table_index,
                             &mut element_index,
                         );
-                        debug_assert!(found, "If a pair was in the mapping, we should be able to find it.");
+                        debug_assert!(
+                            found,
+                            "If a pair was in the mapping, we should be able to find it."
+                        );
                         let cache = unsafe { *self.mapping.values.get(element_index) };
                         pair_location.inactive_set_index = set_index;
                         pair_location.inactive_pair_index = builder.add(

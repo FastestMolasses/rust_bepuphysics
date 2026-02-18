@@ -46,11 +46,25 @@ impl AngularSwivelHinge {
                 "AngularSwivelHinge",
             );
         }
-        Vector3Wide::write_slot(self.local_swivel_axis_a, inner_index, &mut prestep_data.local_swivel_axis_a);
-        Vector3Wide::write_slot(self.local_hinge_axis_b, inner_index, &mut prestep_data.local_hinge_axis_b);
+        Vector3Wide::write_slot(
+            self.local_swivel_axis_a,
+            inner_index,
+            &mut prestep_data.local_swivel_axis_a,
+        );
+        Vector3Wide::write_slot(
+            self.local_hinge_axis_b,
+            inner_index,
+            &mut prestep_data.local_hinge_axis_b,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -71,8 +85,12 @@ impl AngularSwivelHinge {
             &mut description.local_hinge_axis_b,
         );
         unsafe {
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

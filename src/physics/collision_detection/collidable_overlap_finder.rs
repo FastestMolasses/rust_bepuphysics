@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Trait for types that can dispatch broad phase overlap testing.
 /// Matches C#'s abstract `CollidableOverlapFinder` base class.
-
 struct SelfOverlapHandler<TCallbacks: INarrowPhaseCallbacks> {
     narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
     leaves: Buffer<CollidableReference>,

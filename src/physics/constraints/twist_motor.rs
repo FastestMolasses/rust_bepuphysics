@@ -46,12 +46,23 @@ impl TwistMotor {
             );
             ConstraintChecker::assert_valid_motor_settings(&self.settings, "TwistMotor");
         }
-        Vector3Wide::write_slot(self.local_axis_a, inner_index, &mut prestep_data.local_axis_a);
-        Vector3Wide::write_slot(self.local_axis_b, inner_index, &mut prestep_data.local_axis_b);
+        Vector3Wide::write_slot(
+            self.local_axis_a,
+            inner_index,
+            &mut prestep_data.local_axis_a,
+        );
+        Vector3Wide::write_slot(
+            self.local_axis_b,
+            inner_index,
+            &mut prestep_data.local_axis_b,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.target_velocity, inner_index) = self.target_velocity;
-            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) = self.settings.maximum_force;
-            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) = self.settings.damping;
+            *GatherScatter::get_mut(&mut prestep_data.target_velocity, inner_index) =
+                self.target_velocity;
+            *GatherScatter::get_mut(&mut prestep_data.settings.maximum_force, inner_index) =
+                self.settings.maximum_force;
+            *GatherScatter::get_mut(&mut prestep_data.settings.damping, inner_index) =
+                self.settings.damping;
         }
     }
 
@@ -61,12 +72,23 @@ impl TwistMotor {
         inner_index: usize,
         description: &mut Self,
     ) {
-        Vector3Wide::read_slot(&prestep_data.local_axis_a, inner_index, &mut description.local_axis_a);
-        Vector3Wide::read_slot(&prestep_data.local_axis_b, inner_index, &mut description.local_axis_b);
+        Vector3Wide::read_slot(
+            &prestep_data.local_axis_a,
+            inner_index,
+            &mut description.local_axis_a,
+        );
+        Vector3Wide::read_slot(
+            &prestep_data.local_axis_b,
+            inner_index,
+            &mut description.local_axis_b,
+        );
         unsafe {
-            description.target_velocity = *GatherScatter::get(&prestep_data.target_velocity, inner_index);
-            description.settings.maximum_force = *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
-            description.settings.damping = *GatherScatter::get(&prestep_data.settings.damping, inner_index);
+            description.target_velocity =
+                *GatherScatter::get(&prestep_data.target_velocity, inner_index);
+            description.settings.maximum_force =
+                *GatherScatter::get(&prestep_data.settings.maximum_force, inner_index);
+            description.settings.damping =
+                *GatherScatter::get(&prestep_data.settings.damping, inner_index);
         }
     }
 }

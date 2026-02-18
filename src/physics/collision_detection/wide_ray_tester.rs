@@ -88,9 +88,8 @@ impl WideRayTester {
             for j in 0..count {
                 let ray_ref = ray_source.get_ray(i + j);
                 // Cast tree::RayData → collidables::ray::RayData (identical repr(C) layout).
-                let ray_data =
-                    &*(ray_ref as *const crate::physics::trees::ray_batcher::RayData
-                        as *const crate::physics::collidables::ray::RayData);
+                let ray_data = &*(ray_ref as *const crate::physics::trees::ray_batcher::RayData
+                    as *const crate::physics::collidables::ray::RayData);
                 let slot = j as usize;
                 *GatherScatter::get_mut(&mut ray_wide.origin.x, slot) = ray_data.origin.x;
                 *GatherScatter::get_mut(&mut ray_wide.origin.y, slot) = ray_data.origin.y;

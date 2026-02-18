@@ -1,16 +1,13 @@
 #![feature(portable_simd)]
-// #![feature(effects)]
 #![feature(generic_const_exprs)]
 #![allow(unused_unsafe)]
+#![allow(clippy::missing_safety_doc)]
 
 pub mod physics;
 pub mod utilities;
 
 #[cfg(feature = "bevy")]
 pub mod bevy_bepu;
-
-/// Re-export glam so consumers use the exact same version as the physics crate.
-pub use glam;
 
 // NOTE: Could replace is_x86_feature_detected with cfg, maybe OnceLock and do feature detection in build script.
 // NOTE: SVE intrinsics not yet implemented for aarch64.
@@ -56,7 +53,7 @@ macro_rules! out_unsafe {
     ($e:ident :: $method:ident ( $($arg:expr),* )) => {{
         let mut __result = std::mem::MaybeUninit::uninit();
         unsafe {
-            $e::$method($($arg,)* &mut *(__result.as_mut_ptr()));
+            $e::$method($($arg,)* unsafe { &mut *(__result.as_mut_ptr()) });
             __result.assume_init()
         }
     }};
@@ -65,12 +62,14 @@ macro_rules! out_unsafe {
     ($e:ident :: $method:ident ( $($arg:expr),* ), 2) => {{
         let mut __result1 = std::mem::MaybeUninit::uninit();
         let mut __result2 = std::mem::MaybeUninit::uninit();
+        // The call to the (unsafe) associated function is left to the caller's unsafe block.
+        $e::$method(
+            $($arg,)*
+            unsafe { &mut *(__result1.as_mut_ptr()) },
+            unsafe { &mut *(__result2.as_mut_ptr()) }
+        );
+        // assume_init is unsafe but only touches macro-local variables.
         unsafe {
-            $e::$method(
-                $($arg,)*
-                &mut *(__result1.as_mut_ptr()),
-                &mut *(__result2.as_mut_ptr())
-            );
             (
                 __result1.assume_init(),
                 __result2.assume_init()

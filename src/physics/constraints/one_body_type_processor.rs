@@ -7,7 +7,6 @@
 use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraint_location::ConstraintLocation;
-use crate::utilities::collections::index_set::IndexSet;
 use crate::physics::constraints::body_access_filter::{
     AccessAll, AccessOnlyVelocity, IBodyAccessFilter,
 };
@@ -15,6 +14,7 @@ use crate::physics::constraints::type_batch::TypeBatch;
 use crate::physics::constraints::type_batch_alloc;
 use crate::physics::constraints::type_processor::ITypeProcessor;
 use crate::physics::handles::ConstraintHandle;
+use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
@@ -446,7 +446,9 @@ impl<
                 let mut wsv_a = BodyVelocityWide::default();
                 let mut inertia_a = BodyInertiaWide::default();
 
-                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<TWarmStartAccessFilterA>(
+                crate::physics::constraints::gather_and_integrate::gather_and_integrate::<
+                    TWarmStartAccessFilterA,
+                >(
                     bodies,
                     angular_mode,
                     velocity_callbacks,
@@ -624,8 +626,7 @@ impl<
                 );
 
                 // Copy body reference, converting index to handle (one body only)
-                let src_refs = &*(source_type_batch.body_references.as_ptr()
-                    as *const Vector<i32>)
+                let src_refs = &*(source_type_batch.body_references.as_ptr() as *const Vector<i32>)
                     .add(source_bundle);
                 let dst_refs = &mut *(target_type_batch.body_references.as_mut_ptr()
                     as *mut Vector<i32>)
@@ -746,8 +747,7 @@ impl<
                 let target_bundle = (target_index as usize) >> vector_shift;
                 let target_inner = (target_index as usize) & vector_mask;
 
-                let src_refs = &*(source_type_batch.body_references.as_ptr()
-                    as *const Vector<i32>)
+                let src_refs = &*(source_type_batch.body_references.as_ptr() as *const Vector<i32>)
                     .add(source_bundle);
                 let dst_refs = &mut *(target_type_batch.body_references.as_mut_ptr()
                     as *mut Vector<i32>)
@@ -820,10 +820,8 @@ impl<
 
                     let encoded_handle = src_refs[source_inner_index as usize];
                     let body_handle = encoded_handle & Bodies::BODY_REFERENCE_MASK;
-                    let body_indices = [
-                        bodies.handle_to_location.get(body_handle).index
-                            | (encoded_handle & (Bodies::KINEMATIC_MASK as i32)),
-                    ];
+                    let body_indices = [bodies.handle_to_location.get(body_handle).index
+                        | (encoded_handle & (Bodies::KINEMATIC_MASK as i32))];
 
                     let handle = *source_type_batch.index_to_handle.get(source_index);
                     let target_index = self.allocate_in_type_batch_for_fallback(

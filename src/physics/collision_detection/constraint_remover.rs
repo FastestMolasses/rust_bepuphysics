@@ -537,8 +537,10 @@ impl ConstraintRemover {
                         &(*batches.removals_for_type_batches.get(i)).constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
-                        solver.handle_to_constraint.get_mut(batch_handles.get(j).0).set_index =
-                            -1;
+                        solver
+                            .handle_to_constraint
+                            .get_mut(batch_handles.get(j).0)
+                            .set_index = -1;
                     }
                 }
             }
@@ -577,8 +579,10 @@ impl ConstraintRemover {
                         // Fallback batch is handled separately.
                         continue;
                     }
-                    let removals =
-                        &batches.removals_for_type_batches.get(i).per_body_removal_targets;
+                    let removals = &batches
+                        .removals_for_type_batches
+                        .get(i)
+                        .per_body_removal_targets;
                     for j in 0..removals.count {
                         let target = removals.get(j);
                         solver
@@ -603,8 +607,10 @@ impl ConstraintRemover {
                     if type_batch_idx.batch as i32 != fallback_threshold {
                         continue;
                     }
-                    let removals =
-                        &batches.removals_for_type_batches.get(i).per_body_removal_targets;
+                    let removals = &batches
+                        .removals_for_type_batches
+                        .get(i)
+                        .per_body_removal_targets;
                     for j in 0..removals.count {
                         let target = removals.get(j);
                         let encoded = target.encoded_body_index & Bodies::BODY_REFERENCE_MASK;
@@ -632,7 +638,8 @@ impl ConstraintRemover {
         unsafe {
             if !self.removed_type_batches.is_empty() {
                 // Sort removed batches from highest to lowest so higher index batches get removed first.
-                self.removed_type_batches.sort_unstable_by_key(|b| std::cmp::Reverse(b.as_i32()));
+                self.removed_type_batches
+                    .sort_unstable_by_key(|b| std::cmp::Reverse(b.as_i32()));
                 let solver_ptr = self.solver;
                 for i in 0..self.removed_type_batches.len() {
                     let batch_indices = self.removed_type_batches[i];

@@ -511,7 +511,7 @@ impl PendingConstraintAddCache {
             pool,
             pending_constraints_by_type: pending,
             speculative_batch_indices: Buffer::default(),
-            minimum_constraint_count_per_cache: minimum_constraint_count_per_cache,
+            minimum_constraint_count_per_cache,
         }
     }
 
@@ -1191,7 +1191,10 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
     pub unsafe fn init_freshness_checker(&mut self) {
         let pair_cache_ptr = &mut self.base.pair_cache as *mut PairCache;
         let constraint_remover_ptr = &mut self.base.constraint_remover as *mut ConstraintRemover;
-        self.base.freshness_checker = Some(FreshnessChecker::new(pair_cache_ptr, constraint_remover_ptr));
+        self.base.freshness_checker = Some(FreshnessChecker::new(
+            pair_cache_ptr,
+            constraint_remover_ptr,
+        ));
     }
 
     /// Trampoline for OnPreflush: casts base NarrowPhase pointer back to NarrowPhaseGeneric<T>.
@@ -2304,8 +2307,8 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             // non-thread-safe BufferPool, causing data races and pool corruption.
             if self.base.freshness_checker.is_some() && original_pair_cache_mapping_count > 0 {
                 let pool = unsafe { &mut *self.base.pool };
-                let dispatcher_ptr = dispatcher as *const dyn IThreadDispatcher
-                    as *mut dyn IThreadDispatcher;
+                let dispatcher_ptr =
+                    dispatcher as *const dyn IThreadDispatcher as *mut dyn IThreadDispatcher;
                 if let Some(ref mut checker) = self.base.freshness_checker {
                     checker.cached_dispatcher = Some(dispatcher_ptr);
                 }

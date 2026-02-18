@@ -51,13 +51,29 @@ impl TwistLimit {
             );
             ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "TwistLimit");
         }
-        QuaternionWide::write_slot(self.local_basis_a, inner_index, &mut prestep_data.local_basis_a);
-        QuaternionWide::write_slot(self.local_basis_b, inner_index, &mut prestep_data.local_basis_b);
+        QuaternionWide::write_slot(
+            self.local_basis_a,
+            inner_index,
+            &mut prestep_data.local_basis_a,
+        );
+        QuaternionWide::write_slot(
+            self.local_basis_b,
+            inner_index,
+            &mut prestep_data.local_basis_b,
+        );
         unsafe {
-            *GatherScatter::get_mut(&mut prestep_data.minimum_angle, inner_index) = self.minimum_angle;
-            *GatherScatter::get_mut(&mut prestep_data.maximum_angle, inner_index) = self.maximum_angle;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.angular_frequency, inner_index) = self.spring_settings.angular_frequency;
-            *GatherScatter::get_mut(&mut prestep_data.spring_settings.twice_damping_ratio, inner_index) = self.spring_settings.twice_damping_ratio;
+            *GatherScatter::get_mut(&mut prestep_data.minimum_angle, inner_index) =
+                self.minimum_angle;
+            *GatherScatter::get_mut(&mut prestep_data.maximum_angle, inner_index) =
+                self.maximum_angle;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.angular_frequency,
+                inner_index,
+            ) = self.spring_settings.angular_frequency;
+            *GatherScatter::get_mut(
+                &mut prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            ) = self.spring_settings.twice_damping_ratio;
         }
     }
 
@@ -67,13 +83,27 @@ impl TwistLimit {
         inner_index: usize,
         description: &mut Self,
     ) {
-        QuaternionWide::read_slot(&prestep_data.local_basis_a, inner_index, &mut description.local_basis_a);
-        QuaternionWide::read_slot(&prestep_data.local_basis_b, inner_index, &mut description.local_basis_b);
+        QuaternionWide::read_slot(
+            &prestep_data.local_basis_a,
+            inner_index,
+            &mut description.local_basis_a,
+        );
+        QuaternionWide::read_slot(
+            &prestep_data.local_basis_b,
+            inner_index,
+            &mut description.local_basis_b,
+        );
         unsafe {
-            description.minimum_angle = *GatherScatter::get(&prestep_data.minimum_angle, inner_index);
-            description.maximum_angle = *GatherScatter::get(&prestep_data.maximum_angle, inner_index);
-            description.spring_settings.angular_frequency = *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
-            description.spring_settings.twice_damping_ratio = *GatherScatter::get(&prestep_data.spring_settings.twice_damping_ratio, inner_index);
+            description.minimum_angle =
+                *GatherScatter::get(&prestep_data.minimum_angle, inner_index);
+            description.maximum_angle =
+                *GatherScatter::get(&prestep_data.maximum_angle, inner_index);
+            description.spring_settings.angular_frequency =
+                *GatherScatter::get(&prestep_data.spring_settings.angular_frequency, inner_index);
+            description.spring_settings.twice_damping_ratio = *GatherScatter::get(
+                &prestep_data.spring_settings.twice_damping_ratio,
+                inner_index,
+            );
         }
     }
 }

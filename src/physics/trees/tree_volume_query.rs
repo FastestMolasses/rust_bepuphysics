@@ -52,7 +52,12 @@ impl Tree {
                                 // First allocation is on the stack.
                                 let mut new_stack: Buffer<i32> =
                                     pool.take_at_least(TRAVERSAL_STACK_CAPACITY as i32 * 2);
-                                stack.copy_to(0, &mut new_stack, 0, TRAVERSAL_STACK_CAPACITY as i32);
+                                stack.copy_to(
+                                    0,
+                                    &mut new_stack,
+                                    0,
+                                    TRAVERSAL_STACK_CAPACITY as i32,
+                                );
                                 stack = new_stack;
                             } else {
                                 pool.resize(&mut stack, stack_end * 2, stack_end);

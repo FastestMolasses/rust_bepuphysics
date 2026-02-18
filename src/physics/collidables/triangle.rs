@@ -2,7 +2,6 @@ use glam::{Quat, Vec3};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
-use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::math_helper;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;

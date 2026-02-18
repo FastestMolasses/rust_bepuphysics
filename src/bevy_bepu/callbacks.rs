@@ -7,7 +7,9 @@ use std::simd::prelude::*;
 
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::collidables::collidable_reference::CollidableReference;
-use crate::physics::collision_detection::contact_manifold::{ConvexContactManifold, IContactManifold};
+use crate::physics::collision_detection::contact_manifold::{
+    ConvexContactManifold, IContactManifold,
+};
 use crate::physics::collision_detection::narrow_phase_callbacks::{
     INarrowPhaseCallbacks, PairMaterialProperties,
 };
@@ -113,7 +115,12 @@ pub struct DefaultNarrowPhaseCallbacks {
 }
 
 impl DefaultNarrowPhaseCallbacks {
-    pub fn new(friction: f32, max_recovery_velocity: f32, spring_frequency: f32, spring_damping_ratio: f32) -> Self {
+    pub fn new(
+        friction: f32,
+        max_recovery_velocity: f32,
+        spring_frequency: f32,
+        spring_damping_ratio: f32,
+    ) -> Self {
         Self {
             friction,
             max_recovery_velocity,
