@@ -11,6 +11,7 @@ use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for capsule vs cylinder collisions.
 pub struct CapsuleCylinderTester;
@@ -77,7 +78,7 @@ impl CapsuleCylinderTester {
             Vector3Wide::dot(&clamped, line_direction, &mut conservative_new_t);
             conservative_new_t = min.simd_max(max.simd_min(conservative_new_t - origin_dot));
             let change = conservative_new_t - *t;
-            let lane_should_deactivate = change.abs().simd_lt(epsilon).to_int();
+            let lane_should_deactivate = change.abs().simd_lt(epsilon).to_simd();
             lane_deactivated = lane_deactivated | lane_should_deactivate;
             if (lane_deactivated).simd_lt(Vector::<i32>::splat(0)).all() {
                 break;
@@ -242,9 +243,9 @@ impl CapsuleCylinderTester {
             .select(Vector::<f32>::splat(f32::MAX), -dist_from_cyl_to_seg);
         let negative_margin = -*speculative_margin;
         let mut inactive_lanes =
-            (depth + a.radius).simd_lt(negative_margin).to_int() | inactive_lanes;
+            (depth + a.radius).simd_lt(negative_margin).to_simd() | inactive_lanes;
 
-        if (internal_line_segment_intersected.to_int() & !inactive_lanes)
+        if (internal_line_segment_intersected.to_simd() & !inactive_lanes)
             .simd_lt(Vector::<i32>::splat(0))
             .any()
         {
@@ -253,8 +254,8 @@ impl CapsuleCylinderTester {
             let _ = capsule_axis.y; // db = (0,1,0)
             let endpoint_vs_cap_depth =
                 b.half_length + (capsule_axis.y * a.half_length).abs() - local_offset_a.y.abs();
-            let use_endpoint_cap_depth = internal_line_segment_intersected.to_int()
-                & endpoint_vs_cap_depth.simd_lt(depth).to_int();
+            let use_endpoint_cap_depth = internal_line_segment_intersected.to_simd()
+                & endpoint_vs_cap_depth.simd_lt(depth).to_simd();
             depth = use_endpoint_cap_depth
                 .simd_lt(Vector::<i32>::splat(0))
                 .select(endpoint_vs_cap_depth, depth);
@@ -334,8 +335,8 @@ impl CapsuleCylinderTester {
             let internal_edge_depth =
                 cylinder_contribution + capsule_contribution - center_separation_along_normal;
 
-            let use_internal_edge_depth = internal_line_segment_intersected.to_int()
-                & internal_edge_depth.simd_lt(depth).to_int();
+            let use_internal_edge_depth = internal_line_segment_intersected.to_simd()
+                & internal_edge_depth.simd_lt(depth).to_simd();
             depth = use_internal_edge_depth
                 .simd_lt(Vector::<i32>::splat(0))
                 .select(internal_edge_depth, depth);
@@ -348,7 +349,7 @@ impl CapsuleCylinderTester {
 
         // All of the above excluded capsule radius. Include it now.
         depth = depth + a.radius;
-        inactive_lanes = depth.simd_lt(negative_margin).to_int() | inactive_lanes;
+        inactive_lanes = depth.simd_lt(negative_margin).to_simd() | inactive_lanes;
         if inactive_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
             *manifold = unsafe { std::mem::zeroed() };
             return;
@@ -360,7 +361,7 @@ impl CapsuleCylinderTester {
                 .y
                 .abs()
                 .simd_gt(Vector::<f32>::splat(0.70710678118))
-                .to_int();
+                .to_simd();
 
         // First, assume non-cap (side) contacts.
         let inverse_horizontal_normal_length_squared = Vector::<f32>::splat(1.0)
@@ -514,10 +515,10 @@ impl CapsuleCylinderTester {
             .simd_lt(Vector::<f32>::splat(1e-7));
         manifold.depth0 = collapse.select(depth, manifold.depth0);
         let contact0_valid = manifold.depth0.simd_ge(negative_margin);
-        let contact1_valid = contact_count.simd_eq(Vector::<i32>::splat(2)).to_int()
-            & (!collapse.to_int())
-            & manifold.depth1.simd_ge(negative_margin).to_int();
-        manifold.contact0_exists = (!inactive_lanes) & contact0_valid.to_int();
+        let contact1_valid = contact_count.simd_eq(Vector::<i32>::splat(2)).to_simd()
+            & (!collapse.to_simd())
+            & manifold.depth1.simd_ge(negative_margin).to_simd();
+        manifold.contact0_exists = (!inactive_lanes) & contact0_valid.to_simd();
         manifold.contact1_exists = (!inactive_lanes) & contact1_valid;
 
         // Transform to world space.

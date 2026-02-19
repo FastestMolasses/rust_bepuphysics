@@ -20,6 +20,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for triangle vs convex hull collisions.
 pub struct TriangleConvexHullTester;
@@ -147,11 +148,11 @@ impl TriangleConvexHullTester {
         Vector3Wide::dot(&edge_plane_ab, &triangle_a, &mut ab_plane_test);
         Vector3Wide::dot(&edge_plane_bc, &triangle_b_v, &mut bc_plane_test);
         Vector3Wide::dot(&edge_plane_ca, &triangle_c, &mut ca_plane_test);
-        let hull_inside_triangle_edge_planes = ab_plane_test.simd_le(zero_f).to_int()
-            & bc_plane_test.simd_le(zero_f).to_int()
-            & ca_plane_test.simd_le(zero_f).to_int();
+        let hull_inside_triangle_edge_planes = ab_plane_test.simd_le(zero_f).to_simd()
+            & bc_plane_test.simd_le(zero_f).to_simd()
+            & ca_plane_test.simd_le(zero_f).to_simd();
         let hull_inside_and_below_triangle =
-            hull_below_plane.to_int() & hull_inside_triangle_edge_planes;
+            hull_below_plane.to_simd() & hull_inside_triangle_edge_planes;
 
         let mut inactive_lanes =
             BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
@@ -245,10 +246,10 @@ impl TriangleConvexHullTester {
         // Triangle normal is minimal if hull center is inside + above triangle AND extreme point
         // is inside triangle edges.
         let triangle_normal_is_minimal = (hull_inside_triangle_edge_planes
-            & (!hull_below_plane.to_int()))
-            & extreme_ab_test.simd_le(zero_f).to_int()
-            & extreme_bc_test.simd_le(zero_f).to_int()
-            & extreme_ca_test.simd_le(zero_f).to_int();
+            & (!hull_below_plane.to_simd()))
+            & extreme_ab_test.simd_le(zero_f).to_simd()
+            & extreme_bc_test.simd_le(zero_f).to_simd()
+            & extreme_ca_test.simd_le(zero_f).to_simd();
 
         let depth_threshold = -*speculative_margin;
         let skip_depth_refine = triangle_normal_is_minimal | inactive_lanes;
@@ -308,8 +309,8 @@ impl TriangleConvexHullTester {
                 .simd_gt(Vector::<f32>::splat(
                     -TriangleWide::BACKFACE_NORMAL_DOT_REJECTION_THRESHOLD,
                 ))
-                .to_int()
-            | depth.simd_lt(depth_threshold).to_int();
+                .to_simd()
+            | depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             return;
         }

@@ -8,6 +8,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
+use std::simd::Select;
 
 /// Constrains two bodies with the angular component of a swivel hinge that allows rotation around two axes.
 #[repr(C)]
@@ -149,7 +150,7 @@ impl AngularSwivelHingeFunctions {
         Vector3Wide::dot(jacobian_a, jacobian_a, &mut jacobian_length_squared);
         let use_fallback = jacobian_length_squared
             .simd_lt(Vector::<f32>::splat(1e-3))
-            .to_int();
+            .to_simd();
         *jacobian_a =
             Vector3Wide::conditional_select(&use_fallback, &fallback_jacobian, jacobian_a);
     }

@@ -6,6 +6,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// A scalar manifold candidate (2D position on face + feature ID).
 #[repr(C)]
@@ -314,10 +315,10 @@ impl ManifoldCandidateHelper {
                     .select(extremity * extremity_scale, Vector::<f32>::splat(0.0));
             let candidate_is_best =
                 (exists.simd_lt(Vector::<i32>::splat(0))) & (candidate_score.simd_gt(best_score));
-            *contact0 = Self::conditional_select(&candidate_is_best.to_int(), candidate, contact0);
+            *contact0 = Self::conditional_select(&candidate_is_best.to_simd(), candidate, contact0);
             best_score = candidate_is_best.select(candidate_score, best_score);
         }
-        *contact0_exists = best_score.simd_gt(Vector::<f32>::splat(-f32::MAX)).to_int();
+        *contact0_exists = best_score.simd_gt(Vector::<f32>::splat(-f32::MAX)).to_simd();
 
         // 2. Find most distant from contact0 → contact1
         let mut max_distance_squared = Vector::<f32>::splat(0.0);
@@ -339,11 +340,11 @@ impl ManifoldCandidateHelper {
             max_distance_squared =
                 candidate_is_most_distant.select(distance_squared, max_distance_squared);
             *contact1 =
-                Self::conditional_select(&candidate_is_most_distant.to_int(), candidate, contact1);
+                Self::conditional_select(&candidate_is_most_distant.to_simd(), candidate, contact1);
         }
         *contact1_exists = max_distance_squared
             .simd_gt(*epsilon_scale * *epsilon_scale * Vector::<f32>::splat(1e-6))
-            .to_int();
+            .to_simd();
 
         // 3. Find contacts with largest positive and negative signed area → contact2, contact3
         let edge_offset_x = contact1.x - contact0.x;
@@ -372,19 +373,19 @@ impl ManifoldCandidateHelper {
             let is_min_area =
                 (signed_area.simd_lt(min_signed_area)) & (exists.simd_lt(Vector::<i32>::splat(0)));
             min_signed_area = is_min_area.select(signed_area, min_signed_area);
-            *contact2 = Self::conditional_select(&is_min_area.to_int(), candidate, contact2);
+            *contact2 = Self::conditional_select(&is_min_area.to_simd(), candidate, contact2);
             let is_max_area =
                 (signed_area.simd_gt(max_signed_area)) & (exists.simd_lt(Vector::<i32>::splat(0)));
             max_signed_area = is_max_area.select(signed_area, max_signed_area);
-            *contact3 = Self::conditional_select(&is_max_area.to_int(), candidate, contact3);
+            *contact3 = Self::conditional_select(&is_max_area.to_simd(), candidate, contact3);
         }
         let epsilon = max_distance_squared * max_distance_squared * Vector::<f32>::splat(1e-6);
         *contact2_exists = (min_signed_area * min_signed_area)
             .simd_gt(epsilon)
-            .to_int();
+            .to_simd();
         *contact3_exists = (max_signed_area * max_signed_area)
             .simd_gt(epsilon)
-            .to_int();
+            .to_simd();
     }
 
     #[inline(always)]

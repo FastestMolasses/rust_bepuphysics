@@ -13,6 +13,7 @@ use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::Select;
 
 /// Defines how a pose integrator should handle angular velocity integration.
 #[repr(i32)]

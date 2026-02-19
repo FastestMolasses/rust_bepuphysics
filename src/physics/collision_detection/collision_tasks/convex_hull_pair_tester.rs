@@ -16,6 +16,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Cached edge data for face A's edges, used during edge clipping.
 #[derive(Clone, Copy)]
@@ -115,7 +116,7 @@ impl ConvexHullPairTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
+        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
         // Clear all contact exists states up front.
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;

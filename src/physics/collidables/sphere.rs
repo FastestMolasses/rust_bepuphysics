@@ -221,7 +221,7 @@ impl IShapeWide<Sphere> for SphereWide {
         // If discriminant < 0, the ray misses.
         let discriminant = b * b - c;
         *intersected =
-            (b.simd_le(zero) | c.simd_le(zero)).to_int() & discriminant.simd_ge(zero).to_int();
+            (b.simd_le(zero) | c.simd_le(zero)).to_simd() & discriminant.simd_ge(zero).to_simd();
 
         *t = (-t_offset).simd_max(-b - discriminant.simd_max(zero).sqrt());
         Vector3Wide::scale_to(&d, t, &mut o_offset);

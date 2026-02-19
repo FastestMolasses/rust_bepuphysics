@@ -13,6 +13,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for capsule vs triangle collisions.
 pub struct CapsuleTriangleTester;
@@ -88,14 +89,14 @@ impl CapsuleTriangleTester {
         let mut calibration_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&fallback_normal, capsule_center, &mut calibration_dot);
         Vector3Wide::conditionally_negate(
-            &calibration_dot.simd_lt(Vector::<f32>::splat(0.0)).to_int(),
+            &calibration_dot.simd_lt(Vector::<f32>::splat(0.0)).to_simd(),
             &mut fallback_normal,
         );
         let mut fallback_normal_length_squared = Vector::<f32>::splat(0.0);
         Vector3Wide::length_squared_to(&fallback_normal, &mut fallback_normal_length_squared);
         let use_fallback_normal = normal_length_squared.simd_lt(Vector::<f32>::splat(1e-13));
         *normal = Vector3Wide::conditional_select(
-            &use_fallback_normal.to_int(),
+            &use_fallback_normal.to_simd(),
             &fallback_normal,
             normal,
         );
@@ -116,7 +117,7 @@ impl CapsuleTriangleTester {
         Vector3Wide::length_squared_to(&fallback_normal, &mut second_fallback_length_squared);
         let use_second_fallback = normal_length_squared.simd_lt(Vector::<f32>::splat(1e-13));
         *normal = Vector3Wide::conditional_select(
-            &use_second_fallback.to_int(),
+            &use_second_fallback.to_simd(),
             &second_fallback_normal,
             normal,
         );
@@ -282,12 +283,12 @@ impl CapsuleTriangleTester {
         );
         let use_ac = edge_depth_cand.simd_lt(edge_depth);
         edge_direction = Vector3Wide::conditional_select(
-            &use_ac.to_int(),
+            &use_ac.to_simd(),
             &edge_direction_cand,
             &edge_direction,
         );
         edge_normal =
-            Vector3Wide::conditional_select(&use_ac.to_int(), &edge_normal_cand, &edge_normal);
+            Vector3Wide::conditional_select(&use_ac.to_simd(), &edge_normal_cand, &edge_normal);
         ta = use_ac.select(ta_cand, ta);
         tb = use_ac.select(tb_cand, tb);
         b_min_val = use_ac.select(b_min_cand, b_min_val);
@@ -315,14 +316,14 @@ impl CapsuleTriangleTester {
         );
         let use_bc = edge_depth_cand.simd_lt(edge_depth);
         let edge_start =
-            Vector3Wide::conditional_select(&use_bc.to_int(), &triangle.b, &triangle.a);
+            Vector3Wide::conditional_select(&use_bc.to_simd(), &triangle.b, &triangle.a);
         edge_direction = Vector3Wide::conditional_select(
-            &use_bc.to_int(),
+            &use_bc.to_simd(),
             &edge_direction_cand,
             &edge_direction,
         );
         edge_normal =
-            Vector3Wide::conditional_select(&use_bc.to_int(), &edge_normal_cand, &edge_normal);
+            Vector3Wide::conditional_select(&use_bc.to_simd(), &edge_normal_cand, &edge_normal);
         ta = use_bc.select(ta_cand, ta);
         tb = use_bc.select(tb_cand, tb);
         b_min_val = use_bc.select(b_min_cand, b_min_val);
@@ -332,7 +333,7 @@ impl CapsuleTriangleTester {
         let depth = edge_depth.simd_min(face_depth);
         let use_edge = edge_depth.simd_lt(face_depth);
         let local_normal =
-            Vector3Wide::conditional_select(&use_edge.to_int(), &edge_normal, &face_normal);
+            Vector3Wide::conditional_select(&use_edge.to_simd(), &edge_normal, &face_normal);
         let mut local_normal_dot_face_normal = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(
             &local_normal,
@@ -359,9 +360,9 @@ impl CapsuleTriangleTester {
             &mut nondegenerate_mask,
         );
         let negative_margin = -*speculative_margin;
-        let allow_contacts = (depth + a.radius).simd_ge(negative_margin).to_int()
+        let allow_contacts = (depth + a.radius).simd_ge(negative_margin).to_simd()
             & active_lanes
-            & colliding_with_solid_side.to_int()
+            & colliding_with_solid_side.to_simd()
             & nondegenerate_mask;
         if allow_contacts.simd_eq(Vector::<i32>::splat(0)).all() {
             manifold.contact0_exists = Vector::<i32>::splat(0);
@@ -372,7 +373,7 @@ impl CapsuleTriangleTester {
         let mut b0 = Vector3Wide::default();
         let mut b1 = Vector3Wide::default();
         let mut contact_count: Vector<i32>;
-        let use_edge_masked = use_edge.to_int() & allow_contacts;
+        let use_edge_masked = use_edge.to_simd() & allow_contacts;
         if use_edge_masked.simd_lt(Vector::<i32>::splat(0)).any() {
             // Edge contact generation with coplanarity-based interval weighting.
             let mut plane_normal = Vector3Wide::default();
@@ -416,7 +417,7 @@ impl CapsuleTriangleTester {
         }
 
         // Face contact generation via clipping.
-        if ((contact_count.simd_le(Vector::<i32>::splat(1)).to_int()) & allow_contacts)
+        if ((contact_count.simd_le(Vector::<i32>::splat(1)).to_simd()) & allow_contacts)
             .simd_lt(Vector::<i32>::splat(0))
             .any()
         {
@@ -486,7 +487,7 @@ impl CapsuleTriangleTester {
             let no_edge_contacts = contact_count.simd_eq(Vector::<i32>::splat(0));
             let allow_face_contacts =
                 capsule_offset_along_normal.simd_ge(Vector::<f32>::splat(0.0));
-            let use_face_contacts = no_edge_contacts.to_int() & allow_face_contacts.to_int();
+            let use_face_contacts = no_edge_contacts.to_simd() & allow_face_contacts.to_simd();
             b0 = Vector3Wide::conditional_select(&use_face_contacts, &face_candidate0, &b0);
             b1 = Vector3Wide::conditional_select(&use_face_contacts, &face_candidate1, &b1);
             contact_count = use_face_contacts
@@ -498,17 +499,17 @@ impl CapsuleTriangleTester {
                 .abs()
                 .simd_gt((overlap_interval_min_final - ta).abs());
             let second_contact_candidate = Vector3Wide::conditional_select(
-                &use_face1_for_second.to_int(),
+                &use_face1_for_second.to_simd(),
                 &face_candidate1,
                 &face_candidate0,
             );
             let second_contact_distance =
                 use_face1_for_second.select(distance_along_normal_a1, distance_along_normal_a0);
-            let use_candidate_for_second = interval_is_valid.to_int()
-                & contact_count.simd_eq(Vector::<i32>::splat(1)).to_int()
+            let use_candidate_for_second = interval_is_valid.to_simd()
+                & contact_count.simd_eq(Vector::<i32>::splat(1)).to_simd()
                 & second_contact_distance
                     .simd_gt(Vector::<f32>::splat(0.0))
-                    .to_int();
+                    .to_simd();
             b1 = Vector3Wide::conditional_select(
                 &use_candidate_for_second,
                 &second_contact_candidate,
@@ -560,11 +561,11 @@ impl CapsuleTriangleTester {
         manifold.depth0 = collapse.select(a.radius + depth, manifold.depth0);
         contact_count = colliding_with_solid_side.select(contact_count, Vector::<i32>::splat(0));
         manifold.contact0_exists = allow_contacts
-            & contact_count.simd_gt(Vector::<i32>::splat(0)).to_int()
-            & manifold.depth0.simd_gt(negative_margin).to_int();
+            & contact_count.simd_gt(Vector::<i32>::splat(0)).to_simd()
+            & manifold.depth0.simd_gt(negative_margin).to_simd();
         manifold.contact1_exists = allow_contacts
-            & (contact_count.simd_eq(Vector::<i32>::splat(2)).to_int() & (!collapse.to_int()))
-            & manifold.depth1.simd_gt(negative_margin).to_int();
+            & (contact_count.simd_eq(Vector::<i32>::splat(2)).to_simd() & (!collapse.to_simd()))
+            & manifold.depth1.simd_gt(negative_margin).to_simd();
 
         // Feature IDs based on capsule-axis projection order.
         let mut local_offset_a0 = Vector3Wide::default();

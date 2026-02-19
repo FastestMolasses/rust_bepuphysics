@@ -9,6 +9,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for capsule vs box collisions.
 pub struct CapsuleBoxTester;
@@ -545,10 +546,10 @@ impl CapsuleBoxTester {
         manifold.offset_a1 = manifold.offset_a1 + push1;
 
         let min_accepted_depth = -*speculative_margin;
-        manifold.contact0_exists = manifold.depth0.simd_ge(min_accepted_depth).to_int();
-        manifold.contact1_exists = manifold.depth1.simd_ge(min_accepted_depth).to_int()
+        manifold.contact0_exists = manifold.depth0.simd_ge(min_accepted_depth).to_simd();
+        manifold.contact1_exists = manifold.depth1.simd_ge(min_accepted_depth).to_simd()
             & (t_max - t_min)
                 .simd_gt(Vector::<f32>::splat(1e-7) * a.half_length)
-                .to_int();
+                .to_simd();
     }
 }

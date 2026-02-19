@@ -12,6 +12,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Quat;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Constrains two bodies' rotations around attached twist axes to a range of permitted twist angles.
 #[repr(C)]
@@ -153,7 +154,7 @@ impl TwistLimitFunctions {
         math_helper::get_signed_angle_difference(minimum_angle, &angle, &mut min_error);
         let mut max_error = Vector::<f32>::splat(0.0);
         math_helper::get_signed_angle_difference(maximum_angle, &angle, &mut max_error);
-        let use_min = min_error.abs().simd_lt(max_error.abs()).to_int();
+        let use_min = min_error.abs().simd_lt(max_error.abs()).to_simd();
 
         // If we use the maximum bound, flip the jacobian.
         *error = use_min

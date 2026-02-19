@@ -3,6 +3,7 @@ use crate::utilities::vector::Vector;
 use glam::Vec2;
 use std::ops::{AddAssign, MulAssign, Neg, Sub};
 use std::simd::Mask;
+use std::simd::Select;
 
 /// Two dimensional vector with SIMD lanes.
 #[derive(Clone, Copy, Debug, Default)]
@@ -46,14 +47,14 @@ impl Vector2Wide {
 
     #[inline(always)]
     pub fn conditionally_negate(should_negate: &Vector<i32>, v: &mut Self) {
-        let mask = Mask::from_int(*should_negate);
+        let mask = Mask::from_simd(*should_negate);
         v.x = mask.select(-v.x, v.x);
         v.y = mask.select(-v.y, v.y);
     }
 
     #[inline(always)]
     pub fn conditionally_negate_to(should_negate: &Vector<i32>, v: &Self, negated: &mut Self) {
-        let mask = Mask::from_int(*should_negate);
+        let mask = Mask::from_simd(*should_negate);
         negated.x = mask.select(-v.x, v.x);
         negated.y = mask.select(-v.y, v.y);
     }
@@ -65,7 +66,7 @@ impl Vector2Wide {
         right: &Self,
         result: &mut Self,
     ) {
-        let mask = Mask::from_int(*condition);
+        let mask = Mask::from_simd(*condition);
         result.x = mask.select(left.x, right.x);
         result.y = mask.select(left.y, right.y);
     }

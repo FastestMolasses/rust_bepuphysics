@@ -10,6 +10,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for sphere vs convex hull collisions.
 pub struct SphereConvexHullTester;
@@ -98,6 +99,6 @@ impl SphereConvexHullTester {
 
         manifold.feature_id = Vector::<i32>::splat(0);
         manifold.depth = depth;
-        manifold.contact_exists = manifold.depth.simd_ge(-*speculative_margin).to_int();
+        manifold.contact_exists = manifold.depth.simd_ge(-*speculative_margin).to_simd();
     }
 }

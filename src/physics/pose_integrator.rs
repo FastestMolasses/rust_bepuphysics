@@ -25,6 +25,7 @@ use std::simd::prelude::*;
 
 use crate::physics::bounding_box_batcher::BoundingBoxBatcher;
 use crate::physics::collision_detection::broad_phase::BroadPhase;
+use std::simd::Select;
 
 /// Trait for pose integrator dispatch.
 pub trait IPoseIntegrator {
@@ -555,7 +556,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 bundle_effective_dt = bundle_substep_dt;
             } else {
                 // Unconstrained bodies use full dt, constrained use substep dt.
-                let mask = Mask::from_int(unconstrained_mask);
+                let mask = Mask::from_simd(unconstrained_mask);
                 bundle_effective_dt = mask.select(bundle_dt, bundle_substep_dt);
             }
             let half_dt = bundle_effective_dt * Simd::splat(0.5f32);

@@ -6,6 +6,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialEq;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Handles the twist friction implementation.
 pub struct TwistFriction;

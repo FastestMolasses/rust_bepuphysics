@@ -4,6 +4,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::Select;
 
 /// Describes how quickly and strongly a servo constraint should move towards a position target.
 #[repr(C)]

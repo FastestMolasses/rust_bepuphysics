@@ -16,6 +16,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for box vs triangle collisions.
 pub struct BoxTriangleTester;
@@ -171,7 +172,7 @@ impl BoxTriangleTester {
         depth_candidate: &Vector<f32>,
         normal_candidate: &Vector3Wide,
     ) {
-        let use_candidate = depth_candidate.simd_lt(*depth).to_int();
+        let use_candidate = depth_candidate.simd_lt(*depth).to_simd();
         *normal = Vector3Wide::conditional_select(&use_candidate, normal_candidate, normal);
         *depth = depth.simd_min(*depth_candidate);
     }
@@ -301,10 +302,10 @@ impl BoxTriangleTester {
         let eps = Vector::<f32>::splat(1e-5);
 
         let min_exists = *allow_contacts
-            & (*candidate_count).simd_lt(six).to_int()
-            & (max - min).simd_ge(eps).to_int()
-            & min.simd_lt(one_f).to_int()
-            & min.simd_gt(zero_f).to_int();
+            & (*candidate_count).simd_lt(six).to_simd()
+            & (max - min).simd_ge(eps).to_simd()
+            & min.simd_lt(one_f).to_simd()
+            & min.simd_gt(zero_f).to_simd();
         Self::add(
             &min_location,
             triangle_center,
@@ -318,10 +319,10 @@ impl BoxTriangleTester {
         );
 
         let max_exists = *allow_contacts
-            & (*candidate_count).simd_lt(six).to_int()
-            & max.simd_ge(min).to_int()
-            & max.simd_le(one_f).to_int()
-            & max.simd_ge(zero_f).to_int();
+            & (*candidate_count).simd_lt(six).to_simd()
+            & max.simd_ge(min).to_simd()
+            & max.simd_le(one_f).to_simd()
+            & max.simd_ge(zero_f).to_simd();
         Self::add(
             &max_location,
             triangle_center,
@@ -453,9 +454,9 @@ impl BoxTriangleTester {
 
         let zero = Vector::<f32>::splat(0.0);
         let contained = *allow_contacts
-            & ab_dot.simd_ge(zero).to_int()
-            & bc_dot.simd_ge(zero).to_int()
-            & ca_dot.simd_ge(zero).to_int();
+            & ab_dot.simd_ge(zero).to_simd()
+            & bc_dot.simd_ge(zero).to_simd()
+            & ca_dot.simd_ge(zero).to_simd();
 
         Self::add(
             &v_on_plane,
@@ -743,7 +744,7 @@ impl BoxTriangleTester {
                 y: -triangle_normal.y,
                 z: -triangle_normal.z,
             };
-            let should_negate = triangle_plane_offset.simd_gt(zero_f).to_int();
+            let should_negate = triangle_plane_offset.simd_gt(zero_f).to_simd();
             let calibrated_triangle_normal = Vector3Wide::conditional_select(
                 &should_negate,
                 &neg_triangle_normal,
@@ -784,8 +785,8 @@ impl BoxTriangleTester {
                     .simd_ge(Vector::<f32>::splat(
                         TriangleWide::BACKFACE_NORMAL_DOT_REJECTION_THRESHOLD,
                     ))
-                    .to_int()
-                & depth.simd_ge(minimum_depth).to_int()
+                    .to_simd()
+                & depth.simd_ge(minimum_depth).to_simd()
                 & active_lanes;
 
             if allow_contacts.simd_eq(Vector::<i32>::splat(0)).all() {
@@ -797,9 +798,9 @@ impl BoxTriangleTester {
             let abs_nx = local_normal.x.abs();
             let abs_ny = local_normal.y.abs();
             let abs_nz = local_normal.z.abs();
-            let x_bigger_than_y = abs_nx.simd_gt(abs_ny).to_int();
-            let x_bigger_than_z = abs_nx.simd_gt(abs_nz).to_int();
-            let y_bigger_than_z = abs_ny.simd_gt(abs_nz).to_int();
+            let x_bigger_than_y = abs_nx.simd_gt(abs_ny).to_simd();
+            let x_bigger_than_z = abs_nx.simd_gt(abs_nz).to_simd();
+            let y_bigger_than_z = abs_ny.simd_gt(abs_nz).to_simd();
             let use_ax = x_bigger_than_y & x_bigger_than_z;
             let use_ay = y_bigger_than_z & !use_ax;
             let use_az = !(use_ax | use_ay);
@@ -846,16 +847,16 @@ impl BoxTriangleTester {
             let axis_id_tangent_y = use_ay_i.select(local_z_id, local_y_id);
             let axis_id_normal = use_ax_i.select(
                 normal_is_negative_x
-                    .to_int()
+                    .to_simd()
                     .simd_lt(Vector::<i32>::splat(0))
                     .select(local_x_id, Vector::<i32>::splat(0)),
                 use_ay_i.select(
                     normal_is_negative_y
-                        .to_int()
+                        .to_simd()
                         .simd_lt(Vector::<i32>::splat(0))
                         .select(local_y_id, Vector::<i32>::splat(0)),
                     normal_is_negative_z
-                        .to_int()
+                        .to_simd()
                         .simd_lt(Vector::<i32>::splat(0))
                         .select(local_z_id, Vector::<i32>::splat(0)),
                 ),

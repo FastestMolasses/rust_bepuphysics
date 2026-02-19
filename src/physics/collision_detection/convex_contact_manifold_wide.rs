@@ -3,6 +3,7 @@
 use super::contact_manifold::ConvexContactManifold;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::Select;
 
 /// Trait for SIMD-wide contact manifold types used in collision detection.
 pub trait IContactManifoldWide {

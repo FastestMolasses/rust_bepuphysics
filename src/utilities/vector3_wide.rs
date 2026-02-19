@@ -5,6 +5,7 @@ use std::{
     ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub},
     simd::{num::SimdFloat, Mask},
 };
+use std::simd::Select;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -222,7 +223,7 @@ impl Vector3Wide {
     /// Conditionally negates lanes of the vector.
     #[inline(always)]
     pub fn conditionally_negate(should_negate: &Vector<i32>, v: &mut Self) {
-        let mask = Mask::from_int(*should_negate);
+        let mask = Mask::from_simd(*should_negate);
         v.x = mask.select(-v.x, v.x);
         v.y = mask.select(-v.y, v.y);
         v.z = mask.select(-v.z, v.z);
@@ -231,7 +232,7 @@ impl Vector3Wide {
     /// Conditionally negates lanes of the vector and stores the result in another vector.
     #[inline(always)]
     pub fn conditionally_negate_to(should_negate: &Vector<i32>, v: &Self, negated: &mut Self) {
-        let mask = Mask::from_int(*should_negate);
+        let mask = Mask::from_simd(*should_negate);
         negated.x = mask.select(-v.x, v.x);
         negated.y = mask.select(-v.y, v.y);
         negated.z = mask.select(-v.z, v.z);
@@ -240,7 +241,7 @@ impl Vector3Wide {
     /// Conditionally negates lanes of the vector and stores the result in another vector.
     #[inline(always)]
     pub fn conditionally_negate_to_new(should_negate: &Vector<i32>, v: &Self) -> Self {
-        let mask = Mask::from_int(*should_negate);
+        let mask = Mask::from_simd(*should_negate);
         Self {
             x: mask.select(-v.x, v.x),
             y: mask.select(-v.y, v.y),
@@ -362,7 +363,7 @@ impl Vector3Wide {
     /// Selects the left or right input for each lane depending on a mask.
     #[inline(always)]
     pub fn conditional_select(condition: &Vector<i32>, left: &Self, right: &Self) -> Self {
-        let mask = Mask::from_int(*condition);
+        let mask = Mask::from_simd(*condition);
         Self {
             x: mask.select(left.x, right.x),
             y: mask.select(left.y, right.y),
@@ -378,7 +379,7 @@ impl Vector3Wide {
         right: &Self,
         result: &mut Self,
     ) {
-        let mask = Mask::from_int(*condition);
+        let mask = Mask::from_simd(*condition);
         result.x = mask.select(left.x, right.x);
         result.y = mask.select(left.y, right.y);
         result.z = mask.select(left.z, right.z);

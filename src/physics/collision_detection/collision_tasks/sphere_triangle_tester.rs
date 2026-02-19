@@ -10,6 +10,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for sphere vs triangle collisions.
 pub struct SphereTriangleTester;
@@ -27,7 +28,7 @@ impl SphereTriangleTester {
         let use_candidate = distance_squared_candidate.simd_lt(*distance_squared);
         *distance_squared = distance_squared.simd_min(*distance_squared_candidate);
         *local_normal = Vector3Wide::conditional_select(
-            &use_candidate.to_int(),
+            &use_candidate.to_simd(),
             local_normal_candidate,
             local_normal,
         );
@@ -86,22 +87,22 @@ impl SphereTriangleTester {
         let neg_one = Vector::<i32>::splat(-1);
         let active_lanes = BundleIndexing::create_mask_for_count_in_bundle(pair_count as usize);
 
-        if (active_lanes & outside_any_edge.to_int())
+        if (active_lanes & outside_any_edge.to_simd())
             .simd_eq(neg_one)
             .any()
         {
             // At least one lane detected a point outside of the triangle.
             // Choose one edge which is outside as the representative.
             let edge_direction_ac_or_ab =
-                Vector3Wide::conditional_select(&outside_ac.to_int(), &ac, &ab);
+                Vector3Wide::conditional_select(&outside_ac.to_simd(), &ac, &ab);
             let mut bc = Vector3Wide::default();
             Vector3Wide::subtract(&b.c, &b.b, &mut bc);
             let edge_direction = Vector3Wide::conditional_select(
-                &outside_bc.to_int(),
+                &outside_bc.to_simd(),
                 &bc,
                 &edge_direction_ac_or_ab,
             );
-            let edge_start = Vector3Wide::conditional_select(&outside_bc.to_int(), &b.b, &b.a);
+            let edge_start = Vector3Wide::conditional_select(&outside_bc.to_simd(), &b.b, &b.a);
 
             let mut neg_edge_start_to_p = Vector3Wide::default();
             Vector3Wide::add(&local_offset_b, &edge_start, &mut neg_edge_start_to_p);
@@ -121,12 +122,12 @@ impl SphereTriangleTester {
             Vector3Wide::add(&edge_start, &point_on_edge, &mut point_on_edge_final);
 
             local_closest_on_triangle = Vector3Wide::conditional_select(
-                &outside_any_edge.to_int(),
+                &outside_any_edge.to_simd(),
                 &point_on_edge_final,
                 &local_closest_on_triangle,
             );
         }
-        if (active_lanes & !outside_any_edge.to_int())
+        if (active_lanes & !outside_any_edge.to_simd())
             .simd_eq(neg_one)
             .any()
         {
@@ -139,14 +140,14 @@ impl SphereTriangleTester {
             Vector3Wide::subtract(&offset_to_plane, &local_offset_b, &mut point_on_face);
 
             local_closest_on_triangle = Vector3Wide::conditional_select(
-                &outside_any_edge.to_int(),
+                &outside_any_edge.to_simd(),
                 &local_closest_on_triangle,
                 &point_on_face,
             );
         }
 
         manifold.feature_id = outside_any_edge
-            .to_int()
+            .to_simd()
             .simd_eq(Vector::<i32>::splat(0))
             .select(
                 Vector::<i32>::splat(FACE_COLLISION_FLAG),
@@ -187,13 +188,13 @@ impl SphereTriangleTester {
             &mut epsilon_scale,
             &mut nondegenerate_mask,
         );
-        manifold.contact_exists = distance.simd_gt(Vector::<f32>::splat(0.0)).to_int()
+        manifold.contact_exists = distance.simd_gt(Vector::<f32>::splat(0.0)).to_simd()
             & nondegenerate_mask
             & face_normal_dot
                 .simd_le(Vector::<f32>::splat(
                     -TriangleWide::BACKFACE_NORMAL_DOT_REJECTION_THRESHOLD,
                 ))
-                .to_int()
-            & manifold.depth.simd_ge(-*speculative_margin).to_int();
+                .to_simd()
+            & manifold.depth.simd_ge(-*speculative_margin).to_simd();
     }
 }

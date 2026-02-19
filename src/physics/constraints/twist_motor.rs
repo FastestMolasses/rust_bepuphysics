@@ -9,6 +9,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Constrains the twist velocity between two bodies to a target.
 #[repr(C)]
@@ -124,7 +125,7 @@ impl TwistMotorFunctions {
         let inv_length = Vector::<f32>::splat(1.0) / length;
         let mut scaled = Vector3Wide::default();
         Vector3Wide::scale_to(jacobian_a, &inv_length, &mut scaled);
-        let use_fallback = length.simd_lt(Vector::<f32>::splat(1e-10)).to_int();
+        let use_fallback = length.simd_lt(Vector::<f32>::splat(1e-10)).to_simd();
         *jacobian_a = Vector3Wide::conditional_select(&use_fallback, &axis_a, &scaled);
     }
 

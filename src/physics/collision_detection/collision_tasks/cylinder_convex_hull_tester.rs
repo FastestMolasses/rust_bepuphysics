@@ -20,6 +20,7 @@ use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::{Vec2, Vec3};
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for cylinder vs convex hull collisions.
 pub struct CylinderConvexHullTester;
@@ -194,7 +195,7 @@ impl CylinderConvexHullTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
+        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;
         manifold.contact2_exists = zero_i;
@@ -222,7 +223,7 @@ impl CylinderConvexHullTester {
             .y
             .abs()
             .simd_gt(Vector::<f32>::splat(0.70710678118))
-            .to_int();
+            .to_simd();
 
         let mut cap_center = Vector3Wide::default();
         let mut interior0 = Vector2Wide::default();

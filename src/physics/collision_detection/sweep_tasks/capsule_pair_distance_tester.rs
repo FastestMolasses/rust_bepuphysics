@@ -77,6 +77,6 @@ impl IPairDistanceTester<CapsuleWide, CapsuleWide> for CapsulePairDistanceTester
         Vector3Wide::scale_to(&*normal, &a.radius, &mut a_offset);
         *closest_a = *closest_a - a_offset;
         *distance = *distance - a.radius - b.radius;
-        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

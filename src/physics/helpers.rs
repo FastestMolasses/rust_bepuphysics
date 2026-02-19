@@ -3,6 +3,7 @@ use std::simd::prelude::*;
 
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::Select;
 
 /// Shared miscellaneous helper functions.
 pub struct Helpers;

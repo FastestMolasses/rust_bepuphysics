@@ -2,6 +2,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
 use glam::Vec4;
 use std::simd::{num::SimdFloat, Mask, StdFloat};
+use std::simd::Select;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -166,7 +167,7 @@ impl Vector4Wide {
         right: &Self,
         result: &mut Self,
     ) {
-        let mask = Mask::from_int(*condition);
+        let mask = Mask::from_simd(*condition);
         result.x = mask.select(left.x, right.x);
         result.y = mask.select(left.y, right.y);
         result.z = mask.select(left.z, right.z);

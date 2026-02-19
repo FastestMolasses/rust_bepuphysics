@@ -17,6 +17,7 @@ use crate::physics::helpers::Helpers;
 
 use super::convex_hull::{ConvexHull, HullBoundingPlanes};
 use super::mesh_inertia_helper::MeshInertiaHelper;
+use std::simd::Select;
 
 /// Stores references to the points composing one of a convex hull's faces.
 pub struct HullFace {
@@ -177,11 +178,11 @@ impl ConvexHullHelper {
         };
 
         let ignore_slot = (!allow_vertex_bundles[0])
-            | (best_x.simd_le(*plane_epsilon).to_int() & best_y.simd_le(*plane_epsilon).to_int())
-            | (index_offsets.simd_eq(edge_index_a).to_int()
-                | index_offsets.simd_eq(edge_index_b).to_int());
-        best_x = Mask::from_int(ignore_slot).select(Vector::<f32>::splat(1.0), best_x);
-        best_y = Mask::from_int(ignore_slot).select(Vector::<f32>::splat(f32::MIN), best_y);
+            | (best_x.simd_le(*plane_epsilon).to_simd() & best_y.simd_le(*plane_epsilon).to_simd())
+            | (index_offsets.simd_eq(edge_index_a).to_simd()
+                | index_offsets.simd_eq(edge_index_b).to_simd());
+        best_x = Mask::from_simd(ignore_slot).select(Vector::<f32>::splat(1.0), best_x);
+        best_y = Mask::from_simd(ignore_slot).select(Vector::<f32>::splat(f32::MIN), best_y);
         let mut best_indices = *index_offsets;
 
         for i in 1..point_bundles.len() as usize {
@@ -195,15 +196,15 @@ impl ConvexHullHelper {
             let candidate_indices =
                 *index_offsets + Vector::<i32>::splat((i << BundleIndexing::vector_shift()) as i32);
             let ignore_slot = (!allow_vertex_bundles[i])
-                | ((*x).simd_le(*plane_epsilon).to_int() & (*y).simd_le(*plane_epsilon).to_int())
-                | (candidate_indices.simd_eq(edge_index_a).to_int()
-                    | candidate_indices.simd_eq(edge_index_b).to_int());
-            let use_candidate = (*y * best_x).simd_gt(best_y * *x).to_int() & !ignore_slot;
+                | ((*x).simd_le(*plane_epsilon).to_simd() & (*y).simd_le(*plane_epsilon).to_simd())
+                | (candidate_indices.simd_eq(edge_index_a).to_simd()
+                    | candidate_indices.simd_eq(edge_index_b).to_simd());
+            let use_candidate = (*y * best_x).simd_gt(best_y * *x).to_simd() & !ignore_slot;
 
-            let mask = Mask::from_int(use_candidate);
+            let mask = Mask::from_simd(use_candidate);
             best_y = mask.select(*y, best_y);
             best_x = mask.select(*x, best_x);
-            best_indices = mask.cast().select(candidate_indices, best_indices);
+            best_indices = mask.cast::<i32>().select(candidate_indices, best_indices);
         }
 
         let mut best_y_narrow = best_y[0];
@@ -242,7 +243,7 @@ impl ConvexHullHelper {
         for i in 0..point_bundles.len() as usize {
             let dot = projected_on_x[i] * projected_plane_normal.x
                 + projected_on_y[i] * projected_plane_normal.y;
-            let coplanar = dot.simd_gt(negated_plane_epsilon).to_int();
+            let coplanar = dot.simd_gt(negated_plane_epsilon).to_simd();
             if coplanar.simd_lt(Vector::<i32>::splat(0)).any() {
                 let bundle_base_index = i << BundleIndexing::vector_shift();
                 let mut local_index_maximum = point_count - bundle_base_index;
@@ -603,7 +604,7 @@ impl ConvexHullHelper {
                 Vector3Wide::distance_squared(&point_bundles[i], &centroid_bundle);
             let use_new = distance_squared_candidate.simd_gt(distance_squared_bundle);
             most_distant_indices_bundle = use_new
-                .cast()
+                .cast::<i32>()
                 .select(bundle_indices, most_distant_indices_bundle);
             distance_squared_bundle = distance_squared_bundle.simd_max(distance_squared_candidate);
         }

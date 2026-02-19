@@ -11,6 +11,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::Select;
 
 /// Constrains points on two bodies to be separated by a goal distance.
 #[repr(C)]

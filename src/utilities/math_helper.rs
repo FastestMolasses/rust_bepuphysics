@@ -9,6 +9,7 @@ use std::simd::StdFloat;
 use std::arch::aarch64::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
+use std::simd::Select;
 
 const TWO_PI: f32 = 2.0 * PI;
 

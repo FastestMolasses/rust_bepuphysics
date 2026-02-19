@@ -50,6 +50,6 @@ impl IPairDistanceTester<SphereWide, CylinderWide> for SphereCylinderDistanceTes
         let inv_scale = Vector::<f32>::splat(-1.0) / contact_distance_from_sphere_center;
         Vector3Wide::scale_to(&*closest_a, &inv_scale, normal);
         *distance = contact_distance_from_sphere_center - a.radius;
-        *intersected = distance.simd_lt(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_lt(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

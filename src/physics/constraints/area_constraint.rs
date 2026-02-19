@@ -5,6 +5,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 pub const BATCH_TYPE_ID: i32 = 36;
 

@@ -19,6 +19,7 @@ use super::shape::{
 };
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
+use std::simd::Select;
 
 /// Bounding plane of a convex hull face.
 #[derive(Clone, Copy, Default)]
@@ -299,7 +300,7 @@ impl IConvexShape for ConvexHull {
                 plane_t.simd_gt(latest_entry_wide) & (lane_exists & !exit_candidate);
             latest_entry_wide = entry_candidate.select(plane_t, latest_entry_wide);
             latest_entry_index_bundle = entry_candidate
-                .to_int()
+                .to_simd()
                 .simd_eq(Vector::<i32>::splat(-1))
                 .select(candidate_indices, latest_entry_index_bundle);
         }
@@ -628,7 +629,7 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
                 Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
                 let use_candidate = dot_candidate.simd_gt(dot);
                 best_indices = use_candidate
-                    .to_int()
+                    .to_simd()
                     .simd_eq(Vector::<i32>::splat(-1))
                     .select(
                         index_offsets
@@ -723,7 +724,7 @@ impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
                 Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
                 let use_candidate = dot_candidate.simd_gt(dot);
                 best_indices = use_candidate
-                    .to_int()
+                    .to_simd()
                     .simd_eq(Vector::<i32>::splat(-1))
                     .select(
                         index_offsets

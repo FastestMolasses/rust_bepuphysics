@@ -163,7 +163,7 @@ impl Bodies {
             & inertia.inverse_inertia_tensor.zx.simd_eq(zero)
             & inertia.inverse_inertia_tensor.zy.simd_eq(zero)
             & inertia.inverse_inertia_tensor.zz.simd_eq(zero);
-        result.to_int()
+        result.to_simd()
     }
 
     /// Has locked inertia (all inverse inertia tensor components zero).

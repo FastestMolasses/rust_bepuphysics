@@ -9,6 +9,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Mask;
+use std::simd::Select;
 
 #[derive(Default)]
 pub struct SphereTriangleDistanceTester;
@@ -83,13 +84,13 @@ impl IPairDistanceTester<SphereWide, TriangleWide> for SphereTriangleDistanceTes
             triangle_normal_length_squared - edge_plane_test_ab - edge_plane_test_ac;
 
         let zero_f = Vector::<f32>::splat(0.0);
-        let outside_ab = edge_plane_test_ab.simd_lt(zero_f).to_int();
-        let outside_ac = edge_plane_test_ac.simd_lt(zero_f).to_int();
-        let outside_bc = edge_plane_test_bc.simd_lt(zero_f).to_int();
+        let outside_ab = edge_plane_test_ab.simd_lt(zero_f).to_simd();
+        let outside_ac = edge_plane_test_ac.simd_lt(zero_f).to_simd();
+        let outside_bc = edge_plane_test_bc.simd_lt(zero_f).to_simd();
 
         let outside_any_edge = outside_ab | (outside_ac | outside_bc);
         let mut local_closest_on_triangle = Vector3Wide::default();
-        let outside_any = Mask::from_int(outside_any_edge);
+        let outside_any = Mask::from_simd(outside_any_edge);
 
         if outside_any.any() {
             // At least one lane detected a point outside of the triangle. Choose one edge which is outside as the representative.
@@ -154,6 +155,6 @@ impl IPairDistanceTester<SphereWide, TriangleWide> for SphereTriangleDistanceTes
         Matrix3x3Wide::transform_without_overlap(&local_normal, &r_b, normal);
         Vector3Wide::scale_to(&*normal, &(-a.radius), closest_a);
         *distance = local_normal_length - a.radius;
-        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

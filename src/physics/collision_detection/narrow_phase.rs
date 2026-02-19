@@ -902,8 +902,11 @@ impl NarrowPhase {
     pub fn prepare(&mut self, dt: f32, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         self.timestep_duration = dt;
         self.pair_cache.prepare(
-            thread_dispatcher
-                .map(|d| d as *const dyn IThreadDispatcher as *mut dyn IThreadDispatcher),
+            thread_dispatcher.map(|d| unsafe {
+                std::mem::transmute::<*const dyn IThreadDispatcher, *mut dyn IThreadDispatcher>(
+                    d as *const dyn IThreadDispatcher,
+                )
+            }),
         );
         self.constraint_remover.prepare(thread_dispatcher);
     }
@@ -2307,8 +2310,11 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             // non-thread-safe BufferPool, causing data races and pool corruption.
             if self.base.freshness_checker.is_some() && original_pair_cache_mapping_count > 0 {
                 let pool = unsafe { &mut *self.base.pool };
-                let dispatcher_ptr =
-                    dispatcher as *const dyn IThreadDispatcher as *mut dyn IThreadDispatcher;
+                let dispatcher_ptr = unsafe {
+                    std::mem::transmute::<*const dyn IThreadDispatcher, *mut dyn IThreadDispatcher>(
+                        dispatcher as *const dyn IThreadDispatcher,
+                    )
+                };
                 if let Some(ref mut checker) = self.base.freshness_checker {
                     checker.cached_dispatcher = Some(dispatcher_ptr);
                 }

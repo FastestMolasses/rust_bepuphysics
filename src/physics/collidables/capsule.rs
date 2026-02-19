@@ -15,6 +15,7 @@ use super::ray::RayWide;
 use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
+use std::simd::Select;
 
 /// Collision shape representing a sphere-expanded line segment.
 #[repr(C)]
@@ -360,7 +361,7 @@ impl IShapeWide<Capsule> for CapsuleWide {
 
         // Merge cylinder and cap results. use_cylinder is a Mask<i32, N>.
         // Convert to i32 mask for conditional selection on f32 values.
-        let use_cyl_i32 = use_cylinder.to_int();
+        let use_cyl_i32 = use_cylinder.to_simd();
         // For f32 conditional select, reinterpret the i32 mask
         let use_cyl_f32_mask: Mask<i32, { Vector::<f32>::LEN }> =
             Simd::simd_lt(use_cyl_i32, Vector::<i32>::splat(0));
@@ -369,8 +370,8 @@ impl IShapeWide<Capsule> for CapsuleWide {
         normal.z = use_cyl_f32_mask.select(cylinder_normal_z, cap_normal.z);
         *t = (use_cyl_f32_mask.select(cylinder_t, cap_t) + t_offset) * inverse_d_length;
 
-        let cyl_int_vals = cylinder_intersected_mask.to_int();
-        let cap_int_vals = cap_intersected_mask.to_int();
+        let cyl_int_vals = cylinder_intersected_mask.to_simd();
+        let cap_int_vals = cap_intersected_mask.to_simd();
         *intersected = use_cyl_f32_mask.select(cyl_int_vals, cap_int_vals);
 
         let mut rotated_normal = Vector3Wide::default();
@@ -408,7 +409,7 @@ impl ISupportFinder<Capsule, CapsuleWide> for CapsuleSupportFinder {
         let mut dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&orientation.y, direction, &mut dot);
         let zero = Vector::<f32>::splat(0.0);
-        let should_negate = dot.simd_lt(zero).to_int();
+        let should_negate = dot.simd_lt(zero).to_simd();
         *support = Vector3Wide::conditional_select(&should_negate, &negated, support);
     }
 
@@ -470,7 +471,7 @@ impl DepthRefinerSupportFinder<CapsuleWide> for CapsuleSupportFinder {
         let mut dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&orientation.y, direction, &mut dot);
         let zero = Vector::<f32>::splat(0.0);
-        let should_negate = dot.simd_lt(zero).to_int();
+        let should_negate = dot.simd_lt(zero).to_simd();
         *support = Vector3Wide::conditional_select(&should_negate, &negated, support);
     }
 }

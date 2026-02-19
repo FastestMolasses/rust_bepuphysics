@@ -15,6 +15,7 @@ use super::ray::RayWide;
 use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
+use std::simd::Select;
 
 /// Collision shape representing a cylinder.
 #[repr(C)]
@@ -342,7 +343,7 @@ impl IShapeWide<Cylinder> for CylinderWide {
         local_normal.y = use_cylinder.select(zero, cap_uses_upward.select(one, neg_one));
         local_normal.z = use_cylinder.select(cylinder_normal_z, zero);
         Matrix3x3Wide::transform_without_overlap(&local_normal, &orientation, normal);
-        *intersected = use_cylinder.select(cylinder_intersected.to_int(), hit_cap.to_int());
+        *intersected = use_cylinder.select(cylinder_intersected.to_simd(), hit_cap.to_simd());
     }
 }
 

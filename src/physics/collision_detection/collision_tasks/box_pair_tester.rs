@@ -12,6 +12,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for box vs box collisions.
 pub struct BoxPairTester;
@@ -164,7 +165,7 @@ impl BoxPairTester {
         let contained =
             candidate.x.abs().simd_le(*half_span_bx) & candidate.y.abs().simd_le(*half_span_by);
         let below_buffer_capacity = (*candidate_count).simd_lt(Vector::<i32>::splat(8));
-        let contact_exists = *allow_contacts & contained.to_int() & below_buffer_capacity.to_int();
+        let contact_exists = *allow_contacts & contained.to_simd() & below_buffer_capacity.to_simd();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -392,8 +393,8 @@ impl BoxPairTester {
         pair_count: i32,
     ) {
         let min_exists = *allow_contacts
-            & ((*max - *min).simd_gt(*epsilon)).to_int()
-            & min.abs().simd_lt(*half_span_b).to_int();
+            & ((*max - *min).simd_gt(*epsilon)).to_simd()
+            & min.abs().simd_lt(*half_span_b).to_simd();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -403,7 +404,7 @@ impl BoxPairTester {
         );
 
         let max_exists =
-            *allow_contacts & max.simd_ge(*min).to_int() & max.abs().simd_le(*half_span_b).to_int();
+            *allow_contacts & max.simd_ge(*min).to_simd() & max.abs().simd_le(*half_span_b).to_simd();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -784,7 +785,7 @@ impl BoxPairTester {
             // Early out if no contacts
             let active_lanes = BundleIndexing::create_mask_for_count_in_bundle(pair_count as usize);
             let minimum_depth = -*speculative_margin;
-            let allow_contacts = active_lanes & depth.simd_ge(minimum_depth).to_int();
+            let allow_contacts = active_lanes & depth.simd_ge(minimum_depth).to_simd();
             if allow_contacts.simd_eq(Vector::<i32>::splat(0)).all() {
                 manifold.contact0_exists = Vector::<i32>::splat(0);
                 manifold.contact1_exists = Vector::<i32>::splat(0);
@@ -817,8 +818,8 @@ impl BoxPairTester {
             let abs_ay_dot = ay_dot.abs();
             let abs_az_dot = az_dot.abs();
             let max_a_dot = abs_ax_dot.simd_max(abs_ay_dot.simd_max(abs_az_dot));
-            let use_ax = max_a_dot.simd_eq(abs_ax_dot).to_int();
-            let use_ay = max_a_dot.simd_eq(abs_ay_dot).to_int() & !use_ax;
+            let use_ax = max_a_dot.simd_eq(abs_ax_dot).to_simd();
+            let use_ay = max_a_dot.simd_eq(abs_ay_dot).to_simd() & !use_ax;
 
             let _normal_a = Vector3Wide::conditional_select(
                 &use_ay,
@@ -870,8 +871,8 @@ impl BoxPairTester {
             let abs_by_dot = by_dot.abs();
             let abs_bz_dot = bz_dot.abs();
             let max_b_dot = abs_bx_dot.simd_max(abs_by_dot.simd_max(abs_bz_dot));
-            let use_bx = max_b_dot.simd_eq(abs_bx_dot).to_int();
-            let use_by = max_b_dot.simd_eq(abs_by_dot).to_int() & !use_bx;
+            let use_bx = max_b_dot.simd_eq(abs_bx_dot).to_simd();
+            let use_by = max_b_dot.simd_eq(abs_by_dot).to_simd() & !use_bx;
             let use_bx_f = use_bx.simd_lt(Vector::<i32>::splat(0));
             let use_by_f = use_by.simd_lt(Vector::<i32>::splat(0));
 

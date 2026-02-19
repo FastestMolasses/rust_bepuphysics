@@ -46,6 +46,6 @@ impl IPairDistanceTester<SphereWide, CapsuleWide> for SphereCapsuleDistanceTeste
         let surface_offset = -a.radius;
         Vector3Wide::scale_to(&*normal, &surface_offset, closest_a);
         *distance = internal_distance - a.radius - b.radius;
-        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

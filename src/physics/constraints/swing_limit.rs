@@ -10,6 +10,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Restricts axes attached to two bodies to fall within a maximum swing angle.
 #[repr(C)]
@@ -167,7 +168,7 @@ impl SwingLimitFunctions {
         Vector3Wide::dot(jacobian_a, jacobian_a, &mut jacobian_length_squared);
         let use_fallback = jacobian_length_squared
             .simd_lt(Vector::<f32>::splat(1e-7))
-            .to_int();
+            .to_simd();
         *jacobian_a =
             Vector3Wide::conditional_select(&use_fallback, &fallback_jacobian, jacobian_a);
     }

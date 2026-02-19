@@ -15,6 +15,7 @@ use super::mesh_inertia_helper::MeshInertiaHelper;
 use super::ray::RayWide;
 use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
+use std::simd::Select;
 
 /// Collision shape representing an individual triangle.
 /// Triangle collisions and ray tests are one-sided; only tests which see the triangle as wound
@@ -221,7 +222,7 @@ impl TriangleWide {
             epsilon_scale,
             &mut epsilon,
         );
-        *nondegenerate_mask = triangle_normal_length.simd_gt(epsilon).to_int();
+        *nondegenerate_mask = triangle_normal_length.simd_gt(epsilon).to_simd();
     }
 
     /// Computes a mask indicating which triangle lanes are non-degenerate from precomputed lengths.
@@ -240,7 +241,7 @@ impl TriangleWide {
             epsilon_scale,
             &mut epsilon,
         );
-        *nondegenerate_mask = triangle_normal_length.simd_gt(epsilon).to_int();
+        *nondegenerate_mask = triangle_normal_length.simd_gt(epsilon).to_simd();
     }
 
     /// Wide ray test against triangle vertices.
@@ -281,7 +282,7 @@ impl TriangleWide {
             & v.simd_ge(zero)
             & w.simd_ge(zero)
             & (v + w).simd_le(dn))
-        .to_int();
+        .to_simd();
     }
 }
 
@@ -450,8 +451,8 @@ impl ISupportFinder<Triangle, TriangleWide> for TriangleSupportFinder {
         Vector3Wide::dot(&shape.b, direction, &mut b_dot);
         Vector3Wide::dot(&shape.c, direction, &mut c_dot);
         let max_val = a_dot.simd_max(b_dot.simd_max(c_dot));
-        let pick_a = max_val.simd_eq(a_dot).to_int();
-        let pick_c = max_val.simd_eq(c_dot).to_int();
+        let pick_a = max_val.simd_eq(a_dot).to_simd();
+        let pick_c = max_val.simd_eq(c_dot).to_simd();
         *support = Vector3Wide::conditional_select(&pick_a, &shape.a, &shape.b);
         *support = Vector3Wide::conditional_select(&pick_c, &shape.c, support);
     }
@@ -484,8 +485,8 @@ impl crate::physics::collision_detection::support_finder::ISupportFinder<Triangl
         Vector3Wide::dot(&shape.b, direction, &mut b_dot);
         Vector3Wide::dot(&shape.c, direction, &mut c_dot);
         let max_val = a_dot.simd_max(b_dot.simd_max(c_dot));
-        let pick_a = max_val.simd_eq(a_dot).to_int();
-        let pick_c = max_val.simd_eq(c_dot).to_int();
+        let pick_a = max_val.simd_eq(a_dot).to_simd();
+        let pick_c = max_val.simd_eq(c_dot).to_simd();
         *support = Vector3Wide::conditional_select(&pick_a, &shape.a, &shape.b);
         *support = Vector3Wide::conditional_select(&pick_c, &shape.c, support);
     }

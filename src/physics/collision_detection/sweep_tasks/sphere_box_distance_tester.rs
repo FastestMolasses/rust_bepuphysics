@@ -58,6 +58,6 @@ impl IPairDistanceTester<SphereWide, BoxWide> for SphereBoxDistanceTester {
         let negative_radius = -a.radius;
         Vector3Wide::scale_to(&*normal, &negative_radius, closest_a);
         *distance = inner_distance - a.radius;
-        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

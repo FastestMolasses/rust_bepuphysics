@@ -7,6 +7,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for sphere vs capsule collisions.
 pub struct SphereCapsuleTester;
@@ -47,7 +48,7 @@ impl SphereCapsuleTester {
         // If the center of the sphere is on the internal line segment, choose a direction
         // on the plane defined by the capsule's up vector.
         manifold.normal =
-            Vector3Wide::conditional_select(&normal_is_valid.to_int(), &manifold.normal, &x);
+            Vector3Wide::conditional_select(&normal_is_valid.to_simd(), &manifold.normal, &x);
         manifold.depth = a.radius + b.radius - internal_distance;
         manifold.feature_id = Vector::<i32>::splat(0);
 
@@ -58,6 +59,6 @@ impl SphereCapsuleTester {
             &negative_offset_from_sphere,
             &mut manifold.offset_a,
         );
-        manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_int();
+        manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_simd();
     }
 }

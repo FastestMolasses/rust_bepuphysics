@@ -11,6 +11,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Quat;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Constrains two bodies to maintain a target twist angle around body-attached axes.
 #[repr(C)]
@@ -161,7 +162,7 @@ impl TwistServoFunctions {
         let inv_length = Vector::<f32>::splat(1.0) / length;
         let mut scaled = Vector3Wide::default();
         Vector3Wide::scale_to(jacobian_a, &inv_length, &mut scaled);
-        let use_fallback = length.simd_lt(Vector::<f32>::splat(1e-10)).to_int();
+        let use_fallback = length.simd_lt(Vector::<f32>::splat(1e-10)).to_simd();
         *jacobian_a = Vector3Wide::conditional_select(&use_fallback, &basis_a.z, &scaled);
     }
 
@@ -313,7 +314,7 @@ impl TwistServoFunctions {
         let inv_length = Vector::<f32>::splat(1.0) / length;
         let mut scaled = Vector3Wide::default();
         Vector3Wide::scale_to(jacobian_a, &inv_length, &mut scaled);
-        let use_fallback = length.simd_lt(Vector::<f32>::splat(1e-10)).to_int();
+        let use_fallback = length.simd_lt(Vector::<f32>::splat(1e-10)).to_simd();
         *jacobian_a = Vector3Wide::conditional_select(&use_fallback, &basis_a_z, &scaled);
     }
 

@@ -67,7 +67,7 @@ impl IPairDistanceTester<CapsuleWide, CylinderWide> for CapsuleCylinderDistanceT
             &mut local_normal,
         );
         *distance = *distance - a.radius;
-        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_simd();
         QuaternionWide::transform_without_overlap(&local_normal, orientation_b, normal);
         let mut local_closest_a = Vector3Wide::default();
         Vector3Wide::scale_to(&capsule_axis, &t, &mut local_closest_a);

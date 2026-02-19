@@ -5,6 +5,7 @@ use crate::physics::collision_detection::convex_contact_manifold_wide::Convex1Co
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for sphere vs sphere collisions.
 pub struct SpherePairTester;
@@ -40,7 +41,7 @@ impl SpherePairTester {
             &negative_offset_from_a,
             &mut manifold.offset_a,
         );
-        manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_int();
+        manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_simd();
         manifold.feature_id = Vector::<i32>::splat(0);
     }
 }

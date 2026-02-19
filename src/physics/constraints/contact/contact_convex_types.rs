@@ -18,6 +18,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialEq;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 // ============================================================================
 // Accumulated Impulse types

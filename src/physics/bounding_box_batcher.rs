@@ -23,6 +23,7 @@ use glam::Vec3;
 use std::simd::prelude::*;
 
 use crate::physics::body_properties::BodyVelocityWide;
+use std::simd::Select;
 
 const VECTOR_WIDTH: usize = crate::utilities::vector::VECTOR_WIDTH;
 

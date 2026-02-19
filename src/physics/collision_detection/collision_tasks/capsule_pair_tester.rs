@@ -6,6 +6,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for capsule vs capsule collisions.
 pub struct CapsulePairTester;
@@ -74,7 +75,7 @@ impl CapsulePairTester {
         manifold.normal = Vector3Wide::scale(&manifold.normal, &inverse_distance);
         let normal_is_valid = distance.simd_gt(Vector::<f32>::splat(1e-7));
         manifold.normal =
-            Vector3Wide::conditional_select(&normal_is_valid.to_int(), &manifold.normal, &xa);
+            Vector3Wide::conditional_select(&normal_is_valid.to_simd(), &manifold.normal, &xa);
 
         // Coplanarity-based interval weighting.
         let mut plane_normal = Vector3Wide::default();
@@ -139,10 +140,10 @@ impl CapsulePairTester {
         manifold.feature_id0 = Vector::<i32>::splat(0);
         manifold.feature_id1 = Vector::<i32>::splat(1);
         let minimum_accepted_depth = -*speculative_margin;
-        manifold.contact0_exists = manifold.depth0.simd_ge(minimum_accepted_depth).to_int();
-        manifold.contact1_exists = manifold.depth1.simd_ge(minimum_accepted_depth).to_int()
+        manifold.contact0_exists = manifold.depth0.simd_ge(minimum_accepted_depth).to_simd();
+        manifold.contact1_exists = manifold.depth1.simd_ge(minimum_accepted_depth).to_simd()
             & (a_max - a_min)
                 .simd_gt(Vector::<f32>::splat(1e-7) * a.half_length)
-                .to_int();
+                .to_simd();
     }
 }

@@ -8,6 +8,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Constrains the center of two bodies to be separated by a distance within a range.
 #[repr(C)]
@@ -129,7 +130,7 @@ impl CenterDistanceLimitFunctions {
         *use_minimum = (*distance - *minimum_distance)
             .abs()
             .simd_lt((*distance - *maximum_distance).abs())
-            .to_int();
+            .to_simd();
         let mut negated_jacobian = Vector3Wide::default();
         Vector3Wide::negate(jacobian_a, &mut negated_jacobian);
         *jacobian_a = Vector3Wide::conditional_select(use_minimum, &negated_jacobian, jacobian_a);

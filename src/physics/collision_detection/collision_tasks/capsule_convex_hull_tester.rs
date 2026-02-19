@@ -13,6 +13,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 pub struct CapsuleConvexHullTester;
 
@@ -96,7 +97,7 @@ impl CapsuleConvexHullTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
+        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = std::mem::zeroed();
             return;
@@ -275,11 +276,11 @@ impl CapsuleConvexHullTester {
         manifold.feature_id1 = Vector::<i32>::splat(1);
         // AndNot(a, b) = a & !b
         manifold.contact0_exists =
-            manifold.depth0.simd_ge(depth_threshold).to_int() & !inactive_lanes;
+            manifold.depth0.simd_ge(depth_threshold).to_simd() & !inactive_lanes;
         manifold.contact1_exists = (t_exit - t_entry)
             .simd_gt(a.half_length * Vector::<f32>::splat(1e-3))
-            .to_int()
-            & manifold.depth1.simd_ge(depth_threshold).to_int()
+            .to_simd()
+            & manifold.depth1.simd_ge(depth_threshold).to_simd()
             & !inactive_lanes;
 
         Matrix3x3Wide::transform_without_overlap(

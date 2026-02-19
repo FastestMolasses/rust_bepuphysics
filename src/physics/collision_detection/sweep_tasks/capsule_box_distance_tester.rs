@@ -9,6 +9,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 #[derive(Default)]
 pub struct CapsuleBoxDistanceTester;
@@ -222,14 +223,14 @@ fn select_for_edge(
     edge_local_normal_candidate: &Vector3Wide,
     edge_direction_index_candidate: &Vector<i32>,
 ) {
-    let use_candidate = edge_depth_candidate.simd_lt(*edge_depth).to_int();
+    let use_candidate = edge_depth_candidate.simd_lt(*edge_depth).to_simd();
     *edge_depth = edge_depth.simd_min(*edge_depth_candidate);
     *edge_local_normal = Vector3Wide::conditional_select(
         &use_candidate,
         edge_local_normal_candidate,
         edge_local_normal,
     );
-    *edge_direction_index = Mask::from_int(use_candidate)
+    *edge_direction_index = Mask::from_simd(use_candidate)
         .select(*edge_direction_index_candidate, *edge_direction_index);
 }
 
@@ -242,7 +243,7 @@ fn select3(
     local_normal_candidate: &Vector3Wide,
     local_closest_candidate: &Vector3Wide,
 ) {
-    let use_candidate = depth_candidate.simd_lt(*depth).to_int();
+    let use_candidate = depth_candidate.simd_lt(*depth).to_simd();
     *depth = depth.simd_min(*depth_candidate);
     *local_normal =
         Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
@@ -257,7 +258,7 @@ fn select2(
     depth_candidate: &Vector<f32>,
     local_normal_candidate: &Vector3Wide,
 ) {
-    let use_candidate = depth_candidate.simd_lt(*depth).to_int();
+    let use_candidate = depth_candidate.simd_lt(*depth).to_simd();
     *depth = depth.simd_min(*depth_candidate);
     *local_normal =
         Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
@@ -334,7 +335,7 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
         let mut local_closest = Vector3Wide::conditional_select(
             &endpoint_choice_dot
                 .simd_lt(Vector::<f32>::splat(0.0))
-                .to_int(),
+                .to_simd(),
             &endpoint1,
             &endpoint0,
         );
@@ -464,6 +465,6 @@ impl IPairDistanceTester<CapsuleWide, BoxWide> for CapsuleBoxDistanceTester {
         closest_a.y -= closest_offset.y;
         closest_a.z -= closest_offset.z;
         *distance = -depth - a.radius;
-        *intersected = distance.simd_lt(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_lt(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

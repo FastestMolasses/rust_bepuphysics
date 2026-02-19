@@ -6,6 +6,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Helper methods for convex hull face picking during collision testing.
 pub struct ConvexHullTestHelper;
@@ -72,7 +73,7 @@ impl ConvexHullTestHelper {
             let use_candidate = error_improvement.simd_ge(slot_bounding_plane_epsilon_bundle)
                 | (error_improvement.simd_gt(negated_slot_bounding_plane_epsilon_bundle)
                     & dot.simd_gt(best_face_dot_bundle));
-            let use_candidate_i = use_candidate.to_int();
+            let use_candidate_i = use_candidate.to_simd();
             best_face_dot_bundle = use_candidate.select(dot, best_face_dot_bundle);
             best_plane_error_bundle =
                 use_candidate.select(candidate_error, best_plane_error_bundle);

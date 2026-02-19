@@ -10,7 +10,7 @@ A line-by-line translation of [BepuPhysics v2](https://github.com/bepu/bepuphysi
 
 ## Requirements
 
-- **Rust nightly** — requires `#![feature(portable_simd)]` and `#![feature(generic_const_exprs)]`
+- **Rust nightly v1.95.0+** — requires `#![feature(portable_simd)]` and `#![feature(generic_const_exprs)]`
 - macOS (NEON SIMD) or x86_64 (SSE/AVX2)
 
 ## Installation

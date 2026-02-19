@@ -13,6 +13,7 @@ use crate::utilities::symmetric4x4_wide::Symmetric4x4Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector4_wide::Vector4Wide;
+use std::simd::Select;
 
 /// Constrains two bodies with a swivel hinge that allows rotation around two axes,
 /// like a laptop monitor hinge that allows flipping the screen.
@@ -250,7 +251,7 @@ impl SwivelHingeFunctions {
         }
         // If the axes are aligned, it'll be zero length and the effective mass can get NaNsploded.
         let length_squared = swivel_hinge_jacobian.length_squared();
-        let use_fallback = length_squared.simd_lt(Vector::<f32>::splat(1e-3)).to_int();
+        let use_fallback = length_squared.simd_lt(Vector::<f32>::splat(1e-3)).to_simd();
         // This causes a discontinuity, but a discontinuity is better than a NaNsplode.
         *swivel_hinge_jacobian =
             Vector3Wide::conditional_select(&use_fallback, hinge_axis, swivel_hinge_jacobian);

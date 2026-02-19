@@ -18,6 +18,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for box vs convex hull collisions.
 pub struct BoxConvexHullTester;
@@ -105,7 +106,7 @@ impl BoxConvexHullTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
+        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
         // Clear all contact exists states up front.
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;
@@ -126,8 +127,8 @@ impl BoxConvexHullTester {
         let use_x = abs_local_normal_in_a.x.simd_gt(abs_local_normal_in_a.y)
             & abs_local_normal_in_a.x.simd_gt(abs_local_normal_in_a.z);
         let use_y = (!use_x) & abs_local_normal_in_a.y.simd_gt(abs_local_normal_in_a.z);
-        let use_x_i = use_x.to_int();
-        let use_y_i = use_y.to_int();
+        let use_x_i = use_x.to_simd();
+        let use_y_i = use_y.to_simd();
 
         let mut box_face_normal = Vector3Wide::conditional_select(
             &use_x_i,
@@ -155,10 +156,10 @@ impl BoxConvexHullTester {
             Vector3Wide::conditional_select(&use_y_i, &hull_local_box_orientation.x, &box_face_y);
 
         let negate_face = use_x.select(
-            local_normal_in_a.x.simd_gt(zero_f).to_int(),
+            local_normal_in_a.x.simd_gt(zero_f).to_simd(),
             use_y.select(
-                local_normal_in_a.y.simd_gt(zero_f).to_int(),
-                local_normal_in_a.z.simd_gt(zero_f).to_int(),
+                local_normal_in_a.y.simd_gt(zero_f).to_simd(),
+                local_normal_in_a.z.simd_gt(zero_f).to_simd(),
             ),
         );
         Vector3Wide::conditionally_negate(&negate_face, &mut box_face_normal);

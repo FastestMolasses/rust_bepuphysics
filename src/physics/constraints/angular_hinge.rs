@@ -16,6 +16,7 @@ use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::Select;
 
 /// Angular component of a hinge. Constrains the angular degrees of freedom of two bodies
 /// such that they can only rotate relative to each other around the hinge's axis.
@@ -147,8 +148,8 @@ impl AngularHingeFunctions {
 
         // If the axis is parallel with the normal of the plane, just arbitrarily pick 0 angle.
         let epsilon = Vector::<f32>::splat(1e-7);
-        let use_fallback_x = x_length.simd_lt(epsilon).to_int();
-        let use_fallback_y = y_length.simd_lt(epsilon).to_int();
+        let use_fallback_x = x_length.simd_lt(epsilon).to_simd();
+        let use_fallback_y = y_length.simd_lt(epsilon).to_simd();
         hinge_axis_b_on_plane_x = Vector3Wide::conditional_select(
             &use_fallback_x,
             hinge_axis_a,

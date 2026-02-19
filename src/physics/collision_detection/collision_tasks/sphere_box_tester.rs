@@ -8,6 +8,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Pair tester for sphere vs box collisions.
 pub struct SphereBoxTester;
@@ -88,7 +89,7 @@ impl SphereBoxTester {
         let inside_depth_total = inside_depth + a.radius;
         let use_inside = distance.simd_eq(Vector::<f32>::splat(0.0));
         let local_normal =
-            Vector3Wide::conditional_select(&use_inside.to_int(), &inside_normal, &outside_normal);
+            Vector3Wide::conditional_select(&use_inside.to_simd(), &inside_normal, &outside_normal);
         Matrix3x3Wide::transform_without_overlap(
             &local_normal,
             &orientation_matrix_b,
@@ -104,6 +105,6 @@ impl SphereBoxTester {
             &negative_offset_from_sphere,
             &mut manifold.offset_a,
         );
-        manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_int();
+        manifold.contact_exists = manifold.depth.simd_gt(-*speculative_margin).to_simd();
     }
 }

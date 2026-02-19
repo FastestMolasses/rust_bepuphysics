@@ -14,6 +14,7 @@ use super::ray::RayWide;
 use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
 use crate::physics::collision_detection::support_finder::ISupportFinder as DepthRefinerSupportFinder;
+use std::simd::Select;
 
 /// Collision shape representing a solid cuboid.
 #[repr(C)]
@@ -332,7 +333,7 @@ impl IShapeWide<Box> for BoxWide {
         let earliest_exit = exit_t_x.simd_min(exit_t_y).simd_min(exit_t_z);
         let earliest_entry = entry_t_x.simd_max(entry_t_y).simd_max(entry_t_z);
         *t = zero.simd_max(earliest_entry);
-        *intersected = t.simd_le(earliest_exit).to_int();
+        *intersected = t.simd_le(earliest_exit).to_simd();
 
         let use_x = earliest_entry.simd_eq(entry_t_x);
         let use_y = earliest_entry.simd_eq(entry_t_y) & !use_x;

@@ -9,6 +9,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
+use std::simd::Select;
 
 /// Constrains points on two bodies to be separated by a distance within a range.
 #[repr(C)]
@@ -213,7 +214,7 @@ impl DistanceLimitFunctions {
         *use_minimum = (*distance - *minimum_distance)
             .abs()
             .simd_lt((*distance - *maximum_distance).abs())
-            .to_int();
+            .to_simd();
         let sign = use_minimum
             .simd_lt(Vector::<i32>::splat(0))
             .select(Vector::<f32>::splat(-1.0), Vector::<f32>::splat(1.0));

@@ -17,6 +17,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for box vs cylinder collisions.
 pub struct BoxCylinderTester;
@@ -46,7 +47,7 @@ impl BoxCylinderTester {
         let radius_squared = *radius * *radius;
         c_val = c_val - radius_squared;
         let d = b_val * b_val - a_val * c_val;
-        *intersected = d.simd_ge(zero_f).to_int();
+        *intersected = d.simd_ge(zero_f).to_simd();
         let t_offset = StdFloat::sqrt(d.simd_max(zero_f)) * inverse_a;
         let t_base = -b_val * inverse_a;
         *t_min = t_base - t_offset;
@@ -77,7 +78,7 @@ impl BoxCylinderTester {
             candidates,
             candidate_count,
             &candidate,
-            &(allow_contacts & t_min.simd_lt(*t_max).to_int() & t_min.simd_gt(zero_f).to_int()),
+            &(allow_contacts & t_min.simd_lt(*t_max).to_simd() & t_min.simd_gt(zero_f).to_simd()),
             pair_count,
         );
         candidate.feature_id = *edge_id + Vector::<i32>::splat(4);
@@ -87,7 +88,7 @@ impl BoxCylinderTester {
             candidates,
             candidate_count,
             &candidate,
-            &(allow_contacts & t_max.simd_gt(zero_f).to_int()),
+            &(allow_contacts & t_max.simd_gt(zero_f).to_simd()),
             pair_count,
         );
     }
@@ -159,10 +160,10 @@ impl BoxCylinderTester {
         let edge0010_dot = point.x * edge0010.y - point.y * edge0010.x;
         let edge1011_dot = point.x * edge1011.y - point.y * edge1011.x;
         let contained = *allow_contact
-            & (edge0010_dot.simd_ge(*edge0010_plane_min).to_int()
-                & edge0010_dot.simd_le(*edge0010_plane_max).to_int())
-            & (edge1011_dot.simd_ge(*edge1011_plane_min).to_int()
-                & edge1011_dot.simd_le(*edge1011_plane_max).to_int());
+            & (edge0010_dot.simd_ge(*edge0010_plane_min).to_simd()
+                & edge0010_dot.simd_le(*edge0010_plane_max).to_simd())
+            & (edge1011_dot.simd_ge(*edge1011_plane_min).to_simd()
+                & edge1011_dot.simd_le(*edge1011_plane_max).to_simd());
         let mut candidate = MaybeUninit::<ManifoldCandidate>::uninit();
         let c = candidate.assume_init_mut();
         c.x = point.x;
@@ -250,7 +251,7 @@ impl BoxCylinderTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
+        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = std::mem::zeroed();
             return;
@@ -267,8 +268,8 @@ impl BoxCylinderTester {
         let use_x = abs_local_normal_in_a.x.simd_gt(abs_local_normal_in_a.y)
             & abs_local_normal_in_a.x.simd_gt(abs_local_normal_in_a.z);
         let use_y = (!use_x) & abs_local_normal_in_a.y.simd_gt(abs_local_normal_in_a.z);
-        let use_x_i = use_x.to_int();
-        let use_y_i = use_y.to_int();
+        let use_x_i = use_x.to_simd();
+        let use_y_i = use_y.to_simd();
         let mut box_face_normal = Vector3Wide::conditional_select(&use_x_i, &r_a.x, &r_a.z);
         box_face_normal = Vector3Wide::conditional_select(&use_y_i, &r_a.y, &box_face_normal);
         let mut box_face_x = Vector3Wide::conditional_select(&use_x_i, &r_a.y, &r_a.x);
@@ -276,10 +277,10 @@ impl BoxCylinderTester {
         let mut box_face_y = Vector3Wide::conditional_select(&use_x_i, &r_a.z, &r_a.y);
         box_face_y = Vector3Wide::conditional_select(&use_y_i, &r_a.x, &box_face_y);
         let negate_face_mask = use_x.select(
-            local_normal_in_a.x.simd_gt(zero_f).to_int(),
+            local_normal_in_a.x.simd_gt(zero_f).to_simd(),
             use_y.select(
-                local_normal_in_a.y.simd_gt(zero_f).to_int(),
-                local_normal_in_a.z.simd_gt(zero_f).to_int(),
+                local_normal_in_a.y.simd_gt(zero_f).to_simd(),
+                local_normal_in_a.z.simd_gt(zero_f).to_simd(),
             ),
         );
         let negate_face = negate_face_mask;
@@ -320,7 +321,7 @@ impl BoxCylinderTester {
                 .y
                 .abs()
                 .simd_gt(Vector::<f32>::splat(0.70710678118));
-        let use_cap_i = use_cap.to_int();
+        let use_cap_i = use_cap.to_simd();
 
         let mut face_normal_dot_local_normal = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(
@@ -664,7 +665,7 @@ impl BoxCylinderTester {
         }
 
         let use_side = (!use_cap) & (!inactive_lanes.simd_lt(zero_i));
-        let use_side_i = use_side.to_int();
+        let use_side_i = use_side.to_simd();
         if use_side_i.simd_lt(zero_i).any() {
             // Side-face manifold.
             let mut edge_normal_x = Vector3Wide::default();
@@ -793,11 +794,11 @@ impl BoxCylinderTester {
             manifold.depth0 = use_side.select(depth0, manifold.depth0);
             manifold.depth1 = use_side.select(depth1, manifold.depth1);
             manifold.contact0_exists = use_side_i.simd_ne(zero_i).select(
-                depth0.simd_ge(depth_threshold).to_int(),
+                depth0.simd_ge(depth_threshold).to_simd(),
                 manifold.contact0_exists,
             );
             manifold.contact1_exists = use_side_i.simd_ne(zero_i).select(
-                depth1.simd_ge(depth_threshold).to_int() & t_max.simd_gt(t_min).to_int(),
+                depth1.simd_ge(depth_threshold).to_simd() & t_max.simd_gt(t_min).to_simd(),
                 manifold.contact1_exists,
             );
             manifold.contact2_exists = use_side_i

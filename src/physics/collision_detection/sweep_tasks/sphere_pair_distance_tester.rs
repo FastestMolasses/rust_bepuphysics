@@ -31,6 +31,6 @@ impl IPairDistanceTester<SphereWide, SphereWide> for SpherePairDistanceTester {
         *distance = center_distance - a.radius - b.radius;
         let negative_radius_a = -a.radius;
         Vector3Wide::scale_to(&*normal, &negative_radius_a, closest_a);
-        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_int();
+        *intersected = distance.simd_le(Vector::<f32>::splat(0.0)).to_simd();
     }
 }

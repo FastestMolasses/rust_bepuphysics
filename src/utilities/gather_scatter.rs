@@ -12,7 +12,6 @@ impl GatherScatter {
     where
         T: Copy,
         T: std::simd::SimdElement,
-        std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,
     {
         let ptr = vector as *const Vector<T> as *const T;
         &*ptr.add(index)
@@ -25,7 +24,6 @@ impl GatherScatter {
     where
         T: Copy,
         T: std::simd::SimdElement,
-        std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,
     {
         let ptr = vector as *mut Vector<T> as *mut T;
         &mut *ptr.add(index)
@@ -99,7 +97,7 @@ impl GatherScatter {
         TOuter: Copy,
         TVector: Copy + Default,
         TVector: std::simd::SimdElement,
-        std::simd::LaneCount<{ optimal_lanes::<TVector>() }>: std::simd::SupportedLaneCount,
+        [(); optimal_lanes::<TVector>()]:,
     {
         let vector_count = mem::size_of::<TOuter>() / mem::size_of::<Vector<TVector>>();
         let lane_base = (bundle as *mut TOuter as *mut TVector).add(inner_index);
@@ -142,7 +140,6 @@ impl GatherScatter {
     pub unsafe fn get_first<T>(vector: &Vector<T>) -> &T
     where
         T: Copy + std::simd::SimdElement,
-        std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,
     {
         let ptr = vector as *const Vector<T> as *const T;
         &*ptr
@@ -153,7 +150,6 @@ impl GatherScatter {
     pub unsafe fn get_first_mut<T>(vector: &mut Vector<T>) -> &mut T
     where
         T: Copy + std::simd::SimdElement,
-        std::simd::LaneCount<{ optimal_lanes::<T>() }>: std::simd::SupportedLaneCount,
     {
         let ptr = vector as *mut Vector<T> as *mut T;
         &mut *ptr

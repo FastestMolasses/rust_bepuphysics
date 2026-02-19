@@ -19,6 +19,7 @@ use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
 use std::simd::prelude::*;
+use std::simd::Select;
 
 /// Support finder for triangles that have already been pretransformed into the other shape's local space.
 /// `compute_support` uses the already-transformed vertices directly.
@@ -55,8 +56,8 @@ impl ISupportFinder<TriangleWide> for PretransformedTriangleSupportFinder {
         Vector3Wide::dot(&shape.c, direction, &mut c_dot);
         let max = a_dot.simd_max(b_dot.simd_max(c_dot));
         *support =
-            Vector3Wide::conditional_select(&max.simd_eq(a_dot).to_int(), &shape.a, &shape.b);
-        *support = Vector3Wide::conditional_select(&max.simd_eq(c_dot).to_int(), &shape.c, support);
+            Vector3Wide::conditional_select(&max.simd_eq(a_dot).to_simd(), &shape.a, &shape.b);
+        *support = Vector3Wide::conditional_select(&max.simd_eq(c_dot).to_simd(), &shape.c, support);
     }
 }
 
@@ -91,12 +92,12 @@ impl TriangleCylinderTester {
         let ab_dot = ap.x * projected_ab.y - ap.y * projected_ab.x;
         let bc_dot = bp.x * projected_bc.y - bp.y * projected_bc.x;
         let ca_dot = cp.x * projected_ca.y - cp.y * projected_ca.x;
-        let sum = ab_dot.simd_gt(zero_f).to_int()
-            + bc_dot.simd_gt(zero_f).to_int()
-            + ca_dot.simd_gt(zero_f).to_int();
+        let sum = ab_dot.simd_gt(zero_f).to_simd()
+            + bc_dot.simd_gt(zero_f).to_simd()
+            + ca_dot.simd_gt(zero_f).to_simd();
         let contained = *allow_contact
-            & (sum.simd_eq(Vector::<i32>::splat(0)).to_int()
-                | sum.simd_eq(Vector::<i32>::splat(-3)).to_int());
+            & (sum.simd_eq(Vector::<i32>::splat(0)).to_simd()
+                | sum.simd_eq(Vector::<i32>::splat(-3)).to_simd());
         let mut candidate = MaybeUninit::<ManifoldCandidate>::uninit();
         let c = candidate.assume_init_mut();
         c.x = point.x;
@@ -126,7 +127,7 @@ impl TriangleCylinderTester {
         let face_normal_fallback_threshold = Vector::<f32>::splat(1e-4);
         let needs_fallback_face_normal = (!inactive_lanes.simd_lt(Vector::<i32>::splat(0)))
             & abs_face_normal_a_dot_normal.simd_lt(face_normal_fallback_threshold);
-        let needs_fallback_i = needs_fallback_face_normal.to_int();
+        let needs_fallback_i = needs_fallback_face_normal.to_simd();
         if needs_fallback_i.simd_eq(Vector::<i32>::splat(-1)).any() {
             let push_scale = ((abs_face_normal_a_dot_normal - face_normal_fallback_threshold)
                 / -face_normal_fallback_threshold)
@@ -255,10 +256,10 @@ impl TriangleCylinderTester {
         Vector3Wide::dot(&edge_plane_ab, &triangle_a_world, &mut ab_plane_test);
         Vector3Wide::dot(&edge_plane_bc, &triangle_b_world, &mut bc_plane_test);
         Vector3Wide::dot(&edge_plane_ca, &triangle_c_world, &mut ca_plane_test);
-        let cylinder_inside_edge_planes = ab_plane_test.simd_le(zero_f).to_int()
-            & bc_plane_test.simd_le(zero_f).to_int()
-            & ca_plane_test.simd_le(zero_f).to_int();
-        let cylinder_inside_and_below = cylinder_inside_edge_planes & cylinder_below_plane.to_int();
+        let cylinder_inside_edge_planes = ab_plane_test.simd_le(zero_f).to_simd()
+            & bc_plane_test.simd_le(zero_f).to_simd()
+            & ca_plane_test.simd_le(zero_f).to_simd();
+        let cylinder_inside_and_below = cylinder_inside_edge_planes & cylinder_below_plane.to_simd();
 
         let mut inactive_lanes =
             BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
@@ -330,10 +331,10 @@ impl TriangleCylinderTester {
         Vector3Wide::dot(&edge_plane_bc, &closest_to_b, &mut extreme_bc_test);
         Vector3Wide::dot(&edge_plane_ca, &closest_to_c, &mut extreme_ca_test);
         let triangle_normal_is_minimal = (cylinder_inside_edge_planes
-            & (!cylinder_below_plane.to_int()))
-            & extreme_ab_test.simd_le(zero_f).to_int()
-            & extreme_bc_test.simd_le(zero_f).to_int()
-            & extreme_ca_test.simd_le(zero_f).to_int();
+            & (!cylinder_below_plane.to_simd()))
+            & extreme_ab_test.simd_le(zero_f).to_simd()
+            & extreme_bc_test.simd_le(zero_f).to_simd()
+            & extreme_ca_test.simd_le(zero_f).to_simd();
 
         let depth_threshold = -*speculative_margin;
         let skip_depth_refine = triangle_normal_is_minimal | inactive_lanes;
@@ -392,8 +393,8 @@ impl TriangleCylinderTester {
                 .simd_gt(Vector::<f32>::splat(
                     -TriangleWide::BACKFACE_NORMAL_DOT_REJECTION_THRESHOLD,
                 ))
-                .to_int()
-            | depth.simd_lt(depth_threshold).to_int();
+                .to_simd()
+            | depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = std::mem::zeroed();
             return;
@@ -403,7 +404,7 @@ impl TriangleCylinderTester {
             & face_normal_a_dot_normal
                 .abs()
                 .simd_lt(Vector::<f32>::splat(0.2));
-        let _use_triangle_edge_case_i = use_triangle_edge_case.to_int();
+        let _use_triangle_edge_case_i = use_triangle_edge_case.to_simd();
 
         let cap_center_by = local_normal
             .y
@@ -414,7 +415,7 @@ impl TriangleCylinderTester {
                 .y
                 .abs()
                 .simd_gt(Vector::<f32>::splat(0.70710678118));
-        let use_cap_i = use_cap.to_int();
+        let use_cap_i = use_cap.to_simd();
 
         let mut local_offset_b0 = Vector3Wide::default();
         let mut local_offset_b1 = Vector3Wide::default();
@@ -573,7 +574,7 @@ impl TriangleCylinderTester {
             );
 
             let use_cap_triangle_face = use_cap & !use_triangle_edge_case;
-            let use_cap_triangle_face_i = use_cap_triangle_face.to_int();
+            let use_cap_triangle_face_i = use_cap_triangle_face.to_simd();
             let mut maximum_contact_count_in_bundle = 6;
             if use_cap_triangle_face_i.simd_lt(zero_i).any() {
                 maximum_contact_count_in_bundle = 10;
@@ -819,10 +820,10 @@ impl TriangleCylinderTester {
         }
 
         let use_side = (!use_cap) & (!inactive_lanes.simd_lt(zero_i));
-        let use_side_i = use_side.to_int();
+        let use_side_i = use_side.to_simd();
         if use_side_i.simd_lt(zero_i).any() {
             let use_side_edge_case = use_side & use_triangle_edge_case;
-            let use_side_edge_case_i = use_side_edge_case.to_int();
+            let use_side_edge_case_i = use_side_edge_case.to_simd();
             let mut depth_t_min = Vector::<f32>::splat(0.0);
             let mut depth_t_max = Vector::<f32>::splat(0.0);
             let mut cylinder_t_min = Vector::<f32>::splat(0.0);
@@ -839,8 +840,8 @@ impl TriangleCylinderTester {
                 ab_edge_alignment.simd_max(bc_edge_alignment.simd_max(ca_edge_alignment));
             let ab_is_dominant = max_alignment.simd_eq(ab_edge_alignment);
             let bc_is_dominant = max_alignment.simd_eq(bc_edge_alignment);
-            let ab_is_dominant_i = ab_is_dominant.to_int();
-            let bc_is_dominant_i = bc_is_dominant.to_int();
+            let ab_is_dominant_i = ab_is_dominant.to_simd();
+            let bc_is_dominant_i = bc_is_dominant.to_simd();
 
             let mut dominant_edge_start = Vector3Wide::conditional_select(
                 &ab_is_dominant_i,
@@ -936,7 +937,7 @@ impl TriangleCylinderTester {
             }
 
             let use_side_triangle_face = use_side & !use_triangle_edge_case;
-            let use_side_triangle_face_i = use_side_triangle_face.to_int();
+            let use_side_triangle_face_i = use_side_triangle_face.to_simd();
             if use_side_triangle_face_i.simd_lt(zero_i).any() {
                 // Side-triangle face case.
                 let inverse_denominator = one_f / face_normal_a_dot_normal;
@@ -1010,7 +1011,7 @@ impl TriangleCylinderTester {
                 let mut exit_ca = exiting_ca.select(edge_t_ca, max_value);
 
                 let ca_is_dominant = (!ab_is_dominant) & (!bc_is_dominant);
-                let _ca_is_dominant_i = ca_is_dominant.to_int();
+                let _ca_is_dominant_i = ca_is_dominant.to_simd();
                 let unrestrict_weight = one_f - restrict_weight;
                 entry_ab = ab_is_dominant.select(entry_ab * restrict_weight, entry_ab);
                 entry_bc = bc_is_dominant.select(entry_bc * restrict_weight, entry_bc);
@@ -1028,13 +1029,13 @@ impl TriangleCylinderTester {
                 // Vertex fallback for degenerate intervals.
                 let use_vertex_fallback =
                     use_side_triangle_face & side_tri_cyl_t_max.simd_lt(side_tri_cyl_t_min);
-                let use_vertex_fallback_i = use_vertex_fallback.to_int();
-                let ab_contributed = edge_t_ab.simd_eq(side_tri_cyl_t_min).to_int()
-                    | edge_t_ab.simd_eq(side_tri_cyl_t_max).to_int();
-                let bc_contributed = edge_t_bc.simd_eq(side_tri_cyl_t_min).to_int()
-                    | edge_t_bc.simd_eq(side_tri_cyl_t_max).to_int();
-                let ca_contributed = edge_t_ca.simd_eq(side_tri_cyl_t_min).to_int()
-                    | edge_t_ca.simd_eq(side_tri_cyl_t_max).to_int();
+                let use_vertex_fallback_i = use_vertex_fallback.to_simd();
+                let ab_contributed = edge_t_ab.simd_eq(side_tri_cyl_t_min).to_simd()
+                    | edge_t_ab.simd_eq(side_tri_cyl_t_max).to_simd();
+                let bc_contributed = edge_t_bc.simd_eq(side_tri_cyl_t_min).to_simd()
+                    | edge_t_bc.simd_eq(side_tri_cyl_t_max).to_simd();
+                let ca_contributed = edge_t_ca.simd_eq(side_tri_cyl_t_min).to_simd()
+                    | edge_t_ca.simd_eq(side_tri_cyl_t_max).to_simd();
                 let use_a = ca_contributed & ab_contributed;
                 let use_b = ab_contributed & bc_contributed;
                 let mut vertex_fallback =
@@ -1104,12 +1105,12 @@ impl TriangleCylinderTester {
             manifold.depth0 = use_side.select(depth_t_min, manifold.depth0);
             manifold.depth1 = use_side.select(depth_t_max, manifold.depth1);
             manifold.contact0_exists = use_side_i.simd_ne(zero_i).select(
-                depth_t_min.simd_gt(depth_threshold).to_int(),
+                depth_t_min.simd_gt(depth_threshold).to_simd(),
                 manifold.contact0_exists,
             );
             manifold.contact1_exists = use_side_i.simd_ne(zero_i).select(
-                depth_t_max.simd_gt(depth_threshold).to_int()
-                    & cylinder_t_max.simd_gt(cylinder_t_min).to_int(),
+                depth_t_max.simd_gt(depth_threshold).to_simd()
+                    & cylinder_t_max.simd_gt(cylinder_t_min).to_simd(),
                 manifold.contact1_exists,
             );
             manifold.contact2_exists = use_side_i

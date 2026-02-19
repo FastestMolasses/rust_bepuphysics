@@ -12,6 +12,7 @@ use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for cylinder vs cylinder collisions.
 pub struct CylinderPairTester;
@@ -145,7 +146,7 @@ impl CylinderPairTester {
         let mut local_a_to_contact = Vector3Wide::default();
         Vector3Wide::add(contact, local_offset_b, &mut local_a_to_contact);
         Matrix3x3Wide::transform_without_overlap(&local_a_to_contact, orientation_b, a_to_contact);
-        *contact_exists = *contact_exists & depth.simd_ge(negative_speculative_margin).to_int();
+        *contact_exists = *contact_exists & depth.simd_ge(negative_speculative_margin).to_simd();
     }
 
     /// Tests cylinder vs cylinder collision (two orientations).
@@ -219,7 +220,7 @@ impl CylinderPairTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_int();
+        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = unsafe { std::mem::zeroed() };
             return;
@@ -253,7 +254,7 @@ impl CylinderPairTester {
         manifold.contact1_exists = zero_i;
         manifold.contact2_exists = zero_i;
         manifold.contact3_exists = zero_i;
-        let use_cap_cap = (use_cap_a & use_cap_b).to_int() & !inactive_lanes;
+        let use_cap_cap = (use_cap_a & use_cap_b).to_simd() & !inactive_lanes;
 
         // Extreme points along the contact normal.
         let mut b_to_a_offset = Vector3Wide::default();
@@ -298,7 +299,7 @@ impl CylinderPairTester {
 
             let mut cap_contact0 = extreme_b.clone();
 
-            let both_not_parallel = (a_cap_not_parallel & b_cap_not_parallel).to_int();
+            let both_not_parallel = (a_cap_not_parallel & b_cap_not_parallel).to_simd();
             if ((!both_not_parallel) & !inactive_lanes)
                 .simd_lt(zero_i)
                 .any()
@@ -542,18 +543,18 @@ impl CylinderPairTester {
                 Self::from_cap_b_to_3d(&cap_contact2, &cap_center_by, &mut contact2);
                 Self::from_cap_b_to_3d(&cap_contact3, &cap_center_by, &mut contact3);
                 manifold.contact1_exists = (use_cap_cap
-                    & first_line_t_max.simd_gt(first_line_t_min).to_int())
+                    & first_line_t_max.simd_gt(first_line_t_min).to_simd())
                     & !both_not_parallel;
                 manifold.contact2_exists = manifold.contact1_exists;
                 manifold.contact3_exists = manifold.contact1_exists
-                    & second_line_t_max.simd_gt(second_line_t_min).to_int();
+                    & second_line_t_max.simd_gt(second_line_t_min).to_simd();
             }
             Self::from_cap_b_to_3d(&cap_contact0, &cap_center_by, &mut contact0);
             manifold.contact0_exists = use_cap_cap;
         }
 
         let use_cap_side =
-            ((use_cap_a & !use_cap_b) | (use_cap_b & !use_cap_a)).to_int() & !inactive_lanes;
+            ((use_cap_a & !use_cap_b) | (use_cap_b & !use_cap_a)).to_simd() & !inactive_lanes;
         // Side normal computation (shared for cap-side and side-side).
         let mut ax = Vector::<f32>::splat(0.0);
         let mut az = Vector::<f32>::splat(0.0);
@@ -623,7 +624,7 @@ impl CylinderPairTester {
                 &mut projected_line_end_a_on_b,
             );
 
-            let use_cap_a_i = use_cap_a.to_int();
+            let use_cap_a_i = use_cap_a.to_simd();
             let mut projected_line_start = Vector2Wide::default();
             Vector2Wide::conditional_select(
                 &use_cap_a_i,
@@ -698,7 +699,7 @@ impl CylinderPairTester {
                 .select(neg_one, manifold.contact0_exists);
             manifold.contact1_exists = use_cap_side
                 .simd_ne(zero_i)
-                .select(t_max.simd_gt(t_min).to_int(), manifold.contact1_exists);
+                .select(t_max.simd_gt(t_min).to_simd(), manifold.contact1_exists);
 
             let cap_side_feature_normal_a = Vector3Wide::conditional_select(
                 &use_cap_a_i,
@@ -720,7 +721,7 @@ impl CylinderPairTester {
             );
         }
 
-        let use_side_side = ((!use_cap_a) & (!use_cap_b)).to_int() & !inactive_lanes;
+        let use_side_side = ((!use_cap_a) & (!use_cap_b)).to_simd() & !inactive_lanes;
         if use_side_side.simd_lt(zero_i).any() {
             // Side-side contact generation.
             let mut side_center_a_neg = Vector3Wide::default();
@@ -764,7 +765,7 @@ impl CylinderPairTester {
                 .simd_ne(zero_i)
                 .select(neg_one, manifold.contact0_exists);
             manifold.contact1_exists = use_side_side.simd_ne(zero_i).select(
-                contact_t_max.simd_gt(contact_t_min).to_int(),
+                contact_t_max.simd_gt(contact_t_min).to_simd(),
                 manifold.contact1_exists,
             );
             feature_normal_a = Vector3Wide::conditional_select(

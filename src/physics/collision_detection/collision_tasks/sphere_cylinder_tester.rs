@@ -9,6 +9,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 /// Pair tester for sphere vs cylinder collisions.
 pub struct SphereCylinderTester;
@@ -146,7 +147,7 @@ impl SphereCylinderTester {
         // Can't rely on the external normal if the sphere is too close to the surface.
         let use_internal = contact_distance.simd_lt(Vector::<f32>::splat(1e-7));
         let local_normal = Vector3Wide::conditional_select(
-            &use_internal.to_int(),
+            &use_internal.to_simd(),
             &local_internal_normal,
             &local_external_normal,
         );
@@ -162,6 +163,6 @@ impl SphereCylinderTester {
             use_depth_y.select(depth_y, horizontal_depth),
             -contact_distance,
         ) + a.radius;
-        manifold.contact_exists = manifold.depth.simd_ge(-*speculative_margin).to_int();
+        manifold.contact_exists = manifold.depth.simd_ge(-*speculative_margin).to_simd();
     }
 }

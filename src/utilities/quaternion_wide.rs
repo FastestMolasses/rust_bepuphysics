@@ -9,6 +9,7 @@ use std::ops::{BitAnd, Mul, Neg};
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
 use std::simd::{Mask, StdFloat};
+use std::simd::Select;
 
 #[derive(Clone, Copy, Default)]
 pub struct QuaternionWide {
@@ -446,7 +447,7 @@ impl QuaternionWide {
         right: &Self,
         result: &mut Self,
     ) {
-        let condition = Mask::from_int(condition);
+        let condition = Mask::from_simd(condition);
         result.x = condition.select(left.x, right.x);
         result.y = condition.select(left.y, right.y);
         result.z = condition.select(left.z, right.z);
@@ -455,7 +456,7 @@ impl QuaternionWide {
 
     #[inline(always)]
     pub fn conditional_select(condition: Vector<i32>, left: &Self, right: &Self) -> Self {
-        let condition = Mask::from_int(condition);
+        let condition = Mask::from_simd(condition);
         Self {
             x: condition.select(left.x, right.x),
             y: condition.select(left.y, right.y),

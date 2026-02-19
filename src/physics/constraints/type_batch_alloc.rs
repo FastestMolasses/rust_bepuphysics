@@ -408,7 +408,7 @@ pub unsafe fn remove_from_type_batch_fallback<
         // Determine the new constraint count from the last bundle.
         let last_bundle_body_refs = *(body_references.add(last_bundle_index) as *const Vector<i32>);
         let inner_lane_count = BundleIndexing::get_last_set_lane_count(
-            last_bundle_body_refs.simd_ge(Simd::splat(0i32)).to_int(),
+            last_bundle_body_refs.simd_ge(Simd::splat(0i32)).to_simd(),
         );
         type_batch.constraint_count =
             (last_bundle_index * Vector::<i32>::LEN + inner_lane_count) as i32;
@@ -459,7 +459,7 @@ unsafe fn allow_fallback_bundle_allocation(
 #[inline(always)]
 unsafe fn get_inner_index_for_fallback_allocation(bundle_ptr: *const u8) -> i32 {
     let first_body_refs = *(bundle_ptr as *const Vector<i32>);
-    BundleIndexing::get_first_set_lane_index(first_body_refs.simd_lt(Simd::splat(0i32)).to_int())
+    BundleIndexing::get_first_set_lane_index(first_body_refs.simd_lt(Simd::splat(0i32)).to_simd())
 }
 
 /// Probes a single bundle for fallback allocation viability.

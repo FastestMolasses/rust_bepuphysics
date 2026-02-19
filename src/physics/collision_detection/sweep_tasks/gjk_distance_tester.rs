@@ -10,6 +10,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
+use std::simd::Select;
 
 pub struct GJKDistanceTester<
     TShapeA,
@@ -154,12 +155,12 @@ fn select(
     let use_candidate = *mask
         & distance_squared_candidate
             .simd_lt(*distance_squared)
-            .to_int();
+            .to_simd();
     *distance_squared =
-        Mask::from_int(use_candidate).select(*distance_squared_candidate, *distance_squared);
+        Mask::from_simd(use_candidate).select(*distance_squared_candidate, *distance_squared);
     *closest = Vector3Wide::conditional_select(&use_candidate, closest_candidate, closest);
     *closest_a = Vector3Wide::conditional_select(&use_candidate, closest_a_candidate, closest_a);
-    *feature_id = Mask::from_int(use_candidate).select(*feature_id_candidate, *feature_id);
+    *feature_id = Mask::from_simd(use_candidate).select(*feature_id_candidate, *feature_id);
 }
 
 #[inline(always)]
@@ -232,10 +233,10 @@ fn try_remove(
     let should_remove = *active_mask
         & (*feature_id & Simd::splat(1 << index))
             .simd_eq(Simd::splat(0))
-            .to_int();
+            .to_simd();
     let last_slot = simplex.count - Simd::splat(1);
-    simplex.count = Mask::from_int(should_remove).select(last_slot, simplex.count);
-    let should_pull_last_slot = should_remove & Simd::splat(index).simd_lt(last_slot).to_int();
+    simplex.count = Mask::from_simd(should_remove).select(last_slot, simplex.count);
+    let should_pull_last_slot = should_remove & Simd::splat(index).simd_lt(last_slot).to_simd();
     if should_pull_last_slot.simd_ne(Simd::splat(0)).any() {
         for i in 0..VECTOR_WIDTH {
             if should_pull_last_slot[i] < 0 {
@@ -340,9 +341,9 @@ fn triangle(
     let b_weight = (abac * *ac_a - *acac * *ab_a) * inverse_n_length_squared;
     let a_weight = Vector::<f32>::splat(1.0) - b_weight - c_weight;
     let zero = Vector::<f32>::splat(0.0);
-    let projection_in_triangle = a_weight.simd_ge(zero).to_int()
-        & b_weight.simd_ge(zero).to_int()
-        & c_weight.simd_ge(zero).to_int();
+    let projection_in_triangle = a_weight.simd_ge(zero).to_simd()
+        & b_weight.simd_ge(zero).to_simd()
+        & c_weight.simd_ge(zero).to_simd();
 
     let mut a_on_a_contribution = Vector3Wide::default();
     Vector3Wide::scale_to(a_on_a, &a_weight, &mut a_on_a_contribution);
@@ -388,7 +389,7 @@ fn find_closest_point(
     let mut closest = simplex.a;
     let mut closest_a = simplex.a_on_a;
 
-    let active_mask = active_mask & simplex.count.simd_ge(Simd::splat(2)).to_int();
+    let active_mask = active_mask & simplex.count.simd_ge(Simd::splat(2)).to_simd();
     if active_mask.simd_eq(Simd::splat(0)).all() {
         *closest_out = closest;
         *closest_a_out = closest_a;
@@ -416,7 +417,7 @@ fn find_closest_point(
         &mut feature_id,
     );
 
-    let next_active_mask = active_mask & simplex.count.simd_ge(Simd::splat(3)).to_int();
+    let next_active_mask = active_mask & simplex.count.simd_ge(Simd::splat(3)).to_simd();
     if next_active_mask.simd_eq(Simd::splat(0)).all() {
         try_remove(simplex, 1, &feature_id, &active_mask);
         try_remove(simplex, 0, &feature_id, &active_mask);
@@ -488,7 +489,7 @@ fn find_closest_point(
         &mut feature_id,
     );
 
-    let next_active_mask = active_mask & simplex.count.simd_ge(Simd::splat(4)).to_int();
+    let next_active_mask = active_mask & simplex.count.simd_ge(Simd::splat(4)).to_simd();
     if next_active_mask.simd_eq(Simd::splat(0)).all() {
         try_remove(simplex, 2, &feature_id, &active_mask);
         try_remove(simplex, 1, &feature_id, &active_mask);
@@ -647,7 +648,7 @@ fn find_closest_point(
     Vector3Wide::dot(&ad, &nabc, &mut calibration_dot_abc);
     let flip_required = calibration_dot_abc
         .simd_ge(Vector::<f32>::splat(0.0))
-        .to_int();
+        .to_simd();
 
     let mut abc_dot = Vector::<f32>::default();
     Vector3Wide::dot(&nabc, &simplex.a, &mut abc_dot);
@@ -659,10 +660,10 @@ fn find_closest_point(
     Vector3Wide::dot(&nbdc, &simplex.b, &mut bdc_dot);
 
     let zero = Vector::<f32>::splat(0.0);
-    let abc_inside = abc_dot.simd_ge(zero).to_int() ^ flip_required;
-    let abd_inside = abd_dot.simd_ge(zero).to_int() ^ flip_required;
-    let acd_inside = acd_dot.simd_ge(zero).to_int() ^ flip_required;
-    let bdc_inside = bdc_dot.simd_ge(zero).to_int() ^ flip_required;
+    let abc_inside = abc_dot.simd_ge(zero).to_simd() ^ flip_required;
+    let abd_inside = abd_dot.simd_ge(zero).to_simd() ^ flip_required;
+    let acd_inside = acd_dot.simd_ge(zero).to_simd() ^ flip_required;
+    let bdc_inside = bdc_dot.simd_ge(zero).to_simd() ^ flip_required;
     let tetrahedron_contains = (abc_inside & abd_inside) & (acd_inside & bdc_inside);
     let use_tetrahedral_result = tetrahedron_contains & active_mask;
     // Note that we don't guarantee correct closest points in the intersecting case.
@@ -796,14 +797,14 @@ where
 
             let simplex_contains_origin = new_distance_squared
                 .simd_le(containment_epsilon_squared)
-                .to_int();
+                .to_simd();
             *intersected = *intersected | (simplex_contains_origin & !terminated_mask);
             terminated_mask = terminated_mask | simplex_contains_origin;
             if terminated_mask.simd_eq(all_ones).all() {
                 break;
             }
 
-            let no_progress_made = new_distance_squared.simd_ge(distance_squared).to_int();
+            let no_progress_made = new_distance_squared.simd_ge(distance_squared).to_simd();
             distance_squared = distance_squared.simd_min(new_distance_squared);
             let about_to_terminate = no_progress_made & !terminated_mask;
             *closest_a =
@@ -847,20 +848,20 @@ where
             Vector3Wide::length_squared_to(&simplex.c, &mut c_squared);
             let mut d_squared = Vector::<f32>::default();
             Vector3Wide::length_squared_to(&simplex.d, &mut d_squared);
-            let mut max = Mask::from_int(
-                simplex.count.simd_gt(Simd::splat(1)).to_int()
-                    & b_squared.simd_gt(a_squared).to_int(),
+            let mut max = Mask::from_simd(
+                simplex.count.simd_gt(Simd::splat(1)).to_simd()
+                    & b_squared.simd_gt(a_squared).to_simd(),
             )
             .select(b_squared, a_squared);
-            max = Mask::from_int(
-                simplex.count.simd_gt(Simd::splat(2)).to_int() & c_squared.simd_gt(max).to_int(),
+            max = Mask::from_simd(
+                simplex.count.simd_gt(Simd::splat(2)).to_simd() & c_squared.simd_gt(max).to_simd(),
             )
             .select(c_squared, max);
-            max = Mask::from_int(
-                simplex.count.simd_gt(Simd::splat(3)).to_int() & d_squared.simd_gt(max).to_int(),
+            max = Mask::from_simd(
+                simplex.count.simd_gt(Simd::splat(3)).to_simd() & d_squared.simd_gt(max).to_simd(),
             )
             .select(d_squared, max);
-            let no_progress_made = progress.simd_le(max * epsilon).to_int();
+            let no_progress_made = progress.simd_le(max * epsilon).to_simd();
             let about_to_terminate = no_progress_made & !terminated_mask;
             *closest_a =
                 Vector3Wide::conditional_select(&about_to_terminate, &simplex_closest_a, closest_a);

@@ -5,6 +5,7 @@ use crate::utilities::math_helper;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
+use std::simd::Select;
 
 /// Constrains the center of two bodies to be separated by a goal distance.
 #[repr(C)]
