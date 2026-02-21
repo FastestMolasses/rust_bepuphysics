@@ -1,8 +1,8 @@
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::vector::Vector;
 use glam::Vec4;
-use std::simd::{num::SimdFloat, Mask, StdFloat};
 use std::simd::Select;
+use std::simd::{num::SimdFloat, Mask, StdFloat};
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]

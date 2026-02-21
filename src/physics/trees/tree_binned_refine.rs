@@ -58,7 +58,7 @@ pub struct BinnedResources {
 impl Tree {
     #[inline(always)]
     unsafe fn suballocate(memory: *mut u8, memory_allocated: &mut i32, byte_count: i32) -> *mut u8 {
-        let new_size = *memory_allocated + (byte_count + 15) & !0xF; // 16-byte alignment
+        let new_size = (*memory_allocated + (byte_count + 15)) & !0xF; // 16-byte alignment
         let to_return = memory.add(*memory_allocated as usize);
         *memory_allocated = new_size;
         to_return
@@ -76,13 +76,13 @@ impl Tree {
             + 16 * (6 + 3 + 8)
             + mem::size_of::<i32>() as i32
                 * (maximum_subtree_count * 6 + node_count * 3 + MAXIMUM_BIN_COUNT * 8)
-            + 16 * 1
+            + 16
             + mem::size_of::<Vec3>() as i32 * maximum_subtree_count
-            + 16 * 1
+            + 16
             + mem::size_of::<SubtreeHeapEntry>() as i32 * maximum_subtree_count
-            + 16 * 1
+            + 16
             + mem::size_of::<Node>() as i32 * node_count
-            + 16 * 1
+            + 16
             + mem::size_of::<i32>() as i32 * node_count;
 
         let buffer: Buffer<u8> = pool.take_at_least(bytes_required);
@@ -819,8 +819,8 @@ impl Tree {
                 let subtree_ref = subtree_references[i];
                 if subtree_ref >= 0 {
                     // Internal node.
-                    let metanode = &*self.metanodes.get(subtree_ref);
-                    let parent_node = &*self.nodes.get(metanode.parent);
+                    let metanode = self.metanodes.get(subtree_ref);
+                    let parent_node = self.nodes.get(metanode.parent);
                     let owning_child = Self::node_child(parent_node, metanode.index_in_parent);
                     let target_bounds = &mut *resources.bounding_boxes.add(i as usize);
                     target_bounds.min = owning_child.min;
@@ -829,9 +829,9 @@ impl Tree {
                     *resources.leaf_counts.add(i as usize) = owning_child.leaf_count;
                 } else {
                     // Leaf node.
-                    let leaf = &*self.leaves.get(Self::encode(subtree_ref));
+                    let leaf = self.leaves.get(Self::encode(subtree_ref));
                     let owning_child =
-                        Self::node_child(&*self.nodes.get(leaf.node_index()), leaf.child_index());
+                        Self::node_child(self.nodes.get(leaf.node_index()), leaf.child_index());
                     let target_bounds = &mut *resources.bounding_boxes.add(i as usize);
                     target_bounds.min = owning_child.min;
                     target_bounds.max = owning_child.max;

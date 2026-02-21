@@ -57,7 +57,7 @@ impl HullData {
         let next_face_index = face_index + 1;
         let start = self.face_start_indices[face_index as usize];
         let end = if next_face_index == self.face_start_indices.len() {
-            self.face_vertex_indices.len() as i32
+            self.face_vertex_indices.len()
         } else {
             self.face_start_indices[next_face_index as usize]
         };
@@ -153,7 +153,7 @@ impl ConvexHullHelper {
             projected_on_x.len() >= point_bundles.len()
                 && projected_on_y.len() >= point_bundles.len()
                 && vertex_indices.count == 0
-                && vertex_indices.span.len() >= point_bundles.len() as i32 * VECTOR_WIDTH as i32
+                && vertex_indices.span.len() >= point_bundles.len() * VECTOR_WIDTH as i32
         );
 
         // Find the candidate-basisOrigin which has the smallest angle with basisY when projected onto the plane.
@@ -365,18 +365,18 @@ impl ConvexHullHelper {
                 if uncalibrated_normal.length_squared() < 1e-14 {
                     if ab.length_squared() > 1e-14 {
                         unsafe {
-                            *allow_vertex.get_mut(reduced_indices.span[2] as i32) = 0;
+                            *allow_vertex.get_mut(reduced_indices.span[2]) = 0;
                         }
                         reduced_indices.fast_remove_at(2);
                     } else if ac.length_squared() > 1e-14 {
                         unsafe {
-                            *allow_vertex.get_mut(reduced_indices.span[1] as i32) = 0;
+                            *allow_vertex.get_mut(reduced_indices.span[1]) = 0;
                         }
                         reduced_indices.fast_remove_at(1);
                     } else {
                         unsafe {
-                            *allow_vertex.get_mut(reduced_indices.span[1] as i32) = 0;
-                            *allow_vertex.get_mut(reduced_indices.span[2] as i32) = 0;
+                            *allow_vertex.get_mut(reduced_indices.span[1]) = 0;
+                            *allow_vertex.get_mut(reduced_indices.span[2]) = 0;
                         }
                         reduced_indices.count = 1;
                     }
@@ -419,7 +419,7 @@ impl ConvexHullHelper {
         if greatest_distance_squared < 1e-14 {
             for i in 0..face_vertex_indices.count {
                 unsafe {
-                    *allow_vertex.get_mut(face_vertex_indices.span[i as usize] as i32) = 0;
+                    *allow_vertex.get_mut(face_vertex_indices.span[i as usize]) = 0;
                 }
             }
             return;
@@ -476,7 +476,7 @@ impl ConvexHullHelper {
             let index = face_vertex_indices.span[i as usize];
             if !reduced_indices.contains(&index) {
                 unsafe {
-                    *allow_vertex.get_mut(index as i32) = 0;
+                    *allow_vertex.get_mut(index) = 0;
                 }
             }
         }
@@ -508,9 +508,10 @@ impl ConvexHullHelper {
         let mut previous_index =
             reduced_face_indices.span[(reduced_face_indices.count - 1) as usize];
         for i in 0..reduced_face_indices.count {
-            let mut endpoints = EdgeEndpoints::default();
-            endpoints.a = previous_index;
-            endpoints.b = reduced_face_indices.span[i as usize];
+            let endpoints = EdgeEndpoints {
+                a: previous_index,
+                b: reduced_face_indices.span[i as usize],
+            };
             previous_index = endpoints.b;
 
             let mut slot_index = 0i32;
@@ -567,14 +568,14 @@ impl ConvexHullHelper {
 
         // Create AOSOA version of input data.
         let mut centroid = Vec3::ZERO;
-        for i in 0..points.len() {
+        for (i, &point) in points.iter().enumerate() {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
             BundleIndexing::get_bundle_indices(i, &mut bundle_index, &mut inner_index);
-            Vector3Wide::write_slot(points[i], inner_index, unsafe {
+            Vector3Wide::write_slot(point, inner_index, unsafe {
                 point_bundles.get_mut(bundle_index as i32)
             });
-            centroid += points[i];
+            centroid += point;
         }
         centroid /= points.len() as f32;
 
@@ -659,7 +660,7 @@ impl ConvexHullHelper {
         let normal_coplanarity_epsilon = 1.0 - 1e-6f32;
         let plane_slab_epsilon = Vector::<f32>::splat(plane_slab_epsilon_narrow);
         let mut raw_face_vertex_indices =
-            QuickList::<i32>::with_capacity(point_bundles.len() as i32 * VECTOR_WIDTH as i32, pool);
+            QuickList::<i32>::with_capacity(point_bundles.len() * VECTOR_WIDTH as i32, pool);
 
         let mut allow_vertices: Buffer<i32> =
             pool.take_at_least(point_bundle_count as i32 * VECTOR_WIDTH as i32);
@@ -746,9 +747,7 @@ impl ConvexHullHelper {
             let basis_y = edge_offset.cross(edge.face_normal);
             let basis_x = edge_offset.cross(basis_y);
             if basis_x.dot(edge.face_normal) > 0.0 {
-                let tmp = edge.endpoints.a;
-                edge.endpoints.a = edge.endpoints.b;
-                edge.endpoints.b = tmp;
+                std::mem::swap(&mut edge.endpoints.a, &mut edge.endpoints.b);
             }
         }
 
@@ -756,7 +755,7 @@ impl ConvexHullHelper {
             let edge_to_test = edges_to_test.pop();
             if edge_face_counts
                 .get(&edge_to_test.endpoints)
-                .map_or(false, |c| *c >= 2)
+                .is_some_and(|c| *c >= 2)
             {
                 continue;
             }
@@ -809,7 +808,7 @@ impl ConvexHullHelper {
             // Check for coplanar face merging.
             let mut merged_face = false;
             for i in 0..faces.count {
-                let face = unsafe { &mut *faces.span.get_mut(i as i32) };
+                let face = unsafe { &mut *faces.span.get_mut(i) };
                 if face.normal.dot(face_normal) > normal_coplanarity_epsilon {
                     // Merge the new face into the existing face.
                     raw_face_vertex_indices.ensure_capacity(
@@ -866,7 +865,7 @@ impl ConvexHullHelper {
             // Check all faces for disallowed vertices; delete faces that contain them.
             let mut deleted_face_count = 0i32;
             for i in 0..faces.count {
-                let face = unsafe { &mut *faces.span.get_mut(i as i32) };
+                let face = unsafe { &mut *faces.span.get_mut(i) };
                 let mut deleted_face = false;
                 for j in 0..face.vertex_indices.count {
                     if allow_vertices[face.vertex_indices.span[j as usize] as usize] == 0 {
@@ -896,26 +895,24 @@ impl ConvexHullHelper {
                             &endpoints,
                             &mut table_index,
                             &mut element_index,
-                        ) {
-                            if allow_vertices[endpoints.a as usize] != 0
-                                && allow_vertices[endpoints.b as usize] != 0
-                            {
-                                edges_to_test.add(
-                                    EdgeToTest {
-                                        endpoints,
-                                        face_normal: face.normal,
-                                    },
-                                    pool,
-                                );
-                            }
+                        ) && allow_vertices[endpoints.a as usize] != 0
+                            && allow_vertices[endpoints.b as usize] != 0
+                        {
+                            edges_to_test.add(
+                                EdgeToTest {
+                                    endpoints,
+                                    face_normal: face.normal,
+                                },
+                                pool,
+                            );
                         }
                     }
                     face.vertex_indices.dispose(pool);
                 }
                 if !deleted_face && deleted_face_count > 0 {
-                    let src = unsafe { std::ptr::read(faces.span.get(i as i32)) };
+                    let src = unsafe { std::ptr::read(faces.span.get(i)) };
                     unsafe {
-                        std::ptr::write(faces.span.get_mut((i - deleted_face_count) as i32), src);
+                        std::ptr::write(faces.span.get_mut(i - deleted_face_count), src);
                     }
                 }
             }
@@ -982,7 +979,7 @@ impl ConvexHullHelper {
         pool.return_buffer(&mut original_to_hull_index_mapping);
         hull_to_original_index_mapping.dispose(pool);
         for i in 0..faces.count {
-            let face = unsafe { &mut *faces.span.get_mut(i as i32) };
+            let face = unsafe { &mut *faces.span.get_mut(i) };
             face.vertex_indices.dispose(pool);
         }
         faces.dispose(pool);
@@ -1011,7 +1008,7 @@ impl ConvexHullHelper {
 
         let mut volume = 0.0f32;
         *center = Vec3::ZERO;
-        for face_index in 0..hull_data.face_start_indices.len() as i32 {
+        for face_index in 0..hull_data.face_start_indices.len() {
             let face = hull_data.get_face(face_index);
             for subtriangle_index in 2..face.vertex_count() {
                 let a = points[face.get(0) as usize];
@@ -1036,7 +1033,7 @@ impl ConvexHullHelper {
             return false;
         }
 
-        let last_index = hull_data.original_vertex_mapping.len() as i32 - 1;
+        let last_index = hull_data.original_vertex_mapping.len() - 1;
         for bundle_index in 0..hull_shape.points.len() as usize {
             let bundle = unsafe { hull_shape.points.get_mut(bundle_index as i32) };
             for inner_index in 0..VECTOR_WIDTH {

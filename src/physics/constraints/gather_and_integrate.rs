@@ -18,7 +18,6 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::simd::Select;
 
 /// Checks whether a bundle of constraints should integrate, returning a per-lane mask.
 /// Corresponds to C# `TypeProcessor.BundleShouldIntegrate`.

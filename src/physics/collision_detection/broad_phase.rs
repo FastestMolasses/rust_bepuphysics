@@ -242,7 +242,12 @@ unsafe fn static_entrypoint_task(
 
 impl BroadPhase {
     /// Creates a new BroadPhase.
-    pub fn new(
+    /// # Safety
+    ///
+    /// The caller must ensure that the provided `pool` pointer is valid and
+    /// remains valid for the lifetime of the returned `BroadPhase`. Dereferencing
+    /// the raw pointer is performed internally.
+    pub unsafe fn new(
         pool: *mut BufferPool,
         initial_active_leaf_capacity: i32,
         initial_static_leaf_capacity: i32,

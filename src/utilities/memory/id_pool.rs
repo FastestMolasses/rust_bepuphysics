@@ -6,6 +6,7 @@ use super::buffer_pool::BufferPool;
 /// Manages a pool of identifier values. Grabbing an id from the pool picks a number that has been
 /// picked and returned before, or if none of those are available, the minimum value greater
 /// than any existing id.
+#[derive(Default)]
 pub struct IdPool {
     next_index: i32,
     available_id_count: i32,
@@ -13,15 +14,6 @@ pub struct IdPool {
 }
 
 impl IdPool {
-    /// Creates an uninitialized IdPool. Must call `new()` before use, or lazy-init in `BatcherContinuations`.
-    pub fn default() -> Self {
-        IdPool {
-            next_index: 0,
-            available_id_count: 0,
-            available_ids: Buffer::default(),
-        }
-    }
-
     /// Creates a new IdPool with the given initial capacity.
     pub fn new(initial_capacity: i32, pool: &mut BufferPool) -> Self {
         let available_ids = pool.take_at_least(initial_capacity);

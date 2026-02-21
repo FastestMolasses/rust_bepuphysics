@@ -901,13 +901,11 @@ impl NarrowPhase {
     /// Prepares the narrow phase for a new timestep.
     pub fn prepare(&mut self, dt: f32, thread_dispatcher: Option<&dyn IThreadDispatcher>) {
         self.timestep_duration = dt;
-        self.pair_cache.prepare(
-            thread_dispatcher.map(|d| unsafe {
-                std::mem::transmute::<*const dyn IThreadDispatcher, *mut dyn IThreadDispatcher>(
-                    d as *const dyn IThreadDispatcher,
-                )
-            }),
-        );
+        self.pair_cache.prepare(thread_dispatcher.map(|d| unsafe {
+            std::mem::transmute::<*const dyn IThreadDispatcher, *mut dyn IThreadDispatcher>(
+                d as *const dyn IThreadDispatcher,
+            )
+        }));
         self.constraint_remover.prepare(thread_dispatcher);
     }
 

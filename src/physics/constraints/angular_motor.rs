@@ -158,7 +158,7 @@ impl AngularMotorFunctions {
         csv = tmp;
         let mut csi = Vector3Wide::default();
         Symmetric3x3Wide::transform_without_overlap(&csv, &unsoftened_effective_mass, &mut csi);
-        csi = csi * effective_mass_cfm_scale;
+        csi *= effective_mass_cfm_scale;
         let softness_component = Vector3Wide::scale(accumulated_impulses, &softness_impulse_scale);
         Vector3Wide::subtract(&csi, &softness_component, &mut tmp);
         csi = tmp;

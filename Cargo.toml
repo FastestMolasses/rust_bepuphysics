@@ -32,10 +32,6 @@ path = "examples/rain.rs"
 required-features = ["bevy"]
 
 [[example]]
-name = "rain_old"
-path = "examples/rain_old.rs"
-
-[[example]]
 name = "rain_csharp"
 path = "examples/rain_csharp.rs"
 

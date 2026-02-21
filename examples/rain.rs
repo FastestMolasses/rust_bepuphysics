@@ -180,7 +180,7 @@ fn spawn_objects(
         return;
     }
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Spawn 10 objects per tick
     let batch_size = 10;

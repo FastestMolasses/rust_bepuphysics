@@ -143,7 +143,7 @@ impl Quicksort {
         values[i as usize] = pivot_value;
 
         j = i - 1;
-        i = i + 1;
+        i += 1;
 
         // Move equal elements from edges to center
         let mut k = l;

@@ -120,7 +120,7 @@ impl StaticReference {
         self.statics_mut().set_shape(self.handle, new_shape);
     }
 
-    // NOTE: BoundingBox and GetBoundsReferencesFromBroadPhase omitted — require BroadPhase implementation.
+    // TODO: BoundingBox and GetBoundsReferencesFromBroadPhase
 
     /// Updates the static's bounds in the broad phase for its current state.
     pub fn update_bounds(&self) {

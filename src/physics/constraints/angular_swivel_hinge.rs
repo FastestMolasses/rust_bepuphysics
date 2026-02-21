@@ -8,7 +8,6 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::Select;
 
 /// Constrains two bodies with the angular component of a swivel hinge that allows rotation around two axes.
 #[repr(C)]
@@ -271,7 +270,7 @@ impl AngularSwivelHingeFunctions {
         let csi =
             effective_mass * (bias_velocity - csv) - *accumulated_impulses * softness_impulse_scale;
 
-        *accumulated_impulses = *accumulated_impulses + csi;
+        *accumulated_impulses += csi;
         Self::apply_impulse(
             &impulse_to_velocity_a,
             &negated_impulse_to_velocity_b,

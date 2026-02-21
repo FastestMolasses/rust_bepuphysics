@@ -472,7 +472,15 @@ fn main() {
         .insert_resource(Gravity(Vec3::new(0.0, -20.0, 0.0)))
         .insert_resource(SpawnedBodies::default())
         .add_systems(Startup, (setup, setup_counter))
-        .add_systems(Update, (orbit_camera, update_counter, update_fps, handle_explosion_input))
+        .add_systems(
+            Update,
+            (
+                orbit_camera,
+                update_counter,
+                update_fps,
+                handle_explosion_input,
+            ),
+        )
         .add_systems(FixedUpdate, (spawn_objects, clear_objects).chain())
         .run();
 }

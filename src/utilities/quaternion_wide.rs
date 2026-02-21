@@ -8,8 +8,8 @@ use glam::Quat;
 use std::ops::{BitAnd, Mul, Neg};
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
-use std::simd::{Mask, StdFloat};
 use std::simd::Select;
+use std::simd::{Mask, StdFloat};
 
 #[derive(Clone, Copy, Default)]
 pub struct QuaternionWide {

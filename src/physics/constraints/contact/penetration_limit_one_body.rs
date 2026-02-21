@@ -56,7 +56,7 @@ impl PenetrationLimitOneBody {
         Vector3Wide::add(&wxr, &velocity.linear, &mut contact_velocity);
         let mut estimated_depth_change = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(normal, &contact_velocity, &mut estimated_depth_change);
-        *penetration_depth = *penetration_depth - estimated_depth_change * *dt;
+        *penetration_depth -= estimated_depth_change * *dt;
     }
 
     #[inline(always)]

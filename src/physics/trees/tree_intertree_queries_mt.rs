@@ -74,10 +74,10 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
 
         // Collect jobs.
         if tree_a.leaf_count >= 2 && tree_b.leaf_count >= 2 {
-            self.get_jobs_between_different_nodes(&*tree_a.nodes.get(0), &*tree_b.nodes.get(0));
+            self.get_jobs_between_different_nodes(tree_a.nodes.get(0), tree_b.nodes.get(0));
         } else if tree_a.leaf_count == 1 && tree_b.leaf_count >= 2 {
-            let a = &*tree_a.nodes.get(0);
-            let b = &*tree_b.nodes.get(0);
+            let a = tree_a.nodes.get(0);
+            let b = tree_b.nodes.get(0);
             if BoundingBox::intersects_unsafe(&a.a, &b.a) {
                 self.dispatch_test_for_nodes(&a.a, &b.a);
             }
@@ -85,8 +85,8 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                 self.dispatch_test_for_nodes(&a.a, &b.b);
             }
         } else if tree_a.leaf_count >= 2 && tree_b.leaf_count == 1 {
-            let a = &*tree_a.nodes.get(0);
-            let b = &*tree_b.nodes.get(0);
+            let a = tree_a.nodes.get(0);
+            let b = tree_b.nodes.get(0);
             if BoundingBox::intersects_unsafe(&a.a, &b.a) {
                 self.dispatch_test_for_nodes(&a.a, &b.a);
             }
@@ -95,9 +95,8 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
             }
         } else {
             debug_assert!(tree_a.leaf_count == 1 && tree_b.leaf_count == 1);
-            if BoundingBox::intersects_unsafe(&(*tree_a.nodes.get(0)).a, &(*tree_b.nodes.get(0)).a)
-            {
-                self.dispatch_test_for_nodes(&(*tree_a.nodes.get(0)).a, &(*tree_b.nodes.get(0)).a);
+            if BoundingBox::intersects_unsafe(&tree_a.nodes.get(0).a, &tree_b.nodes.get(0).a) {
+                self.dispatch_test_for_nodes(&tree_a.nodes.get(0).a, &tree_b.nodes.get(0).a);
             }
         }
     }
@@ -117,16 +116,16 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
             if overlap.b >= 0 {
                 // Different internal nodes.
                 tree_a.get_overlaps_between_different_nodes_intertree(
-                    &*tree_a.nodes.get(overlap.a),
-                    &*tree_b.nodes.get(overlap.b),
+                    tree_a.nodes.get(overlap.a),
+                    tree_b.nodes.get(overlap.b),
                     tree_b,
                     &mut self.overlap_handlers[worker_index as usize],
                 );
             } else {
                 // A is an internal node, B is a leaf.
                 let leaf_index = Tree::encode(overlap.b);
-                let leaf = &*tree_b.leaves.get(leaf_index);
-                let node = &*tree_b.nodes.get(leaf.node_index());
+                let leaf = tree_b.leaves.get(leaf_index);
+                let node = tree_b.nodes.get(leaf.node_index());
                 let child_owning_leaf = if leaf.child_index() == 0 {
                     &node.a
                 } else {
@@ -142,8 +141,8 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
         } else {
             // A is a leaf, B is internal.
             let leaf_index = Tree::encode(overlap.a);
-            let leaf = &*tree_a.leaves.get(leaf_index);
-            let node = &*tree_a.nodes.get(leaf.node_index());
+            let leaf = tree_a.leaves.get(leaf_index);
+            let node = tree_a.nodes.get(leaf.node_index());
             let child_owning_leaf = if leaf.child_index() == 0 {
                 &node.a
             } else {
@@ -213,7 +212,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                 } else {
                     &*self.tree_b
                 };
-                let node = &*node_owner.nodes.get(node_index);
+                let node = node_owner.nodes.get(node_index);
                 let b_index = node.b.index;
                 let b_leaf_count = node.b.leaf_count;
                 let a_intersects = BoundingBox::intersects_unsafe(leaf_child, &node.a);
@@ -255,15 +254,15 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                     );
                 } else {
                     self.get_jobs_between_different_nodes(
-                        &*tree_a.nodes.get(a.index),
-                        &*tree_b.nodes.get(b.index),
+                        tree_a.nodes.get(a.index),
+                        tree_b.nodes.get(b.index),
                     );
                 }
             } else {
                 // leaf B versus node A.
                 let leaf_index = Tree::encode(b.index);
-                let leaf = &*tree_b.leaves.get(leaf_index);
-                let lnode = &*tree_b.nodes.get(leaf.node_index());
+                let leaf = tree_b.leaves.get(leaf_index);
+                let lnode = tree_b.nodes.get(leaf.node_index());
                 let child_owning = if leaf.child_index() == 0 {
                     &lnode.a
                 } else {
@@ -275,8 +274,8 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
         } else if b.index >= 0 {
             // leaf A versus node B.
             let leaf_index = Tree::encode(a.index);
-            let leaf = &*tree_a.leaves.get(leaf_index);
-            let lnode = &*tree_a.nodes.get(leaf.node_index());
+            let leaf = tree_a.leaves.get(leaf_index);
+            let lnode = tree_a.nodes.get(leaf.node_index());
             let child_owning = if leaf.child_index() == 0 {
                 &lnode.a
             } else {

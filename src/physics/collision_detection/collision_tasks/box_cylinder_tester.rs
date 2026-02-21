@@ -16,8 +16,8 @@ use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
 use std::simd::prelude::*;
-use std::simd::StdFloat;
 use std::simd::Select;
+use std::simd::StdFloat;
 
 /// Pair tester for box vs cylinder collisions.
 pub struct BoxCylinderTester;

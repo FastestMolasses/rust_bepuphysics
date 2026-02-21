@@ -84,7 +84,7 @@ impl PenetrationLimit {
             &contact_velocity_difference,
             &mut estimated_depth_change_velocity,
         );
-        *penetration_depth = *penetration_depth - estimated_depth_change_velocity * *dt;
+        *penetration_depth -= estimated_depth_change_velocity * *dt;
     }
 
     #[inline(always)]

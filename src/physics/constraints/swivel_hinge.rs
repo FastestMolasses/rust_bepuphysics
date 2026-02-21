@@ -13,7 +13,6 @@ use crate::utilities::symmetric4x4_wide::Symmetric4x4Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use crate::utilities::vector4_wide::Vector4Wide;
-use std::simd::Select;
 
 /// Constrains two bodies with a swivel hinge that allows rotation around two axes,
 /// like a laptop monitor hinge that allows flipping the screen.

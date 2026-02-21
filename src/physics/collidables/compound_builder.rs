@@ -152,13 +152,12 @@ impl CompoundBuilder {
             target.local_position = source.local_pose.position - center;
             target.local_orientation = source.local_pose.orientation;
             target.shape_index = source.shape_index;
-            summed_inertia = summed_inertia
-                + Self::compute_inertia_for_child(
-                    target.local_position,
-                    target.local_orientation,
-                    &source.local_inverse_inertia,
-                    source.weight,
-                );
+            summed_inertia += Self::compute_inertia_for_child(
+                target.local_position,
+                target.local_orientation,
+                &source.local_inverse_inertia,
+                source.weight,
+            );
         }
         let mut inverse_inertia = Symmetric3x3::default();
         Symmetric3x3::invert(&summed_inertia, &mut inverse_inertia);
@@ -186,13 +185,12 @@ impl CompoundBuilder {
             target.local_position = source.local_pose.position;
             target.local_orientation = source.local_pose.orientation;
             target.shape_index = source.shape_index;
-            summed_inertia = summed_inertia
-                + Self::compute_inertia_for_child(
-                    source.local_pose.position,
-                    source.local_pose.orientation,
-                    &source.local_inverse_inertia,
-                    source.weight,
-                );
+            summed_inertia += Self::compute_inertia_for_child(
+                source.local_pose.position,
+                source.local_pose.orientation,
+                &source.local_inverse_inertia,
+                source.weight,
+            );
         }
         let mut inverse_inertia = Symmetric3x3::default();
         Symmetric3x3::invert(&summed_inertia, &mut inverse_inertia);
@@ -268,13 +266,12 @@ impl CompoundBuilder {
         let mut mass_sum = 0.0f32;
         for i in 0..children.len() as usize {
             let child = &children[i];
-            summed_inertia = summed_inertia
-                + Self::compute_inertia_for_child(
-                    child.local_position,
-                    child.local_orientation,
-                    &inverse_local_inertias[i],
-                    child_masses[i],
-                );
+            summed_inertia += Self::compute_inertia_for_child(
+                child.local_position,
+                child.local_orientation,
+                &inverse_local_inertias[i],
+                child_masses[i],
+            );
             mass_sum += child_masses[i];
         }
         let mut inverse_inertia = Symmetric3x3::default();
@@ -297,13 +294,12 @@ impl CompoundBuilder {
         for i in 0..children.len() as usize {
             children[i].local_position -= center_of_mass;
             let child = &children[i];
-            summed_inertia = summed_inertia
-                + Self::compute_inertia_for_child(
-                    child.local_position,
-                    child.local_orientation,
-                    &inverse_local_inertias[i],
-                    child_masses[i],
-                );
+            summed_inertia += Self::compute_inertia_for_child(
+                child.local_position,
+                child.local_orientation,
+                &inverse_local_inertias[i],
+                child_masses[i],
+            );
         }
         let mut inverse_inertia = Symmetric3x3::default();
         Symmetric3x3::invert(&summed_inertia, &mut inverse_inertia);

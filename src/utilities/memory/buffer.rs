@@ -48,12 +48,7 @@ impl<T> Default for Buffer<T> {
 impl<T> Clone for Buffer<T> {
     #[inline(always)]
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            length: self.length,
-            id: self.id,
-            _phantom: PhantomData,
-        }
+        *self
     }
 }
 

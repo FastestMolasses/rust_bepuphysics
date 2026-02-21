@@ -148,6 +148,7 @@ struct MultithreadBinnedBuildContext {
 }
 
 impl MultithreadBinnedBuildContext {
+    #[allow(clippy::type_complexity)]
     #[inline(always)]
     unsafe fn get_bins(
         &self,
@@ -159,7 +160,7 @@ impl MultithreadBinnedBuildContext {
         Buffer<BoundingBox4>,
         Buffer<i32>,
     ) {
-        let worker = &*self.workers.get(worker_index);
+        let worker = self.workers.get(worker_index);
         (
             worker.bin_bounding_boxes,
             worker.bin_centroid_bounding_boxes,
@@ -1764,7 +1765,9 @@ unsafe fn binned_build_node(
     let mut node_b_continuation = ContinuationHandle::default();
     if should_push_b_onto_mt_queue {
         // Both children are large. Push child B onto the task stack for parallel execution.
-        debug_assert!(MINIMUM_SUBTREES_PER_THREAD_FOR_NODE_JOB > 1);
+        const {
+            debug_assert!(MINIMUM_SUBTREES_PER_THREAD_FOR_NODE_JOB > 1);
+        }
         let mt_ctx = mt_context_ptr.unwrap();
         // Allocate params on the local stack — we must preserve the stack frame until WaitForCompletion.
         let mut node_push_context = NodePushTaskContext {
@@ -1943,8 +1946,8 @@ unsafe fn binned_builder_internal(
         let mut worker_contexts_vec =
             vec![std::mem::zeroed::<BinnedBuildWorkerContext>(); worker_count as usize];
         let mut bin_alloc_start = 0i32;
-        for i in 0..worker_count as usize {
-            worker_contexts_vec[i] = BinnedBuildWorkerContext::new(
+        for ctx in worker_contexts_vec.iter_mut() {
+            *ctx = BinnedBuildWorkerContext::new(
                 worker_bins_allocation,
                 &mut bin_alloc_start,
                 allocated_bin_count,
@@ -2088,20 +2091,24 @@ impl Tree {
             requires_return = true;
         }
 
-        let effective_worker_count = if dispatcher.is_none() {
-            0
-        } else if worker_count < 0 {
-            dispatcher.unwrap().thread_count()
+        let effective_worker_count = if let Some(disp) = dispatcher {
+            if worker_count < 0 {
+                disp.thread_count()
+            } else {
+                worker_count
+            }
         } else {
-            worker_count
+            0
         };
 
-        let effective_target_task_count = if dispatcher.is_none() {
-            0
-        } else if target_task_count < 0 {
-            dispatcher.unwrap().thread_count()
+        let effective_target_task_count = if let Some(disp) = dispatcher {
+            if target_task_count < 0 {
+                disp.thread_count()
+            } else {
+                target_task_count
+            }
         } else {
-            target_task_count
+            0
         };
 
         binned_builder_internal(

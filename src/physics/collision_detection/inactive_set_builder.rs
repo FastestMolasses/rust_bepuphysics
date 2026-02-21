@@ -13,7 +13,7 @@ pub struct SleepingPair {
 }
 
 /// A set of sleeping pairs.
-#[derive(Copy, Clone)]
+#[derive(Default, Copy, Clone)]
 pub struct SleepingSet {
     pub pairs: QuickList<SleepingPair>,
 }
@@ -28,14 +28,6 @@ impl SleepingSet {
     /// Disposes the sleeping set.
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         self.pairs.dispose(pool);
-    }
-}
-
-impl Default for SleepingSet {
-    fn default() -> Self {
-        Self {
-            pairs: QuickList::default(),
-        }
     }
 }
 

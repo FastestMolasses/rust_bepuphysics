@@ -133,7 +133,7 @@ impl Statics {
 
     /// Gets the backing pool.
     #[inline(always)]
-    fn pool(&self) -> &mut BufferPool {
+    fn pool(&mut self) -> &mut BufferPool {
         unsafe { &mut *self.pool }
     }
 

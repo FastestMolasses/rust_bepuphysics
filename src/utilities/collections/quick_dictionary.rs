@@ -15,10 +15,7 @@ impl HashHelper {
         const C: u32 = 25;
 
         let uhash = (hash as u32).wrapping_mul(982451653u32);
-        let redongled = ((uhash << A) | (uhash >> (32 - A)))
-            ^ ((uhash << B) | (uhash >> (32 - B)))
-            ^ ((uhash << C) | (uhash >> (32 - C)));
-
+        let redongled = uhash.rotate_left(A) ^ uhash.rotate_left(B) ^ uhash.rotate_left(C);
         redongled as i32
     }
 }

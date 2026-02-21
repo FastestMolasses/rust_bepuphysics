@@ -864,10 +864,25 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .insert_resource(ExplosionQueue::default())
         .add_systems(Startup, (setup, setup_counter))
-        .add_systems(Update, (orbit_camera, update_counter, update_fps, handle_explosion_input))
+        .add_systems(
+            Update,
+            (
+                orbit_camera,
+                update_counter,
+                update_fps,
+                handle_explosion_input,
+            ),
+        )
         .add_systems(
             FixedUpdate,
-            (spawn_objects, clear_objects, apply_explosions, physics_step, sync_transforms).chain(),
+            (
+                spawn_objects,
+                clear_objects,
+                apply_explosions,
+                physics_step,
+                sync_transforms,
+            )
+                .chain(),
         )
         .run();
 }

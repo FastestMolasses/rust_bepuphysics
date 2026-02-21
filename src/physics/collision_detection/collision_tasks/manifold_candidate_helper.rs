@@ -318,7 +318,9 @@ impl ManifoldCandidateHelper {
             *contact0 = Self::conditional_select(&candidate_is_best.to_simd(), candidate, contact0);
             best_score = candidate_is_best.select(candidate_score, best_score);
         }
-        *contact0_exists = best_score.simd_gt(Vector::<f32>::splat(-f32::MAX)).to_simd();
+        *contact0_exists = best_score
+            .simd_gt(Vector::<f32>::splat(-f32::MAX))
+            .to_simd();
 
         // 2. Find most distant from contact0 → contact1
         let mut max_distance_squared = Vector::<f32>::splat(0.0);

@@ -7,8 +7,8 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
-use std::simd::StdFloat;
 use std::simd::Select;
+use std::simd::StdFloat;
 
 // ============================================================================
 // Without-witness variant

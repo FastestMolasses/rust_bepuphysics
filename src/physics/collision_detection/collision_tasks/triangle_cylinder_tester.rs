@@ -57,7 +57,8 @@ impl ISupportFinder<TriangleWide> for PretransformedTriangleSupportFinder {
         let max = a_dot.simd_max(b_dot.simd_max(c_dot));
         *support =
             Vector3Wide::conditional_select(&max.simd_eq(a_dot).to_simd(), &shape.a, &shape.b);
-        *support = Vector3Wide::conditional_select(&max.simd_eq(c_dot).to_simd(), &shape.c, support);
+        *support =
+            Vector3Wide::conditional_select(&max.simd_eq(c_dot).to_simd(), &shape.c, support);
     }
 }
 
@@ -259,7 +260,8 @@ impl TriangleCylinderTester {
         let cylinder_inside_edge_planes = ab_plane_test.simd_le(zero_f).to_simd()
             & bc_plane_test.simd_le(zero_f).to_simd()
             & ca_plane_test.simd_le(zero_f).to_simd();
-        let cylinder_inside_and_below = cylinder_inside_edge_planes & cylinder_below_plane.to_simd();
+        let cylinder_inside_and_below =
+            cylinder_inside_edge_planes & cylinder_below_plane.to_simd();
 
         let mut inactive_lanes =
             BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);

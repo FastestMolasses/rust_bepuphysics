@@ -19,7 +19,7 @@ pub enum CollisionContinuationType {
 }
 
 /// Describes the continuation of a collision pair after initial processing.
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct PairContinuation {
     pub pair_id: i32,
@@ -91,17 +91,6 @@ impl PairContinuation {
     #[inline(always)]
     pub fn child_index(&self) -> i32 {
         (self.packed & Self::CHILD_INDEX_MASK) as i32
-    }
-}
-
-impl Default for PairContinuation {
-    fn default() -> Self {
-        Self {
-            pair_id: 0,
-            child_a: 0,
-            child_b: 0,
-            packed: 0,
-        }
     }
 }
 

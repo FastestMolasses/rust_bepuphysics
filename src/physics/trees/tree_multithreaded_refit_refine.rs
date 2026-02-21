@@ -34,6 +34,12 @@ pub struct RefitAndRefineMultithreadedContext {
 unsafe impl Send for RefitAndRefineMultithreadedContext {}
 unsafe impl Sync for RefitAndRefineMultithreadedContext {}
 
+impl Default for RefitAndRefineMultithreadedContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RefitAndRefineMultithreadedContext {
     pub fn new() -> Self {
         Self {
@@ -237,7 +243,7 @@ impl RefitAndRefineMultithreadedContext {
         thread_pool: &mut BufferPool,
     ) {
         let tree = &*self.tree;
-        let node = &*tree.nodes.get(node_index);
+        let node = tree.nodes.get(node_index);
         debug_assert!(tree.metanodes.get(node_index).cost_or_flag.refine_flag == 0);
         debug_assert!(tree.leaf_count > 2);
 

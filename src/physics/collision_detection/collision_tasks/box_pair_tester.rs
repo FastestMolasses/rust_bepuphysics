@@ -11,8 +11,8 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
-use std::simd::StdFloat;
 use std::simd::Select;
+use std::simd::StdFloat;
 
 /// Pair tester for box vs box collisions.
 pub struct BoxPairTester;
@@ -165,7 +165,8 @@ impl BoxPairTester {
         let contained =
             candidate.x.abs().simd_le(*half_span_bx) & candidate.y.abs().simd_le(*half_span_by);
         let below_buffer_capacity = (*candidate_count).simd_lt(Vector::<i32>::splat(8));
-        let contact_exists = *allow_contacts & contained.to_simd() & below_buffer_capacity.to_simd();
+        let contact_exists =
+            *allow_contacts & contained.to_simd() & below_buffer_capacity.to_simd();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -403,8 +404,9 @@ impl BoxPairTester {
             pair_count,
         );
 
-        let max_exists =
-            *allow_contacts & max.simd_ge(*min).to_simd() & max.abs().simd_le(*half_span_b).to_simd();
+        let max_exists = *allow_contacts
+            & max.simd_ge(*min).to_simd()
+            & max.abs().simd_le(*half_span_b).to_simd();
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,

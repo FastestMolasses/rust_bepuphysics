@@ -9,7 +9,6 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
-use std::simd::Select;
 
 /// Constrains the twist velocity between two bodies to a target.
 #[repr(C)]

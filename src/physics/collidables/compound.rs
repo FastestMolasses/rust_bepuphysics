@@ -65,7 +65,7 @@ impl CompoundChild {
 /// Minimalist compound shape containing a list of child shapes.
 /// Does not make use of any internal acceleration structure;
 /// should be used only with small groups of shapes.
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct Compound {
     /// Buffer of children within this compound.
     pub children: Buffer<CompoundChild>,
@@ -78,7 +78,7 @@ impl Compound {
     /// Creates a compound shape with no acceleration structure.
     pub fn new(children: Buffer<CompoundChild>) -> Self {
         debug_assert!(
-            children.len() > 0,
+            !children.is_empty(),
             "Compounds must have a nonzero number of children."
         );
         Self { children }
@@ -190,7 +190,7 @@ impl Compound {
             let mut angular_contribution = angular_contribution_to_child_linear;
             if contribution_length_squared > local_pose_radius_squared {
                 angular_contribution *=
-                    (local_pose_radius_squared.sqrt() / contribution_length_squared.sqrt()) as f32;
+                    local_pose_radius_squared.sqrt() / contribution_length_squared.sqrt();
             }
             child_velocity.linear = velocity.linear + angular_contribution;
             child_pose.position += pose.position;
@@ -201,14 +201,6 @@ impl Compound {
     /// Disposes resources.
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         pool.return_buffer(&mut self.children);
-    }
-}
-
-impl Default for Compound {
-    fn default() -> Self {
-        Self {
-            children: Buffer::default(),
-        }
     }
 }
 
@@ -266,7 +258,7 @@ impl Compound {
         debug_assert!(
             shape_batches
                 .get_batch(child.shape_index.type_id() as usize)
-                .map_or(false, |b| !b.compound()),
+                .is_some_and(|b| !b.compound()),
             "All children of a compound must be convex."
         );
 

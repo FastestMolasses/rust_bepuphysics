@@ -290,12 +290,7 @@ impl<T: Copy> QuickList<T> {
     where
         T: PartialEq,
     {
-        for i in 0..self.count {
-            if self.span[i] == *element {
-                return Some(i);
-            }
-        }
-        None
+        (0..self.count).find(|&i| self.span[i] == *element)
     }
 
     /// Checks if the list contains an element.
@@ -530,10 +525,7 @@ impl<T: Copy> Default for QuickList<T> {
 
 impl<T> Clone for QuickList<T> {
     fn clone(&self) -> Self {
-        Self {
-            span: self.span,
-            count: self.count,
-        }
+        *self
     }
 }
 

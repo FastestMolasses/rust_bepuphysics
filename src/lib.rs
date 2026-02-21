@@ -2,6 +2,8 @@
 #![feature(generic_const_exprs)]
 #![allow(unused_unsafe)]
 #![allow(clippy::missing_safety_doc)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::new_without_default)]
 
 pub mod physics;
 pub mod utilities;
