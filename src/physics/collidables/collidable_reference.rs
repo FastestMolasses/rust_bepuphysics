@@ -16,7 +16,7 @@ pub enum CollidableMobility {
 
 /// Uses a bitpacked representation to refer to a body or static collidable.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CollidableReference {
     /// Bitpacked representation of the collidable reference.
     pub packed: u32,
@@ -74,7 +74,7 @@ impl CollidableReference {
             "Invalid mobility type."
         );
         debug_assert!(
-            handle >= 0 && handle < (1 << 30),
+            (0..(1 << 30)).contains(&handle),
             "Do you actually have more than 2^30 collidables?"
         );
         Self {
@@ -96,12 +96,6 @@ impl CollidableReference {
     #[inline(always)]
     pub fn from_static(handle: StaticHandle) -> Self {
         Self::from_raw(CollidableMobility::Static, handle.0)
-    }
-}
-
-impl Default for CollidableReference {
-    fn default() -> Self {
-        Self { packed: 0 }
     }
 }
 

@@ -4,6 +4,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::new_without_default)]
+#![allow(clippy::excessive_precision)]
 
 pub mod physics;
 pub mod utilities;

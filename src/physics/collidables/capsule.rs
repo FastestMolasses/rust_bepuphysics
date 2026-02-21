@@ -341,12 +341,12 @@ impl IShapeWide<Capsule> for CapsuleWide {
             .select(self.half_length, negated_half_length);
         let sphere_y = ray_isnt_parallel.select(non_parallel_sphere_y, parallel_sphere_y);
 
-        o.y = o.y - sphere_y;
+        o.y -= sphere_y;
         let mut cap_b = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&o, &d, &mut cap_b);
         let mut cap_c = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&o, &o, &mut cap_c);
-        cap_c = cap_c - radius_squared;
+        cap_c -= radius_squared;
 
         let cap_discriminant = cap_b * cap_b - cap_c;
         let cap_intersected_mask =

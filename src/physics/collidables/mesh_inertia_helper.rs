@@ -121,7 +121,7 @@ impl MeshInertiaHelper {
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
             let (t_volume, t_contribution) =
                 Self::compute_tetrahedron_contribution_with_volume(a, b, c);
-            summed = summed + t_contribution;
+            summed += t_contribution;
             volume += t_volume;
         }
         let mut inertia = Symmetric3x3::default();
@@ -140,7 +140,7 @@ impl MeshInertiaHelper {
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
             let (t_volume, t_contribution) =
                 Self::compute_tetrahedron_contribution_with_volume(a, b, c);
-            summed = summed + t_contribution;
+            summed += t_contribution;
             volume += t_volume;
             center += (a + b + c) * t_volume;
         }
@@ -267,7 +267,7 @@ impl MeshInertiaHelper {
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
             let (t_area, t_contribution) = Self::compute_triangle_contribution_with_area(a, b, c);
             area += t_area;
-            inertia = inertia + t_contribution;
+            inertia += t_contribution;
         }
         let mut result = Symmetric3x3::default();
         Symmetric3x3::scale(&inertia, mass / area, &mut result);
@@ -286,7 +286,7 @@ impl MeshInertiaHelper {
             let (t_area, t_contribution) = Self::compute_triangle_contribution_with_area(a, b, c);
             area += t_area;
             center += t_area * (a + b + c);
-            inertia = inertia + t_contribution;
+            inertia += t_contribution;
         }
         let inverse_area = 1.0 / area;
         center *= inverse_area * (1.0 / 3.0);

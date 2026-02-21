@@ -338,10 +338,11 @@ impl IShapeWide<Cylinder> for CylinderWide {
             * inverse_d_length;
 
         let cap_uses_upward = d.y.simd_lt(zero);
-        let mut local_normal = Vector3Wide::default();
-        local_normal.x = use_cylinder.select(cylinder_normal_x, zero);
-        local_normal.y = use_cylinder.select(zero, cap_uses_upward.select(one, neg_one));
-        local_normal.z = use_cylinder.select(cylinder_normal_z, zero);
+        let local_normal = Vector3Wide {
+            x: use_cylinder.select(cylinder_normal_x, zero),
+            y: use_cylinder.select(zero, cap_uses_upward.select(one, neg_one)),
+            z: use_cylinder.select(cylinder_normal_z, zero),
+        };
         Matrix3x3Wide::transform_without_overlap(&local_normal, &orientation, normal);
         *intersected = use_cylinder.select(cylinder_intersected.to_simd(), hit_cap.to_simd());
     }

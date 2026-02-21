@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 /// Represents an index with an associated type packed into a single integer.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct TypedIndex {
     /// Bit packed representation of the typed index.
     pub packed: u32,
@@ -33,11 +33,11 @@ impl TypedIndex {
     #[inline(always)]
     pub fn new(type_id: i32, index: i32) -> Self {
         debug_assert!(
-            type_id >= 0 && type_id < 128,
+            (0..128).contains(&type_id),
             "Do you really have that many type indices, or is the index corrupt?"
         );
         debug_assert!(
-            index >= 0 && index < (1 << 24),
+            (0..(1 << 24)).contains(&index),
             "Do you really have that many instances, or is the index corrupt?"
         );
         // Note the inclusion of a set bit in the most significant slot.
@@ -46,12 +46,6 @@ impl TypedIndex {
         Self {
             packed: ((type_id as u32) << 24) | (index as u32) | (1u32 << 31),
         }
-    }
-}
-
-impl Default for TypedIndex {
-    fn default() -> Self {
-        Self { packed: 0 }
     }
 }
 

@@ -47,7 +47,7 @@ impl std::fmt::Display for HullVertexIndex {
 }
 
 /// Collision shape representing a convex hull.
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct ConvexHull {
     /// Bundled points of the convex hull.
     pub points: Buffer<Vector3Wide>,
@@ -323,7 +323,7 @@ impl IConvexShape for ConvexHull {
         if earliest_exit_t < 0.0 || latest_entry_t > earliest_exit_t {
             *t = 0.0;
             *normal = Vec3::ZERO;
-            return false;
+            false
         } else {
             *t = if latest_entry_t < 0.0 {
                 0.0
@@ -344,7 +344,7 @@ impl IConvexShape for ConvexHull {
             );
             let n = *normal;
             Matrix3x3::transform(&n, &orientation, normal);
-            return true;
+            true
         }
     }
 
@@ -372,17 +372,6 @@ impl IConvexShape for ConvexHull {
     }
 }
 
-impl Default for ConvexHull {
-    fn default() -> Self {
-        Self {
-            points: Buffer::default(),
-            bounding_planes: Buffer::default(),
-            face_vertex_indices: Buffer::default(),
-            face_to_vertex_indices_start: Buffer::default(),
-        }
-    }
-}
-
 impl IDisposableShape for ConvexHull {
     fn dispose(&mut self, pool: &mut BufferPool) {
         pool.return_buffer(&mut self.points);
@@ -395,16 +384,9 @@ impl IDisposableShape for ConvexHull {
 /// Wide representation of a convex hull.
 /// Unlike other shapes, single convex hulls are internally vectorized.
 /// The "wide" variant is simply a collection of convex hull instances.
+#[derive(Default)]
 pub struct ConvexHullWide {
     pub hulls: Buffer<ConvexHull>,
-}
-
-impl Default for ConvexHullWide {
-    fn default() -> Self {
-        Self {
-            hulls: Buffer::default(),
-        }
-    }
 }
 
 impl ConvexHullWide {
@@ -558,7 +540,7 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
         t: &mut Vector<f32>,
         normal: &mut Vector3Wide,
     ) {
-        debug_assert!(self.hulls.len() > 0 && (self.hulls.len() as usize) <= Vector::<f32>::LEN);
+        debug_assert!(!self.hulls.is_empty() && (self.hulls.len() as usize) <= Vector::<f32>::LEN);
         for i in 0..self.hulls.len() as usize {
             let mut pose = RigidPose::default();
             Vector3Wide::read_slot(&poses.position, i, &mut pose.position);

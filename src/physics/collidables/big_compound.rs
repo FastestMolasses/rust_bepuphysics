@@ -26,7 +26,7 @@ use crate::utilities::bounding_box::BoundingBox;
 /// Compound shape containing a bunch of shapes accessible through a tree acceleration structure.
 /// Useful for compounds with lots of children.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct BigCompound {
     /// Acceleration structure for the compound children.
     pub tree: Tree,
@@ -63,7 +63,7 @@ impl BigCompound {
         pool: &mut BufferPool,
     ) -> Self {
         debug_assert!(
-            children.len() > 0,
+            !children.is_empty(),
             "Compounds must have a nonzero number of children."
         );
         let child_len = children.len();
@@ -284,7 +284,7 @@ impl BigCompound {
         }
 
         let mut leaf_tester = LeafTester {
-            children: self.children.as_ptr() as *const CompoundChild,
+            children: self.children.as_ptr(),
             shapes,
             handler: hit_handler,
             orientation,
@@ -408,15 +408,6 @@ impl BigCompound {
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         pool.return_buffer(&mut self.children);
         self.tree.dispose(pool);
-    }
-}
-
-impl Default for BigCompound {
-    fn default() -> Self {
-        Self {
-            tree: Tree::default(),
-            children: Buffer::default(),
-        }
     }
 }
 

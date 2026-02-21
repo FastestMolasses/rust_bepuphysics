@@ -15,7 +15,6 @@ use super::mesh_inertia_helper::MeshInertiaHelper;
 use super::ray::RayWide;
 use super::shape::{IConvexShape, IShape, IShapeWide, IShapeWideAllocation, ISupportFinder};
 use crate::physics::body_properties::{BodyInertia, RigidPose, RigidPoseWide};
-use std::simd::Select;
 
 /// Collision shape representing an individual triangle.
 /// Triangle collisions and ray tests are one-sided; only tests which see the triangle as wound
@@ -267,7 +266,7 @@ impl TriangleWide {
         let mut ao = Vector3Wide::default();
         Vector3Wide::subtract(origin, a, &mut ao);
         Vector3Wide::dot(&ao, normal, t);
-        *t = *t / dn;
+        *t /= dn;
         let mut aoxd = Vector3Wide::default();
         Vector3Wide::cross(&ao, direction, &mut aoxd);
         let mut v = Vector::<f32>::splat(0.0);
