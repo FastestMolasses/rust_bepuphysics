@@ -542,8 +542,8 @@ impl CapsuleBoxTester {
         Vector3Wide::scale_to(&manifold.normal, &neg_offset0, &mut push0);
         let mut push1 = Vector3Wide::default();
         Vector3Wide::scale_to(&manifold.normal, &neg_offset1, &mut push1);
-        manifold.offset_a0 = manifold.offset_a0 + push0;
-        manifold.offset_a1 = manifold.offset_a1 + push1;
+        manifold.offset_a0 += push0;
+        manifold.offset_a1 += push1;
 
         let min_accepted_depth = -*speculative_margin;
         manifold.contact0_exists = manifold.depth0.simd_ge(min_accepted_depth).to_simd();

@@ -64,8 +64,8 @@ impl BoxTriangleTester {
             .simd_lt(Vector::<f32>::splat(0.0))
             .select(Vector::<f32>::splat(1.0), Vector::<f32>::splat(-1.0))
             / length;
-        local_normal_y = local_normal_y * inverse_length;
-        local_normal_z = local_normal_z * inverse_length;
+        local_normal_y *= inverse_length;
+        local_normal_z *= inverse_length;
 
         let extreme_a = local_normal_y.abs() * *half_height + local_normal_z.abs() * *half_length;
         let n_va = *va_y * local_normal_y + *va_z * local_normal_z;
@@ -636,13 +636,13 @@ impl BoxTriangleTester {
             // Transform triangle vertices to box A's local space
             let mut va = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.a, &r_b, &mut va);
-            va = va + local_offset_b;
+            va += local_offset_b;
             let mut vb = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.b, &r_b, &mut vb);
-            vb = vb + local_offset_b;
+            vb += local_offset_b;
             let mut vc = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.c, &r_b, &mut vc);
-            vc = vc + local_offset_b;
+            vc += local_offset_b;
 
             let local_triangle_center =
                 Vector3Wide::scale(&(va + vb + vc), &Vector::<f32>::splat(1.0 / 3.0));
@@ -813,23 +813,23 @@ impl BoxTriangleTester {
             let normal_is_negative_z = local_normal.z.simd_lt(zero_f);
 
             // Box face tangents and normal
-            let mut box_tangent_x = Vector3Wide::default();
-            box_tangent_x.x = (use_ay_f | use_az_f).select(one_f, zero_f);
-            box_tangent_x.y = zero_f;
-            box_tangent_x.z = use_ax_f.select(one_f, zero_f);
+            let box_tangent_x = Vector3Wide {
+                x: (use_ay_f | use_az_f).select(one_f, zero_f),
+                y: zero_f,
+                z: use_ax_f.select(one_f, zero_f),
+            };
 
-            let mut box_tangent_y = Vector3Wide::default();
-            box_tangent_y.x = zero_f;
-            box_tangent_y.y = (use_ax_f | use_az_f).select(one_f, zero_f);
-            box_tangent_y.z = use_ay_f.select(one_f, zero_f);
+            let box_tangent_y = Vector3Wide {
+                x: zero_f,
+                y: (use_ax_f | use_az_f).select(one_f, zero_f),
+                z: use_ay_f.select(one_f, zero_f),
+            };
 
-            let mut box_face_normal = Vector3Wide::default();
-            box_face_normal.x =
-                use_ax_f.select(normal_is_negative_x.select(one_f, neg_one), zero_f);
-            box_face_normal.y =
-                use_ay_f.select(normal_is_negative_y.select(one_f, neg_one), zero_f);
-            box_face_normal.z =
-                use_az_f.select(normal_is_negative_z.select(one_f, neg_one), zero_f);
+            let box_face_normal = Vector3Wide {
+                x: use_ax_f.select(normal_is_negative_x.select(one_f, neg_one), zero_f),
+                y: use_ay_f.select(normal_is_negative_y.select(one_f, neg_one), zero_f),
+                z: use_az_f.select(normal_is_negative_z.select(one_f, neg_one), zero_f),
+            };
 
             let half_extent_x = use_ax_f.select(a.half_length, a.half_width);
             let half_extent_y = use_ay_f.select(a.half_length, a.half_height);
@@ -1037,7 +1037,7 @@ impl BoxTriangleTester {
                     Vector::<i32>::splat(FACE_COLLISION_FLAG),
                     Vector::<i32>::splat(0),
                 );
-            manifold.feature_id0 = manifold.feature_id0 + face_flag;
+            manifold.feature_id0 += face_flag;
         }
     }
 }

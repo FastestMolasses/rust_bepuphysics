@@ -45,7 +45,7 @@ impl BoxCylinderTester {
         let mut c_val = Vector::<f32>::splat(0.0);
         Vector2Wide::dot(line_position, line_position, &mut c_val);
         let radius_squared = *radius * *radius;
-        c_val = c_val - radius_squared;
+        c_val -= radius_squared;
         let d = b_val * b_val - a_val * c_val;
         *intersected = d.simd_ge(zero_f).to_simd();
         let t_offset = StdFloat::sqrt(d.simd_max(zero_f)) * inverse_a;
@@ -69,10 +69,12 @@ impl BoxCylinderTester {
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
         let _zero_i = Vector::<i32>::splat(0);
-        let mut candidate = ManifoldCandidate::default();
-        candidate.feature_id = *edge_id;
-        candidate.x = edge_start.x + edge_offset.x * *t_min;
-        candidate.y = edge_start.y + edge_offset.y * *t_min;
+        let mut candidate = ManifoldCandidate {
+            feature_id: *edge_id,
+            x: edge_start.x + edge_offset.x * *t_min,
+            y: edge_start.y + edge_offset.y * *t_min,
+            ..Default::default()
+        };
         let allow_contacts = *intersected & *allow_feature_contacts;
         ManifoldCandidateHelper::add_candidate(
             candidates,
@@ -233,7 +235,7 @@ impl BoxCylinderTester {
 
         let mut depth = Vector::<f32>::splat(0.0);
         let mut closest_on_b = Vector3Wide::default();
-        let initial_normal = local_normal.clone();
+        let initial_normal = local_normal;
         DepthRefiner::find_minimum_depth_with_witness(
             b,
             a,
@@ -251,7 +253,7 @@ impl BoxCylinderTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
+        inactive_lanes |= depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = std::mem::zeroed();
             return;
@@ -344,11 +346,11 @@ impl BoxCylinderTester {
             let inverse_local_normal_y = one_f / local_normal.y;
             let mut v01 = Vector3Wide::default();
             Vector3Wide::subtract(&box_face_center, &box_face_x_offset, &mut v01);
-            let v01_pre = v01.clone();
+            let v01_pre = v01;
             Vector3Wide::add(&v01_pre, &box_face_y_offset, &mut v01);
             let mut v10 = Vector3Wide::default();
             Vector3Wide::add(&box_face_center, &box_face_x_offset, &mut v10);
-            let v10_pre = v10.clone();
+            let v10_pre = v10;
             Vector3Wide::subtract(&v10_pre, &box_face_y_offset, &mut v10);
 
             let mut p00 = Vector2Wide::default();
@@ -575,18 +577,21 @@ impl BoxCylinderTester {
                 pair_count,
             );
 
-            let mut cap_center_to_box_face_center = Vector3Wide::default();
-            cap_center_to_box_face_center.x = box_face_center.x;
-            cap_center_to_box_face_center.y = box_face_center.y - cap_center_by;
-            cap_center_to_box_face_center.z = box_face_center.z;
-            let mut tangent_bx = Vector3Wide::default();
-            tangent_bx.x = one_f;
-            tangent_bx.y = zero_f;
-            tangent_bx.z = zero_f;
-            let mut tangent_by = Vector3Wide::default();
-            tangent_by.x = zero_f;
-            tangent_by.y = zero_f;
-            tangent_by.z = one_f;
+            let cap_center_to_box_face_center = Vector3Wide {
+                x: box_face_center.x,
+                y: box_face_center.y - cap_center_by,
+                z: box_face_center.z,
+            };
+            let tangent_bx = Vector3Wide {
+                x: one_f,
+                y: zero_f,
+                z: zero_f,
+            };
+            let tangent_by = Vector3Wide {
+                x: zero_f,
+                y: zero_f,
+                z: one_f,
+            };
 
             let mut candidate0 = ManifoldCandidate::default();
             let mut candidate1 = ManifoldCandidate::default();
@@ -614,10 +619,11 @@ impl BoxCylinderTester {
                 &mut manifold.contact3_exists,
             );
 
-            let mut local_contact = Vector3Wide::default();
-            local_contact.x = candidate0.x;
-            local_contact.y = cap_center_by;
-            local_contact.z = candidate0.y;
+            let mut local_contact = Vector3Wide {
+                x: candidate0.x,
+                y: cap_center_by,
+                z: candidate0.y,
+            };
             let mut a_to_local_contact = Vector3Wide::default();
             Vector3Wide::add(&local_contact, &local_offset_b, &mut a_to_local_contact);
             Matrix3x3Wide::transform_without_overlap(
@@ -680,14 +686,16 @@ impl BoxCylinderTester {
             let inverse_edge_normal_x_length_squared = one_f / edge_normal_x_length_squared;
             let inverse_edge_normal_y_length_squared = one_f / edge_normal_y_length_squared;
 
-            let mut v00_to_side_line = Vector3Wide::default();
-            v00_to_side_line.x = closest_on_b.x - v00.x;
-            v00_to_side_line.y = -v00.y;
-            v00_to_side_line.z = closest_on_b.z - v00.z;
-            let mut v11_to_side_line = Vector3Wide::default();
-            v11_to_side_line.x = closest_on_b.x - v11.x;
-            v11_to_side_line.y = -v11.y;
-            v11_to_side_line.z = closest_on_b.z - v11.z;
+            let v00_to_side_line = Vector3Wide {
+                x: closest_on_b.x - v00.x,
+                y: -v00.y,
+                z: closest_on_b.z - v00.z,
+            };
+            let v11_to_side_line = Vector3Wide {
+                x: closest_on_b.x - v11.x,
+                y: -v11.y,
+                z: closest_on_b.z - v11.z,
+            };
 
             let mut bottom_numerator = Vector::<f32>::splat(0.0);
             let mut left_numerator = Vector::<f32>::splat(0.0);
@@ -745,14 +753,16 @@ impl BoxCylinderTester {
                 .simd_max(t_x_min.simd_max(t_y_min))
                 .simd_min(b.half_length);
 
-            let mut local_contact0 = Vector3Wide::default();
-            local_contact0.x = closest_on_b.x;
-            local_contact0.y = t_min;
-            local_contact0.z = closest_on_b.z;
-            let mut local_contact1 = Vector3Wide::default();
-            local_contact1.x = closest_on_b.x;
-            local_contact1.y = t_max;
-            local_contact1.z = closest_on_b.z;
+            let local_contact0 = Vector3Wide {
+                x: closest_on_b.x,
+                y: t_min,
+                z: closest_on_b.z,
+            };
+            let local_contact1 = Vector3Wide {
+                x: closest_on_b.x,
+                y: t_max,
+                z: closest_on_b.z,
+            };
 
             let mut contact0_world = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(
@@ -766,9 +776,9 @@ impl BoxCylinderTester {
                 &world_rb,
                 &mut contact1_world,
             );
-            let contact0_tmp = contact0_world.clone();
+            let contact0_tmp = contact0_world;
             Vector3Wide::add(&contact0_tmp, offset_b, &mut contact0_world);
-            let contact1_tmp = contact1_world.clone();
+            let contact1_tmp = contact1_world;
             Vector3Wide::add(&contact1_tmp, offset_b, &mut contact1_world);
             manifold.offset_a0 =
                 Vector3Wide::conditional_select(&use_side_i, &contact0_world, &manifold.offset_a0);

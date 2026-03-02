@@ -79,7 +79,7 @@ impl CapsuleCylinderTester {
             conservative_new_t = min.simd_max(max.simd_min(conservative_new_t - origin_dot));
             let change = conservative_new_t - *t;
             let lane_should_deactivate = change.abs().simd_lt(epsilon).to_simd();
-            lane_deactivated = lane_deactivated | lane_should_deactivate;
+            lane_deactivated |= lane_should_deactivate;
             if (lane_deactivated).simd_lt(Vector::<i32>::splat(0)).all() {
                 break;
             }
@@ -299,7 +299,7 @@ impl CapsuleCylinderTester {
             Vector3Wide::scale_to(&capsule_axis, &ta, &mut closest_a);
             let mut offset = Vector3Wide::default();
             Vector3Wide::subtract(&closest_a, &local_offset_b, &mut offset);
-            offset.y = offset.y - tb;
+            offset.y -= tb;
 
             let distance = offset.length();
             let inverse_distance = Vector::<f32>::splat(1.0) / distance;
@@ -348,7 +348,7 @@ impl CapsuleCylinderTester {
         }
 
         // All of the above excluded capsule radius. Include it now.
-        depth = depth + a.radius;
+        depth += a.radius;
         inactive_lanes = depth.simd_lt(negative_margin).to_simd() | inactive_lanes;
         if inactive_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
             *manifold = unsafe { std::mem::zeroed() };
@@ -441,7 +441,7 @@ impl CapsuleCylinderTester {
             );
             let mut coefficient_c = Vector::<f32>::splat(0.0);
             Vector2Wide::dot(&projected_negative, &projected_negative, &mut coefficient_c);
-            coefficient_c = coefficient_c - b.radius * b.radius;
+            coefficient_c -= b.radius * b.radius;
             let mut coefficient_b = Vector::<f32>::splat(0.0);
             Vector2Wide::dot(&projected_negative, &projected_offset, &mut coefficient_b);
             let mut coefficient_a = Vector::<f32>::splat(0.0);
@@ -505,8 +505,8 @@ impl CapsuleCylinderTester {
         Vector3Wide::dot(&offset0, &face_normal_a, &mut t0);
         let mut t1 = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&offset1, &face_normal_a, &mut t1);
-        t0 = t0 * inverse_face_normal_a_dot_local_normal;
-        t1 = t1 * inverse_face_normal_a_dot_local_normal;
+        t0 *= inverse_face_normal_a_dot_local_normal;
+        t1 *= inverse_face_normal_a_dot_local_normal;
         manifold.depth0 = a.radius + t0;
         manifold.depth1 = a.radius + t1;
 
@@ -525,8 +525,8 @@ impl CapsuleCylinderTester {
         Matrix3x3Wide::transform_without_overlap(&local_normal, &world_r_b, &mut manifold.normal);
         Matrix3x3Wide::transform_without_overlap(&contact0, &world_r_b, &mut manifold.offset_a0);
         Matrix3x3Wide::transform_without_overlap(&contact1, &world_r_b, &mut manifold.offset_a1);
-        manifold.offset_a0 = manifold.offset_a0 + *offset_b;
-        manifold.offset_a1 = manifold.offset_a1 + *offset_b;
+        manifold.offset_a0 += *offset_b;
+        manifold.offset_a1 += *offset_b;
 
         manifold.feature_id0 = Vector::<i32>::splat(0);
         manifold.feature_id1 = Vector::<i32>::splat(1);

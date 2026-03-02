@@ -165,14 +165,16 @@ impl WorkerCache {
         solver: &Solver,
         bodies: &Bodies,
     ) {
-        let constraint = &*solver.handle_to_constraint.get(constraint_handle.0);
+        let constraint = solver.handle_to_constraint.get(constraint_handle.0);
         debug_assert!(
             constraint.set_index == 0,
             "The constraint remover requires that the target constraint is active."
         );
 
-        let mut type_batch_index = TypeBatchIndex::default();
-        type_batch_index.batch = constraint.batch_index as i16;
+        let mut type_batch_index = TypeBatchIndex {
+            batch: constraint.batch_index as i16,
+            ..Default::default()
+        };
         let constraint_batch = solver.active_set().batches.get(constraint.batch_index);
         type_batch_index.type_batch = *constraint_batch
             .type_index_to_type_batch_index
@@ -348,7 +350,7 @@ impl ConstraintRemover {
             for j in 0..cache.removals.batch_count {
                 unsafe {
                     let type_batch_index = *cache.removals.type_batches.get(j);
-                    let worker_removals = &*cache.removals.removals_for_type_batches.get(j);
+                    let worker_removals = cache.removals.removals_for_type_batches.get(j);
                     removed_constraint_count += worker_removals.constraint_handles_to_remove.count;
                     let batch_index = batches.allocate_space_for_targets(
                         type_batch_index,
@@ -386,7 +388,7 @@ impl ConstraintRemover {
                     removals
                         .constraint_handles_to_remove
                         .as_mut_slice()
-                        .sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                        .sort_unstable_by_key(|a| a.0);
                     removals
                         .per_body_removal_targets
                         .as_mut_slice()
@@ -405,7 +407,7 @@ impl ConstraintRemover {
                 let mut paired: Vec<(TypeBatchIndex, usize)> = (0..count)
                     .map(|i| (*batches.type_batches.get(i as i32), i))
                     .collect();
-                paired.sort_unstable_by(|a, b| a.0.as_i32().cmp(&b.0.as_i32()));
+                paired.sort_unstable_by_key(|a| a.0.as_i32());
 
                 // Apply the permutation to both TypeBatches and RemovalsForTypeBatches.
                 // RemovalsForTypeBatch is Copy, so we can just read and write.
@@ -450,7 +452,7 @@ impl ConstraintRemover {
             for i in 0..batches.batch_count {
                 unsafe {
                     let batch_handles =
-                        &(*batches.removals_for_type_batches.get(i)).constraint_handles_to_remove;
+                        &batches.removals_for_type_batches.get(i).constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
                         solver.handle_pool.return_unsafely(batch_handles.get(j).0);
@@ -466,7 +468,7 @@ impl ConstraintRemover {
             for i in 0..batches.batch_count {
                 unsafe {
                     let removals =
-                        &(*batches.removals_for_type_batches.get(i)).per_body_removal_targets;
+                        &batches.removals_for_type_batches.get(i).per_body_removal_targets;
                     let bodies = &mut *self.bodies;
                     let solver = &mut *self.solver;
                     for j in 0..removals.count {
@@ -506,7 +508,7 @@ impl ConstraintRemover {
             let type_processor = (&(*solver_ptr).type_processors)[type_batch.type_id as usize]
                 .as_ref()
                 .unwrap();
-            let removals = &(*batches.removals_for_type_batches.get(index));
+            let removals = batches.removals_for_type_batches.get(index);
             let fallback_threshold = (*solver_ptr).fallback_batch_threshold();
 
             for i in 0..removals.constraint_handles_to_remove.count {
@@ -534,7 +536,7 @@ impl ConstraintRemover {
             for i in 0..batches.batch_count {
                 unsafe {
                     let batch_handles =
-                        &(*batches.removals_for_type_batches.get(i)).constraint_handles_to_remove;
+                        &batches.removals_for_type_batches.get(i).constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
                         solver

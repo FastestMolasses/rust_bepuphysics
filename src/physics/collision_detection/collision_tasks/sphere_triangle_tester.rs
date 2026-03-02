@@ -160,7 +160,7 @@ impl SphereTriangleTester {
             &r_b,
             &mut manifold.offset_a,
         );
-        manifold.offset_a = manifold.offset_a + *offset_b;
+        manifold.offset_a += *offset_b;
         let mut distance = Vector::<f32>::splat(0.0);
         Vector3Wide::length_into(&manifold.offset_a, &mut distance);
         // Normal calibrated from B to A.

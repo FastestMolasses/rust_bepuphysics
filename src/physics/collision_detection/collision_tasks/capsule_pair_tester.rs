@@ -30,7 +30,7 @@ impl CapsulePairTester {
         let mut xa = Vector3Wide::default();
         let mut da = Vector3Wide::default();
         QuaternionWide::transform_unit_xy(orientation_a, &mut xa, &mut da);
-        let db = QuaternionWide::transform_unit_y(orientation_b.clone());
+        let db = QuaternionWide::transform_unit_y(*orientation_b);
         let mut da_offset_b = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&da, offset_b, &mut da_offset_b);
         let mut db_offset_b = Vector::<f32>::splat(0.0);
@@ -63,7 +63,7 @@ impl CapsulePairTester {
         Vector3Wide::scale_to(&da, &ta, &mut closest_point_on_a);
         let mut closest_point_on_b = Vector3Wide::default();
         Vector3Wide::scale_to(&db, &tb, &mut closest_point_on_b);
-        closest_point_on_b = closest_point_on_b + *offset_b;
+        closest_point_on_b += *offset_b;
         // Normals point from B to A by convention.
         Vector3Wide::subtract(
             &closest_point_on_a,
@@ -135,8 +135,8 @@ impl CapsulePairTester {
         Vector3Wide::scale_to(&manifold.normal, &neg_offset0, &mut normal_push0);
         let mut normal_push1 = Vector3Wide::default();
         Vector3Wide::scale_to(&manifold.normal, &neg_offset1, &mut normal_push1);
-        manifold.offset_a0 = manifold.offset_a0 + normal_push0;
-        manifold.offset_a1 = manifold.offset_a1 + normal_push1;
+        manifold.offset_a0 += normal_push0;
+        manifold.offset_a1 += normal_push1;
         manifold.feature_id0 = Vector::<i32>::splat(0);
         manifold.feature_id1 = Vector::<i32>::splat(1);
         let minimum_accepted_depth = -*speculative_margin;

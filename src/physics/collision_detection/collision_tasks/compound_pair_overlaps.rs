@@ -18,6 +18,7 @@ pub trait ICollisionTaskOverlaps<T: ICollisionTaskSubpairOverlaps> {
 
 /// Stores overlapping child indices for one child of a compound pair.
 #[repr(C)]
+#[derive(Default)]
 pub struct ChildOverlapsCollection {
     /// Buffer of overlapping child indices.
     pub overlaps: Buffer<i32>,
@@ -64,16 +65,6 @@ impl ChildOverlapsCollection {
 impl ICollisionTaskSubpairOverlaps for ChildOverlapsCollection {
     fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
         ChildOverlapsCollection::allocate(self, pool)
-    }
-}
-
-impl Default for ChildOverlapsCollection {
-    fn default() -> Self {
-        Self {
-            overlaps: Buffer::default(),
-            count: 0,
-            child_index: 0,
-        }
     }
 }
 

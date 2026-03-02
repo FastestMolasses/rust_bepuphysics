@@ -66,10 +66,10 @@ impl<
         // Store mesh A's triangles in surplus space beyond total_child_count.
         // This is a bit of a hack, but simple and cheap.
         self.triangle_a_start_index.set(total_child_count);
-        continuation.triangles = pool.take(total_child_count + pair_overlaps.len() as i32);
+        continuation.triangles = pool.take(total_child_count + pair_overlaps.len());
         continuation.child_manifold_regions = pool.take(pair_overlaps.len());
         continuation.query_bounds = pool.take(pair_overlaps.len());
-        continuation.region_count = pair_overlaps.len() as i32;
+        continuation.region_count = pair_overlaps.len();
         continuation.mesh_orientation = pair.orientation_b;
         continuation.requires_flip = pair.flip_mask == 0;
         continuation.mesh = pair.b as *mut u8;
@@ -77,7 +77,7 @@ impl<
         // All regions must be assigned ahead of time.
         let mut next_child_index = 0i32;
         debug_assert!(pair_overlaps.len() == pair_queries.len());
-        for j in 0..pair_overlaps.len() as i32 {
+        for j in 0..pair_overlaps.len() {
             let child_overlaps = &pair_overlaps[j];
             continuation.child_manifold_regions[j] = (next_child_index, child_overlaps.count);
             next_child_index += child_overlaps.count;

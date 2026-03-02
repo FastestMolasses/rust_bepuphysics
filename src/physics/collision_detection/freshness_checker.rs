@@ -104,7 +104,7 @@ impl FreshnessChecker {
         );
 
         // We check 8 pairs simultaneously by reading a u64.
-        let freshness_ptr = pair_cache.pair_freshness.as_ptr() as *const u8;
+        let freshness_ptr = pair_cache.pair_freshness.as_ptr();
         let start = freshness_ptr.add(start_index as usize) as *const u64;
 
         for i in 0..wide_count {
@@ -115,7 +115,7 @@ impl FreshnessChecker {
                 if (freshness_batch & 0x0000_0000_FFFF_FFFF) < 0x0000_0000_FFFF_FFFF {
                     if (freshness_batch & 0x0000_0000_0000_FFFF) < 0x0000_0000_0000_FFFF {
                         if (freshness_batch & 0x0000_0000_0000_00FF) == 0 {
-                            self.enqueue_stale_removal(worker_index, start_of_wide + 0);
+                            self.enqueue_stale_removal(worker_index, start_of_wide);
                         }
                         if (freshness_batch & 0x0000_0000_0000_FF00) == 0 {
                             self.enqueue_stale_removal(worker_index, start_of_wide + 1);

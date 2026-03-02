@@ -195,7 +195,7 @@ impl CylinderConvexHullTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
+        inactive_lanes |= depth.simd_lt(depth_threshold).to_simd();
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;
         manifold.contact2_exists = zero_i;
@@ -572,11 +572,7 @@ impl CylinderConvexHullTester {
                             let mut restrict_weight =
                                 (denominator_squared / edge_plane_normal_length_squared - MIN)
                                     * INVERSE_SPAN;
-                            if restrict_weight < 0.0 {
-                                restrict_weight = 0.0;
-                            } else if restrict_weight > 1.0 {
-                                restrict_weight = 1.0;
-                            }
+                            restrict_weight = restrict_weight.clamp(0.0, 1.0);
                             let slot_half_length = a.half_length.as_array()[slot_index];
                             let mut unrestricted_numerator = slot_half_length * denominator;
                             if denominator < 0.0 {

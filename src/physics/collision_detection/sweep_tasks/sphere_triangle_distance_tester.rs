@@ -9,7 +9,6 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Mask;
-use std::simd::Select;
 
 #[derive(Default)]
 pub struct SphereTriangleDistanceTester;
@@ -116,7 +115,7 @@ impl IPairDistanceTester<SphereWide, TriangleWide> for SphereTriangleDistanceTes
             );
             let mut point_on_edge = Vector3Wide::default();
             Vector3Wide::scale_to(&edge_direction, &edge_scale, &mut point_on_edge);
-            point_on_edge = point_on_edge + edge_start;
+            point_on_edge += edge_start;
 
             local_closest_on_triangle = Vector3Wide::conditional_select(
                 &outside_any_edge,

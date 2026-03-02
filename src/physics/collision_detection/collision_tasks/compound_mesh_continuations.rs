@@ -60,7 +60,7 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
         continuation.triangles = pool.take(total_child_count);
         continuation.child_manifold_regions = pool.take(pair_overlaps.len());
         continuation.query_bounds = pool.take(pair_overlaps.len());
-        continuation.region_count = pair_overlaps.len() as i32;
+        continuation.region_count = pair_overlaps.len();
         continuation.mesh_orientation = pair.orientation_b;
         continuation.mesh = pair.b as *mut u8;
         continuation.requires_flip = pair.flip_mask == 0;
@@ -69,14 +69,13 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
         // so the dispatch may occur before all children are visited in the later loop.
         let mut next_child_index = 0i32;
         debug_assert!(pair_overlaps.len() == pair_queries.len());
-        for j in 0..pair_overlaps.len() as i32 {
+        for j in 0..pair_overlaps.len() {
             let child_overlaps = &pair_overlaps[j];
             continuation.child_manifold_regions[j] = (next_child_index, child_overlaps.count);
             next_child_index += child_overlaps.count;
             continuation.query_bounds[j] = BoundingBox {
                 min: pair_queries[j].min,
                 max: pair_queries[j].max,
-                ..Default::default()
             };
         }
         continuation as *mut CompoundMeshReduction

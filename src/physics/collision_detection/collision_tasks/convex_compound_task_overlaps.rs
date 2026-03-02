@@ -8,6 +8,7 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 
 /// Stores the overlap results for a single convex-compound pair.
 /// Contains a list of child indices that overlap with the convex shape.
+#[derive(Default)]
 pub struct ConvexCompoundOverlaps {
     /// Buffer of child indices that overlap.
     pub overlaps: Buffer<i32>,
@@ -27,7 +28,7 @@ impl ConvexCompoundOverlaps {
     #[inline(always)]
     pub fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
         if self.count == self.overlaps.len() {
-            let new_size = if self.overlaps.len() == 0 {
+            let new_size = if self.overlaps.is_empty() {
                 4
             } else {
                 self.overlaps.len() * 2
@@ -43,15 +44,6 @@ impl ConvexCompoundOverlaps {
     #[inline(always)]
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         pool.return_buffer(&mut self.overlaps);
-    }
-}
-
-impl Default for ConvexCompoundOverlaps {
-    fn default() -> Self {
-        Self {
-            overlaps: Buffer::default(),
-            count: 0,
-        }
     }
 }
 

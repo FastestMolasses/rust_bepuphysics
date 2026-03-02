@@ -30,10 +30,11 @@ impl CylinderPairTester {
         point: &Vector2Wide,
         projected: &mut Vector2Wide,
     ) {
-        let mut point3d = Vector3Wide::default();
-        point3d.x = point.x;
-        point3d.y = *cap_center_by;
-        point3d.z = point.y;
+        let point3d = Vector3Wide {
+            x: point.x,
+            y: *cap_center_by,
+            z: point.y,
+        };
         Self::project_onto_cap_a(
             cap_center_a,
             r_a,
@@ -103,7 +104,7 @@ impl CylinderPairTester {
         let mut c_val = Vector::<f32>::splat(0.0);
         Vector2Wide::dot(line_position, line_position, &mut c_val);
         let radius_squared = *radius * *radius;
-        c_val = c_val - radius_squared;
+        c_val -= radius_squared;
         let t_offset = StdFloat::sqrt((b_val * b_val - a_val * c_val).simd_max(zero_f)) * inverse_a;
         let t_base = -b_val * inverse_a;
         *t_min = t_base - t_offset;
@@ -146,7 +147,7 @@ impl CylinderPairTester {
         let mut local_a_to_contact = Vector3Wide::default();
         Vector3Wide::add(contact, local_offset_b, &mut local_a_to_contact);
         Matrix3x3Wide::transform_without_overlap(&local_a_to_contact, orientation_b, a_to_contact);
-        *contact_exists = *contact_exists & depth.simd_ge(negative_speculative_margin).to_simd();
+        *contact_exists &= depth.simd_ge(negative_speculative_margin).to_simd();
     }
 
     /// Tests cylinder vs cylinder collision (two orientations).
@@ -202,7 +203,7 @@ impl CylinderPairTester {
 
         let mut depth = Vector::<f32>::splat(0.0);
         let mut closest_on_b = Vector3Wide::default();
-        let initial_normal = local_normal.clone();
+        let initial_normal = local_normal;
         DepthRefiner::find_minimum_depth_with_witness(
             b,
             a,
@@ -220,7 +221,7 @@ impl CylinderPairTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
+        inactive_lanes |= depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = unsafe { std::mem::zeroed() };
             return;
@@ -236,7 +237,7 @@ impl CylinderPairTester {
             .select(-a.half_length, a.half_length);
         let mut cap_center_a = Vector3Wide::default();
         Vector3Wide::scale_to(&r_a.y, &cap_a_offset, &mut cap_center_a);
-        let cap_center_a_tmp = cap_center_a.clone();
+        let cap_center_a_tmp = cap_center_a;
         Vector3Wide::add(&cap_center_a_tmp, &local_offset_a, &mut cap_center_a);
         let cap_center_by = local_normal
             .y
@@ -271,7 +272,7 @@ impl CylinderPairTester {
         Vector3Wide::dot(&extreme_a_horizontal_offset, &r_a.y, &mut vertical_dot);
         let mut to_remove = Vector3Wide::default();
         Vector3Wide::scale_to(&r_a.y, &vertical_dot, &mut to_remove);
-        let temp_horiz = extreme_a_horizontal_offset.clone();
+        let temp_horiz = extreme_a_horizontal_offset;
         Vector3Wide::subtract(&temp_horiz, &to_remove, &mut extreme_a_horizontal_offset);
 
         let extreme_b = Vector2Wide {
@@ -280,12 +281,13 @@ impl CylinderPairTester {
         };
 
         let use_negative = n_dot_ay.simd_gt(zero_f);
-        let mut cap_feature_normal_a = Vector3Wide::default();
-        cap_feature_normal_a.x = use_negative.select(-r_a.y.x, r_a.y.x);
-        cap_feature_normal_a.y = use_negative.select(-r_a.y.y, r_a.y.y);
-        cap_feature_normal_a.z = use_negative.select(-r_a.y.z, r_a.y.z);
-        let mut feature_normal_a = cap_feature_normal_a.clone();
-        let mut feature_position_a = cap_center_a.clone();
+        let cap_feature_normal_a = Vector3Wide {
+            x: use_negative.select(-r_a.y.x, r_a.y.x),
+            y: use_negative.select(-r_a.y.y, r_a.y.y),
+            z: use_negative.select(-r_a.y.z, r_a.y.z),
+        };
+        let mut feature_normal_a = cap_feature_normal_a;
+        let mut feature_position_a = cap_center_a;
 
         if use_cap_cap.simd_lt(zero_i).any() {
             // Cap-cap contact generation.
@@ -297,7 +299,7 @@ impl CylinderPairTester {
             let a_cap_not_parallel = abs_a_dot.simd_lt(parallel_threshold);
             let b_cap_not_parallel = abs_b_dot.simd_lt(parallel_threshold);
 
-            let mut cap_contact0 = extreme_b.clone();
+            let mut cap_contact0 = extreme_b;
 
             let both_not_parallel = (a_cap_not_parallel & b_cap_not_parallel).to_simd();
             if ((!both_not_parallel) & !inactive_lanes)
@@ -572,23 +574,26 @@ impl CylinderPairTester {
             &side_feature_normal_az,
             &mut side_feature_normal_a,
         );
-        let mut side_center_a = Vector3Wide::default();
-        side_center_a.x = extreme_a_horizontal_offset.x + local_offset_a.x;
-        side_center_a.y = extreme_a_horizontal_offset.y + local_offset_a.y;
-        side_center_a.z = extreme_a_horizontal_offset.z + local_offset_a.z;
-        let mut side_center_b = Vector3Wide::default();
-        side_center_b.x = extreme_b.x;
-        side_center_b.y = zero_f;
-        side_center_b.z = extreme_b.y;
+        let side_center_a = Vector3Wide {
+            x: extreme_a_horizontal_offset.x + local_offset_a.x,
+            y: extreme_a_horizontal_offset.y + local_offset_a.y,
+            z: extreme_a_horizontal_offset.z + local_offset_a.z,
+        };
+        let side_center_b = Vector3Wide {
+            x: extreme_b.x,
+            y: zero_f,
+            z: extreme_b.y,
+        };
 
         if use_cap_side.simd_lt(zero_i).any() {
             // Cap-side contact generation.
             let mut side_line_end_a = Vector3Wide::default();
             Vector3Wide::add(&side_center_a, &r_a.y, &mut side_line_end_a);
-            let mut side_line_end_b = Vector3Wide::default();
-            side_line_end_b.x = side_center_b.x;
-            side_line_end_b.y = one_f;
-            side_line_end_b.z = side_center_b.z;
+            let side_line_end_b = Vector3Wide {
+                x: side_center_b.x,
+                y: one_f,
+                z: side_center_b.z,
+            };
             let mut projected_line_start_b_on_a = Vector2Wide::default();
             Self::project_onto_cap_a(
                 &cap_center_a,
@@ -662,23 +667,27 @@ impl CylinderPairTester {
             t_max = t_max.simd_min(side_half_length);
 
             // Build contacts for both cases.
-            let mut contact0_for_cap_a = Vector3Wide::default();
-            contact0_for_cap_a.x = side_center_b.x;
-            contact0_for_cap_a.y = t_min;
-            contact0_for_cap_a.z = side_center_b.z;
-            let mut contact1_for_cap_a = Vector3Wide::default();
-            contact1_for_cap_a.x = side_center_b.x;
-            contact1_for_cap_a.y = t_max;
-            contact1_for_cap_a.z = side_center_b.z;
+            let contact0_for_cap_a = Vector3Wide {
+                x: side_center_b.x,
+                y: t_min,
+                z: side_center_b.z,
+            };
+            let contact1_for_cap_a = Vector3Wide {
+                x: side_center_b.x,
+                y: t_max,
+                z: side_center_b.z,
+            };
 
-            let mut contact0_for_cap_b = Vector3Wide::default();
-            contact0_for_cap_b.x = projected_line_start.x + t_min * projected_line_direction.x;
-            contact0_for_cap_b.y = cap_center_by;
-            contact0_for_cap_b.z = projected_line_start.y + t_min * projected_line_direction.y;
-            let mut contact1_for_cap_b = Vector3Wide::default();
-            contact1_for_cap_b.x = projected_line_start.x + t_max * projected_line_direction.x;
-            contact1_for_cap_b.y = cap_center_by;
-            contact1_for_cap_b.z = projected_line_start.y + t_max * projected_line_direction.y;
+            let contact0_for_cap_b = Vector3Wide {
+                x: projected_line_start.x + t_min * projected_line_direction.x,
+                y: cap_center_by,
+                z: projected_line_start.y + t_min * projected_line_direction.y,
+            };
+            let contact1_for_cap_b = Vector3Wide {
+                x: projected_line_start.x + t_max * projected_line_direction.x,
+                y: cap_center_by,
+                z: projected_line_start.y + t_max * projected_line_direction.y,
+            };
 
             let cap_side_contact0 = Vector3Wide::conditional_select(
                 &use_cap_a_i,

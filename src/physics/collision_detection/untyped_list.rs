@@ -6,22 +6,12 @@ use std::mem;
 
 /// A type-erased list storing elements as raw bytes, used in the collision pipeline.
 #[repr(C)]
+#[derive(Default)]
 pub struct UntypedList {
     pub buffer: Buffer<u8>,
     pub count: i32,
     pub byte_count: i32,
     pub element_size_in_bytes: i32,
-}
-
-impl Default for UntypedList {
-    fn default() -> Self {
-        Self {
-            buffer: Buffer::default(),
-            count: 0,
-            byte_count: 0,
-            element_size_in_bytes: 0,
-        }
-    }
 }
 
 impl UntypedList {

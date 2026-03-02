@@ -1,8 +1,8 @@
 use crate::utilities::vector::Vector;
-use std::simd::{cmp::SimdPartialOrd, Simd};
-
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+use std::simd::{
+    cmp::{SimdPartialEq, SimdPartialOrd},
+    Simd,
+};
 
 pub const VECTOR_MASK: usize = Vector::<f32>::LEN - 1;
 
@@ -69,7 +69,6 @@ impl BundleIndexing {
     #[inline(always)]
     pub fn get_first_set_lane_index(v: Vector<i32>) -> i32 {
         // Use portable SIMD comparison and bitmask
-        use std::simd::cmp::SimdPartialEq;
         let mask = v.simd_eq(Vector::splat(-1));
         let bits = mask.to_bitmask();
         if bits == 0 {
@@ -83,7 +82,6 @@ impl BundleIndexing {
     /// In other words, if the lanes in the vector are (-1, 0, -1, 0), then this will return 3.
     #[inline(always)]
     pub fn get_last_set_lane_count(v: Vector<i32>) -> usize {
-        use std::simd::cmp::SimdPartialEq;
         let mask = v.simd_eq(Vector::splat(-1));
         let bits = mask.to_bitmask();
         if bits == 0 {

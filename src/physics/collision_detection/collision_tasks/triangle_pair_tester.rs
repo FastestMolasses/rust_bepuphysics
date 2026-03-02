@@ -158,8 +158,10 @@ impl TrianglePairTester {
         let offset = *triangle_center_b - *vertex;
         let mut distance = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&offset, face_normal_b, &mut distance);
-        let mut candidate = ManifoldCandidate::default();
-        candidate.depth = distance * *inverse_contact_normal_dot_face_normal_b;
+        let mut candidate = ManifoldCandidate {
+            depth: distance * *inverse_contact_normal_dot_face_normal_b,
+            ..Default::default()
+        };
         let unprojected_vertex = Vector3Wide::scale(contact_normal, &candidate.depth) + *vertex;
 
         let offset_on_b = unprojected_vertex - *triangle_center_b;
@@ -321,8 +323,7 @@ impl TrianglePairTester {
             use_bc_as_exit.select(depth_contribution_bc_on_a, depth_contribution_ca_on_a),
         );
         // If an edge fails to generate any interval, it's not intersecting.
-        allow_contacts =
-            allow_contacts & !(entry.simd_eq(min_value) | exit.simd_eq(max_value)).to_simd();
+        allow_contacts &= !(entry.simd_eq(min_value) | exit.simd_eq(max_value)).to_simd();
         let entry = entry.simd_max(Vector::<f32>::splat(0.0));
         let exit = exit.simd_min(Vector::<f32>::splat(1.0));
 
@@ -351,17 +352,18 @@ impl TrianglePairTester {
         let interval_threshold = Vector::<f32>::splat(1e-5);
 
         // Entry contact
-        let mut candidate = ManifoldCandidate::default();
-        candidate.depth = depth_contribution_b_at_entry - depth_contribution_a_at_entry;
+        let candidate = ManifoldCandidate {
+            depth: depth_contribution_b_at_entry - depth_contribution_a_at_entry,
+            x: entry * edge_direction_x + offset_x,
+            y: entry * edge_direction_y + offset_y,
+            feature_id: *entry_id,
+        };
         let exists = (allow_contacts.simd_lt(Vector::<i32>::splat(0)))
             & (candidate.depth.simd_ge(*minimum_depth))
             & (candidate_count.simd_lt(six))
             & ((exit - entry).simd_ge(interval_threshold))
             & (entry.simd_lt(one_f))
             & (entry.simd_gt(zero_f));
-        candidate.x = entry * edge_direction_x + offset_x;
-        candidate.y = entry * edge_direction_y + offset_y;
-        candidate.feature_id = *entry_id;
         unsafe {
             ManifoldCandidateHelper::add_candidate_with_depth(
                 candidates as *mut ManifoldCandidate,
@@ -373,16 +375,18 @@ impl TrianglePairTester {
         }
 
         // Exit contact
-        candidate.depth = depth_contribution_b_at_exit - depth_contribution_a_at_exit;
+        let candidate = ManifoldCandidate {
+            depth: depth_contribution_b_at_exit - depth_contribution_a_at_exit,
+            x: exit * edge_direction_x + offset_x,
+            y: exit * edge_direction_y + offset_y,
+            feature_id: *entry_id + *exit_id_offset,
+        };
         let exists = (allow_contacts.simd_lt(Vector::<i32>::splat(0)))
             & (candidate.depth.simd_ge(*minimum_depth))
             & (candidate_count.simd_lt(six))
             & (exit.simd_ge(entry))
             & (exit.simd_le(one_f))
             & (exit.simd_ge(zero_f));
-        candidate.x = exit * edge_direction_x + offset_x;
-        candidate.y = exit * edge_direction_y + offset_y;
-        candidate.feature_id = *entry_id + *exit_id_offset;
         unsafe {
             ManifoldCandidateHelper::add_candidate_with_depth(
                 candidates as *mut ManifoldCandidate,
@@ -406,8 +410,8 @@ impl TrianglePairTester {
     ) {
         *manifold_offset_a = Vector3Wide::scale(tangent_bx, &raw_contact.x);
         let y = Vector3Wide::scale(tangent_by, &raw_contact.y);
-        *manifold_offset_a = *manifold_offset_a + y;
-        *manifold_offset_a = *manifold_offset_a + *face_center_b;
+        *manifold_offset_a += y;
+        *manifold_offset_a += *face_center_b;
         *manifold_depth = raw_contact.depth;
         *manifold_feature_id = raw_contact.feature_id;
     }
@@ -440,13 +444,13 @@ impl TrianglePairTester {
             );
             let mut b_a = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.a, &r_b, &mut b_a);
-            b_a = b_a + local_offset_b;
+            b_a += local_offset_b;
             let mut b_b = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.b, &r_b, &mut b_b);
-            b_b = b_b + local_offset_b;
+            b_b += local_offset_b;
             let mut b_c = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&b.c, &r_b, &mut b_c);
-            b_c = b_c + local_offset_b;
+            b_c += local_offset_b;
 
             let local_triangle_center_b =
                 Vector3Wide::scale(&(b_a + b_b + b_c), &Vector::<f32>::splat(1.0 / 3.0));
@@ -1077,10 +1081,10 @@ impl TrianglePairTester {
                 &mut manifold.normal,
             );
 
-            manifold.contact0_exists = manifold.contact0_exists & allow_contacts;
-            manifold.contact1_exists = manifold.contact1_exists & allow_contacts;
-            manifold.contact2_exists = manifold.contact2_exists & allow_contacts;
-            manifold.contact3_exists = manifold.contact3_exists & allow_contacts;
+            manifold.contact0_exists &= allow_contacts;
+            manifold.contact1_exists &= allow_contacts;
+            manifold.contact2_exists &= allow_contacts;
+            manifold.contact3_exists &= allow_contacts;
 
             Self::transform_contact_to_manifold(
                 &contact0,
@@ -1126,7 +1130,7 @@ impl TrianglePairTester {
                     Vector::<i32>::splat(FACE_COLLISION_FLAG),
                     Vector::<i32>::splat(0),
                 );
-            manifold.feature_id0 = manifold.feature_id0 + face_flag;
+            manifold.feature_id0 += face_flag;
         }
     }
 }

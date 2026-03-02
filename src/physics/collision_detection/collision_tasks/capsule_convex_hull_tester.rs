@@ -45,7 +45,7 @@ impl CapsuleConvexHullTester {
             &hull_orientation,
             &mut hull_local_capsule_orientation,
         );
-        let local_capsule_axis = hull_local_capsule_orientation.y.clone();
+        let local_capsule_axis = hull_local_capsule_orientation.y;
 
         let mut local_offset_b = Vector3Wide::default();
         Matrix3x3Wide::transform_by_transposed_without_overlap(
@@ -97,7 +97,7 @@ impl CapsuleConvexHullTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
+        inactive_lanes |= depth.simd_lt(depth_threshold).to_simd();
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = std::mem::zeroed();
             return;
@@ -185,11 +185,7 @@ impl CapsuleConvexHullTester {
                         let mut restrict_weight =
                             (denominator_squared / edge_plane_normal_length_squared - MIN)
                                 * INVERSE_SPAN;
-                        if restrict_weight < 0.0 {
-                            restrict_weight = 0.0;
-                        } else if restrict_weight > 1.0 {
-                            restrict_weight = 1.0;
-                        }
+                        restrict_weight = restrict_weight.clamp(0.0, 1.0);
                         let mut unrestricted_numerator =
                             a.half_length.as_array()[slot_index] * denominator;
                         if denominator < 0.0 {
@@ -301,9 +297,9 @@ impl CapsuleConvexHullTester {
         // Push contacts to hull surface.
         let contact_offset0 = Vector3Wide::scale(&manifold.normal, &unexpanded_depth0);
         let contact_offset1 = Vector3Wide::scale(&manifold.normal, &unexpanded_depth1);
-        let offset_a0 = manifold.offset_a0.clone();
+        let offset_a0 = manifold.offset_a0;
         Vector3Wide::add(&offset_a0, &contact_offset0, &mut manifold.offset_a0);
-        let offset_a1 = manifold.offset_a1.clone();
+        let offset_a1 = manifold.offset_a1;
         Vector3Wide::add(&offset_a1, &contact_offset1, &mut manifold.offset_a1);
     }
 }

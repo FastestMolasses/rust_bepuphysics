@@ -67,7 +67,7 @@ impl IPairDistanceTester<CapsuleWide, CapsuleWide> for CapsulePairDistanceTester
         Vector3Wide::scale_to(&da, &ta, closest_a);
         let mut closest_b = Vector3Wide::default();
         Vector3Wide::scale_to(&db, &tb, &mut closest_b);
-        closest_b = closest_b + *offset_b;
+        closest_b += *offset_b;
 
         Vector3Wide::subtract(&*closest_a, &closest_b, normal);
         Vector3Wide::length_into(&*normal, distance);

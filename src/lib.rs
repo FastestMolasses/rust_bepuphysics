@@ -5,6 +5,8 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::excessive_precision)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::approx_constant)]
 
 pub mod physics;
 pub mod utilities;

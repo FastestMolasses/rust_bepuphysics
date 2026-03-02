@@ -3,8 +3,6 @@
 //! These read configuration from Bevy resources and per-entity components,
 //! removing the need for users to implement the raw SIMD-level callbacks.
 
-use std::simd::prelude::*;
-
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::collidables::collidable_reference::CollidableReference;
 use crate::physics::collision_detection::contact_manifold::{

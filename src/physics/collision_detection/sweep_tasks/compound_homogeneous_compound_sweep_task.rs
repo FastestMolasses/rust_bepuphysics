@@ -198,14 +198,13 @@ impl<
                             &mut t1_candidate,
                             &mut hit_location_candidate,
                             &mut hit_normal_candidate,
-                        ) {
-                            if t1_candidate < *t1 {
+                        )
+                            && t1_candidate < *t1 {
                                 *t0 = t0_candidate;
                                 *t1 = t1_candidate;
                                 *hit_location = hit_location_candidate;
                                 *hit_normal = hit_normal_candidate;
                             }
-                        }
                     }
                 }
             }

@@ -7,7 +7,6 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
-use std::simd::Select;
 
 /// Pair tester for sphere vs capsule collisions.
 pub struct SphereCapsuleTester;

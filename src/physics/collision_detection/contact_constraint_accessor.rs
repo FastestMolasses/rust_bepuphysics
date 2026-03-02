@@ -625,7 +625,7 @@ unsafe fn sequential_add_to_simulation<
         return;
     }
     let solver_ptr = solver as *mut Solver;
-    for i in 0..list.count as i32 {
+    for i in 0..list.count {
         let (pair, change, body_handles_ptr, description_ptr, impulses_ptr) =
             read_pending_constraint::<TBodyHandles, TDescription, TContactImpulses>(list, i);
 
@@ -726,8 +726,8 @@ unsafe fn sequential_add_to_simulation_speculative<
     if !list.buffer.allocated() {
         return;
     }
-    let batch_indices_for_type = &*speculative_batch_indices.get(narrow_phase_constraint_type_id);
-    for i in 0..list.count as i32 {
+    let batch_indices_for_type = speculative_batch_indices.get(narrow_phase_constraint_type_id);
+    for i in 0..list.count {
         let (pair, change, body_handles_ptr, description_ptr, impulses_ptr) =
             read_pending_constraint::<TBodyHandles, TDescription, TContactImpulses>(list, i);
         let batch_index = *batch_indices_for_type.get(i) as i32;
@@ -768,7 +768,7 @@ unsafe fn deterministic_add_all<
     for i in 0..sorted_constraints.count {
         let target = sorted_constraints.get(i);
         let worker_cache = &*overlap_workers_pending[target.worker_index as usize];
-        let list = &*worker_cache.pending_constraints_by_type.get(type_index);
+        let list = worker_cache.pending_constraints_by_type.get(type_index);
         let base = list
             .buffer
             .as_ptr()

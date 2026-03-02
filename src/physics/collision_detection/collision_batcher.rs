@@ -24,6 +24,7 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
 
 /// A raw byte blob that doesn't auto-resize. Used for caching shape data.
+#[derive(Default)]
 pub(crate) struct UntypedBlob {
     pub buffer: Buffer<u8>,
     pub byte_count: i32,
@@ -43,28 +44,11 @@ impl UntypedBlob {
     }
 }
 
-impl Default for UntypedBlob {
-    fn default() -> Self {
-        Self {
-            buffer: Buffer::default(),
-            byte_count: 0,
-        }
-    }
-}
-
 /// A pending batch of collision pairs plus cached shape data.
+#[derive(Default)]
 pub(crate) struct CollisionBatch {
     pub pairs: UntypedList,
     pub shapes: UntypedBlob,
-}
-
-impl Default for CollisionBatch {
-    fn default() -> Self {
-        Self {
-            pairs: UntypedList::default(),
-            shapes: UntypedBlob::default(),
-        }
-    }
 }
 
 /// Callbacks interface for collision batcher results.
@@ -255,7 +239,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         if shape_type_a != reference.expected_first_type_id {
             debug_assert!(shape_type_b == reference.expected_first_type_id);
             self.add_internal(
-                &reference,
+                reference,
                 -1,
                 shape_type_b,
                 shape_type_a,
@@ -272,7 +256,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             );
         } else {
             self.add_internal(
-                &reference,
+                reference,
                 0,
                 shape_type_a,
                 shape_type_b,
@@ -361,7 +345,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         let type_matrix = &*self.type_matrix;
         let reference = type_matrix.get_task_reference(shape_type_a, shape_type_b);
         let (cached_shape_a, cached_shape_b) =
-            self.cache_shapes(&reference, shape_a, shape_b, shape_size_a, shape_size_b);
+            self.cache_shapes(reference, shape_a, shape_b, shape_size_a, shape_size_b);
         let default_velocity = BodyVelocity::default();
         let continuation = PairContinuation::direct(pair_id);
         self.add_directly(
@@ -742,7 +726,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             let vtable = self.make_vtable();
             // Execute remaining partial batches
             for i in self.minimum_batch_index..=self.maximum_batch_index {
-                let batch_ptr = self.batches.get_mut_ptr(i) as *mut CollisionBatch;
+                let batch_ptr = self.batches.get_mut_ptr(i);
                 if (*batch_ptr).pairs.count > 0 {
                     type_matrix.tasks[i as usize].execute_batch(&mut (*batch_ptr).pairs, &vtable);
                 }

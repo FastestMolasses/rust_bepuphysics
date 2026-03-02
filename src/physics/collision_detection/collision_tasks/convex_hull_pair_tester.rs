@@ -116,7 +116,7 @@ impl ConvexHullPairTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
+        inactive_lanes |= depth.simd_lt(depth_threshold).to_simd();
         // Clear all contact exists states up front.
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;
@@ -250,10 +250,9 @@ impl ConvexHullPairTester {
             );
             previous_vertex_a += slot_local_offset_a;
 
-            for i in 0..face_count_a {
-                let edge = &mut cached_edges[i];
+            for (edge_index, edge) in cached_edges.iter_mut().take(face_count_a).enumerate() {
                 edge.maximum_containment_dot = f32::MIN;
-                let index_a = a_slot.face_vertex_indices[face_start_a + i];
+                let index_a = a_slot.face_vertex_indices[face_start_a + edge_index];
                 Vector3Wide::read_slot(
                     &a_slot.points[index_a.bundle_index as usize],
                     index_a.inner_index as usize,
@@ -299,9 +298,7 @@ impl ConvexHullPairTester {
                 let mut latest_entry = f32::MIN;
                 let mut earliest_exit = f32::MAX;
 
-                for face_vertex_index_a in 0..face_count_a {
-                    let edge_a = &mut cached_edges[face_vertex_index_a];
-
+                for edge_a in &mut cached_edges[..face_count_a] {
                     // Check containment of A vertex in this B edge.
                     let edge_b_to_edge_a = edge_a.vertex - previous_vertex_b;
                     let containment_dot = edge_b_to_edge_a.dot(edge_plane_normal_b);
@@ -384,11 +381,10 @@ impl ConvexHullPairTester {
             // Check for A vertices contained in B's face.
             let inverse_local_normal_a_dot_face_normal_b =
                 1.0 / slot_local_normal.dot(slot_face_normal_b);
-            for i in 0..face_count_a {
+            for (i, edge) in cached_edges[..face_count_a].iter().enumerate() {
                 if candidate_count >= maximum_candidate_count {
                     break;
                 }
-                let edge = &cached_edges[i];
                 if edge.maximum_containment_dot <= 0.0 {
                     // This vertex was contained by all B edge plane normals.
                     // Project it onto B's surface.

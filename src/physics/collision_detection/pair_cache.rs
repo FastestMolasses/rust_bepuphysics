@@ -15,7 +15,7 @@ use super::worker_pair_cache::WorkerPendingPairChanges;
 
 /// Packed pair of collidable references.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CollidablePair {
     pub a: CollidableReference,
     pub b: CollidableReference,
@@ -29,15 +29,6 @@ impl CollidablePair {
     #[inline(always)]
     pub fn new(a: CollidableReference, b: CollidableReference) -> Self {
         Self { a, b }
-    }
-}
-
-impl Default for CollidablePair {
-    fn default() -> Self {
-        Self {
-            a: CollidableReference::default(),
-            b: CollidableReference::default(),
-        }
     }
 }
 
@@ -124,22 +115,12 @@ impl Default for ConstraintCache {
 
 /// Location of a collision pair, used for mapping constraint handles back to pairs.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub(crate) struct CollisionPairLocation {
     pub pair: CollidablePair,
     /// Used only when the collision pair was moved into a sleeping set.
     pub inactive_set_index: i32,
     pub inactive_pair_index: i32,
-}
-
-impl Default for CollisionPairLocation {
-    fn default() -> Self {
-        Self {
-            pair: CollidablePair::default(),
-            inactive_set_index: 0,
-            inactive_pair_index: 0,
-        }
-    }
 }
 
 /// Cache of collision pairs, tracking overlap mappings and sleeping sets.
@@ -210,13 +191,13 @@ impl PairCache {
         self.cached_dispatcher = thread_dispatcher;
 
         let pending_size = i32::max(self.minimum_pending_size, self.previous_pending_size);
-        self.worker_pending_changes = pool_ref.take(thread_count as i32);
+        self.worker_pending_changes = pool_ref.take(thread_count);
 
         if let Some(dispatcher) = thread_dispatcher {
             for i in 0..thread_count {
                 unsafe {
-                    let worker_pool = &mut *(&*dispatcher).worker_pool_ptr(i as i32);
-                    *self.worker_pending_changes.get_mut(i as i32) =
+                    let worker_pool = &mut *(&*dispatcher).worker_pool_ptr(i);
+                    *self.worker_pending_changes.get_mut(i) =
                         WorkerPendingPairChanges::new(worker_pool, pending_size);
                 }
             }
@@ -279,7 +260,7 @@ impl PairCache {
         let mut largest_intermediate_size = self.mapping.count;
         let mut new_mapping_size = self.mapping.count;
         for i in 0..self.worker_pending_changes.len() {
-            let cache = unsafe { &*self.worker_pending_changes.get(i) };
+            let cache = unsafe { self.worker_pending_changes.get(i) };
             // Removes occur first, so this cache can only result in a larger mapping
             // if there are more adds than removes.
             new_mapping_size += cache.pending_adds.count - cache.pending_removes.count;
@@ -313,16 +294,17 @@ impl PairCache {
     ) {
         // Write the constraint handle back into the appropriate location.
         if pair_cache_change_index.is_pending() {
-            (*self
-                .worker_pending_changes
-                .get_mut(pair_cache_change_index.worker_index))
-            .pending_adds
-            .get_mut(pair_cache_change_index.index)
-            .cache
-            .constraint_handle = constraint_handle;
+            self.worker_pending_changes
+                .get_mut(pair_cache_change_index.worker_index)
+                .pending_adds
+                .get_mut(pair_cache_change_index.index)
+                .cache
+                .constraint_handle = constraint_handle;
         } else {
-            (*self.mapping.values.get_mut(pair_cache_change_index.index)).constraint_handle =
-                constraint_handle;
+            self.mapping
+                .values
+                .get_mut(pair_cache_change_index.index)
+                .constraint_handle = constraint_handle;
         }
 
         // Scatter cached impulses into the solver's constraint type batch.
@@ -339,7 +321,9 @@ impl PairCache {
             .scatter_new_impulses(&reference, impulses as *const f32);
 
         // Record the pair so we can look up which CollidablePair owns a given constraint handle.
-        (*self.constraint_handle_to_pair.get_mut(constraint_handle.0)).pair = *pair;
+        self.constraint_handle_to_pair
+            .get_mut(constraint_handle.0)
+            .pair = *pair;
     }
 
     /// Flush all deferred changes from the last narrow phase execution.
@@ -356,7 +340,7 @@ impl PairCache {
                     debug_assert!(removed);
                 }
                 for j in 0..cache.pending_adds.count {
-                    let pending = &*cache.pending_adds.get(j);
+                    let pending = cache.pending_adds.get(j);
                     let added = self.mapping.try_add_unsafely(pending.pair, pending.cache);
                     debug_assert!(added);
                 }
@@ -370,7 +354,7 @@ impl PairCache {
         let mut largest_pending_size = 0i32;
         for i in 0..self.worker_pending_changes.len() {
             unsafe {
-                let pending_changes = &*self.worker_pending_changes.get(i);
+                let pending_changes = self.worker_pending_changes.get(i);
                 if pending_changes.pending_adds.count > largest_pending_size {
                     largest_pending_size = pending_changes.pending_adds.count;
                 }
@@ -455,13 +439,10 @@ impl PairCache {
         constraint_cache: &ConstraintCache,
     ) -> PairCacheChangeIndex {
         // Note that we do not have to set any freshness bytes here; using this path means there exists no previous overlap to remove anyway.
-        let pool = if self.cached_dispatcher.is_none() {
-            unsafe { &mut *self.pool }
+        let pool = if let Some(dispatcher) = self.cached_dispatcher {
+            unsafe { &mut *(&*dispatcher).worker_pool_ptr(worker_index) }
         } else {
-            unsafe {
-                let dispatcher = self.cached_dispatcher.unwrap();
-                &mut *(&*dispatcher).worker_pool_ptr(worker_index)
-            }
+            unsafe { &mut *self.pool }
         };
         let index = unsafe {
             (*self.worker_pending_changes.get_mut(worker_index)).add(pool, pair, constraint_cache)
@@ -559,11 +540,11 @@ impl PairCache {
         solver: &Solver,
     ) {
         let pool_ref = unsafe { &mut *self.pool };
-        let constraint_set = unsafe { &*solver.sets.get(set_index) };
+        let constraint_set = unsafe { solver.sets.get(set_index) };
         for batch_index in 0..constraint_set.batches.count {
-            let batch = unsafe { &*constraint_set.batches.get(batch_index) };
+            let batch = unsafe { constraint_set.batches.get(batch_index) };
             for type_batch_index in 0..batch.type_batches.count {
-                let type_batch = unsafe { &*batch.type_batches.get(type_batch_index) };
+                let type_batch = unsafe { batch.type_batches.get(type_batch_index) };
                 debug_assert!(
                     type_batch.constraint_count > 0,
                     "If a type batch exists, it should contain constraints."
@@ -607,11 +588,11 @@ impl PairCache {
 
     /// Awakens a sleeping set, moving its pairs back into the active mapping.
     pub(crate) fn awaken_set(&mut self, set_index: i32) {
-        let sleeping_set = unsafe { &*self.sleeping_sets.get(set_index) };
+        let sleeping_set = unsafe { self.sleeping_sets.get(set_index) };
         // If there are no pairs, there is no need for an inactive set, so it's not guaranteed to be allocated.
         if sleeping_set.allocated() {
             for i in 0..sleeping_set.pairs.count {
-                let pair = unsafe { &*sleeping_set.pairs.get(i) };
+                let pair = unsafe { sleeping_set.pairs.get(i) };
                 self.mapping.try_add_unsafely(pair.pair, pair.cache);
             }
         }
@@ -624,7 +605,7 @@ impl PairCache {
         type_id: i32,
     ) {
         if is_contact_constraint_type(type_id) {
-            let pair = unsafe { &(*self.constraint_handle_to_pair.get(handle.0)).pair };
+            let pair = unsafe { &self.constraint_handle_to_pair.get(handle.0).pair };
             let removed = self.mapping.fast_remove(pair);
             debug_assert!(
                 removed,

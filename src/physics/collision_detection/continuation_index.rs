@@ -33,11 +33,11 @@ impl CCDContinuationIndex {
     #[inline(always)]
     pub fn new(type_index: i32, index: i32) -> Self {
         debug_assert!(
-            type_index >= 0 && type_index < 2,
+            (0..2).contains(&type_index),
             "Do you really have that many type indices, or is the index corrupt?"
         );
         debug_assert!(
-            index >= 0 && index < (1 << 30),
+            (0..(1 << 30)).contains(&index),
             "Do you really have that many instances, or is the index corrupt?"
         );
         // Note the inclusion of a set bit in the most significant slot.

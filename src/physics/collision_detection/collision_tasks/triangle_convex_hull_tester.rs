@@ -83,19 +83,19 @@ impl TriangleConvexHullTester {
         );
         let mut centroid = Vector3Wide::default();
         Vector3Wide::add(&triangle.a, &triangle.b, &mut centroid);
-        let centroid_tmp = centroid.clone();
+        let centroid_tmp = centroid;
         Vector3Wide::add(&triangle.c, &centroid_tmp, &mut centroid);
-        let centroid_unscaled = centroid.clone();
+        let centroid_unscaled = centroid;
         Vector3Wide::scale_to(
             &centroid_unscaled,
             &Vector::<f32>::splat(1.0 / 3.0),
             &mut centroid,
         );
-        let ta = triangle.a.clone();
+        let ta = triangle.a;
         Vector3Wide::subtract(&ta, &centroid, &mut triangle.a);
-        let tb = triangle.b.clone();
+        let tb = triangle.b;
         Vector3Wide::subtract(&tb, &centroid, &mut triangle.b);
-        let tc = triangle.c.clone();
+        let tc = triangle.c;
         Vector3Wide::subtract(&tc, &centroid, &mut triangle.c);
         let mut local_triangle_center = Vector3Wide::default();
         Vector3Wide::subtract(&centroid, &local_offset_b, &mut local_triangle_center);
@@ -121,7 +121,7 @@ impl TriangleConvexHullTester {
         Vector3Wide::cross(&triangle_ab, &triangle_ca, &mut triangle_normal);
         let mut triangle_normal_length = zero_f;
         Vector3Wide::length_into(&triangle_normal, &mut triangle_normal_length);
-        let tn_tmp = triangle_normal.clone();
+        let tn_tmp = triangle_normal;
         Vector3Wide::scale_to(
             &tn_tmp,
             &(one_f / triangle_normal_length),
@@ -169,8 +169,8 @@ impl TriangleConvexHullTester {
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
         let epsilon_scale = triangle_epsilon_scale.simd_min(hull_epsilon_scale);
         // Degenerate triangles don't contribute contacts.
-        inactive_lanes = inactive_lanes | !nondegenerate_mask;
-        inactive_lanes = inactive_lanes | hull_inside_and_below_triangle;
+        inactive_lanes |= !nondegenerate_mask;
+        inactive_lanes |= hull_inside_and_below_triangle;
         // Clear all contact exists states up front.
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;
@@ -292,8 +292,8 @@ impl TriangleConvexHullTester {
                 .select(triangle_face_depth, refined_depth);
         } else {
             // No depth refine ran; the extreme point prepass did everything needed.
-            local_normal = negated_triangle_normal.clone();
-            closest_on_hull = hull_support_along_negated_tn.clone();
+            local_normal = negated_triangle_normal;
+            closest_on_hull = hull_support_along_negated_tn;
             depth = triangle_face_depth;
         }
 
@@ -553,11 +553,9 @@ impl TriangleConvexHullTester {
                     if earliest_exit_ab * ab_denominator > ab_numerator {
                         earliest_exit_ab = ab_numerator / ab_denominator;
                     }
-                } else if ab_denominator == 0.0 {
-                    if ab_numerator < 0.0 {
-                        earliest_exit_ab = f32::MIN;
-                        latest_entry_ab = f32::MAX;
-                    }
+                } else if ab_denominator == 0.0 && ab_numerator < 0.0 {
+                    earliest_exit_ab = f32::MIN;
+                    latest_entry_ab = f32::MAX;
                 }
 
                 // BC edge.
@@ -571,11 +569,9 @@ impl TriangleConvexHullTester {
                     if earliest_exit_bc * bc_denominator > bc_numerator {
                         earliest_exit_bc = bc_numerator / bc_denominator;
                     }
-                } else if bc_denominator == 0.0 {
-                    if bc_numerator < 0.0 {
-                        earliest_exit_bc = f32::MIN;
-                        latest_entry_bc = f32::MAX;
-                    }
+                } else if bc_denominator == 0.0 && bc_numerator < 0.0 {
+                    earliest_exit_bc = f32::MIN;
+                    latest_entry_bc = f32::MAX;
                 }
 
                 // CA edge.
@@ -589,11 +585,9 @@ impl TriangleConvexHullTester {
                     if earliest_exit_ca * ca_denominator > ca_numerator {
                         earliest_exit_ca = ca_numerator / ca_denominator;
                     }
-                } else if ca_denominator == 0.0 {
-                    if ca_numerator < 0.0 {
-                        earliest_exit_ca = f32::MIN;
-                        latest_entry_ca = f32::MAX;
-                    }
+                } else if ca_denominator == 0.0 && ca_numerator < 0.0 {
+                    earliest_exit_ca = f32::MIN;
+                    latest_entry_ca = f32::MAX;
                 }
             }
 

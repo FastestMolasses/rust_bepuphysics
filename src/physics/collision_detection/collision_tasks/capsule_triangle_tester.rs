@@ -72,10 +72,10 @@ impl CapsuleTriangleTester {
 
         let mut closest_on_capsule = Vector3Wide::default();
         Vector3Wide::scale_to(capsule_axis, ta, &mut closest_on_capsule);
-        closest_on_capsule = closest_on_capsule + *capsule_center;
+        closest_on_capsule += *capsule_center;
         let mut closest_on_edge = Vector3Wide::default();
         Vector3Wide::scale_to(edge_direction, tb, &mut closest_on_edge);
-        closest_on_edge = closest_on_edge + *edge_start;
+        closest_on_edge += *edge_start;
 
         Vector3Wide::subtract(&closest_on_capsule, &closest_on_edge, normal);
         let mut normal_length_squared = Vector::<f32>::splat(0.0);
@@ -189,12 +189,12 @@ impl CapsuleTriangleTester {
         let mut r_b = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_b, &mut r_b);
         let mut local_triangle_center = b.a + b.b;
-        local_triangle_center = local_triangle_center + b.c;
+        local_triangle_center += b.c;
         local_triangle_center =
             Vector3Wide::scale(&local_triangle_center, &Vector::<f32>::splat(1.0 / 3.0));
         let mut local_offset_b = Vector3Wide::default();
         Matrix3x3Wide::transform_by_transposed_without_overlap(offset_b, &r_b, &mut local_offset_b);
-        local_offset_b = local_offset_b + local_triangle_center;
+        local_offset_b += local_triangle_center;
         let mut local_offset_a = Vector3Wide::default();
         Vector3Wide::negate(&local_offset_b, &mut local_offset_a);
         let mut triangle = TriangleWide::default();
@@ -403,9 +403,9 @@ impl CapsuleTriangleTester {
             let b_max_weighted = interval_weight * b_max_val + weighted_tb;
 
             Vector3Wide::scale_to(&edge_direction, &b_min_weighted, &mut b0);
-            b0 = b0 + edge_start;
+            b0 += edge_start;
             Vector3Wide::scale_to(&edge_direction, &b_max_weighted, &mut b1);
-            b1 = b1 + edge_start;
+            b1 += edge_start;
             contact_count = use_edge_masked.simd_lt(Vector::<i32>::splat(0)).select(
                 b_max_weighted
                     .simd_gt(b_min_weighted)
@@ -470,7 +470,7 @@ impl CapsuleTriangleTester {
 
             let mut clipped_on_a0 =
                 Vector3Wide::scale(&local_capsule_axis, &overlap_interval_min_final);
-            clipped_on_a0 = clipped_on_a0 + local_offset_a;
+            clipped_on_a0 += local_offset_a;
             let mut distance_along_normal_a0 = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&clipped_on_a0, &face_normal, &mut distance_along_normal_a0);
             let to_remove_a0 = Vector3Wide::scale(&face_normal, &distance_along_normal_a0);
@@ -478,7 +478,7 @@ impl CapsuleTriangleTester {
 
             let mut clipped_on_a1 =
                 Vector3Wide::scale(&local_capsule_axis, &overlap_interval_max_final);
-            clipped_on_a1 = clipped_on_a1 + local_offset_a;
+            clipped_on_a1 += local_offset_a;
             let mut distance_along_normal_a1 = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&clipped_on_a1, &face_normal, &mut distance_along_normal_a1);
             let to_remove_a1 = Vector3Wide::scale(&face_normal, &distance_along_normal_a1);
@@ -550,8 +550,8 @@ impl CapsuleTriangleTester {
         Vector3Wide::dot(&offset0, &face_normal_a, &mut t0);
         let mut t1 = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&offset1, &face_normal_a, &mut t1);
-        t0 = t0 * inverse_fn_dot;
-        t1 = t1 * inverse_fn_dot;
+        t0 *= inverse_fn_dot;
+        t1 *= inverse_fn_dot;
         manifold.depth0 = a.radius + t0;
         manifold.depth1 = a.radius + t1;
 
@@ -588,7 +588,7 @@ impl CapsuleTriangleTester {
                 Vector::<i32>::splat(FACE_COLLISION_FLAG),
                 Vector::<i32>::splat(0),
             );
-        manifold.feature_id0 = manifold.feature_id0 + face_flag;
+        manifold.feature_id0 += face_flag;
 
         // Transform to world space.
         Matrix3x3Wide::transform_without_overlap(&local_offset_a0, &r_b, &mut manifold.offset_a0);

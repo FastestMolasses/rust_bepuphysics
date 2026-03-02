@@ -142,7 +142,7 @@ impl<
         for i in 0..pair_count {
             // Use raw pointer access to avoid double mutable borrow — accessing different fields.
             let pair_overlaps = &mut *overlaps.pair_overlaps.get_mut(i);
-            let pair_query = &*overlaps.subpair_queries.get(i);
+            let pair_query = overlaps.subpair_queries.get(i);
             let pair = &pairs[i];
 
             if pair_overlaps.count > 0 {

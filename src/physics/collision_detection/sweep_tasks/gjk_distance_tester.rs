@@ -798,8 +798,8 @@ where
             let simplex_contains_origin = new_distance_squared
                 .simd_le(containment_epsilon_squared)
                 .to_simd();
-            *intersected = *intersected | (simplex_contains_origin & !terminated_mask);
-            terminated_mask = terminated_mask | simplex_contains_origin;
+            *intersected |= simplex_contains_origin & !terminated_mask;
+            terminated_mask |= simplex_contains_origin;
             if terminated_mask.simd_eq(all_ones).all() {
                 break;
             }
@@ -811,7 +811,7 @@ where
                 Vector3Wide::conditional_select(&about_to_terminate, &simplex_closest_a, closest_a);
             *normal =
                 Vector3Wide::conditional_select(&about_to_terminate, &simplex_closest, normal);
-            terminated_mask = terminated_mask | about_to_terminate;
+            terminated_mask |= about_to_terminate;
             if terminated_mask.simd_eq(all_ones).all() {
                 break;
             }
@@ -867,7 +867,7 @@ where
                 Vector3Wide::conditional_select(&about_to_terminate, &simplex_closest_a, closest_a);
             *normal =
                 Vector3Wide::conditional_select(&about_to_terminate, &simplex_closest, normal);
-            terminated_mask = terminated_mask | about_to_terminate;
+            terminated_mask |= about_to_terminate;
             if terminated_mask.simd_eq(all_ones).all() {
                 break;
             }
@@ -878,7 +878,7 @@ where
         *distance = distance_squared.sqrt();
         let inverse_distance = Vector::<f32>::splat(1.0) / *distance;
         // The containment epsilon acts as a margin around shapes.
-        *distance = *distance - containment_epsilon;
+        *distance -= containment_epsilon;
         *normal *= inverse_distance;
 
         // For shapes with substantial margins, compensate for the margin.

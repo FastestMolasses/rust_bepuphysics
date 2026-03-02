@@ -112,7 +112,7 @@ pub trait SweepTask {
             );
             // Normals are calibrated to point from B to A by convention; retain that convention if the parameters were reversed.
             *hit_normal = -*hit_normal;
-            *hit_location = *hit_location + offset_b;
+            *hit_location += offset_b;
             intersected
         }
     }
@@ -199,7 +199,7 @@ pub trait SweepTask {
                 hit_normal,
             );
             *hit_normal = -*hit_normal;
-            *hit_location = *hit_location + offset_b;
+            *hit_location += offset_b;
             hit
         } else {
             self.preordered_type_sweep_filtered(

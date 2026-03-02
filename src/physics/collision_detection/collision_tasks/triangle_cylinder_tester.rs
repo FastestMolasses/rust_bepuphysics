@@ -140,7 +140,7 @@ impl TriangleCylinderTester {
             *effective_face_normal =
                 Vector3Wide::conditional_select(&needs_fallback_i, &normalized, triangle_normal);
         } else {
-            *effective_face_normal = triangle_normal.clone();
+            *effective_face_normal = *triangle_normal;
         }
         let mut effective_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(effective_face_normal, normal, &mut effective_dot);
@@ -184,19 +184,19 @@ impl TriangleCylinderTester {
         Matrix3x3Wide::transform_without_overlap(&a.c, &r_a, &mut triangle.c);
         let mut centroid = Vector3Wide::default();
         Vector3Wide::add(&triangle.a, &triangle.b, &mut centroid);
-        let centroid_tmp = centroid.clone();
+        let centroid_tmp = centroid;
         Vector3Wide::add(&triangle.c, &centroid_tmp, &mut centroid);
-        let centroid_unscaled = centroid.clone();
+        let centroid_unscaled = centroid;
         Vector3Wide::scale_to(
             &centroid_unscaled,
             &Vector::<f32>::splat(1.0 / 3.0),
             &mut centroid,
         );
-        let triangle_a_tmp = triangle.a.clone();
+        let triangle_a_tmp = triangle.a;
         Vector3Wide::subtract(&triangle_a_tmp, &centroid, &mut triangle.a);
-        let triangle_b_tmp = triangle.b.clone();
+        let triangle_b_tmp = triangle.b;
         Vector3Wide::subtract(&triangle_b_tmp, &centroid, &mut triangle.b);
-        let triangle_c_tmp = triangle.c.clone();
+        let triangle_c_tmp = triangle.c;
         Vector3Wide::subtract(&triangle_c_tmp, &centroid, &mut triangle.c);
         let mut local_triangle_center = Vector3Wide::default();
         Vector3Wide::subtract(&centroid, &local_offset_b, &mut local_triangle_center);
@@ -230,7 +230,7 @@ impl TriangleCylinderTester {
         Vector3Wide::cross(&triangle_ab, &triangle_ca, &mut triangle_normal);
         let mut triangle_normal_length = Vector::<f32>::splat(0.0);
         Vector3Wide::length_into(&triangle_normal, &mut triangle_normal_length);
-        let tn_tmp = triangle_normal.clone();
+        let tn_tmp = triangle_normal;
         Vector3Wide::scale_to(
             &tn_tmp,
             &(one_f / triangle_normal_length),
@@ -274,8 +274,8 @@ impl TriangleCylinderTester {
             &mut triangle_epsilon_scale,
             &mut nondegenerate_mask,
         );
-        inactive_lanes = inactive_lanes | !nondegenerate_mask;
-        inactive_lanes = inactive_lanes | cylinder_inside_and_below;
+        inactive_lanes |= !nondegenerate_mask;
+        inactive_lanes |= cylinder_inside_and_below;
         if inactive_lanes.simd_lt(zero_i).all() {
             *manifold = std::mem::zeroed();
             return;
@@ -379,8 +379,8 @@ impl TriangleCylinderTester {
                 .simd_lt(zero_i)
                 .select(triangle_face_depth, refined_depth);
         } else {
-            local_normal = negated_triangle_normal.clone();
-            closest_on_b = cylinder_support_along_negated_tn.clone();
+            local_normal = negated_triangle_normal;
+            closest_on_b = cylinder_support_along_negated_tn;
             depth = triangle_face_depth;
         }
 
@@ -732,17 +732,20 @@ impl TriangleCylinderTester {
                 );
             }
 
-            let mut cap_normal = Vector3Wide::default();
-            cap_normal.x = zero_f;
-            cap_normal.y = local_normal
-                .y
-                .simd_lt(zero_f)
-                .select(one_f, Vector::<f32>::splat(-1.0));
-            cap_normal.z = zero_f;
-            let mut triangle_center_to_cap_center = Vector3Wide::default();
-            triangle_center_to_cap_center.x = -local_triangle_center.x;
-            triangle_center_to_cap_center.y = cap_center_by - local_triangle_center.y;
-            triangle_center_to_cap_center.z = -local_triangle_center.z;
+            let cap_normal = Vector3Wide {
+                x: zero_f,
+                y: local_normal
+                    .y
+                    .simd_lt(zero_f)
+                    .select(one_f, Vector::<f32>::splat(-1.0)),
+                z: zero_f,
+            };
+
+            let triangle_center_to_cap_center = Vector3Wide {
+                x: -local_triangle_center.x,
+                y: cap_center_by - local_triangle_center.y,
+                z: -local_triangle_center.z,
+            };
             let mut candidate0 = ManifoldCandidate::default();
             let mut candidate1 = ManifoldCandidate::default();
             let mut candidate2 = ManifoldCandidate::default();
@@ -952,14 +955,16 @@ impl TriangleCylinderTester {
                 let t_max_to_triangle = (xz_contribution
                     + (local_triangle_center.y - b.half_length) * triangle_normal.y)
                     * inverse_denominator;
-                let mut min_on_triangle = Vector3Wide::default();
-                min_on_triangle.x = t_min_to_triangle * local_normal.x + closest_on_b.x;
-                min_on_triangle.y = t_min_to_triangle * local_normal.y - b.half_length;
-                min_on_triangle.z = t_min_to_triangle * local_normal.z + closest_on_b.z;
-                let mut max_on_triangle = Vector3Wide::default();
-                max_on_triangle.x = t_max_to_triangle * local_normal.x + closest_on_b.x;
-                max_on_triangle.y = t_max_to_triangle * local_normal.y + b.half_length;
-                max_on_triangle.z = t_max_to_triangle * local_normal.z + closest_on_b.z;
+                let min_on_triangle = Vector3Wide {
+                    x: t_min_to_triangle * local_normal.x + closest_on_b.x,
+                    y: t_min_to_triangle * local_normal.y - b.half_length,
+                    z: t_min_to_triangle * local_normal.z + closest_on_b.z,
+                };
+                let max_on_triangle = Vector3Wide {
+                    x: t_max_to_triangle * local_normal.x + closest_on_b.x,
+                    y: t_max_to_triangle * local_normal.y + b.half_length,
+                    z: t_max_to_triangle * local_normal.z + closest_on_b.z,
+                };
                 let mut min_to_max = Vector3Wide::default();
                 Vector3Wide::subtract(&max_on_triangle, &min_on_triangle, &mut min_to_max);
 
@@ -1163,6 +1168,6 @@ impl TriangleCylinderTester {
                 Vector::<i32>::splat(mesh_reduction::FACE_COLLISION_FLAG),
                 zero_i,
             );
-        manifold.feature_id0 = manifold.feature_id0 + face_collision_flag;
+        manifold.feature_id0 += face_collision_flag;
     }
 }

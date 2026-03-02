@@ -106,7 +106,7 @@ impl BoxConvexHullTester {
             25,
         );
 
-        inactive_lanes = inactive_lanes | depth.simd_lt(depth_threshold).to_simd();
+        inactive_lanes |= depth.simd_lt(depth_threshold).to_simd();
         // Clear all contact exists states up front.
         manifold.contact0_exists = zero_i;
         manifold.contact1_exists = zero_i;

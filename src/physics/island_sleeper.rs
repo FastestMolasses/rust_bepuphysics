@@ -508,12 +508,8 @@ impl IslandSleeper {
                 &mut constraint_handles,
             ) {
                 slept_bodies += body_indices.count;
-                let island = IslandScaffold::new(
-                    &mut body_indices,
-                    &mut constraint_handles,
-                    solver,
-                    thread_pool,
-                );
+                let island =
+                    IslandScaffold::new(&body_indices, &constraint_handles, solver, thread_pool);
                 results.islands.add(island, thread_pool);
             }
             traversed_bodies += body_indices.count;

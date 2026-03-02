@@ -4,6 +4,7 @@ use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
+#[derive(Default)]
 pub struct CompoundPairSweepOverlaps {
     child_overlaps: Buffer<ChildOverlapsCollection>,
     pub child_count: i32,
@@ -32,14 +33,5 @@ impl CompoundPairSweepOverlaps {
             self.child_overlaps.get_mut(i).dispose(pool);
         }
         pool.return_buffer(&mut self.child_overlaps);
-    }
-}
-
-impl Default for CompoundPairSweepOverlaps {
-    fn default() -> Self {
-        Self {
-            child_overlaps: Buffer::default(),
-            child_count: 0,
-        }
     }
 }
