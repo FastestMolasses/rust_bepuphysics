@@ -295,9 +295,30 @@ pub(crate) fn sync_velocities_to_bepu(
                 continue;
             }
             let body_ref = BodyReference::new(bh.0, bodies);
+
+            let target_linear = glam::Vec3::new(lin_vel.0.x, lin_vel.0.y, lin_vel.0.z);
+            let target_angular = glam::Vec3::new(ang_vel.0.x, ang_vel.0.y, ang_vel.0.z);
+
+            // The post-step writeback (`sync_bepu_to_velocities`) rewrites these
+            // components every frame, so Bevy's change detection marks *every*
+            // body as changed every frame — `Changed` alone can't tell a genuine
+            // user edit from our own writeback. Compare against the body's current
+            // velocity and skip when nothing actually changed; otherwise we'd wake
+            // every body every frame below and sleeping would never happen.
+            {
+                let current = body_ref.velocity();
+                if current.linear == target_linear && current.angular == target_angular {
+                    continue;
+                }
+            }
+
+            if !body_ref.awake() {
+                body_ref.set_awake(true);
+            }
+
             let vel = body_ref.velocity_mut();
-            vel.linear = glam::Vec3::new(lin_vel.0.x, lin_vel.0.y, lin_vel.0.z);
-            vel.angular = glam::Vec3::new(ang_vel.0.x, ang_vel.0.y, ang_vel.0.z);
+            vel.linear = target_linear;
+            vel.angular = target_angular;
         }
     }
 }
