@@ -425,7 +425,7 @@ impl Default for QueryLayers {
 // Internal marker components (inserted by the plugin, not by users)
 // ---------------------------------------------------------------------------
 //
-// Each of these carries an `on_remove` hook that enqueues its teardown into
+// Each of these carries an `on_remove` (or `on_discard`) hook that enqueues its teardown into
 // [`BepuRemovalQueue`]. Hooks rather than `RemovedComponents` because the latter is a
 // per-render-frame double-buffered queue and the physics schedule is `FixedPostUpdate`, which skips
 // entire frames whenever the frame rate exceeds the fixed rate; see [`BepuRemovalQueue`] for the
@@ -498,28 +498,28 @@ fn on_remove_static_handle(mut world: DeferredWorld, ctx: HookContext) {
 /// rebuild a body, remove [`BepuBodyHandle`] / [`BepuStaticHandle`] instead — that path is
 /// supported, and it re-acquires the shape correctly.
 #[derive(Component, Debug, Clone, Copy)]
-// `on_replace`, deliberately, and *not* `on_remove`.
+// `on_discard`, deliberately, and *not* `on_remove`.
 //
 // `add_new_bodies` does not filter on `Added`; its predicate is "this entity has no handle
 // component". An entity whose `BepuBodyHandle` is removed — the rebuild path the docs on those
 // components advertise — therefore gets a fresh body and a fresh `acquire_shape` while its old
-// `BepuShapeIndex` is still sitting on it, so the insert is an *overwrite*. Bevy fires `on_replace`
+// `BepuShapeIndex` is still sitting on it, so the insert is an *overwrite*. Bevy fires `on_discard`
 // for an overwrite and `on_remove` only for an actual removal, so a release hook on `on_remove`
 // silently loses the overwritten reference and the `Shapes` entry leaks with nothing left able to
 // name it.
 //
-// `on_replace` covers all three cases and covers each exactly once: bevy_ecs triggers it from
-// `BundleInserter` (only for components the archetype already had), from `BundleRemover`, and from
-// `EntityWorldMut::despawn` — in the last two immediately *before* `on_remove`. Adding `on_remove`
-// as well would therefore not be belt and braces, it would be a double release: both hooks fire on
-// every removal, the reference count would be decremented twice for one acquire, and the shape
-// would be freed out from under its remaining users. So there is one hook, and it is this one.
+// `on_discard` covers all three cases and covers each exactly once: bevy_ecs runs it whenever the
+// value is about to be dropped — replaced in place by an insert, removed, or dropped with the
+// entity — and in the latter two immediately *before* `on_remove`. Adding `on_remove` as well would
+// therefore not be belt and braces, it would be a double release: both hooks fire on every removal,
+// the reference count would be decremented twice for one acquire, and the shape would be freed out
+// from under its remaining users. So there is one hook, and it is this one.
 //
-// `on_replace` runs before the new value is written, so `world.get` below reads the outgoing index.
-#[component(on_replace = on_replace_shape_index)]
+// `on_discard` runs before the new value is written, so `world.get` below reads the outgoing index.
+#[component(on_discard = on_discard_shape_index)]
 pub struct BepuShapeIndex(pub TypedIndex);
 
-fn on_replace_shape_index(mut world: DeferredWorld, ctx: HookContext) {
+fn on_discard_shape_index(mut world: DeferredWorld, ctx: HookContext) {
     let Some(index) = world.get::<BepuShapeIndex>(ctx.entity).map(|s| s.0) else {
         return;
     };
