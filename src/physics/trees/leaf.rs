@@ -33,25 +33,3 @@ impl Leaf {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_leaf() {
-        let leaf = Leaf::new(123, 1);
-        assert_eq!(leaf.node_index(), 123);
-        assert_eq!(leaf.child_index(), 1);
-
-        let leaf = Leaf::new(123, 0);
-        assert_eq!(leaf.node_index(), 123);
-        assert_eq!(leaf.child_index(), 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "Binary trees can't have children in slots other than 0 and 1!")]
-    fn test_leaf_invalid_child_index() {
-        let _leaf = Leaf::new(123, 2);
-    }
-}

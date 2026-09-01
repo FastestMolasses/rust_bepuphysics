@@ -451,8 +451,10 @@ impl ConstraintRemover {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
                 unsafe {
-                    let batch_handles =
-                        &batches.removals_for_type_batches.get(i).constraint_handles_to_remove;
+                    let batch_handles = &batches
+                        .removals_for_type_batches
+                        .get(i)
+                        .constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
                         solver.handle_pool.return_unsafely(batch_handles.get(j).0);
@@ -467,8 +469,10 @@ impl ConstraintRemover {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
                 unsafe {
-                    let removals =
-                        &batches.removals_for_type_batches.get(i).per_body_removal_targets;
+                    let removals = &batches
+                        .removals_for_type_batches
+                        .get(i)
+                        .per_body_removal_targets;
                     let bodies = &mut *self.bodies;
                     let solver = &mut *self.solver;
                     for j in 0..removals.count {
@@ -535,8 +539,10 @@ impl ConstraintRemover {
         if let Some(ref batches) = self.batches {
             for i in 0..batches.batch_count {
                 unsafe {
-                    let batch_handles =
-                        &batches.removals_for_type_batches.get(i).constraint_handles_to_remove;
+                    let batch_handles = &batches
+                        .removals_for_type_batches
+                        .get(i)
+                        .constraint_handles_to_remove;
                     let solver = &mut *self.solver;
                     for j in 0..batch_handles.count {
                         solver

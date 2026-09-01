@@ -369,7 +369,7 @@ impl IslandSleeper {
                 constraint_handles.add(entry.connecting_constraint_handle, pool);
                 considered_constraints.add_unsafely(handle_value);
                 enumerator.constraint_body_indices.count = 0;
-                solver.enumerate_connected_raw_body_references(
+                solver.enumerate_connected_body_references_by_handle(
                     entry.connecting_constraint_handle,
                     enumerator,
                 );

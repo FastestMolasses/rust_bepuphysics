@@ -335,18 +335,18 @@ impl IThreadDispatcher for ThreadDispatcher {
 }
 
 impl Drop for ThreadDispatcher {
+    /// Waits for all pending work to complete and then disposes all workers.
     fn drop(&mut self) {
         self.state.disposed.store(true, Ordering::Release);
-        // Signal all workers to wake up and check disposed flag (C#: Dispose → SignalThreads)
         for i in 0..self.workers.len() {
             let (lock, cvar) = &self.state.worker_signals[i];
             let mut signaled = lock.lock().unwrap();
             *signaled = true;
             cvar.notify_one();
         }
-        // Join all worker threads
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
+        self.worker_pools.clear();
     }
 }

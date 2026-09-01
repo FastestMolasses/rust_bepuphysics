@@ -40,6 +40,7 @@ pub mod components;
 pub mod joints;
 pub mod plugin;
 pub mod resources;
+pub mod shape_registry;
 pub mod spatial_query;
 pub mod systems;
 
@@ -49,12 +50,16 @@ pub mod systems;
 /// use rust_bepuphysics::bevy_bepu::prelude::*;
 /// ```
 pub mod prelude {
+    pub use super::callbacks::ContactFilter;
     pub use super::components::{
         AngularDamping, AngularVelocity, BepuBodyHandle, BepuCollider, BepuStaticHandle, Friction,
-        LinearDamping, LinearVelocity, Mass, Restitution, RigidBody,
+        LinearDamping, LinearVelocity, LockedRotation, Mass, QueryLayers, Restitution, RigidBody,
+        SleepThreshold, SpeculativeMargin,
     };
     pub use super::joints::{BallSocketJoint, DistanceJoint, WeldJoint};
     pub use super::plugin::{BepuPhysicsPlugin, BepuPhysicsPlugins, BepuSet};
-    pub use super::resources::{BepuConfig, BepuSimulation, Gravity};
-    pub use super::spatial_query::{BepuSpatialQuery, RayHit};
+    pub use super::resources::{BepuConfig, BepuRemovalQueue, BepuSimulation, Gravity};
+    pub use super::spatial_query::{
+        BepuSpatialQuery, QueryFilter, QueryShape, RayHit, SweepHit, SweepResult,
+    };
 }

@@ -607,7 +607,12 @@ impl Simulation {
         }
     }
 
-    /// Intersects a ray against the simulation.
+    /// Intersects a ray against the simulation, using the simulation's own buffer pool for the
+    /// broad phase traversal's scratch memory.
+    ///
+    /// Because the traversal mutates that pool, concurrent calls to this overload (or a call
+    /// concurrent with a timestep) are not safe. Use [`Simulation::ray_cast_with_pool`] with a
+    /// per-thread pool to run queries in parallel.
     pub unsafe fn ray_cast<H: IRayHitHandler>(
         &self,
         origin: Vec3,
@@ -615,6 +620,32 @@ impl Simulation {
         maximum_t: f32,
         hit_handler: &mut H,
         id: i32,
+    ) {
+        self.ray_cast_with_pool(
+            origin,
+            direction,
+            maximum_t,
+            hit_handler,
+            id,
+            self.buffer_pool,
+        )
+    }
+
+    /// Intersects a ray against the simulation.
+    ///
+    /// Ray casts never mutate simulation state, so passing a pool that is exclusive to the calling
+    /// thread makes concurrent queries safe.
+    ///
+    /// # Safety
+    /// `pool` must be a valid, non-null `BufferPool` that no other thread is using concurrently.
+    pub unsafe fn ray_cast_with_pool<H: IRayHitHandler>(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        maximum_t: f32,
+        hit_handler: &mut H,
+        id: i32,
+        pool: *mut BufferPool,
     ) {
         use crate::physics::collision_detection::ray_batchers::{
             IBroadPhaseRayTester, IShapeRayHitHandler, RayData,
@@ -706,7 +737,7 @@ impl Simulation {
             origin,
             direction,
             maximum_t,
-            &mut *self.buffer_pool,
+            &mut *pool,
             &mut dispatcher,
             id,
         );
@@ -875,7 +906,7 @@ impl Simulation {
             max,
             velocity.linear,
             maximum_t,
-            &mut *self.buffer_pool,
+            &mut *pool,
             &mut dispatcher,
         );
     }

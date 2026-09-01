@@ -365,6 +365,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "bepu-benchmarks"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bepuvy-sys",
+ "bevy",
+ "rand",
+]
+
+[[package]]
 name = "bepuvy-sys"
 version = "0.1.0"
 source = "git+https://github.com/DrewRidley/bepuvy-sys.git?rev=bdb4f4d#bdb4f4dce7086c7f880953483df2d41c09d2ef89"
@@ -4526,8 +4536,6 @@ dependencies = [
 name = "rust_bepuphysics"
 version = "0.1.0"
 dependencies = [
- "avian3d",
- "bepuvy-sys",
  "bevy",
  "glam 0.30.10",
  "num-traits",

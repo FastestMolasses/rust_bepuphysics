@@ -3,6 +3,7 @@
 use glam::Vec3;
 
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
+#[cfg(debug_assertions)]
 use crate::physics::constraints::constraint_checker::ConstraintChecker;
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::physics::helpers::Helpers;

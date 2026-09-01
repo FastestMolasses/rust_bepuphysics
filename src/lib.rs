@@ -21,7 +21,7 @@ pub mod bevy_bepu;
 /// Provides a zero-cost abstraction for out parameters similar to C#'s `out` keyword.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// // Instead of:
 /// let mut result = MaybeUninit::<Symmetric3x3Wide>::uninit();
 /// Symmetric3x3Wide::scale(&self, rhs, unsafe { result.as_mut_ptr().as_mut().unwrap() });
@@ -31,7 +31,7 @@ pub mod bevy_bepu;
 /// let result = out!(Symmetric3x3Wide::scale(&self, rhs));
 /// ```
 /// In C#, the equivalent would be:
-/// ```
+/// ```text
 /// Symmetric3x3Wide.Scale(ref this, rhs, out var result);
 /// ```
 #[macro_export]
@@ -47,7 +47,7 @@ macro_rules! out {
 /// but wraps the function call in an unsafe block.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// // For functions marked as unsafe:
 /// let result = out_unsafe!(Symmetric3x3Wide::scale(&self, rhs));
 /// ```

@@ -670,9 +670,10 @@ unsafe fn sweep<
                 last_safe_index = i;
                 let next_index = i + 1;
                 if next_index < first_intersecting_index
-                    && safe_interval_start[i + 1] > forced_interval_end[i] {
-                        break;
-                    }
+                    && safe_interval_start[i + 1] > forced_interval_end[i]
+                {
+                    break;
+                }
             }
             debug_assert!(safe_interval_end[last_safe_index] >= *t0 || !intersection_encountered);
             next0 = safe_interval_end[last_safe_index];

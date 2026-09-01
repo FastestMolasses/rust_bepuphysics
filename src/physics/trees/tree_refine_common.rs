@@ -6,8 +6,10 @@ use crate::utilities::collections::comparer_ref::RefComparer;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::collections::quicksort::Quicksort;
 use crate::utilities::memory::buffer::Buffer;
-use crate::utilities::memory::buffer_pool::BufferPool;
 use std::cmp::Ordering;
+
+#[cfg(debug_assertions)]
+use crate::utilities::memory::buffer_pool::BufferPool;
 
 struct I32Comparer;
 impl RefComparer<i32> for I32Comparer {

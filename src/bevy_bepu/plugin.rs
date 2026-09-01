@@ -3,7 +3,6 @@
 use bevy::prelude::*;
 
 use super::components::*;
-use super::joints::*;
 use super::resources::*;
 use super::systems;
 
@@ -43,6 +42,7 @@ impl Plugin for BepuPhysicsPlugin {
         // Insert default resources if the user hasn't already.
         app.init_resource::<BepuConfig>();
         app.init_resource::<Gravity>();
+        app.init_resource::<BepuRemovalQueue>();
 
         // Register types for reflection.
         app.register_type::<RigidBody>();
@@ -56,6 +56,10 @@ impl Plugin for BepuPhysicsPlugin {
         app.register_type::<AngularDamping>();
         app.register_type::<Gravity>();
         app.register_type::<BepuConfig>();
+        app.register_type::<LockedRotation>();
+        app.register_type::<SpeculativeMargin>();
+        app.register_type::<SleepThreshold>();
+        app.register_type::<QueryLayers>();
 
         // Configure system set ordering.
         app.configure_sets(
@@ -70,8 +74,8 @@ impl Plugin for BepuPhysicsPlugin {
         app.add_systems(
             FixedPostUpdate,
             (
+                systems::apply_pending_removals,
                 systems::add_new_bodies,
-                systems::remove_despawned_bodies,
                 systems::sync_velocities_to_bepu,
                 systems::sync_transforms_to_bepu,
                 systems::update_callback_data,

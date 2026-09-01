@@ -4,7 +4,7 @@
 //! removing the need for users to implement the raw SIMD-level callbacks.
 
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
-use crate::physics::collidables::collidable_reference::CollidableReference;
+use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
 use crate::physics::collision_detection::contact_manifold::{
     ConvexContactManifold, IContactManifold,
 };
@@ -101,6 +101,15 @@ impl IPoseIntegratorCallbacks for DefaultPoseCallbacks {
 // Narrow phase callbacks (friction + restitution)
 // ---------------------------------------------------------------------------
 
+/// A user-supplied predicate consulted before contacts are generated for a pair.
+///
+/// Returning `false` suppresses the pair entirely. Called from narrow phase worker threads, in
+/// parallel, once per candidate pair per step, so it must be cheap and must not touch the
+/// simulation. Install it with
+/// [`BepuSimulation::set_contact_filter`](super::resources::BepuSimulation::set_contact_filter).
+pub type ContactFilter =
+    Box<dyn Fn(CollidableReference, CollidableReference) -> bool + Send + Sync>;
+
 /// Default narrow-phase callbacks that configure contact springs, friction,
 /// and restitution from the global [`BepuConfig`](super::resources::BepuConfig) values.
 pub struct DefaultNarrowPhaseCallbacks {
@@ -110,6 +119,9 @@ pub struct DefaultNarrowPhaseCallbacks {
     pub max_recovery_velocity: f32,
     /// Contact spring settings.
     pub spring: SpringSettings,
+    /// Optional user filter, consulted after the built-in dynamic-involvement rule. See
+    /// [`ContactFilter`].
+    pub filter: Option<ContactFilter>,
 }
 
 impl DefaultNarrowPhaseCallbacks {
@@ -123,6 +135,7 @@ impl DefaultNarrowPhaseCallbacks {
             friction,
             max_recovery_velocity,
             spring: SpringSettings::new(spring_frequency, spring_damping_ratio),
+            filter: None,
         }
     }
 }
@@ -133,11 +146,23 @@ impl INarrowPhaseCallbacks for DefaultNarrowPhaseCallbacks {
     fn allow_contact_generation(
         &self,
         _worker_index: i32,
-        _a: CollidableReference,
-        _b: CollidableReference,
+        a: CollidableReference,
+        b: CollidableReference,
         _speculative_margin: &mut f32,
     ) -> bool {
-        true
+        // At least one collidable has to be dynamic for the pair to be worth anything: nothing in a
+        // kinematic-vs-kinematic, kinematic-vs-static, or static-vs-static pair can be moved by a
+        // contact, so generating one is pure cost. It used to return `true` unconditionally, which
+        // quietly paid for every kinematic-vs-static pair in the scene.
+        if a.mobility() != CollidableMobility::Dynamic
+            && b.mobility() != CollidableMobility::Dynamic
+        {
+            return false;
+        }
+        match &self.filter {
+            Some(filter) => filter(a, b),
+            None => true,
+        }
     }
 
     fn configure_contact_manifold<TManifold: IContactManifold>(

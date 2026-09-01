@@ -4,6 +4,7 @@ use glam::Vec3;
 
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::ball_socket_shared::BallSocketShared;
+#[cfg(debug_assertions)]
 use crate::physics::constraints::constraint_checker::ConstraintChecker;
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;

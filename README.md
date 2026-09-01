@@ -7,6 +7,7 @@ A line-by-line translation of [BepuPhysics v2](https://github.com/bepu/bepuphysi
 - **High Performance**: SIMD-optimized collision detection and constraint solving
 - **Multithreaded**: Lock-free task scheduling with automatic work distribution
 - **Bevy Integration**: Optional plugin for seamless integration with the Bevy game engine
+- **Spatial Queries**: filtered ray casts and shape sweeps
 
 ## Requirements
 
@@ -96,9 +97,66 @@ fn setup(
 - `LinearVelocity(Vec3)` — bidirectional sync with physics
 - `AngularVelocity(Vec3)` — bidirectional sync with physics
 
+**Body tuning:**
+- `LockedRotation` — locks rotation about chosen body-local axes by zeroing the matching rows and
+  columns of the inverse inertia tensor. `LockedRotation::{X, Y, Z}` combine with `|`;
+  `LockedRotation::UPRIGHT` (pitch + roll, yaw free) suits any prop that must not tip over, and
+  `LockedRotation::ALL` locks rotation entirely.
+- `SpeculativeMargin { minimum, maximum }` — how far ahead of a surface contacts are created
+- `SleepThreshold(f32)` — squared-velocity sleep threshold; `SleepThreshold::NEVER` disables sleeping
+- `QueryLayers(u32)` — layer mask used by spatial queries (query filtering only, not collision response)
+
 **Resources:**
 - `Gravity(Vec3)` — global gravity (default: `Vec3::new(0.0, -9.81, 0.0)`)
 - `BepuConfig` — simulation settings (timestep, substeps, thread count, determinism)
+
+## Spatial Queries
+
+`BepuSpatialQuery` is a system parameter. It borrows the simulation *shared*, so several query
+systems can run in parallel; scratch memory comes from a per-system `Local`. Schedule queries
+outside `BepuSet::Step`.
+
+```rust
+fn shoot(
+    mut spatial: BepuSpatialQuery,
+    shooter: Single<(Entity, &Transform), With<Player>>,
+) {
+    let (entity, transform) = *shooter;
+
+    // Self-exclusion matters: a ray starting inside your own collider hits you first, every time.
+    let filter = QueryFilter::default().exclude(&[entity]);
+
+    if let Some(hit) = spatial.ray_cast(transform.translation, *transform.forward(), 100.0, filter) {
+        // hit.entity, hit.t, hit.point, hit.normal, hit.child_index, hit.is_dynamic
+    }
+
+    // Every hit along the ray, not just the closest.
+    spatial.ray_cast_all(origin, direction, 100.0, filter, |hit| { /* ... */ });
+
+    // Shape sweep.
+    match spatial.sweep_shape(QueryShape::capsule(0.3, 1.0), position, Vec3::NEG_Y, 2.0, filter) {
+        SweepResult::Hit(hit)                  => { /* hit.t, hit.point, hit.normal */ }
+        SweepResult::StartPenetrating { .. }   => { /* already overlapping: no t, no normal */ }
+        SweepResult::Miss                      => {}
+    }
+}
+```
+
+**`SweepResult::StartPenetrating` is not an edge case to fold away.** Bepu reports a sweep that
+begins in contact through a separate callback that supplies no time of impact, no contact point,
+and no normal, because none of them are defined. Treating it as a miss makes solid geometry
+occasionally transparent; treating it as a hit with a zero normal pushes things in random
+directions. It is a distinct variant here so you have to decide.
+
+**Filtering:**
+- `QueryFilter::default()` — hits everything
+- `.exclude(&[entity, ...])` — never hit these entities
+- `.layers(mask)` — only collidables whose `QueryLayers` mask shares a bit. Entities without a
+  `QueryLayers` component belong to layer 0.
+- `.statics_only()` / `.bodies_only()` — filter by mobility
+
+Entity resolution branches on `CollidableReference::mobility()` before touching the handle: a
+`BodyHandle` and a `StaticHandle` with the same raw value are unrelated objects.
 
 ### Configuration
 
@@ -125,9 +183,18 @@ cargo +nightly run --release --features bevy --example tower
 
 # Simple hello world
 cargo +nightly run --release --features bevy --example hello_physics
+```
 
-cargo +nightly run --release --example rain_csharp  # Using C# FFI (experimental)
-cargo +nightly run --release --example rain_avian  # Avian physics comparison
+The comparison benchmarks live in the separate `bepu-benchmarks` workspace member, so that their
+heavy and platform-specific dependencies stay out of the library:
+
+```bash
+# Avian physics comparison
+cargo +nightly run --release -p bepu-benchmarks --example rain_avian
+
+# The same scene against the original C# BepuPhysics through FFI. Behind the `csharp` feature
+# because its `bepuvy-sys` dependency links a prebuilt native library that fails to link on MSVC.
+cargo +nightly run --release -p bepu-benchmarks --features csharp --example rain_csharp
 ```
 
 ## License
