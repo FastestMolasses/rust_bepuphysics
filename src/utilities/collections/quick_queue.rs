@@ -21,14 +21,21 @@ pub struct QuickQueue<T> {
 }
 
 impl<T: Copy> QuickQueue<T> {
+    /// Largest power-of-2 capacity that fits in `span_length`, minus one (spans need not be pow2-sized).
+    #[inline(always)]
+    fn get_capacity_mask(span_length: i32) -> i32 {
+        debug_assert!(span_length > 0, "Span length must be positive.");
+        (1i32 << (span_length as u32).ilog2()) - 1
+    }
+
     /// Creates a new queue.
     #[inline(always)]
     pub fn new(span: Buffer<T>) -> Self {
         debug_assert!(
-            !span.is_empty() && (span.len() & (span.len() - 1)) == 0,
-            "Queues depend upon power of 2 capacities for efficient modulo operations."
+            !span.is_empty(),
+            "Any QuickQueue in use should have a nonzero length Span. Was this instance default constructed without further initialization?"
         );
-        let capacity_mask = span.len() - 1;
+        let capacity_mask = Self::get_capacity_mask(span.len());
         Self {
             count: 0,
             first_index: 0,
@@ -203,7 +210,7 @@ impl<T: Copy> QuickQueue<T> {
         pool.return_buffer(&mut self.span);
 
         self.span = new_span;
-        self.capacity_mask = new_span.len() - 1;
+        self.capacity_mask = Self::get_capacity_mask(new_span.len());
         self.first_index = 0;
         self.last_index = if self.count > 0 {
             self.count - 1
@@ -243,7 +250,9 @@ impl<T: Copy> QuickQueue<T> {
     /// Removes and returns the first element from the queue.
     #[inline(always)]
     pub fn dequeue(&mut self) -> T {
-        debug_assert!(self.count > 0, "Can't dequeue from an empty queue.");
+        if self.count == 0 {
+            panic!("The queue is empty.");
+        }
         let element = self.span[self.first_index];
         self.increment_first();
         element
@@ -252,7 +261,9 @@ impl<T: Copy> QuickQueue<T> {
     /// Removes and returns the last element from the queue.
     #[inline(always)]
     pub fn dequeue_last(&mut self) -> T {
-        debug_assert!(self.count > 0, "Can't dequeue from an empty queue.");
+        if self.count == 0 {
+            panic!("The queue is empty.");
+        }
         let element = self.span[self.last_index];
         self.decrement_last();
         element

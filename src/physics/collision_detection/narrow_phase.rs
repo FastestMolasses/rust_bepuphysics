@@ -1287,6 +1287,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
 
     /// Redistributes impulses from old contacts to new contacts by matching feature IDs.
     /// Unmatched impulse is distributed evenly among unmatched new contacts.
+    #[inline(always)]
     unsafe fn redistribute_impulses(
         old_contact_count: i32,
         old_feature_ids: *mut i32,
@@ -1551,6 +1552,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
     ) {
         let manifold_type_as_constraint_type =
             Self::compute_manifold_constraint_type_id(manifold, two_body);
+        let manifold_is_convex = manifold.convex();
 
         // Get the accessor as a raw pointer to avoid borrow conflict with self.
         let accessor_ptr = self.base.contact_constraint_accessors
@@ -1566,6 +1568,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                     worker_index,
                     pair,
                     manifold as *mut TManifold as *mut u8,
+                    manifold_is_convex,
                     material,
                     &body_handles as *const TBodyHandles as *const u8,
                 );
@@ -1780,12 +1783,15 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                         pair: *pair,
                         worker_index,
                     };
+                    // ABI convention: compound sweep tasks expect a pointer to a `*mut dyn ISweepFilter` fat-pointer local.
+                    let mut filter_dyn: *mut dyn ISweepFilter = &mut filter;
 
                     let mut t0 = 0.0f32;
                     let mut t1 = 0.0f32;
                     let mut hit_location = Vec3::ZERO;
                     let mut hit_normal = Vec3::ZERO;
 
+                    let worker_pool = self.overlap_workers[worker_index as usize].batcher.pool;
                     let hit = unsafe {
                         sweep_task.sweep_filtered(
                             shape_data_a,
@@ -1801,10 +1807,10 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                             min_timestep_a.min(min_timestep_b),
                             convergence_a.min(convergence_b),
                             25, // fixed high iteration threshold
-                            &mut filter as *mut CCDSweepFilter<TCallbacks> as *mut u8,
-                            self.base.shapes as *mut crate::physics::collidables::shapes::Shapes,
-                            self.base.sweep_task_registry as *mut SweepTaskRegistry,
-                            self.base.pool as *mut BufferPool,
+                            &mut filter_dyn as *mut _ as *mut u8,
+                            self.base.shapes,
+                            self.base.sweep_task_registry,
+                            worker_pool,
                             &mut t0,
                             &mut t1,
                             &mut hit_location,
@@ -1896,10 +1902,10 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
     ) {
         for i in 0..worker_count {
             let worker_list = unsafe {
-                &(*self.overlap_workers[i as usize]
+                self.overlap_workers[i as usize]
                     .pending_constraints
                     .pending_constraints_by_type
-                    .get(type_index))
+                    .get(type_index)
             };
             if worker_list.count > 0 {
                 let entry_size_in_bytes = worker_list.byte_count / worker_list.count;
@@ -1909,8 +1915,12 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                     constraint.worker_index = i;
                     constraint.byte_index_in_cache = index_in_bytes;
                     // Sort key is the first 8 bytes (CollidablePair) of each pending constraint.
+                    // Entries can be 4-mod-8 aligned, so this must be an unaligned read.
                     constraint.sort_key = unsafe {
-                        *(worker_list.buffer.as_ptr().add(index_in_bytes as usize) as *const u64)
+                        std::ptr::read_unaligned(
+                            worker_list.buffer.as_ptr().add(index_in_bytes as usize)
+                                as *const u64,
+                        )
                     };
                     index_in_bytes += entry_size_in_bytes;
                 }
@@ -2437,6 +2447,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
 
 /// Redistributes impulses from old contacts to new contacts by matching feature IDs.
 /// Unmatched impulse is distributed evenly among unmatched new contacts.
+#[inline(always)]
 unsafe fn redistribute_impulses(
     old_contact_count: i32,
     old_feature_ids: *mut i32,

@@ -674,10 +674,10 @@ impl BroadPhase {
                     active_root_refinement_size,
                     active_subtree_refinement_count,
                     active_subtree_refinement_size,
-                    use_priority_queue_active,
                     static_root_refinement_size,
                     static_subtree_refinement_count,
                     static_subtree_refinement_size,
+                    use_priority_queue_active,
                     use_priority_queue_static,
                 );
             }
@@ -688,10 +688,10 @@ impl BroadPhase {
                 active_root_refinement_size,
                 active_subtree_refinement_count,
                 active_subtree_refinement_size,
-                use_priority_queue_active,
                 static_root_refinement_size,
                 static_subtree_refinement_count,
                 static_subtree_refinement_size,
+                use_priority_queue_active,
                 use_priority_queue_static,
             );
         }
@@ -709,10 +709,10 @@ impl BroadPhase {
         active_root_refinement_size: i32,
         active_subtree_refinement_count: i32,
         active_subtree_refinement_size: i32,
-        use_priority_queue_active: bool,
         static_root_refinement_size: i32,
         static_subtree_refinement_count: i32,
         static_subtree_refinement_size: i32,
+        use_priority_queue_active: bool,
         use_priority_queue_static: bool,
     ) {
         // Note: we refine *before* refitting. Refinement works with slightly out-of-date data,

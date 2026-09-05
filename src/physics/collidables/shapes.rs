@@ -121,6 +121,8 @@ pub trait ShapeBatch {
 
     /// Tests a ray against a shape at the given index.
     ///
+    /// `pool` is the caller's scratch pool (per-thread under concurrent casts), never assumed to be the batch's own.
+    ///
     /// # Safety
     /// Caller must ensure shape_index is valid and pose/ray data are valid.
     unsafe fn ray_test(
@@ -129,6 +131,21 @@ pub trait ShapeBatch {
         pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    );
+
+    /// Tests a batch of rays against a shape at the given index.
+    /// Convex batches go through `WideRayTester`; compound/mesh batches dispatch each ray individually.
+    ///
+    /// # Safety
+    /// Caller must ensure shape_index is valid and rays/pool are valid.
+    unsafe fn ray_test_batched(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        pool: &mut BufferPool,
         hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     );
 
@@ -310,6 +327,7 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
         pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
+        _pool: &mut BufferPool,
         hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     ) {
         let mut t = 0.0f32;
@@ -324,6 +342,49 @@ impl<TShape: IConvexShape + Copy + Default + 'static> ShapeBatch for ConvexShape
         {
             hit_handler.on_ray_hit(ray, maximum_t, t, normal, 0);
         }
+    }
+
+    unsafe fn ray_test_batched(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        _pool: &mut BufferPool,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
+        struct DynHandlerWrapper<'a>(
+            &'a mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+        );
+        impl crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler
+            for DynHandlerWrapper<'_>
+        {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &crate::physics::collision_detection::ray_batchers::RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        crate::physics::collision_detection::wide_ray_tester::WideRayTester::test::<
+            TShape,
+            <TShape as IConvexShape>::Wide,
+            crate::physics::trees::ray_batcher::RaySource,
+            DynHandlerWrapper,
+        >(
+            self.shapes.get(shape_index as i32),
+            pose,
+            rays,
+            &mut wrapper,
+        );
     }
 
     fn try_compute_inertia(&self, shape_index: usize, mass: f32) -> Option<BodyInertia> {
@@ -445,10 +506,23 @@ impl ShapeBatch for ConvexHullShapeBatch {
         pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
+        pool: &mut BufferPool,
         hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     ) {
         self.inner
-            .ray_test(shape_index, pose, ray, maximum_t, hit_handler);
+            .ray_test(shape_index, pose, ray, maximum_t, pool, hit_handler);
+    }
+
+    unsafe fn ray_test_batched(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
+        self.inner
+            .ray_test_batched(shape_index, pose, rays, pool, hit_handler);
     }
 
     fn try_compute_inertia(&self, shape_index: usize, mass: f32) -> Option<BodyInertia> {
@@ -626,12 +700,25 @@ impl<TShape: IDisposableShape + INonConvexBounds + IShape + Copy + Default + 'st
         pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
+        pool: &mut BufferPool,
         hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     ) {
-        let pool = &mut *self.pool;
         self.shapes
             .get(shape_index as i32)
             .ray_test_shape(pose, ray, maximum_t, pool, hit_handler);
+    }
+
+    unsafe fn ray_test_batched(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
+        self.shapes
+            .get(shape_index as i32)
+            .ray_test_shape_batched(pose, rays, pool, hit_handler);
     }
 }
 
@@ -807,14 +894,32 @@ impl<TShape: ICompoundShape + Copy + Default + 'static> ShapeBatch for CompoundS
         pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
+        pool: &mut BufferPool,
         hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
     ) {
         let shape_batches = &*self.shape_batches;
-        let pool = &mut *self.pool;
         self.shapes.get(shape_index as i32).ray_test_shape(
             pose,
             ray,
             maximum_t,
+            shape_batches,
+            pool,
+            hit_handler,
+        );
+    }
+
+    unsafe fn ray_test_batched(
+        &self,
+        shape_index: usize,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler,
+    ) {
+        let shape_batches = &*self.shape_batches;
+        self.shapes.get(shape_index as i32).ray_test_shape_batched(
+            pose,
+            rays,
             shape_batches,
             pool,
             hit_handler,

@@ -59,6 +59,12 @@ impl<TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
         continuation.query_bounds.min = query_for_pair.min;
         continuation.query_bounds.max = query_for_pair.max;
         continuation.mesh = query_for_pair.container as *mut u8;
+        continuation.find_local_overlaps_thunk = Some(
+            crate::physics::collision_detection::mesh_reduction::find_local_overlaps_thunk::<TMesh>,
+        );
+        continuation.get_local_child_thunk = Some(
+            crate::physics::collision_detection::mesh_reduction::get_local_child_thunk::<TMesh>,
+        );
         continuation as *mut MeshReduction
     }
 

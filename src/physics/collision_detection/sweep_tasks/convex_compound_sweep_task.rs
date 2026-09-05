@@ -114,6 +114,7 @@ impl<
             &mut *pool,
             &mut overlaps,
         );
+        // ABI convention: `filter` points to a `*mut dyn ISweepFilter` fat-pointer local, hence the double deref.
         let filter_ref = &**(filter as *const *const dyn ISweepFilter);
         for i in 0..overlaps.count {
             let compound_child_index = overlaps.overlaps[i as usize];

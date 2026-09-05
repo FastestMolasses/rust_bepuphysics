@@ -259,19 +259,19 @@ impl DefaultTypes {
 
         // Sphere vs compound/mesh
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Compound>,
+            ConvexCompoundOverlapFinder<Sphere, SphereWide, Compound>,
             ConvexCompoundContinuations<Compound>,
             NonconvexReduction,
         >::new(Sphere::ID, Compound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<BigCompound>,
+            ConvexCompoundOverlapFinder<Sphere, SphereWide, BigCompound>,
             ConvexCompoundContinuations<BigCompound>,
             NonconvexReduction,
         >::new(Sphere::ID, BigCompound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Mesh>,
+            ConvexCompoundOverlapFinder<Sphere, SphereWide, Mesh>,
             ConvexMeshContinuations<Mesh>,
             MeshReduction,
         >::new(Sphere::ID, Mesh::ID)));
@@ -324,19 +324,19 @@ impl DefaultTypes {
 
         // Capsule vs compound/mesh
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Compound>,
+            ConvexCompoundOverlapFinder<Capsule, CapsuleWide, Compound>,
             ConvexCompoundContinuations<Compound>,
             NonconvexReduction,
         >::new(Capsule::ID, Compound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<BigCompound>,
+            ConvexCompoundOverlapFinder<Capsule, CapsuleWide, BigCompound>,
             ConvexCompoundContinuations<BigCompound>,
             NonconvexReduction,
         >::new(Capsule::ID, BigCompound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Mesh>,
+            ConvexCompoundOverlapFinder<Capsule, CapsuleWide, Mesh>,
             ConvexMeshContinuations<Mesh>,
             MeshReduction,
         >::new(Capsule::ID, Mesh::ID)));
@@ -380,19 +380,19 @@ impl DefaultTypes {
 
         // Box vs compound/mesh
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Compound>,
+            ConvexCompoundOverlapFinder<BoxShape, BoxWide, Compound>,
             ConvexCompoundContinuations<Compound>,
             NonconvexReduction,
         >::new(BoxShape::ID, Compound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<BigCompound>,
+            ConvexCompoundOverlapFinder<BoxShape, BoxWide, BigCompound>,
             ConvexCompoundContinuations<BigCompound>,
             NonconvexReduction,
         >::new(BoxShape::ID, BigCompound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Mesh>,
+            ConvexCompoundOverlapFinder<BoxShape, BoxWide, Mesh>,
             ConvexMeshContinuations<Mesh>,
             MeshReduction,
         >::new(BoxShape::ID, Mesh::ID)));
@@ -427,19 +427,19 @@ impl DefaultTypes {
 
         // Triangle vs compound/mesh
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Compound>,
+            ConvexCompoundOverlapFinder<Triangle, TriangleWide, Compound>,
             ConvexCompoundContinuations<Compound>,
             NonconvexReduction,
         >::new(Triangle::ID, Compound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<BigCompound>,
+            ConvexCompoundOverlapFinder<Triangle, TriangleWide, BigCompound>,
             ConvexCompoundContinuations<BigCompound>,
             NonconvexReduction,
         >::new(Triangle::ID, BigCompound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Mesh>,
+            ConvexCompoundOverlapFinder<Triangle, TriangleWide, Mesh>,
             ConvexMeshContinuations<Mesh>,
             MeshReduction,
         >::new(Triangle::ID, Mesh::ID)));
@@ -465,19 +465,19 @@ impl DefaultTypes {
 
         // Cylinder vs compound/mesh
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Compound>,
+            ConvexCompoundOverlapFinder<Cylinder, CylinderWide, Compound>,
             ConvexCompoundContinuations<Compound>,
             NonconvexReduction,
         >::new(Cylinder::ID, Compound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<BigCompound>,
+            ConvexCompoundOverlapFinder<Cylinder, CylinderWide, BigCompound>,
             ConvexCompoundContinuations<BigCompound>,
             NonconvexReduction,
         >::new(Cylinder::ID, BigCompound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Mesh>,
+            ConvexCompoundOverlapFinder<Cylinder, CylinderWide, Mesh>,
             ConvexMeshContinuations<Mesh>,
             MeshReduction,
         >::new(Cylinder::ID, Mesh::ID)));
@@ -494,19 +494,19 @@ impl DefaultTypes {
 
         // ConvexHull vs compound/mesh
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Compound>,
+            ConvexCompoundOverlapFinder<ConvexHull, ConvexHullWide, Compound>,
             ConvexCompoundContinuations<Compound>,
             NonconvexReduction,
         >::new(ConvexHull::ID, Compound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<BigCompound>,
+            ConvexCompoundOverlapFinder<ConvexHull, ConvexHullWide, BigCompound>,
             ConvexCompoundContinuations<BigCompound>,
             NonconvexReduction,
         >::new(ConvexHull::ID, BigCompound::ID)));
 
         registry.register(Box::new(ConvexCompoundCollisionTask::<
-            ConvexCompoundOverlapFinder<Mesh>,
+            ConvexCompoundOverlapFinder<ConvexHull, ConvexHullWide, Mesh>,
             ConvexMeshContinuations<Mesh>,
             MeshReduction,
         >::new(ConvexHull::ID, Mesh::ID)));

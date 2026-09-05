@@ -7,14 +7,19 @@ use crate::physics::trees::tree::Tree;
 use crate::utilities::bounding_box::BoundingBox4;
 use crate::utilities::collections::comparer_ref::RefComparer;
 use crate::utilities::collections::quicksort::Quicksort;
+use crate::utilities::collections::vectorized_sorts;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::task_scheduling::{ContinuationHandle, EqualTagFilter, Task, TaskStack};
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use crate::utilities::vector::Vector;
 use glam::Vec4;
+use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::mem;
+use std::mem::MaybeUninit;
+use std::simd::prelude::*;
 use std::sync::atomic::{AtomicI32, Ordering as AtomicOrdering};
 
 // ── BoundingBox4-based SAH metric ──────────────────────────────────────────
@@ -188,6 +193,7 @@ impl MultithreadBinnedBuildContext {
 }
 
 /// Shared data for distributing subtree slots across tasks.
+#[derive(Clone, Copy)]
 struct SharedTaskData {
     worker_count: i32,
     task_count: i32,
@@ -273,11 +279,17 @@ struct BinSubtreesTaskContext {
 #[repr(C)]
 struct PartitionCounters {
     _pad_a: [u8; 128],
-    subtree_count_a: i32,
-    _pad_mid: [u8; 2], // C# has 6 byte gap (offset 128 for A, 134 for B)
-    subtree_count_b: i32,
-    _pad_b: [u8; 126],
+    subtree_count_a: UnsafeCell<i32>,
+    _pad_mid: [u8; 60],
+    subtree_count_b: UnsafeCell<i32>,
+    _pad_b: [u8; 60],
 }
+
+const _: () = {
+    assert!(std::mem::offset_of!(PartitionCounters, subtree_count_a) == 128);
+    assert!(std::mem::offset_of!(PartitionCounters, subtree_count_b) == 192);
+    assert!(std::mem::size_of::<PartitionCounters>() == 256);
+};
 
 /// Context for multithreaded partition.
 struct PartitionTaskContext {
@@ -333,18 +345,10 @@ unsafe fn multithreaded_centroid_prepass(
     let active_worker_count = task_data.worker_count.min(task_count);
 
     let mut task_context = CentroidPrepassTaskContext {
-        task_data: SharedTaskData::new(
-            task_data.worker_count,
-            task_data.subtree_start_index,
-            task_data.subtree_count,
-            MINIMUM_SUBTREES_PER_THREAD_FOR_CENTROID_PREPASS,
-            task_count,
-        ),
+        task_data: *task_data,
         prepass_workers,
         bounds,
     };
-    // Re-share the computed task_count
-    task_context.task_data.task_count = task_count;
 
     if task_count > task_data.worker_count {
         for i in 0..active_worker_count {
@@ -559,11 +563,25 @@ unsafe fn partition_subtrees_worker(
     _worker_index: i32,
     _dispatcher: &dyn IThreadDispatcher,
 ) {
-    let context = &mut *(untyped_context as *mut PartitionTaskContext);
+    // Shared reference: worker tasks run concurrently against this context; the partition
+    // counters are the only mutated field and live in UnsafeCell.
+    let context = &*(untyped_context as *const PartitionTaskContext);
     let (start, count) = context.task_data.get_slot_interval(task_id);
-
+    // We don't really want to trigger an interlocked operation for *every single subtree*, but we
+    // also don't want to allocate a bunch of memory. Compromise! Stack-allocate enough memory to
+    // cover sub-batches of the worker's subtrees, and do interlocked operations at the end of each
+    // batch. Note that the main limit to the batch size is the amount of memory in cache.
     const BATCH_SIZE: i32 = 16384;
-    let mut slot_belongs_to_a = vec![0u8; BATCH_SIZE as usize];
+    let mut slot_belongs_to_a_storage: MaybeUninit<[u8; BATCH_SIZE as usize]> =
+        MaybeUninit::uninit();
+    let slot_belongs_to_a: *mut u8 = slot_belongs_to_a_storage.as_mut_ptr() as *mut u8;
+
+    let bin_indices = context.bin_indices;
+    let subtrees = context.subtrees;
+    let subtrees_next = context.subtrees_next;
+    let bin_split_index = context.bin_split_index;
+    let split_index_bundle = Vector::<u8>::splat(bin_split_index as u8);
+    let lane_count = Vector::<u8>::LEN as i32;
 
     let batch_count = (count + BATCH_SIZE - 1) / BATCH_SIZE;
     for batch_index in 0..batch_count {
@@ -571,29 +589,49 @@ unsafe fn partition_subtrees_worker(
         let batch_start = start + batch_index * BATCH_SIZE;
         let count_in_batch = (start + count - batch_start).min(BATCH_SIZE);
 
-        for index_in_batch in 0..count_in_batch {
+        // Note that the original data is loaded as bytes, but we need wider storage to handle the
+        // counts- which could conceivably go up to batch_size.
+        let scalar_loop_start_index = (count_in_batch / lane_count) * lane_count;
+        let mut index_in_batch = 0i32;
+        while index_in_batch < scalar_loop_start_index {
             let subtree_index = (index_in_batch + batch_start) as usize;
-            let bin_index = *context.bin_indices.as_ptr().add(subtree_index);
-            let belongs_to_a = (bin_index as i32) < context.bin_split_index;
-            slot_belongs_to_a[index_in_batch as usize] = if belongs_to_a { 0xFF } else { 0 };
+            let bin_indices_bundle = Vector::<u8>::from_slice(std::slice::from_raw_parts(
+                bin_indices.as_ptr().add(subtree_index),
+                lane_count as usize,
+            ));
+            let belongs_to_a_mask = bin_indices_bundle.simd_lt(split_index_bundle);
+            let belongs_to_a_bundle =
+                belongs_to_a_mask.select(Vector::<u8>::splat(0xFF), Vector::<u8>::splat(0));
+            belongs_to_a_bundle.copy_to_slice(std::slice::from_raw_parts_mut(
+                slot_belongs_to_a.add(index_in_batch as usize),
+                lane_count as usize,
+            ));
+            local_count_a += belongs_to_a_mask.to_bitmask().count_ones() as i32;
+            index_in_batch += lane_count;
+        }
+        for index_in_batch in index_in_batch..count_in_batch {
+            let subtree_index = (index_in_batch + batch_start) as usize;
+            let bin_index = *bin_indices.as_ptr().add(subtree_index);
+            let belongs_to_a = (bin_index as i32) < bin_split_index;
+            *slot_belongs_to_a.add(index_in_batch as usize) = if belongs_to_a { 0xFF } else { 0 };
             if belongs_to_a {
                 local_count_a += 1;
             }
         }
 
         let local_count_b = count_in_batch - local_count_a;
-        let counter_a_ptr = &context.counters.subtree_count_a as *const i32 as *mut i32;
-        let counter_b_ptr = &context.counters.subtree_count_b as *const i32 as *mut i32;
+        let counter_a_ptr = context.counters.subtree_count_a.get();
+        let counter_b_ptr = context.counters.subtree_count_b.get();
         let start_index_a =
             AtomicI32::from_ptr(counter_a_ptr).fetch_add(local_count_a, AtomicOrdering::AcqRel);
-        let start_index_b = context.subtrees.len()
+        let start_index_b = subtrees.len()
             - AtomicI32::from_ptr(counter_b_ptr).fetch_add(local_count_b, AtomicOrdering::AcqRel)
             - local_count_b;
 
         let mut recount_a = 0;
         let mut recount_b = 0;
         for index_in_batch in 0..count_in_batch {
-            let target_index = if slot_belongs_to_a[index_in_batch as usize] != 0 {
+            let target_index = if *slot_belongs_to_a.add(index_in_batch as usize) != 0 {
                 let t = start_index_a + recount_a;
                 recount_a += 1;
                 t
@@ -602,14 +640,8 @@ unsafe fn partition_subtrees_worker(
                 recount_b += 1;
                 t
             };
-            *context
-                .subtrees_next
-                .as_ptr()
-                .add(target_index as usize)
-                .cast_mut() = *context
-                .subtrees
-                .as_ptr()
-                .add((batch_start + index_in_batch) as usize);
+            *subtrees_next.as_ptr().add(target_index as usize).cast_mut() =
+                *subtrees.as_ptr().add((batch_start + index_in_batch) as usize);
         }
     }
 }
@@ -638,10 +670,10 @@ unsafe fn multithreaded_partition(
         bin_split_index,
         counters: PartitionCounters {
             _pad_a: [0; 128],
-            subtree_count_a: 0,
-            _pad_mid: [0; 2],
-            subtree_count_b: 0,
-            _pad_b: [0; 126],
+            subtree_count_a: UnsafeCell::new(0),
+            _pad_mid: [0; 60],
+            subtree_count_b: UnsafeCell::new(0),
+            _pad_b: [0; 60],
         },
     };
     task_context.task_data.task_count = task_data.task_count;
@@ -660,8 +692,10 @@ unsafe fn multithreaded_partition(
     );
 
     (
-        task_context.counters.subtree_count_a,
-        task_context.counters.subtree_count_b,
+        AtomicI32::from_ptr(task_context.counters.subtree_count_a.get())
+            .load(AtomicOrdering::Relaxed),
+        AtomicI32::from_ptr(task_context.counters.subtree_count_b.get())
+            .load(AtomicOrdering::Relaxed),
     )
 }
 
@@ -807,7 +841,7 @@ fn compute_bin_index(
     centroid_min: Vec4,
     use_x: bool,
     use_y: bool,
-    _axis_index: i32,
+    axis_index: i32,
     offset_to_bin_index: Vec4,
     maximum_bin_index: Vec4,
     box_bb4: &BoundingBox4,
@@ -815,13 +849,42 @@ fn compute_bin_index(
     let centroid = box_bb4.min + box_bb4.max;
     let bin_indices_continuous =
         ((centroid - centroid_min) * offset_to_bin_index).clamp(Vec4::ZERO, maximum_bin_index);
-    if use_x {
-        bin_indices_continuous.x as i32
-    } else if use_y {
-        bin_indices_continuous.y as i32
-    } else {
-        bin_indices_continuous.z as i32
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx") {
+            return unsafe { compute_bin_index_permute_avx(bin_indices_continuous, axis_index) };
+        }
+        // No variable-index permute available; extract the lane with an indexed load.
+        let lanes = bin_indices_continuous.to_array();
+        lanes[axis_index as usize] as i32
     }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        if use_x {
+            bin_indices_continuous.x as i32
+        } else if use_y {
+            bin_indices_continuous.y as i32
+        } else {
+            bin_indices_continuous.z as i32
+        }
+    }
+}
+
+/// Branchless variable-lane extraction via AVX `vpermilps`.
+///
+/// # Safety
+/// Caller must have verified AVX support (e.g. via `is_x86_feature_detected!("avx")`).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx")]
+#[inline]
+unsafe fn compute_bin_index_permute_avx(bin_indices_continuous: Vec4, axis_index: i32) -> i32 {
+    use std::arch::x86_64::*;
+    let value = _mm_loadu_ps(&bin_indices_continuous as *const Vec4 as *const f32);
+    let control = _mm_set1_epi32(axis_index);
+    let permuted = _mm_permutevar_ps(value, control);
+    _mm_cvtss_f32(permuted) as i32
 }
 
 /// Computes centroid bounds over a slice of BoundingBox4.
@@ -1114,42 +1177,122 @@ unsafe fn micro_sweep_for_binned_builder(
         return;
     }
 
-    // Sort subtrees by the widest axis using scalar quick sort (no vectorised path).
     let use_x = centroid_span.x > centroid_span.y && centroid_span.x > centroid_span.z;
     let use_y = centroid_span.y > centroid_span.z;
-    if use_x {
-        let comparer = BoundsComparerX;
-        Quicksort::sort_keys(
-            std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), subtree_count as usize),
-            0,
-            subtree_count - 1,
-            &comparer,
-        );
-    } else if use_y {
-        let comparer = BoundsComparerY;
-        Quicksort::sort_keys(
-            std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), subtree_count as usize),
-            0,
-            subtree_count - 1,
-            &comparer,
-        );
-    } else {
-        let comparer = BoundsComparerZ;
-        Quicksort::sort_keys(
-            std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), subtree_count as usize),
-            0,
-            subtree_count - 1,
-            &comparer,
-        );
-    }
 
-    // Get the scan buffer from the appropriate bins (MT per-worker or ST).
-    let mut bin_bounding_boxes_scan = if let Some(mt_ctx) = (*ctx).mt_threading {
-        (*mt_ctx).get_bins(worker_index).2
+    // The bins aren't in use right now, so the sort below repurposes bin_bounding_boxes as
+    // key/target-index scratch and bin_bounding_boxes_scan as the permutation cache.
+    let (bin_bounding_boxes, mut bin_bounding_boxes_scan) = if let Some(mt_ctx) = (*ctx).mt_threading
+    {
+        let bins = (*mt_ctx).get_bins(worker_index);
+        (bins.0, bins.2)
     } else {
-        (*ctx).bins.bin_bounding_boxes_scan
+        (
+            (*ctx).bins.bin_bounding_boxes,
+            (*ctx).bins.bin_bounding_boxes_scan,
+        )
     };
     let bounding_boxes: Buffer<BoundingBox4> = subtrees.cast();
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        // Repurpose the bins memory so we don't need to allocate any extra.
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        let padded_key_count = if std::is_x86_feature_detected!("avx2") {
+            ((subtree_count + 7) / 8) * 8
+        } else {
+            ((subtree_count + 3) / 4) * 4
+        };
+        #[cfg(target_arch = "aarch64")]
+        let padded_key_count = ((subtree_count + 3) / 4) * 4;
+
+        debug_assert!(
+            mem::size_of::<BoundingBox4>() as i64 * bin_bounding_boxes.len() as i64
+                >= (padded_key_count as i64 * 2 + subtree_count as i64)
+                    * mem::size_of::<i32>() as i64,
+            "The bins should preallocate enough space to handle the needs of microsweeps. They reuse the same allocations."
+        );
+        let keys: Buffer<f32> = Buffer::new(
+            bin_bounding_boxes.as_ptr() as *mut f32,
+            padded_key_count,
+            bin_bounding_boxes.id(),
+        );
+        let target_indices: Buffer<i32> = Buffer::new(
+            (keys.as_ptr() as *mut f32).add(padded_key_count as usize) as *mut i32,
+            padded_key_count,
+            bin_bounding_boxes.id(),
+        );
+
+        // Compute the axis centroids up front to avoid having to recompute them during a sort.
+        let keys_ptr = keys.as_ptr() as *mut f32;
+        if use_x {
+            for i in 0..subtree_count {
+                let bounds = &*subtrees.as_ptr().add(i as usize);
+                *keys_ptr.add(i as usize) = bounds.min.x + bounds.max.x;
+            }
+        } else if use_y {
+            for i in 0..subtree_count {
+                let bounds = &*subtrees.as_ptr().add(i as usize);
+                *keys_ptr.add(i as usize) = bounds.min.y + bounds.max.y;
+            }
+        } else {
+            for i in 0..subtree_count {
+                let bounds = &*subtrees.as_ptr().add(i as usize);
+                *keys_ptr.add(i as usize) = bounds.min.z + bounds.max.z;
+            }
+        }
+        for i in subtree_count..padded_key_count {
+            *keys_ptr.add(i as usize) = f32::MAX;
+        }
+
+        vectorized_sorts::vector_counting_sort(
+            std::slice::from_raw_parts(keys.as_ptr(), padded_key_count as usize),
+            std::slice::from_raw_parts_mut(
+                target_indices.as_ptr() as *mut i32,
+                padded_key_count as usize,
+            ),
+            subtree_count as usize,
+        );
+
+        // Now that we know the target indices, copy things into position.
+        // Have to copy things into a temporary cache to avoid overwrites since we didn't do any
+        // shuffling during the sort. Note that we can now reuse the keys memory.
+        let mut subtree_cache: Buffer<NodeChild> = bin_bounding_boxes_scan.cast();
+        subtrees.copy_to(0, &mut subtree_cache, 0, subtree_count);
+        for i in 0..subtree_count {
+            let target_index = *target_indices.as_ptr().add(i as usize);
+            *subtrees.get_mut(target_index) = *subtree_cache.get(i);
+        }
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        // No vectorization supported. Fall back to poopymode!
+        if use_x {
+            let comparer = BoundsComparerX;
+            Quicksort::sort_keys(
+                std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), subtree_count as usize),
+                0,
+                subtree_count - 1,
+                &comparer,
+            );
+        } else if use_y {
+            let comparer = BoundsComparerY;
+            Quicksort::sort_keys(
+                std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), subtree_count as usize),
+                0,
+                subtree_count - 1,
+                &comparer,
+            );
+        } else {
+            let comparer = BoundsComparerZ;
+            Quicksort::sort_keys(
+                std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), subtree_count as usize),
+                0,
+                subtree_count - 1,
+                &comparer,
+            );
+        }
+    }
 
     // Build prefix-merged bounds from left to right.
     *bin_bounding_boxes_scan.as_mut_ptr().add(0) = *bounding_boxes.as_ptr().add(0);
@@ -2159,11 +2302,9 @@ impl Tree {
         microsweep_threshold: i32,
         deterministic: bool,
     ) {
-        let nodes = self.nodes.slice_offset(self.node_count, subtrees.len() - 1);
-        let metanodes = self
-            .metanodes
-            .slice_offset(self.node_count, subtrees.len() - 1);
-        let leaves = self.leaves.slice_offset(self.leaf_count, subtrees.len());
+        let nodes = self.nodes.slice_count(self.node_count);
+        let metanodes = self.metanodes.slice_count(self.node_count);
+        let leaves = self.leaves.slice_count(self.leaf_count);
         Self::binned_build_static(
             subtrees,
             nodes,

@@ -1,3 +1,5 @@
+use crate::out;
+use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::angular_hinge::AngularHingeFunctions;
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
@@ -13,6 +15,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 
 pub const BATCH_TYPE_ID: i32 = 47;
 
@@ -157,50 +160,32 @@ impl HingeFunctions {
         let linear_change_a = Vector3Wide::scale(&csi.ball_socket, &inertia_a.inverse_mass);
         velocity_a.linear = velocity_a.linear + linear_change_a;
 
-        let mut ball_socket_angular_impulse_a = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                offset_a,
-                &csi.ball_socket,
-                &mut ball_socket_angular_impulse_a,
-            );
-        }
-        let mut hinge_angular_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(&csi.hinge, hinge_jacobian, &mut hinge_angular_impulse_a);
+        let ball_socket_angular_impulse_a =
+            out_unsafe!(Vector3Wide::cross_without_overlap(offset_a, &csi.ball_socket));
+        let hinge_angular_impulse_a = out!(Matrix2x3Wide::transform(&csi.hinge, hinge_jacobian));
         let angular_impulse_a = ball_socket_angular_impulse_a + hinge_angular_impulse_a;
-        let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+        let angular_change_a = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_change_a,
-        );
+            &inertia_a.inverse_inertia_tensor
+        ));
         velocity_a.angular = velocity_a.angular + angular_change_a;
 
         // Note cross order flip for negation
         let negated_linear_change_b = Vector3Wide::scale(&csi.ball_socket, &inertia_b.inverse_mass);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::subtract(&velocity_b.linear, &negated_linear_change_b, &mut tmp);
-        velocity_b.linear = tmp;
-        let mut ball_socket_angular_impulse_b = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                &csi.ball_socket,
-                offset_b,
-                &mut ball_socket_angular_impulse_b,
-            );
-        }
-        let mut angular_impulse_b = Vector3Wide::default();
-        Vector3Wide::subtract(
+        velocity_b.linear = out!(Vector3Wide::subtract(
+            &velocity_b.linear,
+            &negated_linear_change_b
+        ));
+        let ball_socket_angular_impulse_b =
+            out_unsafe!(Vector3Wide::cross_without_overlap(&csi.ball_socket, offset_b));
+        let angular_impulse_b = out!(Vector3Wide::subtract(
             &ball_socket_angular_impulse_b,
-            &hinge_angular_impulse_a,
-            &mut angular_impulse_b,
-        );
-        let mut angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+            &hinge_angular_impulse_a
+        ));
+        let angular_change_b = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut angular_change_b,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
         velocity_b.angular = velocity_b.angular + angular_change_b;
     }
 
@@ -217,34 +202,33 @@ impl HingeFunctions {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut orientation_matrix_a = Matrix3x3Wide::default();
-        Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
-        let mut offset_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+        let orientation_matrix_a = out!(Matrix3x3Wide::create_from_quaternion(orientation_a));
+        let offset_a = out!(Matrix3x3Wide::transform_without_overlap(
             &prestep.local_offset_a,
-            &orientation_matrix_a,
-            &mut offset_a,
-        );
-        let mut offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+            &orientation_matrix_a
+        ));
+        let offset_b = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset_b,
-            orientation_b,
-            &mut offset_b,
+            orientation_b
+        ));
+        let (local_ax, local_ay) = out_unsafe!(
+            Helpers::build_orthonormal_basis(&prestep.local_hinge_axis_a),
+            2
         );
-        let mut local_ax = Vector3Wide::default();
-        let mut local_ay = Vector3Wide::default();
-        Helpers::build_orthonormal_basis(&prestep.local_hinge_axis_a, &mut local_ax, &mut local_ay);
-        let mut hinge_jacobian = Matrix2x3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
-            &local_ax,
-            &orientation_matrix_a,
-            &mut hinge_jacobian.x,
-        );
-        Matrix3x3Wide::transform_without_overlap(
-            &local_ay,
-            &orientation_matrix_a,
-            &mut hinge_jacobian.y,
-        );
+        let mut hinge_jacobian = MaybeUninit::<Matrix2x3Wide>::uninit();
+        unsafe {
+            Matrix3x3Wide::transform_without_overlap(
+                &local_ax,
+                &orientation_matrix_a,
+                &mut (*hinge_jacobian.as_mut_ptr()).x,
+            );
+            Matrix3x3Wide::transform_without_overlap(
+                &local_ay,
+                &orientation_matrix_a,
+                &mut (*hinge_jacobian.as_mut_ptr()).y,
+            );
+        }
+        let hinge_jacobian = unsafe { hinge_jacobian.assume_init() };
         Self::apply_impulse(
             &offset_a,
             &offset_b,
@@ -277,268 +261,214 @@ impl HingeFunctions {
         // [ 0, constraintAxisAX, 0, -constraintAxisAX ]
         // [ 0, constraintAxisAY, 0, -constraintAxisAY ]
 
-        let mut orientation_matrix_a = Matrix3x3Wide::default();
-        Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
-        let mut orientation_matrix_b = Matrix3x3Wide::default();
-        Matrix3x3Wide::create_from_quaternion(orientation_b, &mut orientation_matrix_b);
-        let mut offset_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+        let orientation_matrix_a = out!(Matrix3x3Wide::create_from_quaternion(orientation_a));
+        let orientation_matrix_b = out!(Matrix3x3Wide::create_from_quaternion(orientation_b));
+        let offset_a = out!(Matrix3x3Wide::transform_without_overlap(
             &prestep.local_offset_a,
-            &orientation_matrix_a,
-            &mut offset_a,
-        );
-        let mut hinge_axis_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+            &orientation_matrix_a
+        ));
+        let hinge_axis_a = out!(Matrix3x3Wide::transform_without_overlap(
             &prestep.local_hinge_axis_a,
-            &orientation_matrix_a,
-            &mut hinge_axis_a,
-        );
-        let mut offset_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+            &orientation_matrix_a
+        ));
+        let offset_b = out!(Matrix3x3Wide::transform_without_overlap(
             &prestep.local_offset_b,
-            &orientation_matrix_b,
-            &mut offset_b,
-        );
-        let mut hinge_axis_b = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+            &orientation_matrix_b
+        ));
+        let hinge_axis_b = out!(Matrix3x3Wide::transform_without_overlap(
             &prestep.local_hinge_axis_b,
-            &orientation_matrix_b,
-            &mut hinge_axis_b,
+            &orientation_matrix_b
+        ));
+        let (local_ax, local_ay) = out_unsafe!(
+            Helpers::build_orthonormal_basis(&prestep.local_hinge_axis_a),
+            2
         );
-        let mut local_ax = Vector3Wide::default();
-        let mut local_ay = Vector3Wide::default();
-        Helpers::build_orthonormal_basis(&prestep.local_hinge_axis_a, &mut local_ax, &mut local_ay);
-        let mut hinge_jacobian = Matrix2x3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
-            &local_ax,
-            &orientation_matrix_a,
-            &mut hinge_jacobian.x,
-        );
-        Matrix3x3Wide::transform_without_overlap(
-            &local_ay,
-            &orientation_matrix_a,
-            &mut hinge_jacobian.y,
-        );
+        let mut hinge_jacobian = MaybeUninit::<Matrix2x3Wide>::uninit();
+        unsafe {
+            Matrix3x3Wide::transform_without_overlap(
+                &local_ax,
+                &orientation_matrix_a,
+                &mut (*hinge_jacobian.as_mut_ptr()).x,
+            );
+            Matrix3x3Wide::transform_without_overlap(
+                &local_ay,
+                &orientation_matrix_a,
+                &mut (*hinge_jacobian.as_mut_ptr()).y,
+            );
+        }
+        let hinge_jacobian = unsafe { hinge_jacobian.assume_init() };
 
         // Upper left 3x3 block: ball socket contribution
-        let mut ball_socket_contribution_angular_a = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::skew_sandwich_without_overlap(
-            &offset_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut ball_socket_contribution_angular_a,
-        );
-        let mut ball_socket_contribution_angular_b = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::skew_sandwich_without_overlap(
-            &offset_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut ball_socket_contribution_angular_b,
-        );
-        let mut inverse_effective_mass = Symmetric5x5Wide {
-            a: Symmetric3x3Wide::default(),
-            b: Matrix2x3Wide::default(),
-            d: Symmetric2x2Wide::default(),
-        };
-        Symmetric3x3Wide::add(
-            &ball_socket_contribution_angular_a,
-            &ball_socket_contribution_angular_b,
-            &mut inverse_effective_mass.a,
-        );
-        let linear_contribution = inertia_a.inverse_mass + inertia_b.inverse_mass;
-        inverse_effective_mass.a.xx += linear_contribution;
-        inverse_effective_mass.a.yy += linear_contribution;
-        inverse_effective_mass.a.zz += linear_contribution;
+        let ball_socket_contribution_angular_a =
+            out!(Symmetric3x3Wide::skew_sandwich_without_overlap(
+                &offset_a,
+                &inertia_a.inverse_inertia_tensor
+            ));
+        let ball_socket_contribution_angular_b =
+            out!(Symmetric3x3Wide::skew_sandwich_without_overlap(
+                &offset_b,
+                &inertia_b.inverse_inertia_tensor
+            ));
 
         // Lower right 2x2 block: angular hinge contribution
-        let mut hinge_inertia_a = Matrix2x3Wide::default();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(
+        let hinge_inertia_a = out!(Symmetric3x3Wide::multiply_without_overlap_2x3(
             &hinge_jacobian,
-            &inertia_a.inverse_inertia_tensor,
-            &mut hinge_inertia_a,
-        );
-        let mut hinge_inertia_b = Matrix2x3Wide::default();
-        Symmetric3x3Wide::multiply_without_overlap_2x3(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let hinge_inertia_b = out!(Symmetric3x3Wide::multiply_without_overlap_2x3(
             &hinge_jacobian,
-            &inertia_b.inverse_inertia_tensor,
-            &mut hinge_inertia_b,
-        );
-        let mut hinge_contribution_angular_a = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::complete_matrix_sandwich(
+            &inertia_b.inverse_inertia_tensor
+        ));
+        let hinge_contribution_angular_a = out!(Symmetric2x2Wide::complete_matrix_sandwich(
             &hinge_inertia_a,
-            &hinge_jacobian,
-            &mut hinge_contribution_angular_a,
-        );
-        let mut hinge_contribution_angular_b = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::complete_matrix_sandwich(
+            &hinge_jacobian
+        ));
+        let hinge_contribution_angular_b = out!(Symmetric2x2Wide::complete_matrix_sandwich(
             &hinge_inertia_b,
-            &hinge_jacobian,
-            &mut hinge_contribution_angular_b,
-        );
-        Symmetric2x2Wide::add(
-            &hinge_contribution_angular_a,
-            &hinge_contribution_angular_b,
-            &mut inverse_effective_mass.d,
-        );
+            &hinge_jacobian
+        ));
 
         // Off-diagonal 2x3 block: coupling between ball socket and angular hinge
         // skew(offsetA) * (Ia^-1 * hingeJacobian) + skew(offsetB) * (Ib^-1 * hingeJacobian)
-        let mut off_diagonal_contribution_ax = Vector3Wide::default();
+        let off_diagonal_contribution_ax = out_unsafe!(Vector3Wide::cross_without_overlap(
+            &hinge_inertia_a.x,
+            &offset_a
+        ));
+        let off_diagonal_contribution_ay = out_unsafe!(Vector3Wide::cross_without_overlap(
+            &hinge_inertia_a.y,
+            &offset_a
+        ));
+        let off_diagonal_contribution_bx = out_unsafe!(Vector3Wide::cross_without_overlap(
+            &hinge_inertia_b.x,
+            &offset_b
+        ));
+        let off_diagonal_contribution_by = out_unsafe!(Vector3Wide::cross_without_overlap(
+            &hinge_inertia_b.y,
+            &offset_b
+        ));
+
+        // inverseEffectiveMass is fully written (a, b, d) below before it is read by Invert.
+        let mut inverse_effective_mass = MaybeUninit::<Symmetric5x5Wide>::uninit();
         unsafe {
-            Vector3Wide::cross_without_overlap(
-                &hinge_inertia_a.x,
-                &offset_a,
-                &mut off_diagonal_contribution_ax,
+            let iem = inverse_effective_mass.as_mut_ptr();
+            Symmetric3x3Wide::add(
+                &ball_socket_contribution_angular_a,
+                &ball_socket_contribution_angular_b,
+                &mut (*iem).a,
+            );
+            let linear_contribution = inertia_a.inverse_mass + inertia_b.inverse_mass;
+            (*iem).a.xx += linear_contribution;
+            (*iem).a.yy += linear_contribution;
+            (*iem).a.zz += linear_contribution;
+
+            Symmetric2x2Wide::add(
+                &hinge_contribution_angular_a,
+                &hinge_contribution_angular_b,
+                &mut (*iem).d,
+            );
+
+            Vector3Wide::add(
+                &off_diagonal_contribution_ax,
+                &off_diagonal_contribution_bx,
+                &mut (*iem).b.x,
+            );
+            Vector3Wide::add(
+                &off_diagonal_contribution_ay,
+                &off_diagonal_contribution_by,
+                &mut (*iem).b.y,
             );
         }
-        let mut off_diagonal_contribution_ay = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                &hinge_inertia_a.y,
-                &offset_a,
-                &mut off_diagonal_contribution_ay,
-            );
-        }
-        let mut off_diagonal_contribution_bx = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                &hinge_inertia_b.x,
-                &offset_b,
-                &mut off_diagonal_contribution_bx,
-            );
-        }
-        let mut off_diagonal_contribution_by = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                &hinge_inertia_b.y,
-                &offset_b,
-                &mut off_diagonal_contribution_by,
-            );
-        }
-        Vector3Wide::add(
-            &off_diagonal_contribution_ax,
-            &off_diagonal_contribution_bx,
-            &mut inverse_effective_mass.b.x,
-        );
-        Vector3Wide::add(
-            &off_diagonal_contribution_ay,
-            &off_diagonal_contribution_by,
-            &mut inverse_effective_mass.b.y,
-        );
+        let inverse_effective_mass = unsafe { inverse_effective_mass.assume_init() };
 
         // Invert the 5x5 to get effective mass
-        let mut effective_mass = Symmetric5x5Wide {
-            a: Symmetric3x3Wide::default(),
-            b: Matrix2x3Wide::default(),
-            d: Symmetric2x2Wide::default(),
-        };
-        Symmetric5x5Wide::invert_without_overlap(&inverse_effective_mass, &mut effective_mass);
-        let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
+        let effective_mass = out!(Symmetric5x5Wide::invert_without_overlap(
+            &inverse_effective_mass
+        ));
+        let mut position_error_to_velocity = MaybeUninit::<Vector<f32>>::uninit();
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
         SpringSettingsWide::compute_springiness(
             &prestep.spring_settings,
             dt,
-            &mut position_error_to_velocity,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
+            unsafe { &mut *position_error_to_velocity.as_mut_ptr() },
+            unsafe { &mut *effective_mass_cfm_scale.as_mut_ptr() },
+            unsafe { &mut *softness_impulse_scale.as_mut_ptr() },
         );
+        let position_error_to_velocity = unsafe { position_error_to_velocity.assume_init() };
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
 
         // Position error: anchorB - offsetA, where anchorB = (positionB - positionA) + offsetB
-        let mut ball_socket_error = Vector3Wide::default();
         let pb_minus_pa = *position_b - *position_a;
-        let mut anchor_b = Vector3Wide::default();
-        Vector3Wide::add(&pb_minus_pa, &offset_b, &mut anchor_b);
-        Vector3Wide::subtract(&anchor_b, &offset_a, &mut ball_socket_error);
+        let anchor_b = out!(Vector3Wide::add(&pb_minus_pa, &offset_b));
+        let ball_socket_error = out!(Vector3Wide::subtract(&anchor_b, &offset_a));
         let ball_socket_bias_velocity =
             Vector3Wide::scale(&ball_socket_error, &position_error_to_velocity);
 
         // Angular hinge error
-        let mut error_angles = Vector2Wide::default();
-        AngularHingeFunctions::get_error_angles(
+        let error_angles = out!(AngularHingeFunctions::get_error_angles(
             &hinge_axis_a,
             &hinge_axis_b,
-            &hinge_jacobian,
-            &mut error_angles,
-        );
+            &hinge_jacobian
+        ));
         // Negate: we want to oppose the separation
-        let mut hinge_bias_velocity = Vector2Wide::default();
-        Vector2Wide::scale(
+        let hinge_bias_velocity = out!(Vector2Wide::scale(
             &error_angles,
-            &(-position_error_to_velocity),
-            &mut hinge_bias_velocity,
-        );
+            &(-position_error_to_velocity)
+        ));
 
         // CSV computation
         // J = [ I, skew(offsetA),   -I, -skew(offsetB)    ]
         //     [ 0, constraintAxisAX, 0, -constraintAxisAX ]
         //     [ 0, constraintAxisAY, 0, -constraintAxisAY ]
-        let mut ball_socket_angular_csv_a = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                &wsv_a.angular,
-                &offset_a,
-                &mut ball_socket_angular_csv_a,
-            );
-        }
-        let mut hinge_csv_a = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+        let ball_socket_angular_csv_a =
+            out_unsafe!(Vector3Wide::cross_without_overlap(&wsv_a.angular, &offset_a));
+        let hinge_csv_a = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_a.angular,
-            &hinge_jacobian,
-            &mut hinge_csv_a,
-        );
-        let mut ball_socket_angular_csv_b = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(
-                &offset_b,
-                &wsv_b.angular,
-                &mut ball_socket_angular_csv_b,
-            );
-        }
-        let mut negated_hinge_csv_b = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &hinge_jacobian
+        ));
+        let ball_socket_angular_csv_b =
+            out_unsafe!(Vector3Wide::cross_without_overlap(&offset_b, &wsv_b.angular));
+        let negated_hinge_csv_b = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_b.angular,
-            &hinge_jacobian,
-            &mut negated_hinge_csv_b,
-        );
+            &hinge_jacobian
+        ));
 
         let ball_socket_angular_csv = ball_socket_angular_csv_a + ball_socket_angular_csv_b;
         let ball_socket_linear_csv = wsv_a.linear - wsv_b.linear;
         let ball_socket_csv = ball_socket_angular_csv + ball_socket_linear_csv;
-        let mut ball_socket_csv_biased = Vector3Wide::default();
-        Vector3Wide::subtract(
+        let ball_socket_csv_biased = out!(Vector3Wide::subtract(
             &ball_socket_bias_velocity,
-            &ball_socket_csv,
-            &mut ball_socket_csv_biased,
-        );
+            &ball_socket_csv
+        ));
         let hinge_csv = hinge_csv_a - negated_hinge_csv_b;
         let hinge_csv_biased = hinge_bias_velocity - hinge_csv;
 
-        let mut csi = HingeAccumulatedImpulses {
-            ball_socket: Vector3Wide::default(),
-            hinge: Vector2Wide::default(),
-        };
-        Symmetric5x5Wide::transform_without_overlap(
-            &ball_socket_csv_biased,
-            &hinge_csv_biased,
-            &effective_mass,
-            &mut csi.ball_socket,
-            &mut csi.hinge,
+        let (csi_ball_socket, csi_hinge) = out_unsafe!(
+            Symmetric5x5Wide::transform_without_overlap(
+                &ball_socket_csv_biased,
+                &hinge_csv_biased,
+                &effective_mass
+            ),
+            2
         );
+        let mut csi = HingeAccumulatedImpulses {
+            ball_socket: csi_ball_socket,
+            hinge: csi_hinge,
+        };
         csi.ball_socket *= effective_mass_cfm_scale;
         csi.hinge *= effective_mass_cfm_scale;
         let ball_socket_softness =
             Vector3Wide::scale(&accumulated_impulses.ball_socket, &softness_impulse_scale);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::subtract(&csi.ball_socket, &ball_socket_softness, &mut tmp);
-        csi.ball_socket = tmp;
-        let mut hinge_softness = Vector2Wide::default();
-        Vector2Wide::scale(
+        csi.ball_socket = out!(Vector3Wide::subtract(
+            &csi.ball_socket,
+            &ball_socket_softness
+        ));
+        let hinge_softness = out!(Vector2Wide::scale(
             &accumulated_impulses.hinge,
-            &softness_impulse_scale,
-            &mut hinge_softness,
-        );
-        let mut csi_hinge_tmp = Vector2Wide::default();
-        Vector2Wide::subtract(&csi.hinge, &hinge_softness, &mut csi_hinge_tmp);
-        csi.hinge = csi_hinge_tmp;
+            &softness_impulse_scale
+        ));
+        csi.hinge = out!(Vector2Wide::subtract(&csi.hinge, &hinge_softness));
 
         accumulated_impulses.ball_socket += csi.ball_socket;
         accumulated_impulses.hinge += csi.hinge;

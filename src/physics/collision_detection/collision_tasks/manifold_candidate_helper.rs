@@ -486,8 +486,10 @@ impl ManifoldCandidateHelper {
         let x_dot = tangent_bx.dot(dot_axis);
         let y_dot = tangent_by.dot(dot_axis);
         // Use a fixed-size buffer for depths - convex hulls have bounded face vertex counts.
-        let mut candidate_depths_buf = [0.0f32; 128];
-        let candidate_depths = candidate_depths_buf.as_mut_ptr();
+        // Left uninitialized; every consumed index is written by the loop below before any read.
+        let mut candidate_depths_buf: [std::mem::MaybeUninit<f32>; 128] =
+            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let candidate_depths = candidate_depths_buf.as_mut_ptr() as *mut f32;
         for i in (0..candidate_count as usize).rev() {
             let c = &*candidates.add(i);
             let d = base_dot + c.x * x_dot + c.y * y_dot;
@@ -517,9 +519,9 @@ impl ManifoldCandidateHelper {
         // Find deepest contact (contact 0).
         let mut best_score0 = f32::MIN;
         let mut best_index0 = 0usize;
-        const EXTREMITY_SCALE: f32 = 1e-2;
-        let extremity_x = 0.7946897654 * EXTREMITY_SCALE;
-        let extremity_y = 0.60701579614 * EXTREMITY_SCALE;
+        let extremity_scale = 1e-2;
+        let extremity_x = 0.7946897654 * extremity_scale;
+        let extremity_y = 0.60701579614 * extremity_scale;
         for i in 0..candidate_count as usize {
             let c = &*candidates.add(i);
             let d = *candidate_depths.add(i);

@@ -188,6 +188,7 @@ impl IConvexShape for Box {
 }
 
 /// Wide representation of a box for SIMD processing.
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct BoxWide {
     pub half_width: Vector<f32>,

@@ -15,6 +15,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 use std::simd::Select;
 
@@ -235,7 +236,20 @@ impl ConvexHullPairTester {
 
             // Create cached edge data for A.
             // Transform A's vertices into B-local space.
-            let mut cached_edges = [CachedEdge::default(); 64];
+            // 64-entry stack fast path, heap spill for larger faces (C# stackallocs the unbounded count).
+            // SAFETY: uninitialized; the fill loop writes every element before it is read.
+            let mut cached_edges_stack: [MaybeUninit<CachedEdge>; 64] =
+                unsafe { MaybeUninit::uninit().assume_init() };
+            let mut cached_edges_heap: Vec<MaybeUninit<CachedEdge>>;
+            let cached_edges: &mut [MaybeUninit<CachedEdge>] = if face_count_a <= 64 {
+                &mut cached_edges_stack[..face_count_a]
+            } else {
+                cached_edges_heap = Vec::with_capacity(face_count_a);
+                unsafe {
+                    cached_edges_heap.set_len(face_count_a);
+                }
+                &mut cached_edges_heap[..]
+            };
             let previous_index_a = a_slot.face_vertex_indices[face_start_a + face_count_a - 1];
             let mut previous_vertex_a = Vec3::ZERO;
             Vector3Wide::read_slot(
@@ -250,27 +264,36 @@ impl ConvexHullPairTester {
             );
             previous_vertex_a += slot_local_offset_a;
 
-            for (edge_index, edge) in cached_edges.iter_mut().take(face_count_a).enumerate() {
-                edge.maximum_containment_dot = f32::MIN;
+            for edge_index in 0..face_count_a {
                 let index_a = a_slot.face_vertex_indices[face_start_a + edge_index];
+                let mut vertex = Vec3::ZERO;
                 Vector3Wide::read_slot(
                     &a_slot.points[index_a.bundle_index as usize],
                     index_a.inner_index as usize,
-                    &mut edge.vertex,
+                    &mut vertex,
                 );
-                let vtmp = edge.vertex;
-                Matrix3x3::transform(&vtmp, &slot_b_local_orientation_a, &mut edge.vertex);
-                edge.vertex += slot_local_offset_a;
+                let vtmp = vertex;
+                Matrix3x3::transform(&vtmp, &slot_b_local_orientation_a, &mut vertex);
+                vertex += slot_local_offset_a;
                 // Note flipped cross order; local normal points from B to A.
-                edge.edge_plane_normal = slot_local_normal.cross(edge.vertex - previous_vertex_a);
-                previous_vertex_a = edge.vertex;
+                let edge_plane_normal = slot_local_normal.cross(vertex - previous_vertex_a);
+                previous_vertex_a = vertex;
+                cached_edges[edge_index].write(CachedEdge {
+                    vertex,
+                    edge_plane_normal,
+                    maximum_containment_dot: f32::MIN,
+                });
             }
 
             // Clip B's face edges against A's face, and test A's vertices against B's face.
             let maximum_candidate_count = face_count_a
                 .max(face_count_b)
                 .max((face_count_a * 2).min(face_count_b * 2));
-            let mut candidates_buf = [ManifoldCandidateScalar::default(); 128];
+            // Clamped to the buffer's capacity so the candidate_count guards below cannot index past it.
+            let maximum_candidate_count = maximum_candidate_count.min(128);
+            // SAFETY: uninitialized; every index below candidate_count is written before it is read.
+            let mut candidates_buf: [MaybeUninit<ManifoldCandidateScalar>; 128] =
+                unsafe { MaybeUninit::uninit().assume_init() };
             let mut candidate_count = 0usize;
 
             let previous_index_b_init = b_slot.face_vertex_indices[face_start_b + face_count_b - 1];
@@ -298,7 +321,8 @@ impl ConvexHullPairTester {
                 let mut latest_entry = f32::MIN;
                 let mut earliest_exit = f32::MAX;
 
-                for edge_a in &mut cached_edges[..face_count_a] {
+                for edge_a in cached_edges.iter_mut() {
+                    let edge_a = unsafe { edge_a.assume_init_mut() };
                     // Check containment of A vertex in this B edge.
                     let edge_b_to_edge_a = edge_a.vertex - previous_vertex_b;
                     let containment_dot = edge_b_to_edge_a.dot(edge_plane_normal_b);
@@ -353,10 +377,11 @@ impl ConvexHullPairTester {
                         // Create max contact.
                         let point =
                             edge_offset_b * earliest_exit + previous_vertex_b - b_face_origin;
-                        let c = &mut candidates_buf[candidate_count];
-                        c.x = point.dot(b_face_x);
-                        c.y = point.dot(b_face_y);
-                        c.feature_id = base_feature_id + end_id as i32;
+                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                            x: point.dot(b_face_x),
+                            y: point.dot(b_face_y),
+                            feature_id: base_feature_id + end_id as i32,
+                        });
                         candidate_count += 1;
                     }
                     if latest_entry < earliest_exit
@@ -366,10 +391,11 @@ impl ConvexHullPairTester {
                         // Create min contact.
                         let point =
                             edge_offset_b * latest_entry + previous_vertex_b - b_face_origin;
-                        let c = &mut candidates_buf[candidate_count];
-                        c.x = point.dot(b_face_x);
-                        c.y = point.dot(b_face_y);
-                        c.feature_id = base_feature_id + start_id as i32;
+                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                            x: point.dot(b_face_x),
+                            y: point.dot(b_face_y),
+                            feature_id: base_feature_id + start_id as i32,
+                        });
                         candidate_count += 1;
                     }
                 }
@@ -381,10 +407,11 @@ impl ConvexHullPairTester {
             // Check for A vertices contained in B's face.
             let inverse_local_normal_a_dot_face_normal_b =
                 1.0 / slot_local_normal.dot(slot_face_normal_b);
-            for (i, edge) in cached_edges[..face_count_a].iter().enumerate() {
+            for (i, edge) in cached_edges.iter().enumerate() {
                 if candidate_count >= maximum_candidate_count {
                     break;
                 }
+                let edge = unsafe { edge.assume_init_ref() };
                 if edge.maximum_containment_dot <= 0.0 {
                     // This vertex was contained by all B edge plane normals.
                     // Project it onto B's surface.
@@ -393,10 +420,11 @@ impl ConvexHullPairTester {
                         * inverse_local_normal_a_dot_face_normal_b;
                     let b_face_to_projected = b_face_to_vertex_a - slot_local_normal * distance;
 
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = b_face_x.dot(b_face_to_projected);
-                    c.y = b_face_y.dot(b_face_to_projected);
-                    c.feature_id = i as i32;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: b_face_x.dot(b_face_to_projected),
+                        y: b_face_y.dot(b_face_to_projected),
+                        feature_id: i as i32,
+                    });
                     candidate_count += 1;
                 }
             }
@@ -407,11 +435,11 @@ impl ConvexHullPairTester {
             let mut slot_offset_b = Vec3::ZERO;
             Vector3Wide::read_slot(offset_b, slot_index, &mut slot_offset_b);
             ManifoldCandidateHelper::reduce_scalar(
-                candidates_buf.as_mut_ptr(),
+                candidates_buf.as_mut_ptr() as *mut ManifoldCandidateScalar,
                 candidate_count as i32,
                 slot_face_normal_a,
                 1.0 / slot_face_normal_a.dot(slot_local_normal),
-                cached_edges[0].vertex,
+                unsafe { cached_edges[0].assume_init_ref() }.vertex,
                 b_face_origin,
                 b_face_x,
                 b_face_y,

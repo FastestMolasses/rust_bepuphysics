@@ -12,6 +12,7 @@ use std::simd::Select;
 use std::simd::{Mask, StdFloat};
 
 #[derive(Clone, Copy, Default)]
+#[repr(C)]
 pub struct QuaternionWide {
     pub x: Vector<f32>,
     pub y: Vector<f32>,
@@ -235,6 +236,7 @@ impl QuaternionWide {
     }
 
     /// Transforms the vector using a quaternion. Assumes that the memory backing the input and output do not overlap.
+    #[inline(always)]
     pub fn transform_without_overlap(v: &Vector3Wide, rotation: &Self, result: &mut Vector3Wide) {
         // This operation is an optimized-down version of v' = q * v * q^-1.
         // The expanded form would be to treat v as an 'axis only' quaternion
@@ -447,7 +449,8 @@ impl QuaternionWide {
         right: &Self,
         result: &mut Self,
     ) {
-        let condition = Mask::from_simd(condition);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let condition = unsafe { Mask::from_simd_unchecked(condition) };
         result.x = condition.select(left.x, right.x);
         result.y = condition.select(left.y, right.y);
         result.z = condition.select(left.z, right.z);
@@ -456,7 +459,8 @@ impl QuaternionWide {
 
     #[inline(always)]
     pub fn conditional_select(condition: Vector<i32>, left: &Self, right: &Self) -> Self {
-        let condition = Mask::from_simd(condition);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let condition = unsafe { Mask::from_simd_unchecked(condition) };
         Self {
             x: condition.select(left.x, right.x),
             y: condition.select(left.y, right.y),

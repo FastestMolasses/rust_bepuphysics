@@ -136,7 +136,7 @@ impl Tree {
         let required = self.get_serialized_byte_count();
         assert!(bytes.len() >= required, "Target buffer too small.");
 
-        *(bytes.as_mut_ptr() as *mut i32) = self.leaf_count;
+        std::ptr::write_unaligned(bytes.as_mut_ptr() as *mut i32, self.leaf_count);
         let leaf_byte_count = self.leaf_count as usize * std::mem::size_of::<Leaf>();
         let node_byte_count = self.node_count as usize * std::mem::size_of::<Node>();
         let metanode_byte_count = self.node_count as usize * std::mem::size_of::<Metanode>();
@@ -165,7 +165,7 @@ impl Tree {
     /// Deserializes a tree from a byte buffer.
     pub unsafe fn from_bytes(data: &[u8], pool: &mut BufferPool) -> Self {
         assert!(data.len() > 4, "Data too small for header.");
-        let leaf_count = *(data.as_ptr() as *const i32);
+        let leaf_count = std::ptr::read_unaligned(data.as_ptr() as *const i32);
         let node_count = leaf_count - 1;
         let leaf_byte_count = leaf_count as usize * std::mem::size_of::<Leaf>();
         let node_byte_count = node_count as usize * std::mem::size_of::<Node>();
@@ -308,14 +308,16 @@ impl Tree {
     }
 
     /// Computes SAH metric for a type with the same memory layout as BoundingBox4 (32 bytes: min4 + max4).
-    #[inline(never)]
+    /// Body duplicated rather than delegating to compute_bounds_metric_vecs so this hot path stays inlinable.
+    #[inline(always)]
     pub fn compute_bounds_metric<T>(bounds: &T) -> f32 {
         debug_assert!(std::mem::size_of::<T>() == 32);
         unsafe {
             let ptr = bounds as *const T as *const f32;
             let min = Vec3::new(*ptr, *ptr.add(1), *ptr.add(2));
             let max = Vec3::new(*ptr.add(4), *ptr.add(5), *ptr.add(6));
-            Self::compute_bounds_metric_vecs(&min, &max)
+            let offset = max - min;
+            offset.x * offset.y + offset.y * offset.z + offset.x * offset.z
         }
     }
 

@@ -180,8 +180,9 @@ pub struct Solver {
     pub(crate) bodies_first_observed_in_batches: Buffer<IndexSet>,
 
     // Multithreaded integration responsibility computation state
-    pub(crate) next_constraint_integration_responsibility_job_index: std::sync::atomic::AtomicI32,
-    pub(crate) integration_responsibility_prepass_jobs: Vec<(i32, i32, i32, i32)>, // (batch, typeBatch, start, end)
+    pub(crate) next_constraint_integration_responsibility_job_index: std::cell::UnsafeCell<i32>,
+    // (batch, typeBatch, start, end)
+    pub(crate) integration_responsibility_prepass_jobs: QuickList<(i32, i32, i32, i32)>,
     pub(crate) job_aligned_integration_responsibilities: Buffer<bool>,
 
     // Multithreaded solve state
@@ -407,10 +408,8 @@ impl Solver {
             coarse_batch_integration_responsibilities: Buffer::default(),
             merged_constrained_body_handles: IndexSet::empty(),
             bodies_first_observed_in_batches: Buffer::default(),
-            next_constraint_integration_responsibility_job_index: std::sync::atomic::AtomicI32::new(
-                0,
-            ),
-            integration_responsibility_prepass_jobs: Vec::new(),
+            next_constraint_integration_responsibility_job_index: std::cell::UnsafeCell::new(0),
+            integration_responsibility_prepass_jobs: QuickList::default(),
             job_aligned_integration_responsibilities: Buffer::default(),
             substep_context: SubstepMultithreadingContext::default(),
         };
@@ -636,7 +635,7 @@ impl Solver {
                     dynamic_body_handles,
                     bodies_ref,
                     pool,
-                    bodies_ref.active_set().count,
+                    8,
                 );
         }
 
@@ -646,11 +645,12 @@ impl Solver {
     pub(crate) fn get_blocking_body_handles(
         &self,
         body_handles: &[BodyHandle],
+        blocking_body_handles: &mut [BodyHandle],
         encoded_body_indices: &mut [i32],
-    ) -> Vec<BodyHandle> {
+    ) -> usize {
         let bodies = self.bodies();
         let solver_states = &bodies.active_set().dynamics_state;
-        let mut blocking = Vec::with_capacity(body_handles.len());
+        let mut blocking_count = 0usize;
 
         for (i, &handle) in body_handles.iter().enumerate() {
             let location = bodies.handle_to_location.get(handle.0);
@@ -658,11 +658,12 @@ impl Solver {
             if Bodies::is_kinematic(unsafe { &solver_states.get(location.index).inertia.local }) {
                 encoded_body_indices[i] = location.index | Bodies::KINEMATIC_MASK as i32;
             } else {
-                blocking.push(handle);
+                blocking_body_handles[blocking_count] = handle;
+                blocking_count += 1;
                 encoded_body_indices[i] = location.index;
             }
         }
-        blocking
+        blocking_count
     }
 
     pub(crate) fn allocate_new_constraint_batch(&mut self) -> i32 {
@@ -708,11 +709,15 @@ impl Solver {
             (*self_ptr).allocate_new_constraint_batch();
         } else if target_batch_index < (*self_ptr).fallback_batch_threshold {
             // A non-fallback constraint batch already exists here. This may fail.
-            let int_handles: Vec<i32> = dynamic_body_handles.iter().map(|h| h.0).collect();
+            // BodyHandle is a transparent i32 wrapper; reinterpret in place.
+            let int_handles = std::slice::from_raw_parts(
+                dynamic_body_handles.as_ptr() as *const i32,
+                dynamic_body_handles.len(),
+            );
             if !(*self_ptr)
                 .batch_referenced_handles
                 .get(target_batch_index)
-                .can_fit(&int_handles)
+                .can_fit(int_handles)
             {
                 return None;
             }
@@ -773,21 +778,24 @@ impl Solver {
         apply_fn: impl FnOnce(&mut TypeBatch, i32, i32),
     ) -> ConstraintHandle {
         let mut encoded_body_indices = [0i32; 8]; // stack alloc — matches C# stackalloc
+        let mut blocking_body_handles = [BodyHandle(0); 8]; // stack alloc — matches C# stackalloc
         debug_assert!(
             body_handles.len() <= 8,
             "Body handles exceeds stack buffer size"
         );
-        let blocking = self.get_blocking_body_handles(
+        let blocking_count = self.get_blocking_body_handles(
             body_handles,
+            &mut blocking_body_handles[..body_handles.len()],
             &mut encoded_body_indices[..body_handles.len()],
         );
+        let blocking = &blocking_body_handles[..blocking_count];
 
         let batch_count = self.active_set().batches.count;
         for i in 0..=batch_count {
             if let Some((handle, reference)) = self.try_allocate_in_batch(
                 type_id,
                 i,
-                &blocking,
+                blocking,
                 &encoded_body_indices[..body_handles.len()],
             ) {
                 let (mut bundle_index, mut inner_index) = (0usize, 0usize);
@@ -961,6 +969,9 @@ impl Solver {
 
         // Remove constraint from all connected body constraints lists.
         self.remove_constraint_references_from_bodies(handle);
+
+        // Re-read: awakening may have rewritten batch_index/index_in_type_batch.
+        let location = *self.handle_to_constraint.get(handle.0);
 
         if !self.pair_cache.is_null() {
             (*self.pair_cache).remove_reference_if_contact_constraint(handle, location.type_id);
@@ -1915,7 +1926,10 @@ impl Solver {
                 let batch = set.batches.get_mut(i);
                 for j in 0..batch.type_batches.count {
                     let type_batch = batch.type_batches.get_mut(j);
-                    let target = (*self_ptr).get_minimum_capacity_for_type(type_batch.type_id);
+                    // Never shrink below the batch's live constraint count.
+                    let target = type_batch
+                        .constraint_count
+                        .max((*self_ptr).get_minimum_capacity_for_type(type_batch.type_id));
                     let current = type_batch.capacity();
                     if current != target {
                         let type_id = type_batch.type_id;
@@ -3036,7 +3050,7 @@ impl Solver {
                     } else {
                         base_block_size
                     };
-                    let block = work_blocks.allocate_unsafely();
+                    let block = work_blocks.allocate(pool);
                     block.batch_index = batch_index;
                     block.type_batch_index = type_batch_index;
                     block.start_bundle = previous_end;
@@ -3372,13 +3386,40 @@ impl Solver {
         merged_flag_bundles != 0
     }
 
+    /// Worker entry point for the multithreaded constraint-integration-responsibility prepass.
+    /// Claims jobs via an atomic counter and writes each result into `job_aligned_integration_responsibilities`.
+    unsafe fn constraint_integration_responsibilities_worker(&self, _worker_index: i32) {
+        use std::sync::atomic::{AtomicI32, Ordering};
+        loop {
+            let job_index = AtomicI32::from_ptr(
+                self.next_constraint_integration_responsibility_job_index.get(),
+            )
+            .fetch_add(1, Ordering::AcqRel);
+            if job_index >= self.integration_responsibility_prepass_jobs.count {
+                break;
+            }
+            let (batch, type_batch, start, end) =
+                *self.integration_responsibility_prepass_jobs.span.get(job_index);
+            let has_responsibilities = self.compute_integration_responsibilities_for_constraint_region(
+                batch,
+                type_batch,
+                start,
+                end,
+                batch == self.fallback_batch_threshold,
+            );
+            *(self
+                .job_aligned_integration_responsibilities
+                .get_ptr(job_index) as *mut bool) = has_responsibilities;
+        }
+    }
+
     /// Prepares constraint integration responsibilities. Returns an IndexSet of constrained body handles.
     ///
     /// This computes per-batch merged body handle sets and identifies which constraint is
     /// first to see each body, which determines integration responsibility during substepping.
     pub unsafe fn prepare_constraint_integration_responsibilities(
         &mut self,
-        _thread_dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
+        thread_dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
     ) -> IndexSet {
         if self.active_set().batches.count > 0 {
             let pool = &mut *self.pool;
@@ -3496,64 +3537,152 @@ impl Solver {
                     horizontal_merge != 0;
             }
 
+            // This process is significantly more expensive than the batch merging phase and can
+            // benefit from multithreading. Small jobs use the single-threaded path; dispatching isn't free.
+            let mut use_single_threaded_path = true;
+            if let Some(dispatcher) = thread_dispatcher {
+                if dispatcher.thread_count() > 1 {
+                    self.integration_responsibility_prepass_jobs =
+                        QuickList::with_capacity(128, pool);
+                    let mut constraint_count = 0i32;
+                    const TARGET_JOB_SIZE: i32 = 2048;
+                    debug_assert!(
+                        TARGET_JOB_SIZE % 64 == 0,
+                        "Target job size must be a multiple of the index set bundles to avoid threads working on the same flag bundle."
+                    );
+                    for batch_index in 1..self.bodies_first_observed_in_batches.len() {
+                        if !*batch_has_any_integration_responsibilities.get(batch_index) {
+                            continue;
+                        }
+                        let batch = (*active_set_ptr).batches.get(batch_index);
+                        for type_batch_index in 0..batch.type_batches.count {
+                            let type_batch = batch.type_batches.get(type_batch_index);
+                            constraint_count += type_batch.constraint_count;
+                            let job_count_for_type_batch = (type_batch.constraint_count
+                                + TARGET_JOB_SIZE
+                                - 1)
+                                / TARGET_JOB_SIZE;
+                            for i in 0..job_count_for_type_batch {
+                                let job_start = i * TARGET_JOB_SIZE;
+                                let job_end = (job_start + TARGET_JOB_SIZE)
+                                    .min(type_batch.constraint_count);
+                                *self.integration_responsibility_prepass_jobs.allocate(pool) =
+                                    (batch_index, type_batch_index, job_start, job_end);
+                            }
+                        }
+                    }
+                    if constraint_count > 4096 + dispatcher.thread_count() * 1024 {
+                        *self.next_constraint_integration_responsibility_job_index.get() = 0;
+                        use_single_threaded_path = false;
+                        self.job_aligned_integration_responsibilities =
+                            pool.take(self.integration_responsibility_prepass_jobs.count);
+
+                        fn constraint_integration_responsibilities_worker_fn(
+                            worker_index: i32,
+                            dispatcher: &dyn crate::utilities::thread_dispatcher::IThreadDispatcher,
+                        ) {
+                            let solver = dispatcher.unmanaged_context() as *const Solver;
+                            unsafe {
+                                (*solver)
+                                    .constraint_integration_responsibilities_worker(worker_index);
+                            }
+                        }
+
+                        let self_ptr = self as *mut Self;
+                        dispatcher.dispatch_workers(
+                            constraint_integration_responsibilities_worker_fn,
+                            self.integration_responsibility_prepass_jobs.count,
+                            self_ptr as *mut (),
+                            None,
+                        );
+
+                        // Coarse batch integration responsibilities start uninitialized: multiple
+                        // jobs can target the same type batch in the multithreaded case, so we
+                        // must initialize to false and then merge (OR) each job's result in.
+                        for i in 1..(*active_set_ptr).batches.count {
+                            let batch = (*active_set_ptr).batches.get(i);
+                            for j in 0..batch.type_batches.count {
+                                *self
+                                    .coarse_batch_integration_responsibilities
+                                    .get_mut(i)
+                                    .get_mut(j) = false;
+                            }
+                        }
+                        for i in 0..self.integration_responsibility_prepass_jobs.count {
+                            let (job_batch, job_type_batch, _, _) =
+                                *self.integration_responsibility_prepass_jobs.span.get(i);
+                            let responsibility = self
+                                .coarse_batch_integration_responsibilities
+                                .get_mut(job_batch)
+                                .get_mut(job_type_batch);
+                            *responsibility = *responsibility
+                                || *self.job_aligned_integration_responsibilities.get(i);
+                        }
+                        pool.return_buffer(&mut self.job_aligned_integration_responsibilities);
+                    }
+                    self.integration_responsibility_prepass_jobs.dispose(pool);
+                }
+            }
+
             // Compute per-constraint integration responsibilities (single-threaded path)
             let (synchronized_batch_count, fallback_exists) = self.get_synchronized_batch_count();
-            for i in 1..synchronized_batch_count {
-                if !*batch_has_any_integration_responsibilities.get(i) {
-                    // Initialize coarse to false for batches with no responsibilities
+            if use_single_threaded_path {
+                for i in 1..synchronized_batch_count {
+                    if !*batch_has_any_integration_responsibilities.get(i) {
+                        let batch = (*active_set_ptr).batches.get(i);
+                        for j in 0..batch.type_batches.count {
+                            *self
+                                .coarse_batch_integration_responsibilities
+                                .get_mut(i)
+                                .get_mut(j) = false;
+                        }
+                        continue;
+                    }
                     let batch = (*active_set_ptr).batches.get(i);
                     for j in 0..batch.type_batches.count {
+                        let type_batch = batch.type_batches.get(j);
+                        let has_responsibilities = self
+                            .compute_integration_responsibilities_for_constraint_region(
+                                i,
+                                j,
+                                0,
+                                type_batch.constraint_count,
+                                false,
+                            );
                         *self
                             .coarse_batch_integration_responsibilities
                             .get_mut(i)
+                            .get_mut(j) = has_responsibilities;
+                    }
+                }
+                if fallback_exists
+                    && *batch_has_any_integration_responsibilities
+                        .get(self.fallback_batch_threshold)
+                {
+                    let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
+                    for j in 0..batch.type_batches.count {
+                        let type_batch = batch.type_batches.get(j);
+                        let has_responsibilities = self
+                            .compute_integration_responsibilities_for_constraint_region(
+                                self.fallback_batch_threshold,
+                                j,
+                                0,
+                                type_batch.constraint_count,
+                                true,
+                            );
+                        *self
+                            .coarse_batch_integration_responsibilities
+                            .get_mut(self.fallback_batch_threshold)
+                            .get_mut(j) = has_responsibilities;
+                    }
+                } else if fallback_exists {
+                    let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
+                    for j in 0..batch.type_batches.count {
+                        *self
+                            .coarse_batch_integration_responsibilities
+                            .get_mut(self.fallback_batch_threshold)
                             .get_mut(j) = false;
                     }
-                    continue;
-                }
-                let batch = (*active_set_ptr).batches.get(i);
-                for j in 0..batch.type_batches.count {
-                    let type_batch = batch.type_batches.get(j);
-                    let has_responsibilities = self
-                        .compute_integration_responsibilities_for_constraint_region(
-                            i,
-                            j,
-                            0,
-                            type_batch.constraint_count,
-                            false,
-                        );
-                    *self
-                        .coarse_batch_integration_responsibilities
-                        .get_mut(i)
-                        .get_mut(j) = has_responsibilities;
-                }
-            }
-            if fallback_exists
-                && *batch_has_any_integration_responsibilities.get(self.fallback_batch_threshold)
-            {
-                let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
-                for j in 0..batch.type_batches.count {
-                    let type_batch = batch.type_batches.get(j);
-                    let has_responsibilities = self
-                        .compute_integration_responsibilities_for_constraint_region(
-                            self.fallback_batch_threshold,
-                            j,
-                            0,
-                            type_batch.constraint_count,
-                            true,
-                        );
-                    *self
-                        .coarse_batch_integration_responsibilities
-                        .get_mut(self.fallback_batch_threshold)
-                        .get_mut(j) = has_responsibilities;
-                }
-            } else if fallback_exists {
-                // Initialize coarse to false for fallback batch with no responsibilities
-                let batch = (*active_set_ptr).batches.get(self.fallback_batch_threshold);
-                for j in 0..batch.type_batches.count {
-                    *self
-                        .coarse_batch_integration_responsibilities
-                        .get_mut(self.fallback_batch_threshold)
-                        .get_mut(j) = false;
                 }
             }
 
@@ -3581,15 +3710,9 @@ impl Solver {
                     .add_unsafely(*self.constrained_kinematic_handles.span.get(i));
             }
 
-            // Return a copy of the merged handles (caller owns it)
-            let result_len = self.merged_constrained_body_handles.flags.len();
-            let mut result = IndexSet {
-                flags: pool.take(result_len),
-            };
+            // Shallow copy sharing the pool buffer; the solver owns it and
+            // dispose_constraint_integration_responsibilities frees it.
             self.merged_constrained_body_handles
-                .flags
-                .copy_to(0, &mut result.flags, 0, result_len);
-            result
         } else {
             IndexSet::empty()
         }

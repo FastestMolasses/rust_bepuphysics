@@ -155,15 +155,15 @@ impl Bodies {
     #[inline(always)]
     pub fn is_kinematic_wide(inertia: &BodyInertiaWide) -> Vector<i32> {
         use crate::utilities::vector::Vector;
+        let ored = ((inertia.inverse_mass.to_bits() | inertia.inverse_inertia_tensor.xx.to_bits())
+            | (inertia.inverse_inertia_tensor.yx.to_bits()
+                | inertia.inverse_inertia_tensor.yy.to_bits()))
+            | ((inertia.inverse_inertia_tensor.zx.to_bits()
+                | inertia.inverse_inertia_tensor.zy.to_bits())
+                | inertia.inverse_inertia_tensor.zz.to_bits());
+        let ored = Vector::<f32>::from_bits(ored);
         let zero = Vector::<f32>::splat(0.0);
-        let result = inertia.inverse_mass.simd_eq(zero)
-            & inertia.inverse_inertia_tensor.xx.simd_eq(zero)
-            & inertia.inverse_inertia_tensor.yx.simd_eq(zero)
-            & inertia.inverse_inertia_tensor.yy.simd_eq(zero)
-            & inertia.inverse_inertia_tensor.zx.simd_eq(zero)
-            & inertia.inverse_inertia_tensor.zy.simd_eq(zero)
-            & inertia.inverse_inertia_tensor.zz.simd_eq(zero);
-        result.to_simd()
+        ored.simd_eq(zero).to_simd()
     }
 
     /// Has locked inertia (all inverse inertia tensor components zero).

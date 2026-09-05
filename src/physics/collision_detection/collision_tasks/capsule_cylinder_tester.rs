@@ -52,16 +52,14 @@ impl CapsuleCylinderTester {
         t: &mut Vector<f32>,
         offset_from_cylinder_to_line_segment: &mut Vector3Wide,
     ) {
-        let min = -*half_length;
-        let max = *half_length;
+        let mut min = -*half_length;
+        let mut max = *half_length;
         *t = Vector::<f32>::splat(0.0);
         let radius_squared = b.radius * b.radius;
         let mut origin_dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(line_direction, line_origin, &mut origin_dot);
         let epsilon = *half_length * Vector::<f32>::splat(1e-7);
         let mut lane_deactivated = *inactive_lanes;
-        let mut min_bound = min;
-        let mut max_bound = max;
         let mut p = Vector3Wide::default();
         let mut clamped = Vector3Wide::default();
         for _i in 0..12 {
@@ -84,9 +82,9 @@ impl CapsuleCylinderTester {
                 break;
             }
             let moved_up = change.simd_gt(Vector::<f32>::splat(0.0));
-            min_bound = moved_up.select(conservative_new_t, min_bound);
-            max_bound = moved_up.select(max_bound, conservative_new_t);
-            let new_t = Vector::<f32>::splat(0.5) * (min_bound + max_bound);
+            min = moved_up.select(conservative_new_t, min);
+            max = moved_up.select(max, conservative_new_t);
+            let new_t = Vector::<f32>::splat(0.5) * (min + max);
             *t = lane_deactivated
                 .simd_lt(Vector::<i32>::splat(0))
                 .select(*t, new_t);

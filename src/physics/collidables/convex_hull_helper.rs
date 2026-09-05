@@ -2,6 +2,7 @@ use glam::Vec3;
 use std::simd::prelude::*;
 
 use crate::utilities::bundle_indexing::BundleIndexing;
+use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::collections::quick_dictionary::QuickDictionary;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::gather_scatter::GatherScatter;
@@ -334,6 +335,7 @@ impl ConvexHullHelper {
         face_points: &mut QuickList<glam::Vec2>,
         allow_vertex: &mut Buffer<i32>,
         reduced_indices: &mut QuickList<i32>,
+        reduced_indices_set: &mut IndexSet,
     ) {
         debug_assert!(
             face_points.count == 0
@@ -430,6 +432,8 @@ impl ConvexHullHelper {
             (face_points.span[initial_index as usize] - centroid) / greatest_distance;
         let mut previous_edge_direction =
             glam::Vec2::new(initial_offset_direction.y, -initial_offset_direction.x);
+        reduced_indices_set.clear();
+        reduced_indices_set.add_unsafely(face_vertex_indices.span[initial_index as usize]);
         *reduced_indices.allocate_unsafely() = face_vertex_indices.span[initial_index as usize];
 
         let mut previous_end_index = initial_index;
@@ -441,12 +445,15 @@ impl ConvexHullHelper {
                 face_points,
             );
             if next_index == -1
-                || reduced_indices.contains(&face_vertex_indices.span[next_index as usize])
+                || reduced_indices_set.contains(face_vertex_indices.span[next_index as usize])
             {
                 if next_index >= 0 {
                     let target_val = face_vertex_indices.span[next_index as usize];
                     if let Some(cycle_start_index) = reduced_indices.index_of(&target_val) {
                         if cycle_start_index > 0 {
+                            for j in 0..cycle_start_index {
+                                reduced_indices_set.remove(reduced_indices.span[j as usize]);
+                            }
                             // Self-copy: use memmove via raw pointers.
                             let count_to_copy =
                                 (reduced_indices.count - cycle_start_index) as usize;
@@ -465,6 +472,7 @@ impl ConvexHullHelper {
                 break;
             }
             *reduced_indices.allocate_unsafely() = face_vertex_indices.span[next_index as usize];
+            reduced_indices_set.add_unsafely(face_vertex_indices.span[next_index as usize]);
             let prev_point = face_points.span[previous_end_index as usize];
             let next_point = face_points.span[next_index as usize];
             previous_edge_direction = (next_point - prev_point).normalize();
@@ -474,7 +482,7 @@ impl ConvexHullHelper {
         // Ignore vertices not on the outer boundary.
         for i in 0..face_vertex_indices.count {
             let index = face_vertex_indices.span[i as usize];
-            if !reduced_indices.contains(&index) {
+            if !reduced_indices_set.contains(index) {
                 unsafe {
                     *allow_vertex.get_mut(index) = 0;
                 }
@@ -515,7 +523,7 @@ impl ConvexHullHelper {
             previous_index = endpoints.b;
 
             let mut slot_index = 0i32;
-            if !edge_face_counts.find_or_allocate_slot_unsafely(&endpoints, &mut slot_index) {
+            if !edge_face_counts.find_or_allocate_slot(&endpoints, pool, &mut slot_index) {
                 let edge = edges_to_test.allocate(pool);
                 edge.endpoints = endpoints;
                 edge.face_normal = face_normal;
@@ -541,15 +549,15 @@ impl ConvexHullHelper {
             return;
         }
         if points.len() <= 3 {
-            hull_data.original_vertex_mapping = pool.take_at_least(points.len() as i32);
+            hull_data.original_vertex_mapping = pool.take(points.len() as i32);
             for i in 0..points.len() {
                 unsafe {
                     *hull_data.original_vertex_mapping.get_mut(i as i32) = i as i32;
                 }
             }
             if points.len() == 3 {
-                hull_data.face_start_indices = pool.take_at_least(1);
-                hull_data.face_vertex_indices = pool.take_at_least(3);
+                hull_data.face_start_indices = pool.take(1);
+                hull_data.face_vertex_indices = pool.take(3);
                 unsafe {
                     *hull_data.face_start_indices.get_mut(0) = 0;
                     *hull_data.face_vertex_indices.get_mut(0) = 0;
@@ -564,7 +572,7 @@ impl ConvexHullHelper {
         }
 
         let point_bundle_count = BundleIndexing::get_bundle_count(points.len());
-        let mut point_bundles: Buffer<Vector3Wide> = pool.take_at_least(point_bundle_count as i32);
+        let mut point_bundles: Buffer<Vector3Wide> = pool.take(point_bundle_count as i32);
 
         // Create AOSOA version of input data.
         let mut centroid = Vec3::ZERO;
@@ -637,7 +645,7 @@ impl ConvexHullHelper {
         let initial_to_centroid = centroid - initial_vertex;
         let initial_distance = initial_to_centroid.length();
         if initial_distance < 1e-7 {
-            hull_data.original_vertex_mapping = pool.take_at_least(1);
+            hull_data.original_vertex_mapping = pool.take(1);
             unsafe {
                 *hull_data.original_vertex_mapping.get_mut(0) = 0;
             }
@@ -653,8 +661,8 @@ impl ConvexHullHelper {
         Helpers::find_perpendicular(&initial_basis_x, &mut initial_basis_y);
         let initial_vertex_bundle = Vector3Wide::broadcast(initial_vertex);
 
-        let mut projected_on_x: Buffer<Vector<f32>> = pool.take_at_least(point_bundles.len());
-        let mut projected_on_y: Buffer<Vector<f32>> = pool.take_at_least(point_bundles.len());
+        let mut projected_on_x: Buffer<Vector<f32>> = pool.take(point_bundles.len());
+        let mut projected_on_y: Buffer<Vector<f32>> = pool.take(point_bundles.len());
 
         let plane_slab_epsilon_narrow = best_distance_squared.sqrt() * 1e-4;
         let normal_coplanarity_epsilon = 1.0 - 1e-6f32;
@@ -663,7 +671,7 @@ impl ConvexHullHelper {
             QuickList::<i32>::with_capacity(point_bundles.len() * VECTOR_WIDTH as i32, pool);
 
         let mut allow_vertices: Buffer<i32> =
-            pool.take_at_least(point_bundle_count as i32 * VECTOR_WIDTH as i32);
+            pool.take(point_bundle_count as i32 * VECTOR_WIDTH as i32);
         for i in 0..points.len() {
             unsafe {
                 *allow_vertices.get_mut(i as i32) = -1i32;
@@ -700,6 +708,7 @@ impl ConvexHullHelper {
 
         let mut face_points = QuickList::<glam::Vec2>::with_capacity(points.len() as i32, pool);
         let mut reduced_face_indices = QuickList::<i32>::with_capacity(points.len() as i32, pool);
+        let mut reduced_indices_set = IndexSet::new(pool, points.len() as i32);
 
         Self::reduce_face(
             &mut raw_face_vertex_indices,
@@ -709,6 +718,7 @@ impl ConvexHullHelper {
             &mut face_points,
             &mut allow_vertices,
             &mut reduced_face_indices,
+            &mut reduced_indices_set,
         );
 
         let mut faces = QuickList::<EarlyFace>::with_capacity(points.len() as i32, pool);
@@ -799,6 +809,7 @@ impl ConvexHullHelper {
                 &mut face_points,
                 &mut allow_vertices,
                 &mut reduced_face_indices,
+                &mut reduced_indices_set,
             );
 
             if reduced_face_indices.count < 3 {
@@ -843,6 +854,7 @@ impl ConvexHullHelper {
                         &mut face_points,
                         &mut allow_vertices,
                         &mut face.vertex_indices,
+                        &mut reduced_indices_set,
                     );
                     merged_face = true;
                     break;
@@ -922,6 +934,7 @@ impl ConvexHullHelper {
         edges_to_test.dispose(pool);
         face_points.dispose(pool);
         reduced_face_indices.dispose(pool);
+        reduced_indices_set.dispose(pool);
         raw_face_vertex_indices.dispose(pool);
         pool.return_buffer(&mut allow_vertices);
         pool.return_buffer(&mut projected_on_x);
@@ -933,11 +946,11 @@ impl ConvexHullHelper {
         for i in 0..faces.count {
             total_index_count += faces.span[i as usize].vertex_indices.count;
         }
-        hull_data.face_start_indices = pool.take_at_least(faces.count);
-        hull_data.face_vertex_indices = pool.take_at_least(total_index_count);
+        hull_data.face_start_indices = pool.take(faces.count);
+        hull_data.face_vertex_indices = pool.take(total_index_count);
         let mut next_start_index = 0i32;
         let mut original_to_hull_index_mapping: Buffer<i32> =
-            pool.take_at_least(points.len() as i32);
+            pool.take(points.len() as i32);
         let mut hull_to_original_index_mapping =
             QuickList::<i32>::with_capacity(points.len() as i32, pool);
         for i in 0..points.len() {
@@ -968,7 +981,7 @@ impl ConvexHullHelper {
         }
 
         hull_data.original_vertex_mapping =
-            pool.take_at_least(hull_to_original_index_mapping.count);
+            pool.take(hull_to_original_index_mapping.count);
         hull_to_original_index_mapping.span.copy_to(
             0,
             &mut hull_data.original_vertex_mapping,
@@ -1004,7 +1017,7 @@ impl ConvexHullHelper {
         };
         let point_bundle_count =
             BundleIndexing::get_bundle_count(hull_data.original_vertex_mapping.len() as usize);
-        hull_shape.points = pool.take_at_least(point_bundle_count as i32);
+        hull_shape.points = pool.take(point_bundle_count as i32);
 
         let mut volume = 0.0f32;
         *center = Vec3::ZERO;
@@ -1049,7 +1062,7 @@ impl ConvexHullHelper {
 
         // Create face->vertex mapping.
         hull_shape.face_to_vertex_indices_start =
-            pool.take_at_least(hull_data.face_start_indices.len());
+            pool.take(hull_data.face_start_indices.len());
         {
             let count = hull_shape.face_to_vertex_indices_start.len();
             hull_data.face_start_indices.copy_to(
@@ -1059,7 +1072,7 @@ impl ConvexHullHelper {
                 count,
             );
         }
-        hull_shape.face_vertex_indices = pool.take_at_least(hull_data.face_vertex_indices.len());
+        hull_shape.face_vertex_indices = pool.take(hull_data.face_vertex_indices.len());
         for i in 0..hull_shape.face_vertex_indices.len() as usize {
             let mut bundle_index = 0usize;
             let mut inner_index = 0usize;
@@ -1077,7 +1090,7 @@ impl ConvexHullHelper {
         let face_bundle_count = BundleIndexing::get_bundle_count(
             hull_shape.face_to_vertex_indices_start.len() as usize,
         );
-        hull_shape.bounding_planes = pool.take_at_least(face_bundle_count as i32);
+        hull_shape.bounding_planes = pool.take(face_bundle_count as i32);
 
         for i in 0..hull_shape.face_to_vertex_indices_start.len() as usize {
             let mut start = 0usize;
@@ -1261,8 +1274,8 @@ impl ConvexHullHelper {
         pool: &mut BufferPool,
         target: &mut ConvexHull,
     ) {
-        target.points = pool.take_at_least(source.points.len());
-        target.bounding_planes = pool.take_at_least(source.bounding_planes.len());
+        target.points = pool.take(source.points.len());
+        target.bounding_planes = pool.take(source.bounding_planes.len());
         Self::create_transformed_copy(
             source,
             transform,
@@ -1280,11 +1293,11 @@ impl ConvexHullHelper {
         pool: &mut BufferPool,
         target: &mut ConvexHull,
     ) {
-        target.points = pool.take_at_least(source.points.len());
-        target.bounding_planes = pool.take_at_least(source.bounding_planes.len());
-        target.face_vertex_indices = pool.take_at_least(source.face_vertex_indices.len());
+        target.points = pool.take(source.points.len());
+        target.bounding_planes = pool.take(source.bounding_planes.len());
+        target.face_vertex_indices = pool.take(source.face_vertex_indices.len());
         target.face_to_vertex_indices_start =
-            pool.take_at_least(source.face_to_vertex_indices_start.len());
+            pool.take(source.face_to_vertex_indices_start.len());
         Self::create_transformed_copy(
             source,
             transform,

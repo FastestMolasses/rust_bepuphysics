@@ -145,7 +145,11 @@ pub trait ITypeProcessor {
         _bodies: &crate::physics::bodies::Bodies,
         _solver: &crate::physics::solver::Solver,
     ) {
-        // Default: no-op stub. Concrete implementations will override.
+        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
+        debug_assert!(
+            false,
+            "copy_sleeping_to_active was not overridden by this type processor."
+        );
     }
 
     /// Gathers constraint data from the active set into an inactive type batch.
@@ -160,8 +164,11 @@ pub trait ITypeProcessor {
         _end_index: i32,
         _target_type_batch: &mut TypeBatch,
     ) {
-        // Default: no-op stub. Concrete type processors will override with
-        // lane-copy logic and body reference index→handle conversion.
+        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
+        debug_assert!(
+            false,
+            "gather_active_constraints was not overridden by this type processor."
+        );
     }
 
     /// Adds body handles referenced by the waking type batch to the batch's referenced handles set.
@@ -170,7 +177,11 @@ pub trait ITypeProcessor {
         _type_batch: &TypeBatch,
         _target_batch_referenced_handles: &mut IndexSet,
     ) {
-        // Default: no-op stub. Concrete implementations will override.
+        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
+        debug_assert!(
+            false,
+            "add_waking_body_handles_to_batch_references was not overridden by this type processor."
+        );
     }
 
     /// Adds constraints from a sleeping fallback type batch into the active set's fallback type batch.
@@ -184,7 +195,11 @@ pub trait ITypeProcessor {
         _bodies: &crate::physics::bodies::Bodies,
         _solver: &crate::physics::solver::Solver,
     ) {
-        // Default: no-op stub. Concrete implementations will override.
+        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
+        debug_assert!(
+            false,
+            "add_sleeping_to_active_for_fallback was not overridden by this type processor."
+        );
     }
 
     /// Transfers a constraint from one batch's type batch to another batch's type batch of the same type.
@@ -424,6 +439,11 @@ pub trait ITypeProcessor {
     /// Gets the count of body references in the type batch matching the given body index.
     /// Debug-only function. Performance does not matter.
     fn get_body_reference_count(&self, _type_batch: &TypeBatch, _body: i32) -> i32 {
+        // Every concrete type processor must override this; a silent 0 would mask bookkeeping bugs.
+        debug_assert!(
+            false,
+            "get_body_reference_count was not overridden by this type processor."
+        );
         0
     }
 

@@ -7,6 +7,7 @@ use std::simd::Select;
 
 /// Two dimensional vector with SIMD lanes.
 #[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
 pub struct Vector2Wide {
     /// First component of the vector.
     pub x: Vector<f32>,
@@ -47,14 +48,14 @@ impl Vector2Wide {
 
     #[inline(always)]
     pub fn conditionally_negate(should_negate: &Vector<i32>, v: &mut Self) {
-        let mask = Mask::from_simd(*should_negate);
+        let mask = unsafe { Mask::from_simd_unchecked(*should_negate) };
         v.x = mask.select(-v.x, v.x);
         v.y = mask.select(-v.y, v.y);
     }
 
     #[inline(always)]
     pub fn conditionally_negate_to(should_negate: &Vector<i32>, v: &Self, negated: &mut Self) {
-        let mask = Mask::from_simd(*should_negate);
+        let mask = unsafe { Mask::from_simd_unchecked(*should_negate) };
         negated.x = mask.select(-v.x, v.x);
         negated.y = mask.select(-v.y, v.y);
     }
@@ -66,7 +67,7 @@ impl Vector2Wide {
         right: &Self,
         result: &mut Self,
     ) {
-        let mask = Mask::from_simd(*condition);
+        let mask = unsafe { Mask::from_simd_unchecked(*condition) };
         result.x = mask.select(left.x, right.x);
         result.y = mask.select(left.y, right.y);
     }

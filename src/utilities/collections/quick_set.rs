@@ -189,6 +189,11 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
         let mut old_span = self.span;
         let mut old_table = self.table;
 
+        // A smaller span truncates the count; extra elements are dropped.
+        if self.count > new_span.len() {
+            self.count = new_span.len();
+        }
+
         // Copy elements to new span
         old_span.copy_to(0, &mut new_span, 0, self.count);
 

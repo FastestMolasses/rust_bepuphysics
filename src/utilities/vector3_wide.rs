@@ -223,7 +223,8 @@ impl Vector3Wide {
     /// Conditionally negates lanes of the vector.
     #[inline(always)]
     pub fn conditionally_negate(should_negate: &Vector<i32>, v: &mut Self) {
-        let mask = Mask::from_simd(*should_negate);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let mask = unsafe { Mask::from_simd_unchecked(*should_negate) };
         v.x = mask.select(-v.x, v.x);
         v.y = mask.select(-v.y, v.y);
         v.z = mask.select(-v.z, v.z);
@@ -232,7 +233,8 @@ impl Vector3Wide {
     /// Conditionally negates lanes of the vector and stores the result in another vector.
     #[inline(always)]
     pub fn conditionally_negate_to(should_negate: &Vector<i32>, v: &Self, negated: &mut Self) {
-        let mask = Mask::from_simd(*should_negate);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let mask = unsafe { Mask::from_simd_unchecked(*should_negate) };
         negated.x = mask.select(-v.x, v.x);
         negated.y = mask.select(-v.y, v.y);
         negated.z = mask.select(-v.z, v.z);
@@ -241,7 +243,8 @@ impl Vector3Wide {
     /// Conditionally negates lanes of the vector and stores the result in another vector.
     #[inline(always)]
     pub fn conditionally_negate_to_new(should_negate: &Vector<i32>, v: &Self) -> Self {
-        let mask = Mask::from_simd(*should_negate);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let mask = unsafe { Mask::from_simd_unchecked(*should_negate) };
         Self {
             x: mask.select(-v.x, v.x),
             y: mask.select(-v.y, v.y),
@@ -363,7 +366,8 @@ impl Vector3Wide {
     /// Selects the left or right input for each lane depending on a mask.
     #[inline(always)]
     pub fn conditional_select(condition: &Vector<i32>, left: &Self, right: &Self) -> Self {
-        let mask = Mask::from_simd(*condition);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let mask = unsafe { Mask::from_simd_unchecked(*condition) };
         Self {
             x: mask.select(left.x, right.x),
             y: mask.select(left.y, right.y),
@@ -379,7 +383,8 @@ impl Vector3Wide {
         right: &Self,
         result: &mut Self,
     ) {
-        let mask = Mask::from_simd(*condition);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let mask = unsafe { Mask::from_simd_unchecked(*condition) };
         result.x = mask.select(left.x, right.x);
         result.y = mask.select(left.y, right.y);
         result.z = mask.select(left.z, right.z);

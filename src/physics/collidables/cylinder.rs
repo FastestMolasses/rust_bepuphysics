@@ -141,10 +141,24 @@ impl IConvexShape for Cylinder {
             }
         } else {
             // Ray is parallel to the axis.
-            disc_y = if d.y > 0.0 {
-                (-self.half_length).min(o.y)
+            // If the ray is inside the cylinder, we want t = 0, so just set the discY to match the ray's origin in that case and it'll shake out like we want.
+            let candidate = if d.y > 0.0 {
+                -self.half_length
             } else {
-                self.half_length.max(o.y).min(self.half_length)
+                self.half_length
+            };
+            let candidate_abs = candidate.abs();
+            let o_y_abs = o.y.abs();
+            disc_y = if candidate_abs < o_y_abs {
+                candidate
+            } else if candidate_abs == o_y_abs {
+                if candidate.is_sign_negative() {
+                    candidate
+                } else {
+                    o.y
+                }
+            } else {
+                o.y
             };
         }
 
@@ -188,6 +202,7 @@ impl IConvexShape for Cylinder {
 }
 
 /// Wide representation of a cylinder for SIMD processing.
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct CylinderWide {
     pub radius: Vector<f32>,

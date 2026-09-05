@@ -10,6 +10,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 
 // Re-export from canonical location.
 pub use crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler;
+use crate::physics::trees::ray_batcher::RaySource;
 
 /// Defines a type usable as a shape by collidables.
 pub trait IShape {
@@ -187,6 +188,18 @@ pub trait INonConvexBounds {
         pool: &mut BufferPool,
         hit_handler: &mut dyn IShapeRayHitHandler,
     );
+
+    /// Tests a batch of rays against this shape using dynamic dispatch for the hit handler.
+    ///
+    /// # Safety
+    /// Caller must ensure shape data, rays and pool are valid.
+    unsafe fn ray_test_shape_batched(
+        &self,
+        pose: &RigidPose,
+        rays: &mut RaySource,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    );
 }
 
 /// Defines a compound shape type that has children of potentially different types.
@@ -235,6 +248,19 @@ pub trait ICompoundShape: IDisposableShape {
         pose: &RigidPose,
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
+        shape_batches: &super::shapes::Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    );
+
+    /// Tests a batch of rays against this compound shape using dynamic dispatch for the hit handler.
+    ///
+    /// # Safety
+    /// Caller must ensure shape data, rays and pool are valid.
+    unsafe fn ray_test_shape_batched(
+        &self,
+        pose: &RigidPose,
+        rays: &mut RaySource,
         shape_batches: &super::shapes::Shapes,
         pool: &mut BufferPool,
         hit_handler: &mut dyn IShapeRayHitHandler,

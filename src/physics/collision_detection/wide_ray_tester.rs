@@ -40,7 +40,8 @@ impl WideRayTester {
         let mut wide = TShapeWide::default();
 
         // Handle internal allocation for shape types that need it (e.g. ConvexHullWide).
-        if wide.internal_allocation_size() > 0 {
+        // Held at function scope so the backing memory outlives every use of `wide`.
+        let _wide_memory: Vec<u8> = if wide.internal_allocation_size() > 0 {
             let alloc_size = wide.internal_allocation_size();
             let mut memory = vec![0u8; alloc_size];
             let buffer = crate::utilities::memory::buffer::Buffer::new(
@@ -49,8 +50,10 @@ impl WideRayTester {
                 0,
             );
             wide.initialize(&buffer);
-            std::mem::forget(memory); // Buffer lifetime is managed by the wide shape.
-        }
+            memory
+        } else {
+            Vec::new()
+        };
         wide.broadcast(shape);
 
         let mut poses = RigidPoseWide::default();

@@ -5,10 +5,15 @@ use std::marker::PhantomData;
 use glam::Vec3;
 
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
+use crate::physics::collidables::convex_hull::ConvexHull;
+use crate::physics::collidables::shape::{IConvexShape, IShapeWide, IShapeWideAllocation};
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::quaternion_wide::QuaternionWide;
+use crate::utilities::vector::{Vector, VECTOR_WIDTH};
+use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::convex_compound_collision_task::IConvexCompoundOverlapFinder;
 use super::convex_compound_task_overlaps::ConvexCompoundTaskOverlaps;
@@ -48,26 +53,31 @@ pub trait IBoundsQueryableCompound {
     }
 }
 
+/// Upper bound on internal_allocation_size_of() across convex wide types; only ConvexHullWide is nonzero.
+const MAX_CONVEX_WIDE_INTERNAL_ALLOCATION_SIZE: usize =
+    VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
+
 /// Finds overlapping children between a convex shape and a compound/mesh container.
-///
-/// For each pair, computes the query bounds of the convex shape in the local space
-/// of the compound and then queries the compound's acceleration structure.
-pub struct ConvexCompoundOverlapFinder<TCompound: IBoundsQueryableCompound> {
-    _marker: PhantomData<TCompound>,
+pub struct ConvexCompoundOverlapFinder<TConvex, TConvexWide, TCompound>
+where
+    TConvex: IConvexShape,
+    TConvexWide: IShapeWide<TConvex> + IShapeWideAllocation + Default,
+    TCompound: IBoundsQueryableCompound,
+{
+    _marker: PhantomData<(TConvex, TConvexWide, TCompound)>,
 }
 
-impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder
-    for ConvexCompoundOverlapFinder<TCompound>
+impl<TConvex, TConvexWide, TCompound> IConvexCompoundOverlapFinder
+    for ConvexCompoundOverlapFinder<TConvex, TConvexWide, TCompound>
+where
+    TConvex: IConvexShape,
+    TConvexWide: IShapeWide<TConvex> + IShapeWideAllocation + Default,
+    TCompound: IBoundsQueryableCompound,
 {
     /// Finds all overlapping children for the given set of bounds-tested pairs.
     ///
-    /// This uses a scalar-per-pair approach: for each pair, compute the local-space
-    /// bounding box of the convex shape, expand it for velocity/angular motion, then
-    /// store it in the subpair queries. Finally, delegate to the compound's
-    /// `find_local_overlaps` to populate the overlap lists.
-    ///
     /// # Safety
-    /// Pair pointers must be valid. The `pair.B` pointer must point to a valid `TCompound`.
+    /// Each `pair.a` must point to a valid `TConvex` and each `pair.b` to a valid `TCompound`.
     unsafe fn find_local_overlaps(
         pairs: &Buffer<BoundsTestedPair>,
         pair_count: i32,
@@ -76,62 +86,112 @@ impl<TCompound: IBoundsQueryableCompound> IConvexCompoundOverlapFinder
         dt: f32,
         overlaps: &mut ConvexCompoundTaskOverlaps,
     ) {
-        for i in 0..pair_count {
-            let pair = &pairs[i];
+        let lanes = Vector::<f32>::LEN as i32;
 
-            // Store the container pointer in the subpair query.
-            overlaps.subpair_queries[i].container = pair.b;
-
-            // Compute local-space transforms.
-            let conjugate_orientation_b = pair.orientation_b.conjugate();
-            let local_offset_a = conjugate_orientation_b * (-pair.offset_b);
-            let _local_orientation_a = conjugate_orientation_b * pair.orientation_a;
-            let local_relative_linear_velocity =
-                conjugate_orientation_b * pair.relative_linear_velocity_a;
-
-            // Compute conservative local-space bounding box.
-            // A full implementation would use IShapeWide::get_bounds for shape-specific bounds,
-            // but scalar approach with generous expansion is correct.
-            let angular_velocity_a = pair.angular_velocity_a;
-            let angular_velocity_b = pair.angular_velocity_b;
-
-            // Use speculative margin as a conservative radius for the convex shape.
-            let expansion_velocity = local_relative_linear_velocity.abs() * dt;
-            let angular_expansion_scalar = BoundingBoxHelpers::get_angular_bounds_expansion(
-                angular_velocity_a.length(),
-                dt,
-                pair.maximum_expansion,
-                pair.maximum_expansion,
-            );
-            let expansion = expansion_velocity
-                + Vec3::splat(pair.speculative_margin + angular_expansion_scalar);
-
-            // If compound B is rotating, expand further.
-            let angular_speed_b = angular_velocity_b.length();
-            let expansion = if angular_speed_b > 0.0 {
-                let radius_b = local_offset_a.length();
-                let linear_speed = local_relative_linear_velocity.length();
-                let worst_case_radius = linear_speed * dt + radius_b;
-                let angular_expansion_b = BoundingBoxHelpers::get_angular_bounds_expansion(
-                    angular_speed_b,
-                    dt,
-                    worst_case_radius,
-                    worst_case_radius,
-                );
-                expansion + Vec3::splat(angular_expansion_b)
-            } else {
-                expansion
-            };
-
-            // Clamp expansion.
-            let max_exp = Vec3::splat(pair.maximum_expansion);
-            let expansion = expansion.min(max_exp);
-
-            overlaps.subpair_queries[i].min = local_offset_a - expansion;
-            overlaps.subpair_queries[i].max = local_offset_a + expansion;
+        let mut convex_wide = TConvexWide::default();
+        let alloc_size = convex_wide.internal_allocation_size_of();
+        debug_assert!(alloc_size <= MAX_CONVEX_WIDE_INTERNAL_ALLOCATION_SIZE);
+        // Stack storage for IShapeWide internal allocations (e.g. ConvexHullWide).
+        // Typed as [ConvexHull; N] rather than bytes so it has ConvexHull's alignment when reinterpreted as Buffer<ConvexHull>.
+        let mut alloc_backing = std::mem::MaybeUninit::<[ConvexHull; VECTOR_WIDTH]>::uninit();
+        if alloc_size > 0 {
+            let buf = Buffer::new(alloc_backing.as_mut_ptr() as *mut u8, alloc_size as i32, -1);
+            convex_wide.initialize_allocation(&buf);
         }
 
-        // Delegate to the compound's tree/child overlap finder.
+        let mut offset_b = Vector3Wide::default();
+        let mut orientation_a = QuaternionWide::default();
+        let mut orientation_b = QuaternionWide::default();
+        let mut relative_linear_velocity_a = Vector3Wide::default();
+        let mut angular_velocity_a = Vector3Wide::default();
+        let mut angular_velocity_b = Vector3Wide::default();
+        let mut maximum_allowed_expansion = Vector::<f32>::default();
+
+        let mut i = 0i32;
+        while i < pair_count {
+            let mut count = pair_count - i;
+            if count > lanes {
+                count = lanes;
+            }
+
+            // Compute the local bounding boxes using wide operations for the expansion work.
+            for j in 0..count as usize {
+                let pair_index = i + j as i32;
+                let pair = &pairs[pair_index];
+                overlaps.subpair_queries[pair_index].container = pair.b;
+
+                Vector3Wide::write_slot(pair.offset_b, j, &mut offset_b);
+                QuaternionWide::write_slot(pair.orientation_a, j, &mut orientation_a);
+                QuaternionWide::write_slot(pair.orientation_b, j, &mut orientation_b);
+                Vector3Wide::write_slot(
+                    pair.relative_linear_velocity_a,
+                    j,
+                    &mut relative_linear_velocity_a,
+                );
+                Vector3Wide::write_slot(pair.angular_velocity_a, j, &mut angular_velocity_a);
+                Vector3Wide::write_slot(pair.angular_velocity_b, j, &mut angular_velocity_b);
+                *(&mut maximum_allowed_expansion as *mut Vector<f32> as *mut f32).add(j) =
+                    pair.maximum_expansion;
+
+                let convex_shape = &*(pair.a as *const TConvex);
+                convex_wide.write_slot(j, convex_shape);
+            }
+
+            let to_local_b = QuaternionWide::conjugate(&orientation_b);
+            let mut local_offset_b = Vector3Wide::default();
+            QuaternionWide::transform_without_overlap(&offset_b, &to_local_b, &mut local_offset_b);
+            let mut local_orientation_a = QuaternionWide::default();
+            QuaternionWide::concatenate_without_overlap(
+                &orientation_a,
+                &to_local_b,
+                &mut local_orientation_a,
+            );
+            let mut local_relative_linear_velocity_a = Vector3Wide::default();
+            QuaternionWide::transform_without_overlap(
+                &relative_linear_velocity_a,
+                &to_local_b,
+                &mut local_relative_linear_velocity_a,
+            );
+
+            let mut maximum_radius = Vector::<f32>::default();
+            let mut maximum_angular_expansion = Vector::<f32>::default();
+            let mut min = Vector3Wide::default();
+            let mut max = Vector3Wide::default();
+            convex_wide.get_bounds(
+                &mut local_orientation_a,
+                count,
+                &mut maximum_radius,
+                &mut maximum_angular_expansion,
+                &mut min,
+                &mut max,
+            );
+
+            let mut local_position_a = Vector3Wide::default();
+            Vector3Wide::negate(&local_offset_b, &mut local_position_a);
+            BoundingBoxHelpers::expand_local_bounding_boxes(
+                &mut min,
+                &mut max,
+                Vector::<f32>::splat(0.0),
+                &local_position_a,
+                &local_relative_linear_velocity_a,
+                &angular_velocity_a,
+                &angular_velocity_b,
+                dt,
+                maximum_radius,
+                maximum_angular_expansion,
+                maximum_allowed_expansion,
+            );
+
+            for j in 0..count as usize {
+                let pair_to_test = &mut overlaps.subpair_queries[i + j as i32];
+                Vector3Wide::read_slot(&min, j, &mut pair_to_test.min);
+                Vector3Wide::read_slot(&max, j, &mut pair_to_test.max);
+            }
+
+            i += lanes;
+        }
+
+        // Use the compound's acceleration structure to find overlapping children.
         // The choice of instance here is irrelevant — all compounds of the same type
         // have the same tree structure query method.
         let compound_ptr: *const TCompound =

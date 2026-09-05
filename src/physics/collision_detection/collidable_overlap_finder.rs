@@ -49,6 +49,14 @@ impl<TCallbacks: INarrowPhaseCallbacks> IOverlapHandler for IntertreeOverlapHand
     }
 }
 
+/// Per-`TCallbacks` MT test contexts and handler buffers, built once in `new` and reused every frame.
+struct OverlapFinderState<TCallbacks: INarrowPhaseCallbacks> {
+    self_test: MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>,
+    intertree_test: MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>,
+    self_handlers: Vec<SelfOverlapHandler<TCallbacks>>,
+    intertree_handlers: Vec<IntertreeOverlapHandler<TCallbacks>>,
+}
+
 // ============================================================================
 // Monomorphized dispatch function — captures TCallbacks at construction time.
 // ============================================================================
@@ -57,6 +65,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> IOverlapHandler for IntertreeOverlapHand
 type DispatchFn = unsafe fn(
     narrow_phase: *mut u8,
     broad_phase: *mut BroadPhase,
+    state: *mut u8,
     dt: f32,
     thread_dispatcher: Option<&dyn IThreadDispatcher>,
 );
@@ -80,7 +89,8 @@ unsafe fn execute_self_job_impl<TCallbacks: INarrowPhaseCallbacks>(
     job_index: i32,
     worker_index: i32,
 ) {
-    let test = &mut *(ctx as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>);
+    // Workers only touch their own overlap_handlers slot, so a shared reference is sound here.
+    let test = &*(ctx as *const MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>);
     test.execute_job(job_index, worker_index);
 }
 
@@ -89,7 +99,8 @@ unsafe fn execute_intertree_job_impl<TCallbacks: INarrowPhaseCallbacks>(
     job_index: i32,
     worker_index: i32,
 ) {
-    let test = &mut *(ctx as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>);
+    // Workers only touch their own overlap_handlers slot, so a shared reference is sound here.
+    let test = &*(ctx as *const MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>);
     test.execute_job(job_index, worker_index);
 }
 
@@ -124,11 +135,13 @@ fn overlap_worker(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
 unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
     narrow_phase_ptr: *mut u8,
     broad_phase_ptr: *mut BroadPhase,
+    state_ptr: *mut u8,
     dt: f32,
     thread_dispatcher: Option<&dyn IThreadDispatcher>,
 ) {
     let np = &mut *(narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>);
     let bp = &mut *broad_phase_ptr;
+    let state = &mut *(state_ptr as *mut OverlapFinderState<TCallbacks>);
 
     if let Some(td) = thread_dispatcher {
         if td.thread_count() > 1 {
@@ -136,45 +149,72 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
             np.prepare(dt, Some(td));
             let thread_count = td.thread_count();
 
-            // Create per-worker overlap handlers
-            let mut self_handlers = Vec::with_capacity(thread_count as usize);
-            let mut intertree_handlers = Vec::with_capacity(thread_count as usize);
-            for i in 0..thread_count {
-                self_handlers.push(SelfOverlapHandler::<TCallbacks> {
+            if state.intertree_handlers.len() < thread_count as usize {
+                // This initialization/resize should occur extremely rarely.
+                while state.self_handlers.len() < thread_count as usize {
+                    let i = state.self_handlers.len() as i32;
+                    state.self_handlers.push(SelfOverlapHandler::<TCallbacks> {
+                        narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
+                        leaves: bp.active_leaves,
+                        worker_index: i,
+                    });
+                }
+                while state.intertree_handlers.len() < thread_count as usize {
+                    let i = state.intertree_handlers.len() as i32;
+                    state
+                        .intertree_handlers
+                        .push(IntertreeOverlapHandler::<TCallbacks> {
+                            narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
+                            leaves_a: bp.active_leaves,
+                            leaves_b: bp.static_leaves,
+                            worker_index: i,
+                        });
+                }
+            }
+            // Note that the overlap handlers are reinitialized regardless of whether the thread
+            // count changed. This is just a simple way to guarantee that the most recent broad
+            // phase buffers are used- caching the buffers outside of this execution would be
+            // invalid because they may get resized, invalidating the pointers.
+            for (i, handler) in state.self_handlers.iter_mut().enumerate() {
+                *handler = SelfOverlapHandler::<TCallbacks> {
                     narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
                     leaves: bp.active_leaves,
-                    worker_index: i,
-                });
-                intertree_handlers.push(IntertreeOverlapHandler::<TCallbacks> {
+                    worker_index: i as i32,
+                };
+            }
+            for (i, handler) in state.intertree_handlers.iter_mut().enumerate() {
+                *handler = IntertreeOverlapHandler::<TCallbacks> {
                     narrow_phase: narrow_phase_ptr as *mut NarrowPhaseGeneric<TCallbacks>,
                     leaves_a: bp.active_leaves,
                     leaves_b: bp.static_leaves,
-                    worker_index: i,
-                });
+                    worker_index: i as i32,
+                };
             }
+            debug_assert!(state.intertree_handlers.len() >= thread_count as usize);
 
-            // Prepare MT overlap testing jobs
-            let pool = np.base.pool;
-            let mut self_test = MultithreadedSelfTest::new(pool);
-            self_test.prepare_jobs(&bp.active_tree, self_handlers, thread_count);
-            let mut intertree_test = MultithreadedIntertreeTest::new(pool);
-            intertree_test.prepare_jobs(
+            // Handler buffers are moved into the test contexts here and back out below; they only ever grow.
+            state.self_test.prepare_jobs(
+                &bp.active_tree,
+                std::mem::take(&mut state.self_handlers),
+                thread_count,
+            );
+            state.intertree_test.prepare_jobs(
                 &bp.active_tree,
                 &bp.static_tree,
-                intertree_handlers,
+                std::mem::take(&mut state.intertree_handlers),
                 thread_count,
             );
 
-            let self_job_count = self_test.job_count();
-            let intertree_job_count = intertree_test.job_count();
+            let self_job_count = state.self_test.job_count();
+            let intertree_job_count = state.intertree_test.job_count();
             let total_job_count = self_job_count + intertree_job_count;
 
             let mut ctx = OverlapWorkerContext {
-                self_test: &mut self_test
-                    as *mut MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>
+                self_test: &state.self_test
+                    as *const MultithreadedSelfTest<SelfOverlapHandler<TCallbacks>>
                     as *mut u8,
-                intertree_test: &mut intertree_test
-                    as *mut MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>
+                intertree_test: &state.intertree_test
+                    as *const MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>
                     as *mut u8,
                 narrow_phase: narrow_phase_ptr,
                 self_job_count,
@@ -203,8 +243,12 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
                 np.overlap_workers[i as usize].batcher.flush();
             }
 
-            self_test.complete_self_test();
-            intertree_test.complete_test();
+            state.self_test.complete_self_test();
+            state.intertree_test.complete_test();
+
+            // Move the handler buffers back into persistent storage for reuse next frame.
+            state.self_handlers = std::mem::take(&mut state.self_test.overlap_handlers);
+            state.intertree_handlers = std::mem::take(&mut state.intertree_test.overlap_handlers);
             return;
         }
     }
@@ -244,6 +288,8 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
 pub struct CollidableOverlapFinder {
     narrow_phase: *mut u8,
     broad_phase: *mut BroadPhase,
+    /// Type-erased `*mut OverlapFinderState<TCallbacks>`; allocated once in `new`, never freed.
+    state: *mut u8,
     dispatch_fn: DispatchFn,
 }
 
@@ -254,9 +300,17 @@ impl CollidableOverlapFinder {
         narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
         broad_phase: *mut BroadPhase,
     ) -> Self {
+        let pool = unsafe { (*narrow_phase).base.pool };
+        let state = Box::new(OverlapFinderState::<TCallbacks> {
+            self_test: MultithreadedSelfTest::new(pool),
+            intertree_test: MultithreadedIntertreeTest::new(pool),
+            self_handlers: Vec::new(),
+            intertree_handlers: Vec::new(),
+        });
         Self {
             narrow_phase: narrow_phase as *mut u8,
             broad_phase,
+            state: Box::into_raw(state) as *mut u8,
             dispatch_fn: dispatch_overlaps_impl::<TCallbacks>,
         }
     }
@@ -269,7 +323,13 @@ impl CollidableOverlapFinder {
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
         unsafe {
-            (self.dispatch_fn)(self.narrow_phase, self.broad_phase, dt, thread_dispatcher);
+            (self.dispatch_fn)(
+                self.narrow_phase,
+                self.broad_phase,
+                self.state,
+                dt,
+                thread_dispatcher,
+            );
         }
     }
 }

@@ -144,15 +144,9 @@ impl IConvexShape for Capsule {
         } else {
             // Ray is parallel to the axis.
             sphere_y = if d.y > 0.0 {
-                self.half_length
-                    .max(o.y.min(self.half_length))
-                    .min(self.half_length)
-                    .max(-self.half_length)
+                o.y.min(self.half_length).max(-self.half_length)
             } else {
-                (-self.half_length)
-                    .min(o.y.max(-self.half_length))
-                    .max(-self.half_length)
-                    .min(self.half_length)
+                o.y.max(-self.half_length).min(self.half_length)
             };
         }
 
@@ -204,6 +198,7 @@ impl IConvexShape for Capsule {
 }
 
 /// Wide representation of a capsule for SIMD processing.
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct CapsuleWide {
     pub radius: Vector<f32>,

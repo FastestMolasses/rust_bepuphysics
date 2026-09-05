@@ -490,7 +490,7 @@ macro_rules! impl_four_body_functions {
 
 /// Generates an `IConstraintDescription` impl for a three-body constraint.
 macro_rules! impl_three_body_description {
-    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $solve_a:ty, $solve_b:ty, $solve_c:ty) => {
+    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $warm_a:ty, $warm_b:ty, $warm_c:ty, $solve_a:ty, $solve_b:ty, $solve_c:ty) => {
         impl IConstraintDescription for $desc {
             fn apply_description(
                 &self,
@@ -532,6 +532,9 @@ macro_rules! impl_three_body_description {
                         $prestep,
                         $impulse,
                         $funcs,
+                        $warm_a,
+                        $warm_b,
+                        $warm_c,
                         $solve_a,
                         $solve_b,
                         $solve_c,
@@ -544,7 +547,7 @@ macro_rules! impl_three_body_description {
 
 /// Generates an `IConstraintDescription` impl for a four-body constraint.
 macro_rules! impl_four_body_description {
-    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $solve_a:ty, $solve_b:ty, $solve_c:ty, $solve_d:ty) => {
+    ($desc:ty, $prestep:ty, $impulse:ty, $funcs:ty, $type_id:expr, $dof:expr, $warm_a:ty, $warm_b:ty, $warm_c:ty, $warm_d:ty, $solve_a:ty, $solve_b:ty, $solve_c:ty, $solve_d:ty) => {
         impl IConstraintDescription for $desc {
             fn apply_description(
                 &self,
@@ -586,6 +589,10 @@ macro_rules! impl_four_body_description {
                         $prestep,
                         $impulse,
                         $funcs,
+                        $warm_a,
+                        $warm_b,
+                        $warm_c,
+                        $warm_d,
                         $solve_a,
                         $solve_b,
                         $solve_c,
@@ -1543,6 +1550,10 @@ impl_four_body_description!(
     AccessOnlyLinear,
     AccessOnlyLinear,
     AccessOnlyLinear,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
     AccessOnlyLinear
 );
 
@@ -1554,6 +1565,9 @@ impl_three_body_description!(
     AreaConstraintFunctions,
     36,
     1,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
+    AccessOnlyLinear,
     AccessOnlyLinear,
     AccessOnlyLinear,
     AccessOnlyLinear

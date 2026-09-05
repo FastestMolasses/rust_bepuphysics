@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::compound::Compound;
+use crate::physics::collidables::shape::ICompoundShape;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::physics::collision_detection::collision_batcher_continuations::CollisionContinuationType;
 use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
@@ -17,11 +18,13 @@ use super::compound_pair_overlaps::{ChildOverlapsCollection, OverlapQueryForPair
 ///
 /// Creates NonconvexReduction continuations that accumulate child manifolds
 /// from both compound shapes and reduce them into a single nonconvex manifold.
-pub struct CompoundPairContinuations<TCompoundA, TCompoundB> {
+pub struct CompoundPairContinuations<TCompoundA: ICompoundShape, TCompoundB: ICompoundShape> {
     _marker: PhantomData<(TCompoundA, TCompoundB)>,
 }
 
-impl<TCompoundA, TCompoundB> Default for CompoundPairContinuations<TCompoundA, TCompoundB> {
+impl<TCompoundA: ICompoundShape, TCompoundB: ICompoundShape> Default
+    for CompoundPairContinuations<TCompoundA, TCompoundB>
+{
     fn default() -> Self {
         Self {
             _marker: PhantomData,
@@ -29,7 +32,8 @@ impl<TCompoundA, TCompoundB> Default for CompoundPairContinuations<TCompoundA, T
     }
 }
 
-impl<TCompoundA, TCompoundB> ICompoundPairContinuationHandler<NonconvexReduction>
+impl<TCompoundA: ICompoundShape, TCompoundB: ICompoundShape>
+    ICompoundPairContinuationHandler<NonconvexReduction>
     for CompoundPairContinuations<TCompoundA, TCompoundB>
 {
     fn collision_continuation_type(&self) -> CollisionContinuationType {
@@ -62,8 +66,8 @@ impl<TCompoundA, TCompoundB> ICompoundPairContinuationHandler<NonconvexReduction
         child_type_a: &mut i32,
         child_shape_data_a: &mut *const u8,
     ) {
-        let compound_a = &*(pair.a as *const Compound);
-        let compound_child_a = &compound_a.children[child_index_a as usize];
+        let compound_a = &*(pair.a as *const TCompoundA);
+        let compound_child_a = compound_a.get_child(child_index_a);
 
         Compound::get_rotated_child_pose(
             compound_child_a.local_position,
@@ -99,8 +103,8 @@ impl<TCompoundA, TCompoundB> ICompoundPairContinuationHandler<NonconvexReduction
         let cont = &mut *continuation;
         let continuation_child = &mut cont.children[continuation_child_index];
 
-        let compound_b = &*(pair.b as *const Compound);
-        let compound_child_b = &compound_b.children[child_index_b as usize];
+        let compound_b = &*(pair.b as *const TCompoundB);
+        let compound_child_b = compound_b.get_child(child_index_b);
 
         *child_type_b = compound_child_b.shape_index.type_id();
         let shapes = &*vtable.shapes;

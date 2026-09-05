@@ -10,6 +10,7 @@ use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 
 /// Child of a nonconvex reduction containing a convex manifold and child metadata.
 #[repr(C)]
@@ -195,20 +196,17 @@ impl NonconvexReduction {
         const HEAP_ALLOCATION_THRESHOLD: i32 = 8192;
         let remaining_contacts_buffer: Buffer<RemainingCandidate>;
         let heap_allocated = maximum_allocated_candidate_count > HEAP_ALLOCATION_THRESHOLD;
+        // Stack storage for the common case (count is bounded by HEAP_ALLOCATION_THRESHOLD on this path).
+        let mut stack_storage: MaybeUninit<[RemainingCandidate; HEAP_ALLOCATION_THRESHOLD as usize]> =
+            MaybeUninit::uninit();
         if heap_allocated {
             remaining_contacts_buffer = pool.take(maximum_allocated_candidate_count);
         } else {
-            // Use a Vec for stack-like allocation in Rust (C# uses stackalloc)
-            let mut vec = Vec::<RemainingCandidate>::with_capacity(
-                maximum_allocated_candidate_count as usize,
-            );
-            vec.set_len(maximum_allocated_candidate_count as usize);
             remaining_contacts_buffer = Buffer::new(
-                vec.as_mut_ptr(),
+                stack_storage.as_mut_ptr() as *mut RemainingCandidate,
                 maximum_allocated_candidate_count,
                 -1, // No pool id for stack allocation
             );
-            std::mem::forget(vec);
         }
         let mut remaining_contacts = QuickList::new(remaining_contacts_buffer);
         let extremity_scale = maximum_distance * 5e-3;
@@ -304,14 +302,6 @@ impl NonconvexReduction {
 
         if heap_allocated {
             remaining_contacts.dispose(pool);
-        } else {
-            // For stack-like allocation, reconstruct the Vec to drop it.
-            // Vec was forgotten above — reconstruct to drop.
-            let _ = Vec::from_raw_parts(
-                remaining_contacts.span.as_mut_ptr(),
-                0,
-                maximum_allocated_candidate_count as usize,
-            );
         }
     }
 

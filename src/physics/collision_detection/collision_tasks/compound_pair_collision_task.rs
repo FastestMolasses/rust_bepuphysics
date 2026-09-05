@@ -29,8 +29,7 @@ pub trait ICompoundPairOverlapFinder {
         pool: &mut BufferPool,
         shapes: &Shapes,
         dt: f32,
-        overlaps: &mut CompoundPairOverlaps,
-    );
+    ) -> CompoundPairOverlaps;
 }
 
 /// Trait for handling continuations in compound-compound collision tasks.
@@ -144,15 +143,8 @@ impl<
         let shapes = &*vtable.shapes;
 
         // Find all overlaps up front.
-        let mut overlaps = CompoundPairOverlaps::new(pool, 0, 0);
-        TOverlapFinder::find_local_overlaps(
-            pairs,
-            pair_count,
-            pool,
-            shapes,
-            vtable.dt,
-            &mut overlaps,
-        );
+        let mut overlaps =
+            TOverlapFinder::find_local_overlaps(pairs, pair_count, pool, shapes, vtable.dt);
 
         for pair_index in 0..pair_count {
             let (region_start, region_count) = overlaps.get_pair_region(pair_index);
@@ -170,12 +162,18 @@ impl<
                     "Are there REALLY supposed to be that many overlaps?"
                 );
 
+                let mut pair_overlaps_region = overlaps
+                    .child_overlaps
+                    .slice_offset(region_start, region_count);
+                let mut pair_queries_region =
+                    overlaps.pair_queries.slice_offset(region_start, region_count);
+
                 let mut continuation_index = 0i32;
                 let continuation = continuation_handler.create_continuation(
                     vtable,
                     total_overlap_count,
-                    &mut overlaps.child_overlaps,
-                    &mut overlaps.pair_queries,
+                    &mut pair_overlaps_region,
+                    &mut pair_queries_region,
                     pair,
                     &mut continuation_index,
                 );

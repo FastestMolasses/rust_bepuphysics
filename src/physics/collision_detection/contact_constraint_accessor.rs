@@ -145,6 +145,7 @@ pub trait ContactConstraintAccessor: Send + Sync {
         worker_index: i32,
         pair: &CollidablePair,
         manifold_ptr: *mut u8,
+        manifold_is_convex: bool,
         material: &PairMaterialProperties,
         body_handles_ptr: *const u8,
     );
@@ -669,9 +670,16 @@ unsafe fn add_to_simulation_speculative<
     let body_handle_slice =
         std::slice::from_raw_parts(body_handles_ptr as *const BodyHandle, body_count as usize);
 
-    let mut encoded_body_indices = vec![0i32; body_count as usize];
-    let blocking =
-        (*solver_ptr).get_blocking_body_handles(body_handle_slice, &mut encoded_body_indices);
+    // Contact constraints involve at most 2 bodies, so these live on the stack.
+    let mut blocking_body_handles_buf = [BodyHandle(0); 2];
+    let mut encoded_body_indices_buf = [0i32; 2];
+    let blocking_count = (*solver_ptr).get_blocking_body_handles(
+        body_handle_slice,
+        &mut blocking_body_handles_buf[..body_count as usize],
+        &mut encoded_body_indices_buf[..body_count as usize],
+    );
+    let blocking = &blocking_body_handles_buf[..blocking_count];
+    let encoded_body_indices = &encoded_body_indices_buf[..body_count as usize];
     let type_id = TDescription::constraint_type_id();
 
     let mut target_batch = batch_index;
@@ -679,8 +687,8 @@ unsafe fn add_to_simulation_speculative<
         if let Some(result) = (*solver_ptr).try_allocate_in_batch(
             type_id,
             target_batch,
-            &blocking,
-            &encoded_body_indices,
+            blocking,
+            encoded_body_indices,
         ) {
             break result;
         }
@@ -938,16 +946,14 @@ macro_rules! impl_convex_one_body_accessor {
                 worker_index: i32,
                 pair: &CollidablePair,
                 manifold_ptr: *mut u8,
+                manifold_is_convex: bool,
                 material: &PairMaterialProperties,
                 body_handles_ptr: *const u8,
             ) {
                 let body_handle = *(body_handles_ptr as *const i32);
 
-                // Check if the manifold is convex or nonconvex.
-                // Type IDs 0-7 are convex, 8+ are nonconvex.
-                // The concrete accessor knows the description type; the manifold type is determined
-                // by the caller's generic parameter. Since we erase that, we use the type ID ranges.
-                if manifold_type_as_constraint_type < 8 {
+                // Dispatch on convexity, not type id: a NonconvexContactManifold with count==1 gets a convex type id but keeps its nonconvex layout.
+                if manifold_is_convex {
                     // ConvexContactManifold case
                     let manifold = &*(manifold_ptr as *const ConvexContactManifold);
                     let mut constraint_cache = ConstraintCache::default();
@@ -1122,12 +1128,14 @@ macro_rules! impl_convex_two_body_accessor {
                 worker_index: i32,
                 pair: &CollidablePair,
                 manifold_ptr: *mut u8,
+                manifold_is_convex: bool,
                 material: &PairMaterialProperties,
                 body_handles_ptr: *const u8,
             ) {
                 let body_handles = *(body_handles_ptr as *const TwoBodyHandles);
 
-                if manifold_type_as_constraint_type < 8 {
+                // Dispatch on convexity, not type id (see the one-body accessor above).
+                if manifold_is_convex {
                     // ConvexContactManifold case
                     let manifold = &*(manifold_ptr as *const ConvexContactManifold);
                     let mut constraint_cache = ConstraintCache::default();
@@ -1334,6 +1342,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 worker_index: i32,
                 pair: &CollidablePair,
                 manifold_ptr: *mut u8,
+                _manifold_is_convex: bool,
                 material: &PairMaterialProperties,
                 body_handles_ptr: *const u8,
             ) {
@@ -1524,6 +1533,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 worker_index: i32,
                 pair: &CollidablePair,
                 manifold_ptr: *mut u8,
+                _manifold_is_convex: bool,
                 material: &PairMaterialProperties,
                 body_handles_ptr: *const u8,
             ) {

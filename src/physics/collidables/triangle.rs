@@ -164,6 +164,7 @@ impl IConvexShape for Triangle {
 }
 
 /// Wide representation of a triangle for SIMD processing.
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct TriangleWide {
     pub a: Vector3Wide,

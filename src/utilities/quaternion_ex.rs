@@ -108,8 +108,8 @@ pub fn create_from_rotation_matrix(r: &Matrix) -> Quat {
 #[inline(always)]
 pub fn normalize_into(quaternion: &mut Quat) {
     let v = Vec4::from(*quaternion);
-    let scale = v.dot(v).sqrt().recip();
-    *quaternion = Quat::from_vec4(v * scale);
+    // True division (single rounding per component) to match C#.
+    *quaternion = Quat::from_vec4(v / v.dot(v).sqrt());
 }
 
 /// Ensures the quaternion has unit length.

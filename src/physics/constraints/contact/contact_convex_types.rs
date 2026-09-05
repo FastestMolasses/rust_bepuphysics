@@ -630,9 +630,7 @@ impl Contact2OneBodyFunctions {
             wsv_a,
         );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient =
-            Vector::<f32>::splat(1.0 / 2.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient
+        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
         FrictionHelpers::compute_friction_center_2(
@@ -651,7 +649,7 @@ impl Contact2OneBodyFunctions {
             &mut accumulated_impulses.tangent,
             wsv_a,
         );
-        let maximum_twist_impulse = premultiplied_friction_coefficient
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
                 + accumulated_impulses.penetration1
@@ -876,9 +874,7 @@ impl Contact3OneBodyFunctions {
             wsv_a,
         );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient =
-            Vector::<f32>::splat(1.0 / 3.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient
+        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 + accumulated_impulses.penetration1
                 + accumulated_impulses.penetration2);
@@ -901,7 +897,7 @@ impl Contact3OneBodyFunctions {
             &mut accumulated_impulses.tangent,
             wsv_a,
         );
-        let maximum_twist_impulse = premultiplied_friction_coefficient
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
                 + accumulated_impulses.penetration1
@@ -1161,9 +1157,7 @@ impl Contact4OneBodyFunctions {
             wsv_a,
         );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient =
-            Vector::<f32>::splat(1.0 / 4.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient
+        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 + accumulated_impulses.penetration1
                 + accumulated_impulses.penetration2
@@ -1189,7 +1183,7 @@ impl Contact4OneBodyFunctions {
             &mut accumulated_impulses.tangent,
             wsv_a,
         );
-        let maximum_twist_impulse = premultiplied_friction_coefficient
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
                 + accumulated_impulses.penetration1
@@ -1661,9 +1655,7 @@ impl Contact2Functions {
             wsv_b,
         );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient =
-            Vector::<f32>::splat(1.0 / 2.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient
+        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0 + accumulated_impulses.penetration1);
         let mut offset_to_manifold_center_a = Vector3Wide::default();
         FrictionHelpers::compute_friction_center_2(
@@ -1691,7 +1683,7 @@ impl Contact2Functions {
             wsv_a,
             wsv_b,
         );
-        let maximum_twist_impulse = premultiplied_friction_coefficient
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
                 + accumulated_impulses.penetration1
@@ -1978,9 +1970,7 @@ impl Contact3Functions {
             wsv_b,
         );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient =
-            Vector::<f32>::splat(1.0 / 3.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient
+        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 + accumulated_impulses.penetration1
                 + accumulated_impulses.penetration2);
@@ -2012,7 +2002,7 @@ impl Contact3Functions {
             wsv_a,
             wsv_b,
         );
-        let maximum_twist_impulse = premultiplied_friction_coefficient
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
                 + accumulated_impulses.penetration1
@@ -2344,9 +2334,7 @@ impl Contact4Functions {
             wsv_b,
         );
         let (x, z) = out_unsafe!(Helpers::build_orthonormal_basis(&prestep.normal), 2);
-        let premultiplied_friction_coefficient =
-            Vector::<f32>::splat(1.0 / 4.0) * prestep.material_properties.friction_coefficient;
-        let maximum_tangent_impulse = premultiplied_friction_coefficient
+        let maximum_tangent_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 + accumulated_impulses.penetration1
                 + accumulated_impulses.penetration2
@@ -2381,7 +2369,7 @@ impl Contact4Functions {
             wsv_a,
             wsv_b,
         );
-        let maximum_twist_impulse = premultiplied_friction_coefficient
+        let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * (accumulated_impulses.penetration0
                 * Vector3Wide::distance(&offset_to_manifold_center_a, &prestep.contact0.offset_a)
                 + accumulated_impulses.penetration1

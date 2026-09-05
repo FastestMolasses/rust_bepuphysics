@@ -34,6 +34,93 @@ pub struct BigCompound {
     pub children: Buffer<CompoundChild>,
 }
 
+/// Ray leaf tester shared by `BigCompound::ray_test` and `BigCompound::ray_test_batched`.
+struct BigCompoundLeafTester<'a, THandler: IShapeRayHitHandler> {
+    children: *const CompoundChild,
+    shapes: &'a Shapes,
+    handler: &'a mut THandler,
+    orientation: Matrix3x3,
+    original_ray: RayData,
+}
+
+impl<THandler: IShapeRayHitHandler> IRayLeafTester for BigCompoundLeafTester<'_, THandler> {
+    unsafe fn test_leaf(
+        &mut self,
+        leaf_index: i32,
+        ray_data: *mut crate::physics::trees::ray_batcher::RayData,
+        maximum_t: *mut f32,
+        pool: &mut BufferPool,
+    ) {
+        if self.handler.allow_test(leaf_index) {
+            let child = &*self.children.add(leaf_index as usize);
+
+            // Use a simple non-generic hit handler to capture the result,
+            // avoiding infinite generic recursion in AOT.
+            let mut hit_t: f32 = -1.0;
+            let mut hit_normal = Vec3::ZERO;
+
+            struct ChildShapeTester {
+                t: *mut f32,
+                normal: *mut Vec3,
+            }
+
+            impl IShapeRayHitHandler for ChildShapeTester {
+                fn allow_test(&self, _child_index: i32) -> bool {
+                    true
+                }
+                fn on_ray_hit(
+                    &mut self,
+                    _ray: &RayData,
+                    _maximum_t: &mut f32,
+                    t: f32,
+                    normal: Vec3,
+                    _child_index: i32,
+                ) {
+                    unsafe {
+                        *self.t = t;
+                        *self.normal = normal;
+                    }
+                }
+            }
+
+            let mut tester = ChildShapeTester {
+                t: &mut hit_t,
+                normal: &mut hit_normal,
+            };
+
+            if let Some(batch) = self.shapes.get_batch(child.shape_index.type_id() as usize) {
+                let child_pose = RigidPose {
+                    position: child.local_position,
+                    orientation: child.local_orientation,
+                };
+                // trees::RayData and collision_detection::RayData have identical field layout.
+                let cd_ray = &*(ray_data as *const RayData);
+                batch.ray_test(
+                    child.shape_index.index() as usize,
+                    &child_pose,
+                    cd_ray,
+                    &mut *maximum_t,
+                    pool,
+                    &mut tester,
+                );
+            }
+
+            if hit_t >= 0.0 {
+                // Rotate the normal back to world space.
+                let mut rotated_normal = Vec3::ZERO;
+                Matrix3x3::transform(&hit_normal, &self.orientation, &mut rotated_normal);
+                self.handler.on_ray_hit(
+                    &self.original_ray,
+                    &mut *maximum_t,
+                    hit_t,
+                    rotated_normal,
+                    leaf_index,
+                );
+            }
+        }
+    }
+}
+
 impl BigCompound {
     /// Type id of big compound shapes.
     pub const ID: i32 = 7;
@@ -106,7 +193,7 @@ impl BigCompound {
     ) -> Self {
         let child_len = children.len();
         let mut compound = Self::create_without_tree_build(children, pool);
-        let mut subtrees: Buffer<NodeChild> = pool.take_at_least(child_len);
+        let mut subtrees: Buffer<NodeChild> = pool.take(child_len);
         Self::fill_subtrees_for_children(
             std::slice::from_raw_parts(compound.children.as_ptr(), child_len as usize),
             shapes,
@@ -126,9 +213,22 @@ impl BigCompound {
         shapes: &Shapes,
         pool: &mut BufferPool,
     ) -> Self {
+        Self::new_with_dispatcher(children, shapes, pool, None)
+    }
+
+    /// Creates a compound shape with an acceleration structure built using the binned builder.
+    /// If `dispatcher` is provided, the build will be multithreaded; if `None`, the build will
+    /// be single threaded.
+    #[inline(always)]
+    pub unsafe fn new_with_dispatcher(
+        children: Buffer<CompoundChild>,
+        shapes: &Shapes,
+        pool: &mut BufferPool,
+        dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
+    ) -> Self {
         let child_len = children.len();
         let mut compound = Self::create_without_tree_build(children, pool);
-        let mut subtrees: Buffer<NodeChild> = pool.take_at_least(child_len);
+        let mut subtrees: Buffer<NodeChild> = pool.take(child_len);
         Self::fill_subtrees_for_children(
             std::slice::from_raw_parts(compound.children.as_ptr(), child_len as usize),
             shapes,
@@ -137,7 +237,7 @@ impl BigCompound {
         compound.tree.binned_build(
             subtrees,
             Some(pool as *mut BufferPool),
-            None,
+            dispatcher,
             None,
             0,
             -1,
@@ -197,93 +297,7 @@ impl BigCompound {
         let mut local_direction = Vec3::ZERO;
         Matrix3x3::transform_transpose(&ray.direction, &orientation, &mut local_direction);
 
-        struct LeafTester<'a, THandler: IShapeRayHitHandler> {
-            children: *const CompoundChild,
-            shapes: &'a Shapes,
-            handler: &'a mut THandler,
-            orientation: Matrix3x3,
-            original_ray: RayData,
-        }
-
-        impl<THandler: IShapeRayHitHandler> IRayLeafTester for LeafTester<'_, THandler> {
-            unsafe fn test_leaf(
-                &mut self,
-                leaf_index: i32,
-                ray_data: *mut crate::physics::trees::ray_batcher::RayData,
-                maximum_t: *mut f32,
-                _pool: &mut BufferPool,
-            ) {
-                if self.handler.allow_test(leaf_index) {
-                    let child = &*self.children.add(leaf_index as usize);
-
-                    // Use a simple non-generic hit handler to capture the result,
-                    // avoiding infinite generic recursion in AOT.
-                    let mut hit_t: f32 = -1.0;
-                    let mut hit_normal = Vec3::ZERO;
-
-                    struct ChildShapeTester {
-                        t: *mut f32,
-                        normal: *mut Vec3,
-                    }
-
-                    impl IShapeRayHitHandler for ChildShapeTester {
-                        fn allow_test(&self, _child_index: i32) -> bool {
-                            true
-                        }
-                        fn on_ray_hit(
-                            &mut self,
-                            _ray: &RayData,
-                            _maximum_t: &mut f32,
-                            t: f32,
-                            normal: Vec3,
-                            _child_index: i32,
-                        ) {
-                            unsafe {
-                                *self.t = t;
-                                *self.normal = normal;
-                            }
-                        }
-                    }
-
-                    let mut tester = ChildShapeTester {
-                        t: &mut hit_t,
-                        normal: &mut hit_normal,
-                    };
-
-                    if let Some(batch) = self.shapes.get_batch(child.shape_index.type_id() as usize)
-                    {
-                        let child_pose = RigidPose {
-                            position: child.local_position,
-                            orientation: child.local_orientation,
-                        };
-                        // trees::RayData and collision_detection::RayData have identical field layout.
-                        let cd_ray = &*(ray_data as *const RayData);
-                        batch.ray_test(
-                            child.shape_index.index() as usize,
-                            &child_pose,
-                            cd_ray,
-                            &mut *maximum_t,
-                            &mut tester,
-                        );
-                    }
-
-                    if hit_t >= 0.0 {
-                        // Rotate the normal back to world space.
-                        let mut rotated_normal = Vec3::ZERO;
-                        Matrix3x3::transform(&hit_normal, &self.orientation, &mut rotated_normal);
-                        self.handler.on_ray_hit(
-                            &self.original_ray,
-                            &mut *maximum_t,
-                            hit_t,
-                            rotated_normal,
-                            leaf_index,
-                        );
-                    }
-                }
-            }
-        }
-
-        let mut leaf_tester = LeafTester {
+        let mut leaf_tester = BigCompoundLeafTester {
             children: self.children.as_ptr(),
             shapes,
             handler: hit_handler,
@@ -301,10 +315,57 @@ impl BigCompound {
         );
     }
 
+    /// Tests a batch of rays against the big compound shape using BVH acceleration.
+    ///
+    /// # Safety
+    /// Caller must ensure rays and pool are valid.
+    pub unsafe fn ray_test_batched<TRayHitHandler: IShapeRayHitHandler>(
+        &self,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        shapes: &Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut TRayHitHandler,
+    ) {
+        use crate::physics::trees::ray_batcher::RaySourceTrait;
+
+        let mut orientation = Matrix3x3::default();
+        Matrix3x3::create_from_quaternion(&pose.orientation, &mut orientation);
+        let mut inverse_orientation = Matrix3x3::default();
+        Matrix3x3::transpose(&orientation, &mut inverse_orientation);
+
+        let mut leaf_tester = BigCompoundLeafTester {
+            children: self.children.as_ptr(),
+            shapes,
+            handler: hit_handler,
+            orientation,
+            original_ray: RayData::default(),
+        };
+
+        for i in 0..rays.ray_count() {
+            let (ray_ptr, max_t_ptr) = rays.get_ray_ptrs(i);
+            let ray = &*ray_ptr;
+            leaf_tester.original_ray = *ray;
+            let offset = ray.origin - pose.position;
+            let mut local_origin = Vec3::ZERO;
+            let mut local_direction = Vec3::ZERO;
+            Matrix3x3::transform(&offset, &inverse_orientation, &mut local_origin);
+            Matrix3x3::transform(&ray.direction, &inverse_orientation, &mut local_direction);
+            self.tree.ray_cast(
+                local_origin,
+                local_direction,
+                &mut *max_t_ptr,
+                pool,
+                &mut leaf_tester,
+                ray.id,
+            );
+        }
+    }
+
     /// Adds a child to the compound.
     pub fn add(&mut self, child: CompoundChild, pool: &mut BufferPool, shapes: &Shapes) {
         let old_len = self.children.len();
-        pool.resize_to_at_least(&mut self.children, old_len + 1, old_len);
+        pool.resize(&mut self.children, old_len + 1, old_len);
         self.children[old_len as usize] = child;
 
         let mut bounds = BoundingBox::default();
@@ -331,7 +392,7 @@ impl BigCompound {
         }
         // Shrinking the buffer takes care of 'removing' the now-empty last slot.
         let new_len = self.children.len() - 1;
-        pool.resize_to_at_least(&mut self.children, new_len, new_len);
+        pool.resize(&mut self.children, new_len, new_len);
     }
 
     /// Finds overlapping children for pairs of bounding boxes against the compound tree.
@@ -507,6 +568,35 @@ impl ICompoundShape for BigCompound {
         }
         let mut wrapper = DynHandlerWrapper(hit_handler);
         self.ray_test(pose, ray, maximum_t, shape_batches, pool, &mut wrapper);
+    }
+
+    unsafe fn ray_test_shape_batched(
+        &self,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        shape_batches: &Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
+        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
+        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        self.ray_test_batched(pose, rays, shape_batches, pool, &mut wrapper);
     }
 }
 

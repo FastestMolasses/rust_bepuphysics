@@ -473,24 +473,29 @@ unsafe fn sweep<
     let shape_b = &*(shape_data_b as *const TShapeB);
     let mut wide_a = TShapeWideA::default();
     let mut wide_b = TShapeWideB::default();
-    if wide_a.internal_allocation_size() > 0 {
+    // Held at function scope so the backing memory outlives every use of wide_a/wide_b.
+    let _wide_a_memory: Vec<u8> = if wide_a.internal_allocation_size() > 0 {
         let mut memory = vec![0u8; wide_a.internal_allocation_size()];
         wide_a.initialize(&crate::utilities::memory::buffer::Buffer::new(
             memory.as_mut_ptr(),
             memory.len() as i32,
             -1,
         ));
-        std::mem::forget(memory);
-    }
-    if wide_b.internal_allocation_size() > 0 {
+        memory
+    } else {
+        Vec::new()
+    };
+    let _wide_b_memory: Vec<u8> = if wide_b.internal_allocation_size() > 0 {
         let mut memory = vec![0u8; wide_b.internal_allocation_size()];
         wide_b.initialize(&crate::utilities::memory::buffer::Buffer::new(
             memory.as_mut_ptr(),
             memory.len() as i32,
             -1,
         ));
-        std::mem::forget(memory);
-    }
+        memory
+    } else {
+        Vec::new()
+    };
     wide_a.broadcast(shape_a);
     wide_b.broadcast(shape_b);
     let linear_velocity_b = velocity_b.linear - velocity_a.linear;

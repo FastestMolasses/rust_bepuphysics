@@ -70,12 +70,13 @@ impl Matrix3x3 {
         // 1) Missing some helpful instructions for actual SIMD accelerated transposition.
         // 2) Difficult to get SIMD types to generate competitive codegen due to lots of componentwise access.
 
-        let m = &*m;
-        let transposed = &mut *transposed;
-
+        // Copy the source first so this stays sound when m == transposed (in-place transpose from invert()).
+        let m = m.read();
         let m12 = m.m12;
         let m13 = m.m13;
         let m23 = m.m23;
+
+        let transposed = &mut *transposed;
         transposed.m11 = m.m11;
         transposed.m12 = m.m21;
         transposed.m13 = m.m31;

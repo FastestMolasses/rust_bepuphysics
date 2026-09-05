@@ -335,11 +335,9 @@ impl BoxCylinderTester {
 
         if use_cap_i.simd_lt(zero_i).any() {
             // Cap-face manifold.
+            // SAFETY: uninitialized; add_candidate writes every index the reduction reads.
             let mut candidates_buf: [MaybeUninit<ManifoldCandidate>; 12] =
                 MaybeUninit::uninit().assume_init();
-            for c in candidates_buf.iter_mut() {
-                c.write(ManifoldCandidate::default());
-            }
             let candidates = candidates_buf[0].as_mut_ptr();
             let mut candidate_count = zero_i;
 

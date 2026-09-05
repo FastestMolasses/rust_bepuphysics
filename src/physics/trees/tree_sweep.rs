@@ -28,8 +28,8 @@ impl Tree {
                 || (Self::encode(node_index) >= 0 && Self::encode(node_index) < self.leaf_count)
         );
         debug_assert!(
-            self.leaf_count >= 2,
-            "This implementation assumes all nodes are filled."
+            self.leaf_count >= 2 || node_index < 0,
+            "The node traversal assumes all nodes are filled; a single-leaf tree can only be entered through its encoded leaf index."
         );
 
         let mut stack_end: i32 = 0;
@@ -121,9 +121,9 @@ impl Tree {
                 sweep_tester.test_leaf(0, &mut (*tree_ray).maximum_t);
             }
         } else {
-            let mut stack_memory = [0i32; TRAVERSAL_STACK_CAPACITY];
+            let mut stack_memory = std::mem::MaybeUninit::<[i32; TRAVERSAL_STACK_CAPACITY]>::uninit();
             let stack = Buffer::new(
-                stack_memory.as_mut_ptr(),
+                stack_memory.as_mut_ptr() as *mut i32,
                 TRAVERSAL_STACK_CAPACITY as i32,
                 -1,
             );

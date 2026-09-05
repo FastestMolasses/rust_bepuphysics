@@ -32,20 +32,8 @@ impl ChildOverlapsCollection {
     /// Allocates a new overlap entry and returns a mutable reference to the child index slot.
     #[inline(always)]
     pub fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
-        if self.count == self.overlaps.len() {
-            let new_size = if self.count > 0 { self.count * 2 } else { 4 };
-            let mut new_buffer: Buffer<i32> = pool.take_at_least(new_size);
-            if self.count > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        self.overlaps.as_ptr(),
-                        new_buffer.as_mut_ptr(),
-                        self.count as usize,
-                    );
-                }
-                pool.return_buffer(&mut self.overlaps);
-            }
-            self.overlaps = new_buffer;
+        if self.overlaps.len() == self.count {
+            pool.resize_to_at_least(&mut self.overlaps, 64.max(self.count * 2), self.count);
         }
         let index = self.count;
         self.count += 1;
@@ -88,7 +76,7 @@ pub struct CompoundPairOverlaps {
     pub pair_queries: Buffer<OverlapQueryForPair>,
     /// Buffer of (start, count) regions mapping pairs to their children in child_overlaps.
     pub pair_regions: Buffer<(i32, i32)>,
-    /// Number of pairs.
+    /// Number of pairs registered so far via create_pair_overlaps.
     pair_count: i32,
     /// Cursor for the next child index in child_overlaps.
     child_cursor: i32,
@@ -104,7 +92,7 @@ impl CompoundPairOverlaps {
             child_overlaps,
             pair_queries,
             pair_regions,
-            pair_count,
+            pair_count: 0,
             child_cursor: 0,
         }
     }
@@ -112,28 +100,16 @@ impl CompoundPairOverlaps {
     /// Creates a new region for a pair with the given child count.
     #[inline(always)]
     pub fn create_pair_overlaps(&mut self, child_count: i32) {
-        let pair_index = self.pair_count_so_far();
+        let pair_index = self.pair_count;
+        self.pair_count += 1;
         self.pair_regions[pair_index] = (self.child_cursor, child_count);
         // Initialize child overlap entries.
         for i in 0..child_count {
             self.child_overlaps[self.child_cursor + i] = ChildOverlapsCollection::default();
         }
         self.child_cursor += child_count;
-    }
-
-    fn pair_count_so_far(&self) -> i32 {
-        // Count pairs that have been registered based on cursor advancement.
-        // We use pair_regions to track which pairs have been set up.
-        let mut count = 0;
-        for i in 0..self.pair_count {
-            let (start, len) = self.pair_regions[i];
-            if start > 0 || len > 0 || i == 0 {
-                count += 1;
-            } else {
-                break;
-            }
-        }
-        count
+        debug_assert!(self.pair_count <= self.pair_regions.len());
+        debug_assert!(self.child_cursor <= self.child_overlaps.len());
     }
 
     /// Gets a mutable reference to the overlaps for a specific subpair.

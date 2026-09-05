@@ -88,20 +88,21 @@ impl Tree {
     }
 
     fn cache_optimize_recursive(&mut self, node_index: i32, next_index: &mut i32) {
-        let node = *self.nodes.get(node_index);
         for i in 0..2i32 {
-            let child = unsafe { Self::node_child(&node, i) };
-            if child.index >= 0 {
+            let child_index = unsafe { Self::node_child(self.nodes.get(node_index), i).index };
+            if child_index >= 0 {
                 debug_assert!(
                     *next_index >= 0 && *next_index < self.node_count,
                     "Swap target should be within the node set."
                 );
-                if child.index != *next_index {
-                    self.swap_nodes(child.index, *next_index);
+                if child_index != *next_index {
+                    self.swap_nodes(child_index, *next_index);
                 }
-                debug_assert!(child.index != *next_index);
+                // Re-read through the live nodes buffer: swap_nodes may have rewritten this child slot.
+                let child_index = unsafe { Self::node_child(self.nodes.get(node_index), i).index };
+                debug_assert!(child_index != *next_index);
                 *next_index += 1;
-                self.cache_optimize_recursive(child.index, next_index);
+                self.cache_optimize_recursive(child_index, next_index);
             }
         }
     }

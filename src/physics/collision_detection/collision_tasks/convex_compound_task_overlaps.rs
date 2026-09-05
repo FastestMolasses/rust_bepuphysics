@@ -27,13 +27,8 @@ impl ConvexCompoundOverlaps {
     /// Allocates and returns a mutable reference to the next overlap slot, growing if needed.
     #[inline(always)]
     pub fn allocate(&mut self, pool: &mut BufferPool) -> &mut i32 {
-        if self.count == self.overlaps.len() {
-            let new_size = if self.overlaps.is_empty() {
-                4
-            } else {
-                self.overlaps.len() * 2
-            };
-            pool.resize(&mut self.overlaps, new_size, self.count);
+        if self.overlaps.len() == self.count {
+            pool.resize_to_at_least(&mut self.overlaps, 64.max(self.count * 2), self.count);
         }
         let index = self.count as usize;
         self.count += 1;
@@ -43,7 +38,9 @@ impl ConvexCompoundOverlaps {
     /// Disposes the overlap buffer back to the pool.
     #[inline(always)]
     pub fn dispose(&mut self, pool: &mut BufferPool) {
-        pool.return_buffer(&mut self.overlaps);
+        if self.overlaps.allocated() {
+            pool.return_buffer(&mut self.overlaps);
+        }
     }
 }
 

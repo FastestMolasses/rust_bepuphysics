@@ -27,9 +27,53 @@ impl Tree {
         let t1 = max * (*ray).inverse_direction - (*ray).origin_over_direction;
         let t_exit = t0.max(t1);
         let t_entry = t0.min(t1);
-        let earliest_exit = (*ray).maximum_t.min(t_exit.x).min(t_exit.y).min(t_exit.z);
-        *t = t_entry.x.max(0.0).max(t_entry.y).max(t_entry.z);
-        *t <= earliest_exit
+        // Note the use of broadcast and SIMD min/max here. This is much faster than using branches to compute
+        // minimum elements, since the branches get mispredicted extremely frequently. Also note 4-wide
+        // operations; they're actually faster than using narrower vectors due to some unnecessary codegen.
+        #[cfg(target_arch = "x86_64")]
+        {
+            use std::arch::x86_64::*;
+            let earliest_exit_v = _mm_min_ps(
+                _mm_min_ps(_mm_set1_ps((*ray).maximum_t), _mm_set1_ps(t_exit.x)),
+                _mm_min_ps(_mm_set1_ps(t_exit.y), _mm_set1_ps(t_exit.z)),
+            );
+            let earliest_exit = _mm_cvtss_f32(earliest_exit_v);
+            let t_v = _mm_max_ps(
+                _mm_max_ps(_mm_set1_ps(t_entry.x), _mm_setzero_ps()),
+                _mm_max_ps(_mm_set1_ps(t_entry.y), _mm_set1_ps(t_entry.z)),
+            );
+            *t = _mm_cvtss_f32(t_v);
+            *t <= earliest_exit
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            use std::arch::aarch64::*;
+            let earliest_exit_v = vminq_f32(
+                vminq_f32(vdupq_n_f32((*ray).maximum_t), vdupq_n_f32(t_exit.x)),
+                vminq_f32(vdupq_n_f32(t_exit.y), vdupq_n_f32(t_exit.z)),
+            );
+            let earliest_exit = vgetq_lane_f32(earliest_exit_v, 0);
+            let t_v = vmaxq_f32(
+                vmaxq_f32(vdupq_n_f32(t_entry.x), vdupq_n_f32(0.0)),
+                vmaxq_f32(vdupq_n_f32(t_entry.y), vdupq_n_f32(t_entry.z)),
+            );
+            *t = vgetq_lane_f32(t_v, 0);
+            *t <= earliest_exit
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            use std::simd::num::SimdFloat;
+            use std::simd::Simd;
+            let earliest_exit_v = Simd::<f32, 4>::splat((*ray).maximum_t)
+                .simd_min(Simd::<f32, 4>::splat(t_exit.x))
+                .simd_min(Simd::<f32, 4>::splat(t_exit.y).simd_min(Simd::<f32, 4>::splat(t_exit.z)));
+            let earliest_exit = earliest_exit_v[0];
+            let t_v = Simd::<f32, 4>::splat(t_entry.x)
+                .simd_max(Simd::<f32, 4>::splat(0.0))
+                .simd_max(Simd::<f32, 4>::splat(t_entry.y).simd_max(Simd::<f32, 4>::splat(t_entry.z)));
+            *t = t_v[0];
+            *t <= earliest_exit
+        }
     }
 
     unsafe fn ray_cast_node<TLeafTester: IRayLeafTester>(
@@ -46,8 +90,8 @@ impl Tree {
                 || (Self::encode(node_index) >= 0 && Self::encode(node_index) < self.leaf_count)
         );
         debug_assert!(
-            self.leaf_count >= 2,
-            "This implementation assumes all nodes are filled."
+            self.leaf_count >= 2 || node_index < 0,
+            "The node traversal assumes all nodes are filled; a single-leaf tree can only be entered through its encoded leaf index."
         );
 
         let mut stack_end: i32 = 0;
@@ -143,9 +187,9 @@ impl Tree {
                 leaf_tester.test_leaf(0, ray_data, &mut (*tree_ray).maximum_t, pool);
             }
         } else {
-            let mut stack_memory = [0i32; TRAVERSAL_STACK_CAPACITY];
+            let mut stack_memory = std::mem::MaybeUninit::<[i32; TRAVERSAL_STACK_CAPACITY]>::uninit();
             let stack = Buffer::new(
-                stack_memory.as_mut_ptr(),
+                stack_memory.as_mut_ptr() as *mut i32,
                 TRAVERSAL_STACK_CAPACITY as i32,
                 -1,
             );

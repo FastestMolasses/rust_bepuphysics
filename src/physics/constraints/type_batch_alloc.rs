@@ -502,7 +502,7 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
     type_batch: &mut TypeBatch,
     handle: ConstraintHandle,
     encoded_body_indices: &[i32],
-    pool: &mut BufferPool,
+    pool: *mut BufferPool,
     bodies_per_constraint: usize,
     body_references_bundle_size: usize,
     prestep_bundle_size: usize,
@@ -515,9 +515,13 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
     if type_batch.constraint_count == type_batch.index_to_handle.len() {
         // This isn't technically required (since probing might find an earlier slot),
         // but it makes things simpler and rarely allocates more than necessary.
+        debug_assert!(
+            !pool.is_null(),
+            "Looks like a user that doesn't have access to a pool (the awakener, probably?) tried to add a constraint without preallocating enough room."
+        );
         internal_resize(
             type_batch,
-            pool,
+            &mut *pool,
             type_batch.constraint_count * 2,
             body_references_bundle_size,
             prestep_bundle_size,
@@ -607,9 +611,13 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
         let index_in_type_batch = (bundle_count * Vector::<i32>::LEN) as i32;
         let new_constraint_count = index_in_type_batch + 1;
         if new_constraint_count >= type_batch.index_to_handle.len() {
+            debug_assert!(
+                !pool.is_null(),
+                "Looks like a user that doesn't have access to a pool (the awakener, probably?) tried to add a constraint without preallocating enough room."
+            );
             internal_resize(
                 type_batch,
-                pool,
+                &mut *pool,
                 new_constraint_count * 2,
                 body_references_bundle_size,
                 prestep_bundle_size,

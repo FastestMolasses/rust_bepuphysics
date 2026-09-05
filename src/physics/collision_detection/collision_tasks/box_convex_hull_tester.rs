@@ -17,8 +17,12 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 use std::simd::Select;
+
+/// 4-wide SIMD lane, matching C#'s System.Numerics.Vector4 usage in this file.
+type F4 = std::simd::Simd<f32, 4>;
 
 /// Pair tester for box vs convex hull collisions.
 pub struct BoxConvexHullTester;
@@ -244,8 +248,11 @@ impl BoxConvexHullTester {
 
         // To find the contact manifold, we clip box edges against the hull face per-slot.
         // There can be no more than 8 contacts from edge intersections, but more from hull faces with many vertices.
-        let maximum_contact_count = 8usize.max(maximum_face_vertex_count);
-        let mut candidates_buf = [ManifoldCandidateScalar::default(); 128];
+        // Clamped to the candidate buffer's capacity (C# stackallocs the unbounded count).
+        let maximum_contact_count = 8usize.max(maximum_face_vertex_count).min(128);
+        // SAFETY: uninitialized; every index below candidate_count is written before it is read.
+        let mut candidates_buf: [MaybeUninit<ManifoldCandidateScalar>; 128] =
+            unsafe { MaybeUninit::uninit().assume_init() };
 
         for slot_index in 0..pair_count as usize {
             if inactive_lanes.as_array()[slot_index] < 0 {
@@ -276,29 +283,24 @@ impl BoxConvexHullTester {
             let face_y_z = *GatherScatter::get(&box_face_y.z, slot_index);
 
             // 4 box edges: X is 00->10, Y is 10->11, Z is 11->01, W is 01->00
-            let box_edge_start_x = [v00_x, v10_x, v11_x, v01_x];
-            let box_edge_start_y = [v00_y, v10_y, v11_y, v01_y];
-            let box_edge_start_z = [v00_z, v10_z, v11_z, v01_z];
-            let edge_direction_x = [face_x_x, face_y_x, -face_x_x, -face_y_x];
-            let edge_direction_y = [face_x_y, face_y_y, -face_x_y, -face_y_y];
-            let edge_direction_z = [face_x_z, face_y_z, -face_x_z, -face_y_z];
+            let box_edge_start_x: F4 = F4::from_array([v00_x, v10_x, v11_x, v01_x]);
+            let box_edge_start_y: F4 = F4::from_array([v00_y, v10_y, v11_y, v01_y]);
+            let box_edge_start_z: F4 = F4::from_array([v00_z, v10_z, v11_z, v01_z]);
+            let edge_direction_x: F4 = F4::from_array([face_x_x, face_y_x, -face_x_x, -face_y_x]);
+            let edge_direction_y: F4 = F4::from_array([face_x_y, face_y_y, -face_x_y, -face_y_y]);
+            let edge_direction_z: F4 = F4::from_array([face_x_z, face_y_z, -face_x_z, -face_y_z]);
 
-            let slot_local_normal_x4 = [slot_local_normal.x; 4];
-            let slot_local_normal_y4 = [slot_local_normal.y; 4];
-            let slot_local_normal_z4 = [slot_local_normal.z; 4];
+            let slot_local_normal_x4: F4 = F4::splat(slot_local_normal.x);
+            let slot_local_normal_y4: F4 = F4::splat(slot_local_normal.y);
+            let slot_local_normal_z4: F4 = F4::splat(slot_local_normal.z);
 
             // edgePlaneNormal = edgeDirection x localNormal
-            let mut edge_plane_normal_x = [0.0f32; 4];
-            let mut edge_plane_normal_y = [0.0f32; 4];
-            let mut edge_plane_normal_z = [0.0f32; 4];
-            for k in 0..4 {
-                edge_plane_normal_x[k] = edge_direction_y[k] * slot_local_normal_z4[k]
-                    - edge_direction_z[k] * slot_local_normal_y4[k];
-                edge_plane_normal_y[k] = edge_direction_z[k] * slot_local_normal_x4[k]
-                    - edge_direction_x[k] * slot_local_normal_z4[k];
-                edge_plane_normal_z[k] = edge_direction_x[k] * slot_local_normal_y4[k]
-                    - edge_direction_y[k] * slot_local_normal_x4[k];
-            }
+            let edge_plane_normal_x =
+                edge_direction_y * slot_local_normal_z4 - edge_direction_z * slot_local_normal_y4;
+            let edge_plane_normal_y =
+                edge_direction_z * slot_local_normal_x4 - edge_direction_x * slot_local_normal_z4;
+            let edge_plane_normal_z =
+                edge_direction_x * slot_local_normal_y4 - edge_direction_y * slot_local_normal_x4;
 
             let face_start = hull_face_starts[slot_index];
             let face_count = hull_face_counts[slot_index];
@@ -323,7 +325,7 @@ impl BoxConvexHullTester {
                 &mut hull_face_y,
             );
 
-            let mut maximum_vertex_containment_dots = [0.0f32; 4];
+            let mut maximum_vertex_containment_dots: F4 = F4::splat(0.0);
 
             for i in 0..face_count {
                 let index = hull.face_vertex_indices[face_start + i];
@@ -335,45 +337,38 @@ impl BoxConvexHullTester {
                 );
 
                 let hull_edge_offset = vertex - previous_vertex;
-                let hull_edge_start_x4 = [previous_vertex.x; 4];
-                let hull_edge_start_y4 = [previous_vertex.y; 4];
-                let hull_edge_start_z4 = [previous_vertex.z; 4];
-                let hull_edge_offset_x4 = [hull_edge_offset.x; 4];
-                let hull_edge_offset_y4 = [hull_edge_offset.y; 4];
-                let hull_edge_offset_z4 = [hull_edge_offset.z; 4];
+                let hull_edge_start_x4: F4 = F4::splat(previous_vertex.x);
+                let hull_edge_start_y4: F4 = F4::splat(previous_vertex.y);
+                let hull_edge_start_z4: F4 = F4::splat(previous_vertex.z);
+                let hull_edge_offset_x4: F4 = F4::splat(hull_edge_offset.x);
+                let hull_edge_offset_y4: F4 = F4::splat(hull_edge_offset.y);
+                let hull_edge_offset_z4: F4 = F4::splat(hull_edge_offset.z);
 
                 // Containment test: hull edge plane normal = hullEdgeOffset x slotLocalNormal
                 let hull_edge_plane_normal = hull_edge_offset.cross(slot_local_normal);
-                let hull_edge_plane_normal_x4 = [hull_edge_plane_normal.x; 4];
-                let hull_edge_plane_normal_y4 = [hull_edge_plane_normal.y; 4];
-                let hull_edge_plane_normal_z4 = [hull_edge_plane_normal.z; 4];
+                let hull_edge_plane_normal_x4: F4 = F4::splat(hull_edge_plane_normal.x);
+                let hull_edge_plane_normal_y4: F4 = F4::splat(hull_edge_plane_normal.y);
+                let hull_edge_plane_normal_z4: F4 = F4::splat(hull_edge_plane_normal.z);
 
-                let mut hull_edge_start_to_box_edge_x = [0.0f32; 4];
-                let mut hull_edge_start_to_box_edge_y = [0.0f32; 4];
-                let mut hull_edge_start_to_box_edge_z = [0.0f32; 4];
-                let mut box_vertex_containment_dots = [0.0f32; 4];
-                let mut numerator = [0.0f32; 4];
-                let mut denominator = [0.0f32; 4];
-                let mut edge_intersections = [0.0f32; 4];
-                for k in 0..4 {
-                    hull_edge_start_to_box_edge_x[k] = box_edge_start_x[k] - hull_edge_start_x4[k];
-                    hull_edge_start_to_box_edge_y[k] = box_edge_start_y[k] - hull_edge_start_y4[k];
-                    hull_edge_start_to_box_edge_z[k] = box_edge_start_z[k] - hull_edge_start_z4[k];
-                    box_vertex_containment_dots[k] = hull_edge_plane_normal_x4[k]
-                        * hull_edge_start_to_box_edge_x[k]
-                        + hull_edge_plane_normal_y4[k] * hull_edge_start_to_box_edge_y[k]
-                        + hull_edge_plane_normal_z4[k] * hull_edge_start_to_box_edge_z[k];
-                    if box_vertex_containment_dots[k] > maximum_vertex_containment_dots[k] {
-                        maximum_vertex_containment_dots[k] = box_vertex_containment_dots[k];
-                    }
-                    numerator[k] = hull_edge_start_to_box_edge_x[k] * edge_plane_normal_x[k]
-                        + hull_edge_start_to_box_edge_y[k] * edge_plane_normal_y[k]
-                        + hull_edge_start_to_box_edge_z[k] * edge_plane_normal_z[k];
-                    denominator[k] = edge_plane_normal_x[k] * hull_edge_offset_x4[k]
-                        + edge_plane_normal_y[k] * hull_edge_offset_y4[k]
-                        + edge_plane_normal_z[k] * hull_edge_offset_z4[k];
-                    edge_intersections[k] = numerator[k] / denominator[k];
-                }
+                let hull_edge_start_to_box_edge_x = box_edge_start_x - hull_edge_start_x4;
+                let hull_edge_start_to_box_edge_y = box_edge_start_y - hull_edge_start_y4;
+                let hull_edge_start_to_box_edge_z = box_edge_start_z - hull_edge_start_z4;
+                let box_vertex_containment_dots = hull_edge_plane_normal_x4
+                    * hull_edge_start_to_box_edge_x
+                    + hull_edge_plane_normal_y4 * hull_edge_start_to_box_edge_y
+                    + hull_edge_plane_normal_z4 * hull_edge_start_to_box_edge_z;
+                maximum_vertex_containment_dots =
+                    maximum_vertex_containment_dots.simd_max(box_vertex_containment_dots);
+                let numerator = hull_edge_start_to_box_edge_x * edge_plane_normal_x
+                    + hull_edge_start_to_box_edge_y * edge_plane_normal_y
+                    + hull_edge_start_to_box_edge_z * edge_plane_normal_z;
+                let denominator = edge_plane_normal_x * hull_edge_offset_x4
+                    + edge_plane_normal_y * hull_edge_offset_y4
+                    + edge_plane_normal_z * hull_edge_offset_z4;
+                let edge_intersections = numerator / denominator;
+                let numerator = numerator.to_array();
+                let denominator = denominator.to_array();
+                let edge_intersections = edge_intersections.to_array();
 
                 // Compute latest entry / earliest exit across 4 box edges.
                 let mut latest_entry;
@@ -449,10 +444,11 @@ impl BoxConvexHullTester {
                     // Create max contact.
                     let point =
                         hull_edge_offset * earliest_exit + previous_vertex - hull_face_origin;
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = point.dot(hull_face_x);
-                    c.y = point.dot(hull_face_y);
-                    c.feature_id = base_feature_id + end_id as i32;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: point.dot(hull_face_x),
+                        y: point.dot(hull_face_y),
+                        feature_id: base_feature_id + end_id as i32,
+                    });
                     candidate_count += 1;
                 }
                 if latest_entry < earliest_exit
@@ -462,10 +458,11 @@ impl BoxConvexHullTester {
                     // Create min contact.
                     let point =
                         hull_edge_offset * latest_entry + previous_vertex - hull_face_origin;
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = point.dot(hull_face_x);
-                    c.y = point.dot(hull_face_y);
-                    c.feature_id = base_feature_id + start_id as i32;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: point.dot(hull_face_x),
+                        y: point.dot(hull_face_y),
+                        feature_id: base_feature_id + start_id as i32,
+                    });
                     candidate_count += 1;
                 }
 
@@ -476,74 +473,80 @@ impl BoxConvexHullTester {
             if candidate_count < maximum_contact_count {
                 // Try adding box vertex contacts. Project each vertex onto the hull face.
                 // t = dot(boxVertex - hullFaceVertex, hullFacePlaneNormal) / dot(hullFacePlaneNormal, localNormal)
-                let hull_face_origin_x4 = [hull_face_origin.x; 4];
-                let hull_face_origin_y4 = [hull_face_origin.y; 4];
-                let hull_face_origin_z4 = [hull_face_origin.z; 4];
-                let hull_face_normal_x4 = [slot_face_normal.x; 4];
-                let hull_face_normal_y4 = [slot_face_normal.y; 4];
-                let hull_face_normal_z4 = [slot_face_normal.z; 4];
+                let hull_face_origin_x4: F4 = F4::splat(hull_face_origin.x);
+                let hull_face_origin_y4: F4 = F4::splat(hull_face_origin.y);
+                let hull_face_origin_z4: F4 = F4::splat(hull_face_origin.z);
+                let hull_face_normal_x4: F4 = F4::splat(slot_face_normal.x);
+                let hull_face_normal_y4: F4 = F4::splat(slot_face_normal.y);
+                let hull_face_normal_z4: F4 = F4::splat(slot_face_normal.z);
 
-                let mut closest_to_box_x = [0.0f32; 4];
-                let mut closest_to_box_y = [0.0f32; 4];
-                let mut closest_to_box_z = [0.0f32; 4];
-                let mut vertex_proj_num = [0.0f32; 4];
-                for k in 0..4 {
-                    closest_to_box_x[k] = box_edge_start_x[k] - hull_face_origin_x4[k];
-                    closest_to_box_y[k] = box_edge_start_y[k] - hull_face_origin_y4[k];
-                    closest_to_box_z[k] = box_edge_start_z[k] - hull_face_origin_z4[k];
-                    vertex_proj_num[k] = closest_to_box_x[k] * hull_face_normal_x4[k]
-                        + closest_to_box_y[k] * hull_face_normal_y4[k]
-                        + closest_to_box_z[k] * hull_face_normal_z4[k];
-                }
-                let vertex_proj_denom = slot_face_normal.dot(slot_local_normal);
+                let closest_to_box_x = box_edge_start_x - hull_face_origin_x4;
+                let closest_to_box_y = box_edge_start_y - hull_face_origin_y4;
+                let closest_to_box_z = box_edge_start_z - hull_face_origin_z4;
+                let vertex_proj_num = closest_to_box_x * hull_face_normal_x4
+                    + closest_to_box_y * hull_face_normal_y4
+                    + closest_to_box_z * hull_face_normal_z4;
+                let vertex_proj_denom: F4 = F4::splat(slot_face_normal.dot(slot_local_normal));
+                let vertex_proj_t = vertex_proj_num / vertex_proj_denom;
 
-                let mut projected_tangent_x = [0.0f32; 4];
-                let mut projected_tangent_y = [0.0f32; 4];
-                for k in 0..4 {
-                    let t = vertex_proj_num[k] / vertex_proj_denom;
-                    // Normal points from B to A.
-                    let px = closest_to_box_x[k] - t * slot_local_normal.x;
-                    let py = closest_to_box_y[k] - t * slot_local_normal.y;
-                    let pz = closest_to_box_z[k] - t * slot_local_normal.z;
-                    projected_tangent_x[k] =
-                        px * hull_face_x.x + py * hull_face_x.y + pz * hull_face_x.z;
-                    projected_tangent_y[k] =
-                        px * hull_face_y.x + py * hull_face_y.y + pz * hull_face_y.z;
-                }
+                // Normal points from B to A.
+                let projected_vertex_x = closest_to_box_x - vertex_proj_t * slot_local_normal_x4;
+                let projected_vertex_y = closest_to_box_y - vertex_proj_t * slot_local_normal_y4;
+                let projected_vertex_z = closest_to_box_z - vertex_proj_t * slot_local_normal_z4;
+
+                let hull_face_x_x4: F4 = F4::splat(hull_face_x.x);
+                let hull_face_x_y4: F4 = F4::splat(hull_face_x.y);
+                let hull_face_x_z4: F4 = F4::splat(hull_face_x.z);
+                let hull_face_y_x4: F4 = F4::splat(hull_face_y.x);
+                let hull_face_y_y4: F4 = F4::splat(hull_face_y.y);
+                let hull_face_y_z4: F4 = F4::splat(hull_face_y.z);
+                let projected_tangent_x = projected_vertex_x * hull_face_x_x4
+                    + projected_vertex_y * hull_face_x_y4
+                    + projected_vertex_z * hull_face_x_z4;
+                let projected_tangent_y = projected_vertex_x * hull_face_y_x4
+                    + projected_vertex_y * hull_face_y_y4
+                    + projected_vertex_z * hull_face_y_z4;
+                let projected_tangent_x = projected_tangent_x.to_array();
+                let projected_tangent_y = projected_tangent_y.to_array();
+                let maximum_vertex_containment_dots = maximum_vertex_containment_dots.to_array();
 
                 // Check each of 4 box vertices for containment inside hull face.
                 if maximum_vertex_containment_dots[0] <= 0.0 {
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = projected_tangent_x[0];
-                    c.y = projected_tangent_y[0];
-                    c.feature_id = 0;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: projected_tangent_x[0],
+                        y: projected_tangent_y[0],
+                        feature_id: 0,
+                    });
                     candidate_count += 1;
                 }
                 if candidate_count < maximum_contact_count
                     && maximum_vertex_containment_dots[1] <= 0.0
                 {
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = projected_tangent_x[1];
-                    c.y = projected_tangent_y[1];
-                    c.feature_id = 1;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: projected_tangent_x[1],
+                        y: projected_tangent_y[1],
+                        feature_id: 1,
+                    });
                     candidate_count += 1;
                 }
                 if candidate_count < maximum_contact_count
                     && maximum_vertex_containment_dots[2] <= 0.0
                 {
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = projected_tangent_x[2];
-                    c.y = projected_tangent_y[2];
-                    c.feature_id = 2;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: projected_tangent_x[2],
+                        y: projected_tangent_y[2],
+                        feature_id: 2,
+                    });
                     candidate_count += 1;
                 }
                 if candidate_count < maximum_contact_count
                     && maximum_vertex_containment_dots[3] <= 0.0
                 {
-                    let c = &mut candidates_buf[candidate_count];
-                    c.x = projected_tangent_x[3];
-                    c.y = projected_tangent_y[3];
-                    c.feature_id = 3;
+                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        x: projected_tangent_x[3],
+                        y: projected_tangent_y[3],
+                        feature_id: 3,
+                    });
                     candidate_count += 1;
                 }
             }
@@ -558,7 +561,7 @@ impl BoxConvexHullTester {
             let mut slot_hull_orientation = Matrix3x3::default();
             Matrix3x3Wide::read_slot(&hull_orientation, slot_index, &mut slot_hull_orientation);
             ManifoldCandidateHelper::reduce_scalar(
-                candidates_buf.as_mut_ptr(),
+                candidates_buf.as_mut_ptr() as *mut ManifoldCandidateScalar,
                 candidate_count as i32,
                 slot_box_face_normal,
                 1.0 / slot_box_face_normal.dot(slot_local_normal),

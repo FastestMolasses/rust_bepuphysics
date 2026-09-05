@@ -162,7 +162,7 @@ impl PairCache {
         let mut cache = Self {
             mapping: OverlapMapping::with_capacity(
                 minimum_mapping_size,
-                3,
+                2,
                 pool_ref,
                 CollidablePairComparer,
             ),

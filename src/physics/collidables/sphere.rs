@@ -120,6 +120,7 @@ impl IConvexShape for Sphere {
 }
 
 /// Wide representation of a sphere for SIMD processing.
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct SphereWide {
     pub radius: Vector<f32>,

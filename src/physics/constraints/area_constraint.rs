@@ -1,6 +1,7 @@
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::math_helper;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
@@ -129,6 +130,10 @@ impl AreaConstraintFunctions {
         negated_jacobian_a: &mut Vector3Wide,
         jacobian_b: &mut Vector3Wide,
         jacobian_c: &mut Vector3Wide,
+        contribution_a: &mut Vector<f32>,
+        contribution_b: &mut Vector<f32>,
+        contribution_c: &mut Vector<f32>,
+        inverse_jacobian_length: &mut Vector<f32>,
     ) {
         let ab = *position_b - *position_a;
         let ac = *position_c - *position_a;
@@ -149,7 +154,17 @@ impl AreaConstraintFunctions {
             Vector3Wide::cross_without_overlap(&ac, &normal, jacobian_b);
             Vector3Wide::cross_without_overlap(&normal, &ab, jacobian_c);
         }
+        // Similar to the volume constraint, we could create a similar expression for jacobianA, but it's cheap to just do a couple of adds.
         Vector3Wide::add(jacobian_b, jacobian_c, negated_jacobian_a);
+        // Normalize the jacobian to unit length so the inverse effective mass is a bounded weighted average of
+        // inverse masses regardless of triangle size; the scale factor cancels in the solve, so the impulse is unchanged.
+        Vector3Wide::dot(negated_jacobian_a, negated_jacobian_a, contribution_a);
+        Vector3Wide::dot(jacobian_b, jacobian_b, contribution_b);
+        Vector3Wide::dot(jacobian_c, jacobian_c, contribution_c);
+        let jacobian_length_squared = *contribution_a + *contribution_b + *contribution_c;
+        // Guard against the degenerate case where edges are parallel/antiparallel (triangle collapses to a line).
+        let jacobian_length_squared = jacobian_length_squared.simd_max(Vector::<f32>::splat(1e-14));
+        *inverse_jacobian_length = math_helper::fast_reciprocal_square_root(jacobian_length_squared);
     }
 
     #[inline(always)]
@@ -173,6 +188,10 @@ impl AreaConstraintFunctions {
         let mut negated_jacobian_a = Vector3Wide::default();
         let mut jacobian_b = Vector3Wide::default();
         let mut jacobian_c = Vector3Wide::default();
+        let mut _contribution_a = Vector::<f32>::splat(0.0);
+        let mut _contribution_b = Vector::<f32>::splat(0.0);
+        let mut _contribution_c = Vector::<f32>::splat(0.0);
+        let mut inverse_jacobian_length = Vector::<f32>::splat(0.0);
         Self::compute_jacobian(
             position_a,
             position_b,
@@ -181,7 +200,12 @@ impl AreaConstraintFunctions {
             &mut negated_jacobian_a,
             &mut jacobian_b,
             &mut jacobian_c,
+            &mut _contribution_a,
+            &mut _contribution_b,
+            &mut _contribution_c,
+            &mut inverse_jacobian_length,
         );
+        // The accumulated impulse is in unit-jacobian space; replay it through inverseJacobianLength * J_raw.
         Self::apply_impulse(
             &inertia_a.inverse_mass,
             &inertia_b.inverse_mass,
@@ -189,7 +213,7 @@ impl AreaConstraintFunctions {
             &negated_jacobian_a,
             &jacobian_b,
             &jacobian_c,
-            accumulated_impulses,
+            &(inverse_jacobian_length * *accumulated_impulses),
             wsv_a,
             wsv_b,
             wsv_c,
@@ -219,6 +243,10 @@ impl AreaConstraintFunctions {
         let mut negated_jacobian_a = Vector3Wide::default();
         let mut jacobian_b = Vector3Wide::default();
         let mut jacobian_c = Vector3Wide::default();
+        let mut contribution_a = Vector::<f32>::splat(0.0);
+        let mut contribution_b = Vector::<f32>::splat(0.0);
+        let mut contribution_c = Vector::<f32>::splat(0.0);
+        let mut inverse_jacobian_length = Vector::<f32>::splat(0.0);
         Self::compute_jacobian(
             position_a,
             position_b,
@@ -227,27 +255,19 @@ impl AreaConstraintFunctions {
             &mut negated_jacobian_a,
             &mut jacobian_b,
             &mut jacobian_c,
-        );
-
-        let mut contribution_a = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(
-            &negated_jacobian_a,
-            &negated_jacobian_a,
             &mut contribution_a,
+            &mut contribution_b,
+            &mut contribution_c,
+            &mut inverse_jacobian_length,
         );
-        let mut contribution_b = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&jacobian_b, &jacobian_b, &mut contribution_b);
-        let mut contribution_c = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&jacobian_c, &jacobian_c, &mut contribution_c);
+        let inverse_jacobian_length_squared = inverse_jacobian_length * inverse_jacobian_length;
 
-        // Epsilon based on target area to protect against singularity
-        let epsilon = Vector::<f32>::splat(5e-4) * prestep.target_scaled_area;
-        contribution_a = contribution_a.simd_max(epsilon);
-        contribution_b = contribution_b.simd_max(epsilon);
-        contribution_c = contribution_c.simd_max(epsilon);
-        let inverse_effective_mass = contribution_a * inertia_a.inverse_mass
-            + contribution_b * inertia_b.inverse_mass
-            + contribution_c * inertia_c.inverse_mass;
+        // Guard against degenerate configurations (e.g. triangle collapsed to a line) where all contributions are zero.
+        let inverse_effective_mass = (inverse_jacobian_length_squared
+            * (contribution_a * inertia_a.inverse_mass
+                + contribution_b * inertia_b.inverse_mass
+                + contribution_c * inertia_c.inverse_mass))
+            .simd_max(Vector::<f32>::splat(1e-14));
 
         let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
         let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
@@ -261,8 +281,10 @@ impl AreaConstraintFunctions {
         );
 
         let effective_mass = effective_mass_cfm_scale / inverse_effective_mass;
-        let bias_velocity =
-            (prestep.target_scaled_area - normal_length) * position_error_to_velocity;
+        // Compute the position error and bias velocities. Note the order of subtraction when calculating error- we want the bias velocity to counteract the separation.
+        let bias_velocity = (prestep.target_scaled_area - normal_length)
+            * inverse_jacobian_length
+            * position_error_to_velocity;
 
         let mut negated_velocity_contribution_a = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(
@@ -274,8 +296,8 @@ impl AreaConstraintFunctions {
         Vector3Wide::dot(&jacobian_b, &wsv_b.linear, &mut velocity_contribution_b);
         let mut velocity_contribution_c = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&jacobian_c, &wsv_c.linear, &mut velocity_contribution_c);
-        let csv =
-            velocity_contribution_b + velocity_contribution_c - negated_velocity_contribution_a;
+        let csv = inverse_jacobian_length
+            * (velocity_contribution_b + velocity_contribution_c - negated_velocity_contribution_a);
         let csi =
             (bias_velocity - csv) * effective_mass - *accumulated_impulses * softness_impulse_scale;
         *accumulated_impulses += csi;
@@ -287,7 +309,7 @@ impl AreaConstraintFunctions {
             &negated_jacobian_a,
             &jacobian_b,
             &jacobian_c,
-            &csi,
+            &(inverse_jacobian_length * csi),
             wsv_a,
             wsv_b,
             wsv_c,

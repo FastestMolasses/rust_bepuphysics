@@ -5,6 +5,7 @@ use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
+#[derive(Default)]
 pub struct ConstraintSet {
     pub batches: QuickList<ConstraintBatch>,
     pub sequential_fallback: SequentialFallbackBatch,
@@ -63,14 +64,5 @@ impl ConstraintSet {
         self.sequential_fallback.dispose(pool);
         self.batches.dispose(pool);
         *self = Self::default();
-    }
-}
-
-impl Default for ConstraintSet {
-    fn default() -> Self {
-        Self {
-            batches: QuickList::default(),
-            sequential_fallback: SequentialFallbackBatch::default(),
-        }
     }
 }

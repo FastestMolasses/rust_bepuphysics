@@ -113,8 +113,7 @@ impl CapsuleTriangleTester {
             )
         };
         let mut second_fallback_length_squared = Vector::<f32>::splat(0.0);
-        // Note: C# has a bug here using fallbackNormal instead of secondFallbackNormal for LengthSquared. We replicate the bug.
-        Vector3Wide::length_squared_to(&fallback_normal, &mut second_fallback_length_squared);
+        Vector3Wide::length_squared_to(&second_fallback_normal, &mut second_fallback_length_squared);
         let use_second_fallback = normal_length_squared.simd_lt(Vector::<f32>::splat(1e-13));
         *normal = Vector3Wide::conditional_select(
             &use_second_fallback.to_simd(),

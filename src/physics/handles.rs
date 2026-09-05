@@ -1,13 +1,17 @@
 use std::hash::Hash;
 
-// Newtype Pattern for enhanced type safety
+// Newtype Pattern for enhanced type safety.
+// repr(transparent): layout identical to i32, so &[XHandle] may be reinterpreted as &[i32].
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[repr(transparent)]
 pub struct BodyHandle(pub i32);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[repr(transparent)]
 pub struct StaticHandle(pub i32);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[repr(transparent)]
 pub struct ConstraintHandle(pub i32);
 
 // Simple implementations for Display for user-friendliness

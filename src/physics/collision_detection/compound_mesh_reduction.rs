@@ -1,10 +1,13 @@
 // Translated from BepuPhysics/CollisionDetection/CompoundMeshReduction.cs
 
+use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_batcher_continuations::{
     ICollisionTestContinuation, PairContinuation,
 };
 use crate::physics::collision_detection::contact_manifold::ConvexContactManifold;
-use crate::physics::collision_detection::mesh_reduction::{BoundingBox, MeshReduction, Triangle};
+use crate::physics::collision_detection::mesh_reduction::{
+    BoundingBox, FindLocalOverlapsFn, GetLocalChildFn, MeshReduction, Triangle,
+};
 use crate::physics::collision_detection::nonconvex_reduction::{FlushResult, NonconvexReduction};
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
@@ -27,6 +30,10 @@ pub struct CompoundMeshReduction {
     pub inner: NonconvexReduction,
     /// Pointer to the mesh. TODO: Make flexible for different mesh types.
     pub mesh: *mut u8,
+    /// Type-erased tree-query thunk, populated per-TMesh at continuation-creation time.
+    pub find_local_overlaps_thunk: Option<FindLocalOverlapsFn>,
+    /// Type-erased local-child-lookup thunk, populated per-TMesh at continuation-creation time.
+    pub get_local_child_thunk: Option<GetLocalChildFn>,
 }
 
 impl ICollisionTestContinuation for CompoundMeshReduction {
@@ -46,6 +53,8 @@ impl Default for CompoundMeshReduction {
             mesh_orientation: Quat::IDENTITY,
             inner: NonconvexReduction::default(),
             mesh: std::ptr::null_mut(),
+            find_local_overlaps_thunk: None,
+            get_local_child_thunk: None,
         }
     }
 }
@@ -75,7 +84,12 @@ impl CompoundMeshReduction {
     }
 
     /// Tries to flush the compound-mesh reduction if all children are completed.
-    pub unsafe fn try_flush(&mut self, pair_id: i32, pool: &mut BufferPool) -> Option<FlushResult> {
+    pub unsafe fn try_flush(
+        &mut self,
+        pair_id: i32,
+        shapes: *mut Shapes,
+        pool: &mut BufferPool,
+    ) -> Option<FlushResult> {
         debug_assert!(self.inner.child_count > 0);
         if self.inner.completed_child_count == self.inner.child_count {
             let mut mesh_orientation = Matrix3x3::default();
@@ -96,6 +110,9 @@ impl CompoundMeshReduction {
                         &mesh_orientation,
                         &mesh_inverse_orientation,
                         self.mesh,
+                        self.find_local_overlaps_thunk,
+                        self.get_local_child_thunk,
+                        shapes,
                         pool,
                     );
                 }

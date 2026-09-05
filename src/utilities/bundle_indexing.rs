@@ -1,8 +1,5 @@
 use crate::utilities::vector::Vector;
-use std::simd::{
-    cmp::{SimdPartialEq, SimdPartialOrd},
-    Simd,
-};
+use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
 
 pub const VECTOR_MASK: usize = Vector::<f32>::LEN - 1;
 
@@ -47,11 +44,8 @@ impl BundleIndexing {
     pub fn create_trailing_mask_for_count_in_bundle(count_in_bundle: usize) -> Vector<i32> {
         let count = Vector::<i32>::splat(count_in_bundle as i32);
         let indices = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
-        let mask = count.simd_le(indices);
-        // Convert bool mask to -1/0 integers
-        Simd::from_array(std::array::from_fn(
-            |i| if mask.test(i) { -1i32 } else { 0i32 },
-        ))
+        // A single vector compare yields the -1/0 lane mask directly.
+        count.simd_le(indices).to_simd()
     }
 
     /// Creates a mask where lanes < count_in_bundle are set to -1 (all bits set).
@@ -59,11 +53,7 @@ impl BundleIndexing {
     pub fn create_mask_for_count_in_bundle(count_in_bundle: usize) -> Vector<i32> {
         let count = Vector::<i32>::splat(count_in_bundle as i32);
         let indices = Vector::<i32>::from_array(std::array::from_fn(|i| i as i32));
-        let mask = count.simd_gt(indices);
-        // Convert bool mask to -1/0 integers
-        Simd::from_array(std::array::from_fn(
-            |i| if mask.test(i) { -1i32 } else { 0i32 },
-        ))
+        count.simd_gt(indices).to_simd()
     }
 
     #[inline(always)]

@@ -6,7 +6,7 @@ use glam::Vec3;
 
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::compound::Compound;
-use crate::physics::collidables::shape::IHomogeneousCompoundShape;
+use crate::physics::collidables::shape::{ICompoundShape, IHomogeneousCompoundShape};
 use crate::physics::collidables::triangle::{Triangle, TriangleWide};
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::physics::collision_detection::collision_batcher_continuations::CollisionContinuationType;
@@ -35,7 +35,7 @@ impl<TCompound, TMesh> Default for CompoundMeshContinuations<TCompound, TMesh> {
     }
 }
 
-impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
+impl<TCompound: ICompoundShape, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
     ICompoundPairContinuationHandler<CompoundMeshReduction>
     for CompoundMeshContinuations<TCompound, TMesh>
 {
@@ -63,6 +63,12 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
         continuation.region_count = pair_overlaps.len();
         continuation.mesh_orientation = pair.orientation_b;
         continuation.mesh = pair.b as *mut u8;
+        continuation.find_local_overlaps_thunk = Some(
+            crate::physics::collision_detection::mesh_reduction::find_local_overlaps_thunk::<TMesh>,
+        );
+        continuation.get_local_child_thunk = Some(
+            crate::physics::collision_detection::mesh_reduction::get_local_child_thunk::<TMesh>,
+        );
         continuation.requires_flip = pair.flip_mask == 0;
 
         // All regions must be assigned ahead of time. Some trailing regions may be empty,
@@ -91,8 +97,8 @@ impl<TCompound, TMesh: IHomogeneousCompoundShape<Triangle, TriangleWide>>
         child_type_a: &mut i32,
         child_shape_data_a: &mut *const u8,
     ) {
-        let compound = &*(pair.a as *const Compound);
-        let compound_child = &compound.children[child_index_a as usize];
+        let compound = &*(pair.a as *const TCompound);
+        let compound_child = compound.get_child(child_index_a);
 
         Compound::get_rotated_child_pose(
             compound_child.local_position,

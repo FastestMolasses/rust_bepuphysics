@@ -168,8 +168,8 @@ pub unsafe fn sort_u32_simple<T: Copy>(
 
     // Count occurrences
     for i in 0..key_count as usize {
-        let bucket_index = ((keys[i] >> shift) & MASK) as usize;
-        bucket_counts[bucket_index] += 1;
+        let bucket_index = ((*keys.get_unchecked(i) >> shift) & MASK) as usize;
+        *bucket_counts.get_unchecked_mut(bucket_index) += 1;
     }
 
     // Convert to partial sums
@@ -186,27 +186,27 @@ pub unsafe fn sort_u32_simple<T: Copy>(
         let next_start_index = if i == BUCKET_COUNT - 1 {
             key_count
         } else {
-            bucket_original_start_indices[i + 1]
+            *bucket_original_start_indices.get_unchecked(i + 1)
         };
 
-        while bucket_counts[i] < next_start_index {
-            let idx = bucket_counts[i] as usize;
-            let mut local_key = keys[idx];
-            let mut local_value = values[idx];
+        while *bucket_counts.get_unchecked(i) < next_start_index {
+            let idx = *bucket_counts.get_unchecked(i) as usize;
+            let mut local_key = *keys.get_unchecked(idx);
+            let mut local_value = *values.get_unchecked(idx);
 
             loop {
                 let target_bucket_index = ((local_key >> shift) & MASK) as usize;
                 if target_bucket_index == i {
-                    keys[idx] = local_key;
-                    values[idx] = local_value;
-                    bucket_counts[i] += 1;
+                    *keys.get_unchecked_mut(idx) = local_key;
+                    *values.get_unchecked_mut(idx) = local_value;
+                    *bucket_counts.get_unchecked_mut(i) += 1;
                     break;
                 }
 
-                let target_idx = bucket_counts[target_bucket_index] as usize;
-                std::mem::swap(&mut keys[target_idx], &mut local_key);
-                std::mem::swap(&mut values[target_idx], &mut local_value);
-                bucket_counts[target_bucket_index] += 1;
+                let target_idx = *bucket_counts.get_unchecked(target_bucket_index) as usize;
+                std::mem::swap(keys.get_unchecked_mut(target_idx), &mut local_key);
+                std::mem::swap(values.get_unchecked_mut(target_idx), &mut local_value);
+                *bucket_counts.get_unchecked_mut(target_bucket_index) += 1;
             }
         }
     }

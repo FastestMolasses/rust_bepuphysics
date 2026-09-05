@@ -19,6 +19,7 @@ use crate::physics::collision_detection::ray_batchers::RayData;
 
 // The IRayLeafTester trait uses the RayData type from ray_batcher, not collidables::ray.
 use crate::physics::trees::ray_batcher::RayData as TreeRayData;
+use crate::physics::trees::ray_batcher::{RaySource, RaySourceTrait};
 
 use crate::physics::body_properties::{BodyInertia, RigidPose};
 use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps::{
@@ -247,7 +248,7 @@ impl Mesh {
     ) -> Self {
         let tri_len = triangles.len();
         let mut mesh = Self::create_without_tree_build(triangles, scale, pool);
-        let mut subtrees: Buffer<NodeChild> = pool.take_at_least(tri_len);
+        let mut subtrees: Buffer<NodeChild> = pool.take(tri_len);
         Self::fill_subtrees_for_triangles(
             std::slice::from_raw_parts(mesh.triangles.as_ptr(), tri_len as usize),
             std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), tri_len as usize),
@@ -262,9 +263,21 @@ impl Mesh {
 
     /// Creates a mesh shape with an acceleration structure built using the binned builder.
     pub unsafe fn new(triangles: Buffer<Triangle>, scale: Vec3, pool: &mut BufferPool) -> Self {
+        Self::new_with_dispatcher(triangles, scale, pool, None)
+    }
+
+    /// Creates a mesh shape with an acceleration structure built using the binned builder.
+    /// If `dispatcher` is provided, the build will be multithreaded; if `None`, the build will
+    /// be single threaded.
+    pub unsafe fn new_with_dispatcher(
+        triangles: Buffer<Triangle>,
+        scale: Vec3,
+        pool: &mut BufferPool,
+        dispatcher: Option<&dyn crate::utilities::thread_dispatcher::IThreadDispatcher>,
+    ) -> Self {
         let tri_len = triangles.len();
         let mut mesh = Self::create_without_tree_build(triangles, scale, pool);
-        let mut subtrees: Buffer<NodeChild> = pool.take_at_least(tri_len);
+        let mut subtrees: Buffer<NodeChild> = pool.take(tri_len);
         Self::fill_subtrees_for_triangles(
             std::slice::from_raw_parts(mesh.triangles.as_ptr(), tri_len as usize),
             std::slice::from_raw_parts_mut(subtrees.as_mut_ptr(), tri_len as usize),
@@ -272,7 +285,7 @@ impl Mesh {
         mesh.tree.binned_build(
             subtrees,
             Some(pool as *mut BufferPool),
-            None,
+            dispatcher,
             None,
             0,
             -1,
@@ -305,7 +318,7 @@ impl Mesh {
         let tree_data = &data[16 + triangle_byte_count..];
         let tree = Tree::from_bytes(tree_data, pool);
 
-        let mut triangles: Buffer<Triangle> = pool.take_at_least(triangle_count);
+        let mut triangles: Buffer<Triangle> = pool.take(triangle_count);
         std::ptr::copy_nonoverlapping(
             data.as_ptr().add(16),
             triangles.as_mut_ptr() as *mut u8,
@@ -443,6 +456,51 @@ impl Mesh {
             &mut leaf_tester,
             0,
         );
+        // The leaf tester could have mutated the hit handler; copy it back over.
+        std::ptr::write(hit_handler, leaf_tester.hit_handler);
+    }
+
+    /// Casts a batch of rays against the mesh. Executes a callback for every test candidate and every hit.
+    ///
+    /// # Safety
+    /// Caller must ensure rays and pool are valid.
+    pub unsafe fn ray_test_batched<TRayHitHandler: IShapeRayHitHandler>(
+        &self,
+        pose: &RigidPose,
+        rays: &mut RaySource,
+        pool: &mut BufferPool,
+        hit_handler: &mut TRayHitHandler,
+    ) {
+        let mut leaf_tester = HitLeafTester {
+            triangles: self.triangles.as_ptr(),
+            hit_handler: std::ptr::read(hit_handler),
+            orientation: Matrix3x3::default(),
+            inverse_scale: self.inverse_scale,
+            original_ray: RayData::default(),
+        };
+        Matrix3x3::create_from_quaternion(&pose.orientation, &mut leaf_tester.orientation);
+        let mut inverse_orientation = Matrix3x3::default();
+        Matrix3x3::transpose(&leaf_tester.orientation, &mut inverse_orientation);
+        for i in 0..rays.ray_count() {
+            let (ray_ptr, max_t_ptr) = rays.get_ray_ptrs(i);
+            let ray = &*ray_ptr;
+            leaf_tester.original_ray = *ray;
+            let offset = ray.origin - pose.position;
+            let mut local_origin = Vec3::ZERO;
+            let mut local_direction = Vec3::ZERO;
+            Matrix3x3::transform(&offset, &inverse_orientation, &mut local_origin);
+            Matrix3x3::transform(&ray.direction, &inverse_orientation, &mut local_direction);
+            local_origin *= self.inverse_scale;
+            local_direction *= self.inverse_scale;
+            self.tree.ray_cast(
+                local_origin,
+                local_direction,
+                &mut *max_t_ptr,
+                pool,
+                &mut leaf_tester,
+                0,
+            );
+        }
         // The leaf tester could have mutated the hit handler; copy it back over.
         std::ptr::write(hit_handler, leaf_tester.hit_handler);
     }
@@ -680,6 +738,34 @@ impl super::shape::INonConvexBounds for Mesh {
         let mut wrapper = DynHandlerWrapper(hit_handler);
         self.ray_test(pose, ray, maximum_t, pool, &mut wrapper);
     }
+
+    unsafe fn ray_test_shape_batched(
+        &self,
+        pose: &RigidPose,
+        rays: &mut RaySource,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
+        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
+        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        self.ray_test_batched(pose, rays, pool, &mut wrapper);
+    }
 }
 
 impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
@@ -724,8 +810,16 @@ impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
             }
         }
         let mut adapter = OverlapAdapter(overlaps);
-        self.tree
-            .get_overlaps_minmax(*local_min, *local_max, pool, &mut adapter);
+        // The tree is built from unscaled source triangles, so the query AABB has to be
+        // brought into unscaled space. Take a min/max to compensate for negative scales.
+        let scaled_min = *local_min * self.inverse_scale;
+        let scaled_max = *local_max * self.inverse_scale;
+        self.tree.get_overlaps_minmax(
+            scaled_min.min(scaled_max),
+            scaled_min.max(scaled_max),
+            pool,
+            &mut adapter,
+        );
     }
 }
 

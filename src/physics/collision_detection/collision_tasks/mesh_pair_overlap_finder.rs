@@ -38,8 +38,7 @@ impl<
         pool: &mut BufferPool,
         shapes: &Shapes,
         dt: f32,
-        overlaps: &mut CompoundPairOverlaps,
-    ) {
+    ) -> CompoundPairOverlaps {
         let lanes = Vector::<f32>::LEN as i32;
 
         // Count total triangles in mesh A across all pairs.
@@ -49,7 +48,7 @@ impl<
             total_compound_child_count += mesh_a.child_count();
         }
 
-        *overlaps = CompoundPairOverlaps::new(pool, pair_count, total_compound_child_count);
+        let mut overlaps = CompoundPairOverlaps::new(pool, pair_count, total_compound_child_count);
 
         // Set up query pairs: each triangle in mesh A needs to be tested against mesh B.
         let mut next_subpair_index = 0i32;
@@ -103,13 +102,14 @@ impl<
                     count = lanes;
                 }
                 for inner_index in 0..count {
-                    // Write the child into slot 0 of a temp, then copy to the correct slot.
-                    let mut temp = triangles;
-                    mesh_a.get_local_child_wide(j + inner_index, &mut temp);
+                    let mut child_triangle = Triangle {
+                        a: glam::Vec3::ZERO,
+                        b: glam::Vec3::ZERO,
+                        c: glam::Vec3::ZERO,
+                    };
+                    mesh_a.get_local_child(j + inner_index, &mut child_triangle);
                     let slot = inner_index as usize;
-                    Vector3Wide::copy_slot(&temp.a, 0, &mut triangles.a, slot);
-                    Vector3Wide::copy_slot(&temp.b, 0, &mut triangles.b, slot);
-                    Vector3Wide::copy_slot(&temp.c, 0, &mut triangles.c, slot);
+                    IShapeWide::<Triangle>::write_slot(&mut triangles, slot, &child_triangle);
                 }
 
                 let mut maximum_radius = Vector::<f32>::default();
@@ -166,6 +166,8 @@ impl<
         IBoundsQueryableCompound::find_local_overlaps::<
             CompoundPairOverlaps,
             ChildOverlapsCollection,
-        >(mesh_b, &*pair_queries_ptr, pool, shapes, overlaps);
+        >(mesh_b, &*pair_queries_ptr, pool, shapes, &mut overlaps);
+
+        overlaps
     }
 }

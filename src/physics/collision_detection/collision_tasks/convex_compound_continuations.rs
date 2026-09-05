@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use crate::physics::body_properties::RigidPose;
 use crate::physics::collidables::compound::Compound;
+use crate::physics::collidables::shape::ICompoundShape;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::physics::collision_detection::collision_batcher_continuations::CollisionContinuationType;
 use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
@@ -16,11 +17,11 @@ use super::convex_compound_collision_task::IConvexCompoundContinuationHandler;
 ///
 /// Creates NonconvexReduction continuations to accumulate child manifolds
 /// from a compound shape and reduce them into a single nonconvex manifold.
-pub struct ConvexCompoundContinuations<TCompound> {
+pub struct ConvexCompoundContinuations<TCompound: ICompoundShape> {
     _marker: PhantomData<TCompound>,
 }
 
-impl<TCompound> Default for ConvexCompoundContinuations<TCompound> {
+impl<TCompound: ICompoundShape> Default for ConvexCompoundContinuations<TCompound> {
     fn default() -> Self {
         Self {
             _marker: PhantomData,
@@ -28,7 +29,7 @@ impl<TCompound> Default for ConvexCompoundContinuations<TCompound> {
     }
 }
 
-impl<TCompound> IConvexCompoundContinuationHandler<NonconvexReduction>
+impl<TCompound: ICompoundShape> IConvexCompoundContinuationHandler<NonconvexReduction>
     for ConvexCompoundContinuations<TCompound>
 {
     fn collision_continuation_type(&self) -> CollisionContinuationType {
@@ -63,8 +64,8 @@ impl<TCompound> IConvexCompoundContinuationHandler<NonconvexReduction>
         child_shape_data_b: &mut *const u8,
     ) {
         // Get the compound child and compute its world-space pose.
-        let compound = &*(pair.b as *const Compound);
-        let compound_child = &compound.children[child_index as usize];
+        let compound = &*(pair.b as *const TCompound);
+        let compound_child = compound.get_child(child_index);
 
         // Compute the rotated child pose in world space.
         Compound::get_rotated_child_pose(

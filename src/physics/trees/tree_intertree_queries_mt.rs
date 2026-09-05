@@ -55,11 +55,13 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
         overlap_handlers: Vec<TOverlapHandler>,
         thread_count: i32,
     ) {
+        // Assign before the early return so the caller can always move the handlers back out.
+        self.overlap_handlers = overlap_handlers;
         if tree_a.leaf_count == 0 || tree_b.leaf_count == 0 {
             self.jobs = QuickList::default();
             return;
         }
-        debug_assert!(overlap_handlers.len() >= thread_count as usize);
+        debug_assert!(self.overlap_handlers.len() >= thread_count as usize);
         let job_multiplier = 8.0f32;
         let target_job_count = (1.0f32).max(job_multiplier * thread_count as f32);
         self.leaf_threshold =
@@ -68,7 +70,6 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
         unsafe {
             *self.next_node_pair.get() = -1;
         }
-        self.overlap_handlers = overlap_handlers;
         self.tree_a = tree_a as *const Tree;
         self.tree_b = tree_b as *const Tree;
 
@@ -108,7 +109,17 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
         }
     }
 
-    pub unsafe fn execute_job(&mut self, job_index: i32, worker_index: i32) {
+    /// Gets a mutable reference to a single worker's overlap handler slot.
+    ///
+    /// # Safety
+    /// Sound only because each worker index is exclusively accessed by its own thread by
+    /// design (mirrors `TaskStack::worker_mut`); the caller must uphold that discipline.
+    #[inline(always)]
+    unsafe fn handler_mut(&self, worker_index: i32) -> &mut TOverlapHandler {
+        &mut *(self.overlap_handlers.as_ptr().add(worker_index as usize) as *mut TOverlapHandler)
+    }
+
+    pub unsafe fn execute_job(&self, job_index: i32, worker_index: i32) {
         let tree_a = &*self.tree_a;
         let tree_b = &*self.tree_b;
         let overlap = *self.jobs.get(job_index);
@@ -119,7 +130,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                     tree_a.nodes.get(overlap.a),
                     tree_b.nodes.get(overlap.b),
                     tree_b,
-                    &mut self.overlap_handlers[worker_index as usize],
+                    self.handler_mut(worker_index),
                 );
             } else {
                 // A is an internal node, B is a leaf.
@@ -135,7 +146,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                     overlap.a,
                     leaf_index,
                     child_owning_leaf,
-                    &mut self.overlap_handlers[worker_index as usize],
+                    self.handler_mut(worker_index),
                 );
             }
         } else {
@@ -153,13 +164,13 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                 child_owning_leaf,
                 overlap.b,
                 tree_b,
-                &mut self.overlap_handlers[worker_index as usize],
+                self.handler_mut(worker_index),
             );
         }
     }
 
     /// Executes a single worker of the multithreaded inter-tree test.
-    pub unsafe fn pair_test(&mut self, worker_index: i32) {
+    pub unsafe fn pair_test(&self, worker_index: i32) {
         debug_assert!(worker_index >= 0 && (worker_index as usize) < self.overlap_handlers.len());
         loop {
             let next_node_pair_index = unsafe {
@@ -207,35 +218,50 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                     );
                 }
             } else {
-                let node_owner = if node_owner_is_a {
-                    &*self.tree_a
-                } else {
-                    &*self.tree_b
-                };
-                let node = node_owner.nodes.get(node_index);
-                let b_index = node.b.index;
-                let b_leaf_count = node.b.leaf_count;
-                let a_intersects = BoundingBox::intersects_unsafe(leaf_child, &node.a);
-                let b_intersects = BoundingBox::intersects_unsafe(leaf_child, &node.b);
-                if a_intersects {
-                    self.dispatch_test_for_leaf(
-                        node_owner_is_a,
-                        leaf_index,
-                        leaf_child,
-                        node.a.index,
-                        node.a.leaf_count,
-                    );
-                }
-                if b_intersects {
-                    self.dispatch_test_for_leaf(
-                        node_owner_is_a,
-                        leaf_index,
-                        leaf_child,
-                        b_index,
-                        b_leaf_count,
-                    );
-                }
+                self.test_leaf_against_node(node_owner_is_a, leaf_index, leaf_child, node_index);
             }
+        }
+    }
+
+    /// Like `Tree::test_leaf_against_node_intertree`, but recurses via `dispatch_test_for_leaf` to keep splitting jobs.
+    unsafe fn test_leaf_against_node(
+        &mut self,
+        node_owner_is_a: bool,
+        leaf_index: i32,
+        leaf_child: &NodeChild,
+        node_index: i32,
+    ) {
+        let node_owner = if node_owner_is_a {
+            &*self.tree_a
+        } else {
+            &*self.tree_b
+        };
+        let node = node_owner.nodes.get(node_index);
+        // Despite recursion, leafBounds should remain in L1- it'll be used all the way down the
+        // recursion from here. However, while we likely loaded child B when we loaded child A,
+        // there's no guarantee that it will stick around. Reloading that in the event of
+        // eviction would require more work than keeping the derived data on the stack.
+        let b_index = node.b.index;
+        let b_leaf_count = node.b.leaf_count;
+        let a_intersects = BoundingBox::intersects_unsafe(leaf_child, &node.a);
+        let b_intersects = BoundingBox::intersects_unsafe(leaf_child, &node.b);
+        if a_intersects {
+            self.dispatch_test_for_leaf(
+                node_owner_is_a,
+                leaf_index,
+                leaf_child,
+                node.a.index,
+                node.a.leaf_count,
+            );
+        }
+        if b_intersects {
+            self.dispatch_test_for_leaf(
+                node_owner_is_a,
+                leaf_index,
+                leaf_child,
+                b_index,
+                b_leaf_count,
+            );
         }
     }
 
@@ -259,30 +285,12 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedIntertreeTest<TOverlapHandle
                     );
                 }
             } else {
-                // leaf B versus node A.
-                let leaf_index = Tree::encode(b.index);
-                let leaf = tree_b.leaves.get(leaf_index);
-                let lnode = tree_b.nodes.get(leaf.node_index());
-                let child_owning = if leaf.child_index() == 0 {
-                    &lnode.a
-                } else {
-                    &lnode.b
-                };
-                // node A is in tree_a
-                self.dispatch_test_for_leaf(true, leaf_index, child_owning, a.index, a.leaf_count);
+                // leaf B versus node A. node A is in tree_a.
+                self.test_leaf_against_node(true, Tree::encode(b.index), b, a.index);
             }
         } else if b.index >= 0 {
-            // leaf A versus node B.
-            let leaf_index = Tree::encode(a.index);
-            let leaf = tree_a.leaves.get(leaf_index);
-            let lnode = tree_a.nodes.get(leaf.node_index());
-            let child_owning = if leaf.child_index() == 0 {
-                &lnode.a
-            } else {
-                &lnode.b
-            };
-            // node B is in tree_b
-            self.dispatch_test_for_leaf(false, leaf_index, child_owning, b.index, b.leaf_count);
+            // leaf A versus node B. node B is in tree_b.
+            self.test_leaf_against_node(false, Tree::encode(a.index), a, b.index);
         } else {
             // Two leaves.
             self.overlap_handlers[0].handle(Tree::encode(a.index), Tree::encode(b.index));

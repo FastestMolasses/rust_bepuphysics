@@ -198,7 +198,7 @@ impl<
                 type_batch,
                 handle,
                 encoded_body_indices,
-                &mut *pool,
+                pool,
                 2, // bodies_per_constraint
                 std::mem::size_of::<TwoBodyReferences>(),
                 std::mem::size_of::<TPrestepData>(),

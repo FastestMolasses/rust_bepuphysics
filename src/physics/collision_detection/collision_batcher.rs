@@ -9,8 +9,9 @@ use crate::physics::collision_detection::collision_batcher_continuations::{
 use crate::physics::collision_detection::collision_task_registry::{
     BatcherVtable, CollisionTaskPairType, CollisionTaskRegistry,
 };
-use crate::physics::collision_detection::collision_tasks::pair_types::{
-    SphereIncludingPair, SpherePair,
+// Canonical pair type definitions live in pair_types.rs; re-exported here for downstream imports.
+pub use crate::physics::collision_detection::collision_tasks::pair_types::{
+    BoundsTestedPair, CollisionPair, FliplessPair, SphereIncludingPair, SpherePair,
 };
 use crate::physics::collision_detection::compound_mesh_reduction::CompoundMeshReduction;
 use crate::physics::collision_detection::contact_manifold::{
@@ -71,48 +72,6 @@ pub trait ICollisionCallbacks {
 
     /// Checks whether further collision testing should be performed for a given subtask.
     fn allow_collision_testing(&self, pair_id: i32, child_a: i32, child_b: i32) -> bool;
-}
-
-/// Collision pair fed to collision tasks for standard pairs.
-#[repr(C)]
-pub struct CollisionPair {
-    pub a: *const u8,
-    pub b: *const u8,
-    pub flip_mask: i32,
-    pub offset_b: Vec3,
-    pub orientation_a: Quat,
-    pub orientation_b: Quat,
-    pub speculative_margin: f32,
-    pub continuation: PairContinuation,
-}
-
-/// Collision pair variation that omits the flip mask.
-#[repr(C)]
-pub struct FliplessPair {
-    pub a: *const u8,
-    pub b: *const u8,
-    pub offset_b: Vec3,
-    pub orientation_a: Quat,
-    pub orientation_b: Quat,
-    pub speculative_margin: f32,
-    pub continuation: PairContinuation,
-}
-
-/// Collision pair with bounds testing data (velocity, expansion).
-#[repr(C)]
-pub struct BoundsTestedPair {
-    pub a: *const u8,
-    pub b: *const u8,
-    pub flip_mask: i32,
-    pub offset_b: Vec3,
-    pub orientation_a: Quat,
-    pub orientation_b: Quat,
-    pub relative_linear_velocity_a: Vec3,
-    pub angular_velocity_a: Vec3,
-    pub angular_velocity_b: Vec3,
-    pub maximum_expansion: f32,
-    pub speculative_margin: f32,
-    pub continuation: PairContinuation,
 }
 
 /// Batches collision tests and manages post-processing continuations.
@@ -617,7 +576,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
                             .get_mut(continuation.index());
                         slot.on_child_completed(continuation, manifold);
                         if let Some(flush_result) =
-                            slot.try_flush(continuation.pair_id, &mut *self.pool)
+                            slot.try_flush(continuation.pair_id, self.shapes, &mut *self.pool)
                         {
                             self.report_flush_result(continuation.pair_id, flush_result);
                             self.mesh_reductions
@@ -632,7 +591,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
                             .get_mut(continuation.index());
                         slot.on_child_completed(continuation, manifold);
                         if let Some(flush_result) =
-                            slot.try_flush(continuation.pair_id, &mut *self.pool)
+                            slot.try_flush(continuation.pair_id, self.shapes, &mut *self.pool)
                         {
                             self.report_flush_result(continuation.pair_id, flush_result);
                             self.compound_mesh_reductions
@@ -691,7 +650,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
                         .get_mut(continuation.index());
                     slot.on_untested_child_completed(continuation);
                     if let Some(flush_result) =
-                        slot.try_flush(continuation.pair_id, &mut *self.pool)
+                        slot.try_flush(continuation.pair_id, self.shapes, &mut *self.pool)
                     {
                         self.report_flush_result(continuation.pair_id, flush_result);
                         self.mesh_reductions
@@ -706,7 +665,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
                         .get_mut(continuation.index());
                     slot.on_untested_child_completed(continuation);
                     if let Some(flush_result) =
-                        slot.try_flush(continuation.pair_id, &mut *self.pool)
+                        slot.try_flush(continuation.pair_id, self.shapes, &mut *self.pool)
                     {
                         self.report_flush_result(continuation.pair_id, flush_result);
                         self.compound_mesh_reductions
@@ -724,12 +683,17 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         unsafe {
             let type_matrix = &*self.type_matrix;
             let vtable = self.make_vtable();
-            // Execute remaining partial batches
-            for i in self.minimum_batch_index..=self.maximum_batch_index {
+            // Execute remaining partial batches.
+            // The collision task registry guarantees that tasks which create work for other tasks always appear sooner in the task array than their child tasks.
+            // Since there are no cycles, only one flush pass is required.
+            // maximum_batch_index must be re-read each iteration: a compound/mesh batch can add child pairs at higher indices.
+            let mut i = self.minimum_batch_index;
+            while i <= self.maximum_batch_index {
                 let batch_ptr = self.batches.get_mut_ptr(i);
                 if (*batch_ptr).pairs.count > 0 {
                     type_matrix.tasks[i as usize].execute_batch(&mut (*batch_ptr).pairs, &vtable);
                 }
+                i += 1;
             }
             // Dispose batch resources
             let pool = &mut *self.pool;

@@ -5,6 +5,7 @@
 
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
+use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering};
 
 use crate::utilities::memory::buffer::Buffer;
@@ -56,6 +57,9 @@ impl Default for StopPad {
 /// - Continuation support for task dependencies
 /// - Job tagging and filtering for selective work stealing
 /// - Parallel for loop primitives
+///
+/// `#[repr(C)]` keeps the CAS-contended `head` off the cache line shared with `workers`, matching C#'s layout.
+#[repr(C)]
 pub struct TaskStack {
     /// Per-worker storage for job allocation and continuation management.
     workers: Buffer<Worker>,
@@ -67,10 +71,46 @@ pub struct TaskStack {
     head: UnsafeCell<*mut Job>,
 }
 
+// Verify layout matches C# (workers@0, padded@16, head@288, size 296) at compile time.
+const _: () = {
+    assert!(std::mem::offset_of!(TaskStack, workers) == 0);
+    assert!(std::mem::offset_of!(TaskStack, padded) == 16);
+    assert!(std::mem::offset_of!(TaskStack, head) == 288);
+    assert!(std::mem::size_of::<TaskStack>() == 296);
+};
+
 // Safety: TaskStack uses atomic operations for all concurrent access.
 // Workers are accessed only by their owning thread.
 unsafe impl Send for TaskStack {}
 unsafe impl Sync for TaskStack {}
+
+/// Fixed stand-in for C#'s unbounded `stackalloc Task[count]` in run_tasks/push_for/for_loop.
+const STACK_TASK_CAP: usize = 1024;
+
+/// C# `SpinWait.YieldThreshold`: spin rounds before yielding.
+const SPIN_YIELD_THRESHOLD: u32 = 10;
+
+/// C# `SpinWait.Sleep0EveryHowManyYields`: every 5th post-threshold round does `Sleep(0)`.
+const SPIN_SLEEP0_EVERY_HOW_MANY_YIELDS: u32 = 5;
+
+/// `SpinWait.SpinOnce(-1)`: escalating spins, then yield with an occasional `Sleep(0)`; never `Sleep(1)`.
+#[inline(always)]
+fn spin_wait_once(spin_count: u32) {
+    if spin_count < SPIN_YIELD_THRESHOLD {
+        for _ in 0..(1u32 << spin_count) {
+            std::hint::spin_loop();
+        }
+    } else {
+        let yields_so_far = spin_count - SPIN_YIELD_THRESHOLD;
+        if yields_so_far % SPIN_SLEEP0_EVERY_HOW_MANY_YIELDS
+            == SPIN_SLEEP0_EVERY_HOW_MANY_YIELDS - 1
+        {
+            std::thread::sleep(std::time::Duration::ZERO);
+        } else {
+            std::thread::yield_now();
+        }
+    }
+}
 
 impl TaskStack {
     /// Gets a mutable reference to a worker from this TaskStack.
@@ -459,12 +499,7 @@ impl TaskStack {
                     spin_count = 0;
                 }
                 PopTaskResult::Empty => {
-                    // C# SpinWait.SpinOnce(-1): spin then yield, never sleep.
-                    if spin_count < 10 {
-                        std::hint::spin_loop();
-                    } else {
-                        std::thread::yield_now();
-                    }
+                    spin_wait_once(spin_count);
                     spin_count += 1;
                 }
             }
@@ -517,8 +552,13 @@ impl TaskStack {
                 )
             };
 
-            // Build tasks_to_push with the continuation set.
-            let mut tasks_to_push = Vec::with_capacity(task_count as usize);
+            // Fixed stack storage standing in for C#'s `stackalloc Task[taskCount]`.
+            debug_assert!(
+                (task_count as usize) <= STACK_TASK_CAP,
+                "run_tasks task count exceeds fixed stack capacity"
+            );
+            let mut tasks_to_push: [MaybeUninit<Task>; STACK_TASK_CAP] =
+                unsafe { MaybeUninit::uninit().assume_init() };
             for i in 1..tasks.len() {
                 let mut task = tasks[i];
                 debug_assert!(
@@ -526,9 +566,15 @@ impl TaskStack {
                     "None of the source tasks should have continuations when provided to run_tasks."
                 );
                 task.continuation = continuation_handle;
-                tasks_to_push.push(task);
+                tasks_to_push[i - 1].write(task);
             }
-            self.push(&tasks_to_push, worker_index, dispatcher, tag);
+            let tasks_to_push = unsafe {
+                std::slice::from_raw_parts(
+                    tasks_to_push.as_ptr() as *const Task,
+                    task_count as usize,
+                )
+            };
+            self.push(tasks_to_push, worker_index, dispatcher, tag);
         }
 
         // Tasks [1, count) are submitted to the stack and may now be executing on other workers.
@@ -630,16 +676,23 @@ impl TaskStack {
         tag: u64,
         continuation: ContinuationHandle,
     ) {
-        let mut tasks = Vec::with_capacity(iteration_count as usize);
+        // Fixed stack storage standing in for C#'s `stackalloc Task[iterationCount]`.
+        debug_assert!(
+            (iteration_count as usize) <= STACK_TASK_CAP,
+            "push_for_unsafely iteration count exceeds fixed stack capacity"
+        );
+        let mut tasks: [MaybeUninit<Task>; STACK_TASK_CAP] = MaybeUninit::uninit().assume_init();
         for i in 0..iteration_count {
-            tasks.push(Task::new(
+            tasks[i as usize].write(Task::new(
                 function,
                 context,
                 (inclusive_start_index + i) as i64,
                 continuation,
             ));
         }
-        self.push_unsafely(&tasks, worker_index, dispatcher, tag);
+        let tasks =
+            std::slice::from_raw_parts(tasks.as_ptr() as *const Task, iteration_count as usize);
+        self.push_unsafely(tasks, worker_index, dispatcher, tag);
     }
 
     /// Pushes a for loop onto the task stack (thread-safe).
@@ -656,16 +709,25 @@ impl TaskStack {
         tag: u64,
         continuation: ContinuationHandle,
     ) {
-        let mut tasks = Vec::with_capacity(iteration_count as usize);
+        // Fixed stack storage standing in for C#'s `stackalloc Task[iterationCount]`.
+        debug_assert!(
+            (iteration_count as usize) <= STACK_TASK_CAP,
+            "push_for iteration count exceeds fixed stack capacity"
+        );
+        let mut tasks: [MaybeUninit<Task>; STACK_TASK_CAP] =
+            unsafe { MaybeUninit::uninit().assume_init() };
         for i in 0..iteration_count {
-            tasks.push(Task::new(
+            tasks[i as usize].write(Task::new(
                 function,
                 context,
                 (inclusive_start_index + i) as i64,
                 continuation,
             ));
         }
-        self.push(&tasks, worker_index, dispatcher, tag);
+        let tasks = unsafe {
+            std::slice::from_raw_parts(tasks.as_ptr() as *const Task, iteration_count as usize)
+        };
+        self.push(tasks, worker_index, dispatcher, tag);
     }
 
     /// Submits a for loop and returns when all iterations complete.
@@ -684,15 +746,27 @@ impl TaskStack {
             return;
         }
 
-        let mut tasks = Vec::with_capacity(iteration_count as usize);
+        // Fixed stack storage standing in for C#'s `stackalloc Task[iterationCount]`.
+        debug_assert!(
+            (iteration_count as usize) <= STACK_TASK_CAP,
+            "for_loop iteration count exceeds fixed stack capacity"
+        );
+        let mut tasks: [MaybeUninit<Task>; STACK_TASK_CAP] =
+            unsafe { MaybeUninit::uninit().assume_init() };
         for i in 0..iteration_count {
-            tasks.push(Task::with_context(
+            tasks[i as usize].write(Task::with_context(
                 function,
                 context,
                 (inclusive_start_index + i) as i64,
             ));
         }
-        self.run_tasks(&mut tasks, worker_index, dispatcher, filter, tag);
+        let tasks = unsafe {
+            std::slice::from_raw_parts_mut(
+                tasks.as_mut_ptr() as *mut Task,
+                iteration_count as usize,
+            )
+        };
+        self.run_tasks(tasks, worker_index, dispatcher, filter, tag);
     }
 
     /// Submits a for loop and returns when all iterations complete (no filtering).
@@ -720,9 +794,6 @@ impl TaskStack {
     }
 
     /// Worker function that pops tasks from the stack and executes them.
-    ///
-    /// Uses spin-then-yield loop matching C#'s `SpinWait.SpinOnce(-1)` behavior
-    /// (never sleeps, only spins and yields).
     pub fn dispatch_worker_function(worker_index: i32, dispatcher: &dyn IThreadDispatcher) {
         let task_stack = unsafe { &*(dispatcher.unmanaged_context() as *const TaskStack) };
         let mut spin_count: u32 = 0;
@@ -739,12 +810,7 @@ impl TaskStack {
                     spin_count = 0;
                 }
                 PopTaskResult::Empty => {
-                    // C# SpinWait.SpinOnce(-1): spin then yield, never sleep.
-                    if spin_count < 10 {
-                        std::hint::spin_loop();
-                    } else {
-                        std::thread::yield_now();
-                    }
+                    spin_wait_once(spin_count);
                     spin_count += 1;
                 }
             }

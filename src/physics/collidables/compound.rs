@@ -307,6 +307,7 @@ impl Compound {
         ray: &RayData,
         maximum_t: &mut f32,
         shape_batches: &Shapes,
+        pool: &mut BufferPool,
         hit_handler: &mut T,
     ) {
         let mut orientation = Matrix3x3::default();
@@ -369,6 +370,7 @@ impl Compound {
                             &child_pose,
                             &local_ray,
                             maximum_t,
+                            pool,
                             &mut tester,
                         );
                     }
@@ -381,6 +383,26 @@ impl Compound {
                     }
                 }
             }
+        }
+    }
+
+    /// Tests a batch of rays against the compound shape.
+    ///
+    /// # Safety
+    /// Caller must ensure rays and pool are valid.
+    pub unsafe fn ray_test_batched<T: IShapeRayHitHandler>(
+        &self,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        shape_batches: &Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut T,
+    ) {
+        use crate::physics::trees::ray_batcher::RaySourceTrait;
+        // Scalar per-ray dispatch; upstream avoided batching here due to an infinite generic expansion issue in AOT.
+        for i in 0..rays.ray_count() {
+            let (ray_ptr, max_t_ptr) = rays.get_ray_ptrs(i);
+            self.ray_test(pose, &*ray_ptr, &mut *max_t_ptr, shape_batches, pool, hit_handler);
         }
     }
 
@@ -488,7 +510,7 @@ impl ICompoundShape for Compound {
         ray: &RayData,
         maximum_t: &mut f32,
         shape_batches: &Shapes,
-        _pool: &mut BufferPool,
+        pool: &mut BufferPool,
         hit_handler: &mut dyn IShapeRayHitHandler,
     ) {
         // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
@@ -509,7 +531,36 @@ impl ICompoundShape for Compound {
             }
         }
         let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test(pose, ray, maximum_t, shape_batches, &mut wrapper);
+        self.ray_test(pose, ray, maximum_t, shape_batches, pool, &mut wrapper);
+    }
+
+    unsafe fn ray_test_shape_batched(
+        &self,
+        pose: &RigidPose,
+        rays: &mut crate::physics::trees::ray_batcher::RaySource,
+        shape_batches: &Shapes,
+        pool: &mut BufferPool,
+        hit_handler: &mut dyn IShapeRayHitHandler,
+    ) {
+        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
+        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
+        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
+            fn allow_test(&self, child_index: i32) -> bool {
+                self.0.allow_test(child_index)
+            }
+            fn on_ray_hit(
+                &mut self,
+                ray: &RayData,
+                maximum_t: &mut f32,
+                t: f32,
+                normal: Vec3,
+                child_index: i32,
+            ) {
+                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
+            }
+        }
+        let mut wrapper = DynHandlerWrapper(hit_handler);
+        self.ray_test_batched(pose, rays, shape_batches, pool, &mut wrapper);
     }
 }
 

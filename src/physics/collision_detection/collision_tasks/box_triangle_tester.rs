@@ -14,6 +14,8 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
+use std::ptr::addr_of_mut;
 use std::simd::prelude::*;
 use std::simd::Select;
 use std::simd::StdFloat;
@@ -207,10 +209,19 @@ impl BoxTriangleTester {
         pair_count: i32,
     ) {
         let offset = *point_on_triangle - *triangle_center;
-        let mut candidate = ManifoldCandidate::default();
-        Vector3Wide::dot(&offset, triangle_tangent_x, &mut candidate.x);
-        Vector3Wide::dot(&offset, triangle_tangent_y, &mut candidate.y);
-        candidate.feature_id = *feature_id;
+        // SAFETY: uninitialized (C# Unsafe.SkipInit); the depth lane is never written or read here.
+        let mut candidate: MaybeUninit<ManifoldCandidate> = MaybeUninit::uninit();
+        let candidate_ptr = candidate.as_mut_ptr();
+        Vector3Wide::dot(&offset, triangle_tangent_x, unsafe {
+            &mut *addr_of_mut!((*candidate_ptr).x)
+        });
+        Vector3Wide::dot(&offset, triangle_tangent_y, unsafe {
+            &mut *addr_of_mut!((*candidate_ptr).y)
+        });
+        unsafe {
+            (*candidate_ptr).feature_id = *feature_id;
+        }
+        let candidate = unsafe { candidate.assume_init() };
         ManifoldCandidateHelper::add_candidate(
             candidates,
             candidate_count,
@@ -877,9 +888,11 @@ impl BoxTriangleTester {
                 &mut tri_tangent_y,
             );
 
-            // Allocate candidates (up to 6)
-            let mut candidate_buffer = [ManifoldCandidate::default(); 6];
-            let candidates = candidate_buffer.as_mut_ptr();
+            // Allocate candidates (up to 6).
+            // SAFETY: uninitialized; add_candidate writes every index the reduction reads.
+            let mut candidate_buffer: [MaybeUninit<ManifoldCandidate>; 6] =
+                MaybeUninit::uninit().assume_init();
+            let candidates = candidate_buffer.as_mut_ptr() as *mut ManifoldCandidate;
             let mut candidate_count = Vector::<i32>::splat(0);
 
             // Box vertices on triangle face

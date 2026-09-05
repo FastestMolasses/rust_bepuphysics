@@ -10,6 +10,8 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
+use std::ptr::addr_of_mut;
 use std::simd::prelude::*;
 use std::simd::Select;
 use std::simd::StdFloat;
@@ -157,10 +159,19 @@ impl BoxPairTester {
         );
         let vertex_on_b_face = *vertex - offset;
         let vertex_offset_on_b_face = vertex_on_b_face - *face_center_b;
-        let mut candidate = ManifoldCandidate::default();
-        Vector3Wide::dot(&vertex_offset_on_b_face, face_tangent_bx, &mut candidate.x);
-        Vector3Wide::dot(&vertex_offset_on_b_face, face_tangent_by, &mut candidate.y);
-        candidate.feature_id = *feature_id;
+        // SAFETY: uninitialized (C# Unsafe.SkipInit); the depth lane is never written or read here.
+        let mut candidate: MaybeUninit<ManifoldCandidate> = MaybeUninit::uninit();
+        let candidate_ptr = candidate.as_mut_ptr();
+        Vector3Wide::dot(&vertex_offset_on_b_face, face_tangent_bx, unsafe {
+            &mut *addr_of_mut!((*candidate_ptr).x)
+        });
+        Vector3Wide::dot(&vertex_offset_on_b_face, face_tangent_by, unsafe {
+            &mut *addr_of_mut!((*candidate_ptr).y)
+        });
+        unsafe {
+            (*candidate_ptr).feature_id = *feature_id;
+        }
+        let candidate = unsafe { candidate.assume_init() };
 
         let contained =
             candidate.x.abs().simd_le(*half_span_bx) & candidate.y.abs().simd_le(*half_span_by);
@@ -489,16 +500,23 @@ impl BoxPairTester {
 
         let edge_feature_id_offset = Vector::<i32>::splat(64);
         let epsilon = *epsilon_scale * Vector::<f32>::splat(1e-5);
-        let mut min_c = ManifoldCandidate::default();
-        let mut max_c = ManifoldCandidate::default();
+        // SAFETY: uninitialized (C# Unsafe.SkipInit); the depth lane is never written or read below.
+        let mut min_c: MaybeUninit<ManifoldCandidate> = MaybeUninit::uninit();
+        let mut max_c: MaybeUninit<ManifoldCandidate> = MaybeUninit::uninit();
+        let min_c_ptr = min_c.as_mut_ptr();
+        let max_c_ptr = max_c.as_mut_ptr();
 
         // X0
-        min_c.feature_id = *feature_id_x0;
-        min_c.x = min_x0;
-        min_c.y = -*half_span_by;
-        max_c.feature_id = *feature_id_x0 + edge_feature_id_offset;
-        max_c.x = max_x0;
-        max_c.y = min_c.y;
+        unsafe {
+            (*min_c_ptr).feature_id = *feature_id_x0;
+            (*min_c_ptr).x = min_x0;
+            (*min_c_ptr).y = -*half_span_by;
+            (*max_c_ptr).feature_id = *feature_id_x0 + edge_feature_id_offset;
+            (*max_c_ptr).x = max_x0;
+            (*max_c_ptr).y = (*min_c_ptr).y;
+        }
+        let mut min_c = unsafe { min_c.assume_init() };
+        let mut max_c = unsafe { max_c.assume_init() };
         Self::add_contacts_for_edge(
             &min_x0,
             &min_c,
@@ -921,9 +939,11 @@ impl BoxPairTester {
             normal_b.y = should_negate_normal_b.select(-normal_b.y, normal_b.y);
             normal_b.z = should_negate_normal_b.select(-normal_b.z, normal_b.z);
 
-            // Allocate candidate buffer (up to 8 candidates)
-            let mut candidate_buffer = [ManifoldCandidate::default(); 8];
-            let candidates = candidate_buffer.as_mut_ptr();
+            // Allocate candidate buffer (up to 8 candidates).
+            // SAFETY: uninitialized; add_candidate writes every index the reduction reads.
+            let mut candidate_buffer: [MaybeUninit<ManifoldCandidate>; 8] =
+                MaybeUninit::uninit().assume_init();
+            let candidates = candidate_buffer.as_mut_ptr() as *mut ManifoldCandidate;
 
             // Face centers
             let face_center_a = Vector3Wide::scale(&normal_a, &half_span_az);

@@ -112,6 +112,11 @@ impl RefitAndRefineMultithreadedContext {
         frame_index: i32,
         refine_aggressiveness_scale: f32,
     ) {
+        // Null when create_refit_and_mark_jobs early-returned for leaf_count <= 2.
+        if self.tree.is_null() {
+            self.refinement_targets = QuickList::default();
+            return;
+        }
         let tree = &mut *self.tree;
         if tree.leaf_count <= 2 {
             self.refinement_targets = QuickList::default();
@@ -183,6 +188,10 @@ impl RefitAndRefineMultithreadedContext {
     }
 
     pub unsafe fn clean_up_for_refit_and_refine(&mut self, pool: &mut BufferPool) {
+        // Null when create_refit_and_mark_jobs early-returned for leaf_count <= 2.
+        if self.tree.is_null() {
+            return;
+        }
         let tree = &mut *self.tree;
         if tree.leaf_count <= 2 {
             return;

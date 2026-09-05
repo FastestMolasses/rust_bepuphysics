@@ -1,14 +1,19 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ConvexCollisionTask.cs
 
 use super::pair_types::{ICollisionPair, ICollisionPairWide};
+use crate::physics::collidables::convex_hull::ConvexHull;
 use crate::physics::collidables::shape::IShapeWideAllocation;
 use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
 use crate::physics::collision_detection::contact_manifold::ConvexContactManifold;
 use crate::physics::collision_detection::convex_contact_manifold_wide::IContactManifoldWide;
 use crate::physics::collision_detection::untyped_list::UntypedList;
+use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{Vector, VECTOR_WIDTH};
 use crate::utilities::vector3_wide::Vector3Wide;
+
+/// Upper bound on internal_allocation_size_of() across convex wide types; only ConvexHullWide is nonzero.
+const MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE: usize = VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
 
 /// Trait for pair testers that perform SIMD-wide collision tests between two shapes.
 pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
@@ -77,38 +82,26 @@ unsafe fn execute_batch_inner<
     let start = batch.buffer.as_ptr() as *const TPair;
     let mut pair_wide = TPairWide::default();
 
-    // Handle IShapeWide internal allocation (e.g. ConvexHullWide).
-    // These allocations must outlive pair_wide usage, so we hold them here.
-    let _alloc_a;
-    let _alloc_b;
+    // Stack storage for IShapeWide internal allocations (e.g. ConvexHullWide); must outlive pair_wide.
+    // Typed as [ConvexHull; N] rather than bytes so it has ConvexHull's alignment when reinterpreted as Buffer<ConvexHull>.
+    let mut _alloc_a = std::mem::MaybeUninit::<[ConvexHull; VECTOR_WIDTH]>::uninit();
+    let mut _alloc_b = std::mem::MaybeUninit::<[ConvexHull; VECTOR_WIDTH]>::uninit();
     {
         let a_wide = pair_wide.get_shape_a_mut();
         let alloc_size = a_wide.internal_allocation_size_of();
+        debug_assert!(alloc_size <= MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE);
         if alloc_size > 0 {
-            _alloc_a = vec![0u8; alloc_size];
-            let buf = crate::utilities::memory::buffer::Buffer::new(
-                _alloc_a.as_ptr() as *mut u8,
-                alloc_size as i32,
-                -1,
-            );
+            let buf = Buffer::new(_alloc_a.as_mut_ptr() as *mut u8, alloc_size as i32, -1);
             a_wide.initialize_allocation(&buf);
-        } else {
-            _alloc_a = Vec::new();
         }
     }
     {
         let b_wide = pair_wide.get_shape_b_mut();
         let alloc_size = b_wide.internal_allocation_size_of();
+        debug_assert!(alloc_size <= MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE);
         if alloc_size > 0 {
-            _alloc_b = vec![0u8; alloc_size];
-            let buf = crate::utilities::memory::buffer::Buffer::new(
-                _alloc_b.as_ptr() as *mut u8,
-                alloc_size as i32,
-                -1,
-            );
+            let buf = Buffer::new(_alloc_b.as_mut_ptr() as *mut u8, alloc_size as i32, -1);
             b_wide.initialize_allocation(&buf);
-        } else {
-            _alloc_b = Vec::new();
         }
     }
 

@@ -73,6 +73,12 @@ impl<
         continuation.mesh_orientation = pair.orientation_b;
         continuation.requires_flip = pair.flip_mask == 0;
         continuation.mesh = pair.b as *mut u8;
+        continuation.find_local_overlaps_thunk = Some(
+            crate::physics::collision_detection::mesh_reduction::find_local_overlaps_thunk::<TMeshB>,
+        );
+        continuation.get_local_child_thunk = Some(
+            crate::physics::collision_detection::mesh_reduction::get_local_child_thunk::<TMeshB>,
+        );
 
         // All regions must be assigned ahead of time.
         let mut next_child_index = 0i32;

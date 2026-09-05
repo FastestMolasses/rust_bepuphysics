@@ -267,19 +267,24 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
 
             let lane_indices = Simd::splat(bundle_start_body_index) + lane_index_offsets;
 
-            let mut position = Vector3Wide::default();
-            let mut orientation = QuaternionWide::default();
-            let mut velocity = BodyVelocityWide::default();
-            let mut inertia = BodyInertiaWide::default();
+            let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
+            let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
+            let mut velocity = std::mem::MaybeUninit::<BodyVelocityWide>::uninit();
+            let mut inertia = std::mem::MaybeUninit::<BodyInertiaWide>::uninit();
 
             bodies.gather_state::<AccessAll>(
                 &lane_indices,
                 false,
-                &mut position,
-                &mut orientation,
-                &mut velocity,
-                &mut inertia,
+                &mut *position.as_mut_ptr(),
+                &mut *orientation.as_mut_ptr(),
+                &mut *velocity.as_mut_ptr(),
+                &mut *inertia.as_mut_ptr(),
             );
+            // AccessAll gathers every field, so the bundle is fully initialized here.
+            let position = position.assume_init();
+            let orientation = orientation.assume_init();
+            let mut velocity = velocity.assume_init();
+            let inertia = inertia.assume_init();
 
             let integration_mask;
             if self.callbacks.integrate_velocity_for_kinematics() {
@@ -372,19 +377,23 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let body_indices_vector = Simd::from_array(body_indices_arr) | trailing_mask;
 
             // Full gather so we can use the vectorized IntegrateVelocity callback.
-            let mut position = Vector3Wide::default();
-            let mut orientation = QuaternionWide::default();
-            let mut velocity = BodyVelocityWide::default();
-            let mut dummy_inertia = BodyInertiaWide::default();
+            let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
+            let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
+            let mut velocity = std::mem::MaybeUninit::<BodyVelocityWide>::uninit();
+            // AccessNoInertia never gathers inertia; this stays uninitialized and unread.
+            let mut dummy_inertia = std::mem::MaybeUninit::<BodyInertiaWide>::uninit();
 
             bodies.gather_state::<AccessNoInertia>(
                 &body_indices_vector,
                 false,
-                &mut position,
-                &mut orientation,
-                &mut velocity,
-                &mut dummy_inertia,
+                &mut *position.as_mut_ptr(),
+                &mut *orientation.as_mut_ptr(),
+                &mut *velocity.as_mut_ptr(),
+                &mut *dummy_inertia.as_mut_ptr(),
             );
+            let position = position.assume_init();
+            let orientation = orientation.assume_init();
+            let mut velocity = velocity.assume_init();
 
             self.callbacks.integrate_velocity(
                 body_indices_vector,
@@ -439,19 +448,23 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let mut body_indices_vector = Simd::from_array(body_indices_arr);
             body_indices_vector = body_indices_vector | trailing_mask;
 
-            let mut position = Vector3Wide::default();
-            let mut orientation = QuaternionWide::default();
-            let mut velocity = BodyVelocityWide::default();
-            let mut dummy_inertia = BodyInertiaWide::default();
+            let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
+            let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
+            let mut velocity = std::mem::MaybeUninit::<BodyVelocityWide>::uninit();
+            // AccessNoInertia never gathers inertia; this stays uninitialized and unread.
+            let mut dummy_inertia = std::mem::MaybeUninit::<BodyInertiaWide>::uninit();
 
             bodies.gather_state::<AccessNoInertia>(
                 &body_indices_vector,
                 false,
-                &mut position,
-                &mut orientation,
-                &mut velocity,
-                &mut dummy_inertia,
+                &mut *position.as_mut_ptr(),
+                &mut *orientation.as_mut_ptr(),
+                &mut *velocity.as_mut_ptr(),
+                &mut *dummy_inertia.as_mut_ptr(),
             );
+            let mut position = position.assume_init();
+            let mut orientation = orientation.assume_init();
+            let mut velocity = velocity.assume_init();
 
             // Note: we integrate pose THEN velocity. This executes in the context of the second (or later)
             // substep, effectively completing the previous substep's frame. Pose integration completes the
@@ -561,19 +574,24 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             }
             let half_dt = bundle_effective_dt * Simd::splat(0.5f32);
 
-            let mut position = Vector3Wide::default();
-            let mut orientation = QuaternionWide::default();
-            let mut velocity = BodyVelocityWide::default();
-            let mut local_inertia = BodyInertiaWide::default();
+            let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
+            let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
+            let mut velocity = std::mem::MaybeUninit::<BodyVelocityWide>::uninit();
+            let mut local_inertia = std::mem::MaybeUninit::<BodyInertiaWide>::uninit();
 
             bodies.gather_state::<AccessAll>(
                 &body_indices,
                 false,
-                &mut position,
-                &mut orientation,
-                &mut velocity,
-                &mut local_inertia,
+                &mut *position.as_mut_ptr(),
+                &mut *orientation.as_mut_ptr(),
+                &mut *velocity.as_mut_ptr(),
+                &mut *local_inertia.as_mut_ptr(),
             );
+            // AccessAll gathers every field, so the bundle is fully initialized here.
+            let mut position = position.assume_init();
+            let mut orientation = orientation.assume_init();
+            let mut velocity = velocity.assume_init();
+            let local_inertia = local_inertia.assume_init();
 
             let unconstrained_velocity_integration_mask: Vector<i32>;
             let any_body_in_bundle_needs_velocity_integration: bool;

@@ -685,8 +685,11 @@ impl Simulation {
         }
 
         // RayHitDispatcher implements IBroadPhaseRayTester for the broad phase traversal.
+        // Uses the caller's pool, not Simulation::buffer_pool: compound/mesh ray_test traversals
+        // allocate scratch from it, so concurrent ray casts on different threads don't race.
         struct RayHitDispatcher<'a, H: IRayHitHandler> {
             simulation: &'a Simulation,
+            pool: *mut BufferPool,
             shape_hit_handler: ShapeRayHitHandler<'a, H>,
         }
 
@@ -713,6 +716,7 @@ impl Simulation {
                             &*pose,
                             &*ray_data,
                             &mut *maximum_t,
+                            &mut *self.pool,
                             &mut self.shape_hit_handler,
                         );
                     }
@@ -722,6 +726,7 @@ impl Simulation {
 
         let mut dispatcher = RayHitDispatcher {
             simulation: self,
+            pool,
             shape_hit_handler: ShapeRayHitHandler {
                 hit_handler,
                 collidable: CollidableReference::from_raw(
@@ -835,6 +840,9 @@ impl Simulation {
                             hit_handler: &*self.hit_handler,
                             collidable_being_tested: collidable,
                         };
+                        // ABI shared with the compound sweep tasks' filter readers: pass a thin
+                        // pointer to a `*mut dyn ISweepFilter` fat-pointer local, not to the filter.
+                        let mut filter_dyn: *mut dyn ISweepFilter = &mut filter;
 
                         let result = unsafe {
                             task.sweep_filtered(
@@ -851,7 +859,7 @@ impl Simulation {
                                 self.minimum_progression,
                                 self.convergence_threshold,
                                 self.maximum_iteration_count,
-                                &mut filter as *mut SweepFilter<'_, H> as *mut u8,
+                                &mut filter_dyn as *mut _ as *mut u8,
                                 self.simulation.shapes
                                     as *mut crate::physics::collidables::shapes::Shapes,
                                 narrow_phase.sweep_task_registry as *mut SweepTaskRegistry,

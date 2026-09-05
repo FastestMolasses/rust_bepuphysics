@@ -43,8 +43,7 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
         pool: &mut BufferPool,
         shapes: &Shapes,
         dt: f32,
-        overlaps: &mut CompoundPairOverlaps,
-    ) {
+    ) -> CompoundPairOverlaps {
         // Count total children across all pairs.
         let mut total_compound_child_count = 0i32;
         for i in 0..pair_count {
@@ -52,7 +51,7 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
             total_compound_child_count += compound_a.child_count();
         }
 
-        *overlaps = CompoundPairOverlaps::new(pool, pair_count, total_compound_child_count);
+        let mut overlaps = CompoundPairOverlaps::new(pool, pair_count, total_compound_child_count);
 
         // Allocate subpair tracking data.
         let mut subpair_data: Buffer<SubpairData> = pool.take(total_compound_child_count);
@@ -217,9 +216,10 @@ impl<TCompoundA: ICompoundShape, TCompoundB: IBoundsQueryableCompound> ICompound
             &pair_queries,
             pool,
             shapes,
-            overlaps,
+            &mut overlaps,
         );
 
         pool.return_buffer(&mut subpair_data);
+        overlaps
     }
 }

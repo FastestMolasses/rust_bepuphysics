@@ -10,33 +10,44 @@ impl Quicksort {
     const INSERTION_SORT_THRESHOLD: i32 = 30;
 
     /// Swaps two elements in the keys and values arrays.
+    /// Safety: `i` and `j` must be valid in-bounds indices into `keys`/`values`.
     #[inline(always)]
-    fn swap<TKey: Copy, TValue: Copy>(keys: &mut [TKey], values: &mut [TValue], i: i32, j: i32) {
+    unsafe fn swap<TKey: Copy, TValue: Copy>(
+        keys: &mut [TKey],
+        values: &mut [TValue],
+        i: i32,
+        j: i32,
+    ) {
         let i = i as usize;
         let j = j as usize;
-        keys.swap(i, j);
-        values.swap(i, j);
+        std::ptr::swap(keys.as_mut_ptr().add(i), keys.as_mut_ptr().add(j));
+        std::ptr::swap(values.as_mut_ptr().add(i), values.as_mut_ptr().add(j));
     }
 
     /// Swaps two elements in the keys array.
+    /// Safety: `i` and `j` must be valid in-bounds indices into `keys`.
     #[inline(always)]
-    fn swap_keys<TKey: Copy>(keys: &mut [TKey], i: i32, j: i32) {
-        keys.swap(i as usize, j as usize);
+    unsafe fn swap_keys<TKey: Copy>(keys: &mut [TKey], i: i32, j: i32) {
+        std::ptr::swap(
+            keys.as_mut_ptr().add(i as usize),
+            keys.as_mut_ptr().add(j as usize),
+        );
     }
 
     /// Finds the index of the median-of-3 pivot for better partitioning.
     /// Uses `<=` comparisons matching C# to ensure stable pivot selection for equal elements.
+    /// Safety: `l`, `(l + r) / 2`, and `r` must be valid in-bounds indices into `keys`.
     #[inline(always)]
-    fn find_mo3_index<TKey: Copy, TComparer: RefComparer<TKey>>(
+    unsafe fn find_mo3_index<TKey: Copy, TComparer: RefComparer<TKey>>(
         keys: &[TKey],
         l: i32,
         r: i32,
         comparer: &TComparer,
     ) -> i32 {
         let m = l + (r - l) / 2;
-        let l_key = &keys[l as usize];
-        let m_key = &keys[m as usize];
-        let r_key = &keys[r as usize];
+        let l_key = keys.get_unchecked(l as usize);
+        let m_key = keys.get_unchecked(m as usize);
+        let r_key = keys.get_unchecked(r as usize);
 
         // Find median of l, m, r using <= (matching C#'s `Compare(...) <= 0`)
         if comparer.compare(l_key, m_key) != Ordering::Greater
@@ -79,89 +90,97 @@ impl Quicksort {
         comparer: &TComparer,
     ) {
         if r - l <= Self::INSERTION_SORT_THRESHOLD {
-            unsafe {
-                insertion_sort::sort(keys, values, l as usize, r as usize, comparer);
+            // Guard r < l (a no-op in C#'s for loop) so `r as usize` never underflows.
+            if r >= l {
+                unsafe {
+                    insertion_sort::sort(keys, values, l as usize, r as usize, comparer);
+                }
             }
             return;
         }
 
-        let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
-        let pivot = keys[pivot_index as usize];
-        let pivot_value = values[pivot_index as usize];
+        unsafe {
+            let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
+            let pivot = *keys.get_unchecked(pivot_index as usize);
+            let pivot_value = *values.get_unchecked(pivot_index as usize);
 
-        // Move pivot to position r
-        keys[pivot_index as usize] = keys[r as usize];
-        values[pivot_index as usize] = values[r as usize];
+            // Move pivot to position r
+            *keys.get_unchecked_mut(pivot_index as usize) = *keys.get_unchecked(r as usize);
+            *values.get_unchecked_mut(pivot_index as usize) = *values.get_unchecked(r as usize);
 
-        let mut i = l - 1;
-        let mut j = r;
-        let mut p = l - 1;
-        let mut q = r;
+            let mut i = l - 1;
+            let mut j = r;
+            let mut p = l - 1;
+            let mut q = r;
 
-        if r <= l {
-            return;
-        }
+            if r <= l {
+                return;
+            }
 
-        loop {
-            // Claim from left: find first >= pivot
             loop {
-                i += 1;
-                if comparer.compare(&keys[i as usize], &pivot) != Ordering::Less {
+                // Claim from left: find first >= pivot
+                loop {
+                    i += 1;
+                    if comparer.compare(keys.get_unchecked(i as usize), &pivot) != Ordering::Less
+                    {
+                        break;
+                    }
+                }
+                // Claim from right: find first <= pivot
+                loop {
+                    j -= 1;
+                    if comparer.compare(&pivot, keys.get_unchecked(j as usize)) != Ordering::Less
+                        || j == l
+                    {
+                        break;
+                    }
+                }
+
+                if i >= j {
                     break;
                 }
-            }
-            // Claim from right: find first <= pivot
-            loop {
-                j -= 1;
-                if comparer.compare(&pivot, &keys[j as usize]) != Ordering::Less || j == l {
-                    break;
+
+                // Swap elements on wrong sides
+                Self::swap(keys, values, i, j);
+
+                // Track equal elements at edges for later consolidation
+                if comparer.compare(keys.get_unchecked(i as usize), &pivot) == Ordering::Equal {
+                    p += 1;
+                    Self::swap(keys, values, p, i);
+                }
+                if comparer.compare(&pivot, keys.get_unchecked(j as usize)) == Ordering::Equal {
+                    q -= 1;
+                    Self::swap(keys, values, j, q);
                 }
             }
 
-            if i >= j {
-                break;
-            }
+            // Reintroduce pivot
+            *keys.get_unchecked_mut(r as usize) = *keys.get_unchecked(i as usize);
+            *values.get_unchecked_mut(r as usize) = *values.get_unchecked(i as usize);
+            *keys.get_unchecked_mut(i as usize) = pivot;
+            *values.get_unchecked_mut(i as usize) = pivot_value;
 
-            // Swap elements on wrong sides
-            Self::swap(keys, values, i, j);
-
-            // Track equal elements at edges for later consolidation
-            if comparer.compare(&keys[i as usize], &pivot) == Ordering::Equal {
-                p += 1;
-                Self::swap(keys, values, p, i);
-            }
-            if comparer.compare(&pivot, &keys[j as usize]) == Ordering::Equal {
-                q -= 1;
-                Self::swap(keys, values, j, q);
-            }
-        }
-
-        // Reintroduce pivot
-        keys[r as usize] = keys[i as usize];
-        values[r as usize] = values[i as usize];
-        keys[i as usize] = pivot;
-        values[i as usize] = pivot_value;
-
-        j = i - 1;
-        i += 1;
-
-        // Move equal elements from edges to center
-        let mut k = l;
-        while k < p {
-            Self::swap(keys, values, k, j);
-            k += 1;
-            j -= 1;
-        }
-        k = r - 1;
-        while k > q {
-            Self::swap(keys, values, i, k);
+            j = i - 1;
             i += 1;
-            k -= 1;
-        }
 
-        // Recurse on partitions excluding equal-to-pivot elements
-        Self::sort_with_three_way_partitioning(keys, values, l, j, comparer);
-        Self::sort_with_three_way_partitioning(keys, values, i, r, comparer);
+            // Move equal elements from edges to center
+            let mut k = l;
+            while k < p {
+                Self::swap(keys, values, k, j);
+                k += 1;
+                j -= 1;
+            }
+            k = r - 1;
+            while k > q {
+                Self::swap(keys, values, i, k);
+                i += 1;
+                k -= 1;
+            }
+
+            // Recurse on partitions excluding equal-to-pivot elements
+            Self::sort_with_three_way_partitioning(keys, values, l, j, comparer);
+            Self::sort_with_three_way_partitioning(keys, values, i, r, comparer);
+        }
     }
 
     /// Sorts keys and values together.
@@ -174,66 +193,73 @@ impl Quicksort {
         comparer: &TComparer,
     ) {
         if r - l <= Self::INSERTION_SORT_THRESHOLD {
-            // Use insertion sort for small ranges
-            unsafe {
-                insertion_sort::sort(keys, values, l as usize, r as usize, comparer);
+            // Use insertion sort for small ranges; guard r < l (a no-op in C#'s for loop) so `r as usize` never underflows.
+            if r >= l {
+                unsafe {
+                    insertion_sort::sort(keys, values, l as usize, r as usize, comparer);
+                }
             }
             return;
         }
 
-        // Use MO3 to find a pivot
-        let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
-        let pivot = keys[pivot_index as usize];
-        let pivot_value = values[pivot_index as usize];
+        unsafe {
+            // Use MO3 to find a pivot
+            let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
+            let pivot = *keys.get_unchecked(pivot_index as usize);
+            let pivot_value = *values.get_unchecked(pivot_index as usize);
 
-        // Move pivot value to position r, leaving r unused for partitioning
-        keys[pivot_index as usize] = keys[r as usize];
-        values[pivot_index as usize] = values[r as usize];
+            // Move pivot value to position r, leaving r unused for partitioning
+            *keys.get_unchecked_mut(pivot_index as usize) = *keys.get_unchecked(r as usize);
+            *values.get_unchecked_mut(pivot_index as usize) = *values.get_unchecked(r as usize);
 
-        let mut i = l - 1;
-        let mut j = r;
+            let mut i = l - 1;
+            let mut j = r;
 
-        loop {
-            // Claim elements from the left that are less than pivot
             loop {
-                i += 1;
-                if comparer.compare(&keys[i as usize], &pivot) != Ordering::Less {
+                // Claim elements from the left that are less than pivot
+                loop {
+                    i += 1;
+                    if comparer.compare(keys.get_unchecked(i as usize), &pivot) != Ordering::Less
+                    {
+                        break;
+                    }
+                }
+
+                // Claim elements from the right that are greater than pivot
+                loop {
+                    j -= 1;
+                    if comparer.compare(&pivot, keys.get_unchecked(j as usize)) != Ordering::Less
+                        || j <= i
+                    {
+                        break;
+                    }
+                }
+
+                // If the claims have met, partitioning is complete
+                if i >= j {
                     break;
                 }
+
+                // Swap elements that are on the wrong side
+                Self::swap(keys, values, i, j);
             }
 
-            // Claim elements from the right that are greater than pivot
-            loop {
-                j -= 1;
-                if comparer.compare(&pivot, &keys[j as usize]) != Ordering::Less || j <= i {
-                    break;
-                }
+            // Reintroduce the pivot
+            *keys.get_unchecked_mut(r as usize) = *keys.get_unchecked(i as usize);
+            *values.get_unchecked_mut(r as usize) = *values.get_unchecked(i as usize);
+            *keys.get_unchecked_mut(i as usize) = pivot;
+            *values.get_unchecked_mut(i as usize) = pivot_value;
+
+            // Recursively sort the partitions
+            let j = i - 1;
+            let i = i + 1;
+
+            if j > l {
+                Self::sort(keys, values, l, j, comparer);
             }
-
-            // If the claims have met, partitioning is complete
-            if i >= j {
-                break;
+            if r > i {
+                Self::sort(keys, values, i, r, comparer);
             }
-
-            // Swap elements that are on the wrong side
-            Self::swap(keys, values, i, j);
-        }
-
-        // Reintroduce the pivot
-        keys[r as usize] = keys[i as usize];
-        values[r as usize] = values[i as usize];
-        keys[i as usize] = pivot;
-        values[i as usize] = pivot_value;
-
-        // Recursively sort the partitions
-        let j = i - 1;
-        let i = i + 1;
-
-        if j > l {
-            Self::sort(keys, values, l, j, comparer);
-        }
-        if r > i {
-            Self::sort(keys, values, i, r, comparer);
         }
     }
 
@@ -246,62 +272,69 @@ impl Quicksort {
         comparer: &TComparer,
     ) {
         if r - l <= Self::INSERTION_SORT_THRESHOLD {
-            // Use insertion sort for small ranges
-            unsafe {
-                insertion_sort::sort_keys_only(keys, l as usize, r as usize, comparer);
+            // Use insertion sort for small ranges; guard r < l (a no-op in C#'s for loop) so `r as usize` never underflows.
+            if r >= l {
+                unsafe {
+                    insertion_sort::sort_keys_only(keys, l as usize, r as usize, comparer);
+                }
             }
             return;
         }
 
-        // Use MO3 to find a pivot
-        let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
-        let pivot = keys[pivot_index as usize];
+        unsafe {
+            // Use MO3 to find a pivot
+            let pivot_index = Self::find_mo3_index(keys, l, r, comparer);
+            let pivot = *keys.get_unchecked(pivot_index as usize);
 
-        // Move pivot value to position r, leaving r unused for partitioning
-        keys[pivot_index as usize] = keys[r as usize];
+            // Move pivot value to position r, leaving r unused for partitioning
+            *keys.get_unchecked_mut(pivot_index as usize) = *keys.get_unchecked(r as usize);
 
-        let mut i = l - 1;
-        let mut j = r;
+            let mut i = l - 1;
+            let mut j = r;
 
-        loop {
-            // Claim elements from the left that are less than pivot
             loop {
-                i += 1;
-                if comparer.compare(&keys[i as usize], &pivot) != Ordering::Less {
+                // Claim elements from the left that are less than pivot
+                loop {
+                    i += 1;
+                    if comparer.compare(keys.get_unchecked(i as usize), &pivot) != Ordering::Less
+                    {
+                        break;
+                    }
+                }
+
+                // Claim elements from the right that are greater than pivot
+                loop {
+                    j -= 1;
+                    if comparer.compare(&pivot, keys.get_unchecked(j as usize)) != Ordering::Less
+                        || j <= i
+                    {
+                        break;
+                    }
+                }
+
+                // If the claims have met, partitioning is complete
+                if i >= j {
                     break;
                 }
+
+                // Swap elements that are on the wrong side
+                Self::swap_keys(keys, i, j);
             }
 
-            // Claim elements from the right that are greater than pivot
-            loop {
-                j -= 1;
-                if comparer.compare(&pivot, &keys[j as usize]) != Ordering::Less || j <= i {
-                    break;
-                }
+            // Reintroduce the pivot
+            *keys.get_unchecked_mut(r as usize) = *keys.get_unchecked(i as usize);
+            *keys.get_unchecked_mut(i as usize) = pivot;
+
+            // Recursively sort the partitions
+            let j = i - 1;
+            let i = i + 1;
+
+            if j > l {
+                Self::sort_keys(keys, l, j, comparer);
             }
-
-            // If the claims have met, partitioning is complete
-            if i >= j {
-                break;
+            if r > i {
+                Self::sort_keys(keys, i, r, comparer);
             }
-
-            // Swap elements that are on the wrong side
-            Self::swap_keys(keys, i, j);
-        }
-
-        // Reintroduce the pivot
-        keys[r as usize] = keys[i as usize];
-        keys[i as usize] = pivot;
-
-        // Recursively sort the partitions
-        let j = i - 1;
-        let i = i + 1;
-
-        if j > l {
-            Self::sort_keys(keys, l, j, comparer);
-        }
-        if r > i {
-            Self::sort_keys(keys, i, r, comparer);
         }
     }
 

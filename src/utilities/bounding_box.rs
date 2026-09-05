@@ -167,7 +167,6 @@ impl BoundingBox {
             let result_ptr = merged.as_mut_ptr() as *mut f32;
 
             // Use unaligned loads/stores since TA/TB may be NodeChild (4-byte aligned).
-            // C# Unsafe.As + Vector128.Min/Max generates unaligned ops.
             let a_min = _mm_loadu_ps(a_ptr);
             let a_max = _mm_loadu_ps(a_ptr.add(4));
             let b_min = _mm_loadu_ps(b_ptr);
@@ -181,19 +180,21 @@ impl BoundingBox {
             let current_min = _mm_loadu_ps(result_ptr);
             let current_max = _mm_loadu_ps(result_ptr.add(4));
 
-            // Blend the results - preserve W component (mask: 0b1000 = 8)
-            let result_min = if is_x86_feature_detected!("sse4.1") {
-                _mm_blend_ps(min, current_min, 8)
-            } else {
-                let mask = _mm_set_ps(0.0, -1.0, -1.0, -1.0);
-                _mm_or_ps(_mm_and_ps(min, mask), _mm_andnot_ps(mask, current_min))
-            };
-
-            let result_max = if is_x86_feature_detected!("sse4.1") {
-                _mm_blend_ps(max, current_max, 8)
-            } else {
-                let mask = _mm_set_ps(0.0, -1.0, -1.0, -1.0);
-                _mm_or_ps(_mm_and_ps(max, mask), _mm_andnot_ps(mask, current_max))
+            // Blend the results - preserve W component (mask: 0b1000 = 8).
+            // cfg(target_feature) rather than is_x86_feature_detected! so the check folds away.
+            #[cfg(target_feature = "sse4.1")]
+            let (result_min, result_max) = (
+                _mm_blend_ps(min, current_min, 8),
+                _mm_blend_ps(max, current_max, 8),
+            );
+            #[cfg(not(target_feature = "sse4.1"))]
+            let (result_min, result_max) = {
+                // Lane mask (-1,-1,-1,0) as float bits.
+                let mask = _mm_castsi128_ps(_mm_set_epi32(0, -1, -1, -1));
+                (
+                    _mm_or_ps(_mm_and_ps(min, mask), _mm_andnot_ps(mask, current_min)),
+                    _mm_or_ps(_mm_and_ps(max, mask), _mm_andnot_ps(mask, current_max)),
+                )
             };
 
             // Store results
@@ -288,21 +289,65 @@ impl BoundingBox {
     {
         debug_assert!(std::mem::size_of::<TA>() == 32 && std::mem::size_of::<TB>() == 32);
 
-        let a_ptr = bounding_box_a as *const TA as *const f32;
-        let b_ptr = bounding_box_b as *const TB as *const f32;
-        let result_ptr = merged.as_mut_ptr() as *mut f32;
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::*;
 
-        let a_min = Simd::<f32, 4>::from_array(*(a_ptr as *const [f32; 4]));
-        let a_max = Simd::<f32, 4>::from_array(*(a_ptr.add(4) as *const [f32; 4]));
-        let b_min = Simd::<f32, 4>::from_array(*(b_ptr as *const [f32; 4]));
-        let b_max = Simd::<f32, 4>::from_array(*(b_ptr.add(4) as *const [f32; 4]));
+            let a_ptr = bounding_box_a as *const TA as *const f32;
+            let b_ptr = bounding_box_b as *const TB as *const f32;
+            let result_ptr = merged.as_mut_ptr() as *mut f32;
 
-        let min = std::simd::num::SimdFloat::simd_min(a_min, b_min);
-        let max = std::simd::num::SimdFloat::simd_max(a_max, b_max);
+            // Use unaligned loads/stores since TA/TB may be NodeChild (4-byte aligned).
+            let a_min = _mm_loadu_ps(a_ptr);
+            let a_max = _mm_loadu_ps(a_ptr.add(4));
+            let b_min = _mm_loadu_ps(b_ptr);
+            let b_max = _mm_loadu_ps(b_ptr.add(4));
 
-        // Store results
-        *(result_ptr as *mut [f32; 4]) = min.to_array();
-        *(result_ptr.add(4) as *mut [f32; 4]) = max.to_array();
+            let min = _mm_min_ps(a_min, b_min);
+            let max = _mm_max_ps(a_max, b_max);
+
+            _mm_storeu_ps(result_ptr, min);
+            _mm_storeu_ps(result_ptr.add(4), max);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            use std::arch::aarch64::*;
+
+            let a_ptr = bounding_box_a as *const TA as *const f32;
+            let b_ptr = bounding_box_b as *const TB as *const f32;
+            let result_ptr = merged.as_mut_ptr() as *mut f32;
+
+            let a_min = vld1q_f32(a_ptr);
+            let a_max = vld1q_f32(a_ptr.add(4));
+            let b_min = vld1q_f32(b_ptr);
+            let b_max = vld1q_f32(b_ptr.add(4));
+
+            let min = vminq_f32(a_min, b_min);
+            let max = vmaxq_f32(a_max, b_max);
+
+            vst1q_f32(result_ptr, min);
+            vst1q_f32(result_ptr.add(4), max);
+        }
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        unsafe {
+            let a_ptr = bounding_box_a as *const TA as *const f32;
+            let b_ptr = bounding_box_b as *const TB as *const f32;
+            let result_ptr = merged.as_mut_ptr() as *mut f32;
+
+            let a_min = Simd::<f32, 4>::from_array(*(a_ptr as *const [f32; 4]));
+            let a_max = Simd::<f32, 4>::from_array(*(a_ptr.add(4) as *const [f32; 4]));
+            let b_min = Simd::<f32, 4>::from_array(*(b_ptr as *const [f32; 4]));
+            let b_max = Simd::<f32, 4>::from_array(*(b_ptr.add(4) as *const [f32; 4]));
+
+            let min = std::simd::num::SimdFloat::simd_min(a_min, b_min);
+            let max = std::simd::num::SimdFloat::simd_max(a_max, b_max);
+
+            // Store results
+            *(result_ptr as *mut [f32; 4]) = min.to_array();
+            *(result_ptr.add(4) as *mut [f32; 4]) = max.to_array();
+        }
     }
 
     /// Determines if a bounding box intersects a bounding sphere.

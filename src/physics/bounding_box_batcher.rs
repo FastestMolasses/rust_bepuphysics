@@ -4,6 +4,7 @@ use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{BodyVelocity, MotionState, RigidPose};
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
 use crate::physics::collidables::collidable::Collidable;
+use crate::physics::collidables::convex_hull::ConvexHull;
 use crate::physics::collidables::shape::{
     ICompoundShape, IConvexShape, IDisposableShape, INonConvexBounds, IShapeWide,
     IShapeWideAllocation,
@@ -20,6 +21,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 
 use crate::physics::body_properties::BodyVelocityWide;
@@ -138,6 +140,10 @@ pub struct BoundingBoxBatcher {
 
 pub const COLLIDABLES_PER_FLUSH: i32 = 16;
 
+/// Upper bound on IShapeWideAllocation::internal_allocation_size_of() across all convex wide
+/// shape types; only ConvexHullWide is nonzero (VECTOR_WIDTH * size_of::<ConvexHull>()).
+const MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE: usize = VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
+
 impl BoundingBoxBatcher {
     pub fn new(
         bodies: *mut Bodies,
@@ -168,10 +174,13 @@ impl BoundingBoxBatcher {
         &mut self,
         shape_batch: &ConvexShapeBatch<TShape>,
     ) {
-        let mut shape_wide = TShape::Wide::default();
+        // Every lane is written via write_slot before get_bounds reads it.
+        let mut shape_wide_storage = MaybeUninit::<TShape::Wide>::uninit();
+        let shape_wide = unsafe { &mut *shape_wide_storage.as_mut_ptr() };
         let alloc_size = shape_wide.internal_allocation_size_of();
+        debug_assert!(alloc_size <= MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE);
         // Stack-allocate internal memory for wide types that need it (e.g. ConvexHullWide).
-        let mut alloc_backing = vec![0u8; alloc_size];
+        let mut alloc_backing = [0u8; MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE];
         if alloc_size > 0 {
             let alloc_buffer = Buffer::<u8>::new(alloc_backing.as_mut_ptr(), alloc_size as i32, -1);
             shape_wide.initialize_allocation(&alloc_buffer);

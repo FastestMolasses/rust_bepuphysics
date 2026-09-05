@@ -276,7 +276,8 @@ impl Tree {
         // Re-borrow node after potential recursive calls
         let node = &mut *(self.nodes.as_ptr() as *mut super::node::Node).add(node_index as usize);
         if leaf_count_b > 1 {
-            node.b.index = self.create_sweep_builder_node(-1, 1, leaves, split_index, leaf_count_b);
+            node.b.index =
+                self.create_sweep_builder_node(node_index, 1, leaves, split_index, leaf_count_b);
         } else {
             debug_assert_eq!(leaf_count_b, 1);
             let leaf_index = *leaves.index_map.add(split_index as usize);

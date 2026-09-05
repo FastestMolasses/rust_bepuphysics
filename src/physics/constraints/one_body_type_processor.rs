@@ -168,7 +168,7 @@ impl<
                 type_batch,
                 handle,
                 encoded_body_indices,
-                &mut *pool,
+                pool,
                 1, // bodies_per_constraint
                 std::mem::size_of::<Vector<i32>>(),
                 std::mem::size_of::<TPrestepData>(),

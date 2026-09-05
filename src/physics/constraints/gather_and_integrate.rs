@@ -18,6 +18,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::simd::prelude::*;
 
 /// Checks whether a bundle of constraints should integrate, returning a per-lane mask.
 /// Corresponds to C# `TypeProcessor.BundleShouldIntegrate`.
@@ -40,14 +41,23 @@ pub fn bundle_should_integrate(
         // All lanes need integration.
         (BundleIntegrationMode::All, Vector::<i32>::splat(-1))
     } else if scalar_integration_mask > 0 {
-        // Partial: expand bitstring into a vector mask.
-        let integration_mask = Vector::<i32>::from_array(std::array::from_fn(|i| {
-            if (scalar_integration_mask & (1 << i)) != 0 {
-                -1
-            } else {
-                0
-            }
-        }));
+        // Partial: expand the bitstring into a vector mask.
+        let integration_mask = if vector_count == 4 || vector_count == 8 {
+            // Broadcast the scalar mask, AND against per-lane bit selectors, and compare-equal.
+            let selectors = Vector::<i32>::from_array(std::array::from_fn(|i| 1i32 << i));
+            let scalar_broadcast = Vector::<i32>::splat(scalar_integration_mask);
+            let selected = selectors & scalar_broadcast;
+            selected.simd_eq(selectors).to_simd()
+        } else {
+            // Scalar fallback for unsupported widths (e.g. AVX-512).
+            Vector::<i32>::from_array(std::array::from_fn(|i| {
+                if (scalar_integration_mask & (1 << i)) != 0 {
+                    -1
+                } else {
+                    0
+                }
+            }))
+        };
         (BundleIntegrationMode::Partial, integration_mask)
     } else {
         // No integration needed.
@@ -309,13 +319,11 @@ pub unsafe fn integrate_velocity(
 /// or kinematic body indices are masked out (set to 0). Dynamic lanes are set to -1.
 #[inline(always)]
 fn build_dynamic_integration_mask(encoded_body_indices: &Vector<i32>) -> Vector<i32> {
-    Vector::<i32>::from_array(std::array::from_fn(|i| {
-        if (encoded_body_indices[i] as u32) < Bodies::DYNAMIC_LIMIT {
-            -1
-        } else {
-            0
-        }
-    }))
+    // Single vectorized unsigned compare against the dynamic limit.
+    encoded_body_indices
+        .cast::<u32>()
+        .simd_lt(Vector::<u32>::splat(Bodies::DYNAMIC_LIMIT))
+        .to_simd()
 }
 
 /// The full gather-and-integrate function that handles all 6 integration paths.

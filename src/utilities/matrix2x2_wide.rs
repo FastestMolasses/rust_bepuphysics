@@ -2,6 +2,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Matrix2x2Wide {
     /// First row of the matrix.
     pub x: Vector2Wide,
