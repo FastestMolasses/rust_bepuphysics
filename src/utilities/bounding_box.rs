@@ -1,4 +1,5 @@
 use crate::utilities::bounding_sphere::BoundingSphere;
+use crate::utilities::vector::HwMinMax;
 use glam::Vec4Swizzles;
 use glam::{Vec3, Vec4};
 use std::mem::MaybeUninit;
@@ -134,8 +135,8 @@ impl BoundingBox {
         min: &mut Vec3,
         max: &mut Vec3,
     ) {
-        *min = min_a.min(min_b);
-        *max = max_a.max(max_b);
+        *min = min_a.hw_min(min_b);
+        *max = max_a.hw_max(max_b);
     }
 
     /// Computes a bounding box which contains two other bounding boxes.
@@ -259,8 +260,8 @@ impl BoundingBox {
             // Compute min and max
             let current_min = Simd::<f32, 4>::from_array(*(result_ptr as *const [f32; 4]));
             let current_max = Simd::<f32, 4>::from_array(*(result_ptr.add(4) as *const [f32; 4]));
-            let min = std::simd::num::SimdFloat::simd_min(a_min, b_min);
-            let max = std::simd::num::SimdFloat::simd_max(a_max, b_max);
+            let min = a_min.hw_min(b_min);
+            let max = a_max.hw_max(b_max);
             let mask = std::simd::Mask::<i32, 4>::from_array([true, true, true, false]);
 
             // Use load_select to blend the results while preserving the W component
@@ -341,8 +342,8 @@ impl BoundingBox {
             let b_min = Simd::<f32, 4>::from_array(*(b_ptr as *const [f32; 4]));
             let b_max = Simd::<f32, 4>::from_array(*(b_ptr.add(4) as *const [f32; 4]));
 
-            let min = std::simd::num::SimdFloat::simd_min(a_min, b_min);
-            let max = std::simd::num::SimdFloat::simd_max(a_max, b_max);
+            let min = a_min.hw_min(b_min);
+            let max = a_max.hw_max(b_max);
 
             // Store results
             *(result_ptr as *mut [f32; 4]) = min.to_array();
@@ -353,7 +354,7 @@ impl BoundingBox {
     /// Determines if a bounding box intersects a bounding sphere.
     #[inline(always)]
     pub fn intersects_sphere(&self, sphere: &BoundingSphere) -> bool {
-        let offset = sphere.center - self.min.max(sphere.center).min(self.max);
+        let offset = sphere.center - sphere.center.hw_max(self.min).hw_min(self.max);
         offset.dot(offset) <= sphere.radius * sphere.radius
     }
 
@@ -392,8 +393,8 @@ impl BoundingBox {
             _pad1: 0.0,
         };
         for point in points.iter().skip(1) {
-            aabb.min = Vec3::min(*point, aabb.min);
-            aabb.max = Vec3::max(*point, aabb.max);
+            aabb.min = point.hw_min(aabb.min);
+            aabb.max = point.hw_max(aabb.max);
         }
         aabb
     }

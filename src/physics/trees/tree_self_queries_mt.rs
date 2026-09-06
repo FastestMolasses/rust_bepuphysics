@@ -6,6 +6,7 @@ use crate::physics::trees::tree_self_queries::IOverlapHandler;
 use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::vector::HwMinMax;
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -60,7 +61,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         }
         debug_assert!(self.overlap_handlers.len() >= thread_count as usize);
         let job_multiplier = 8.0f32;
-        let target_job_count = (1.0f32).max(job_multiplier * thread_count as f32);
+        let target_job_count = (1.0f32).hw_max(job_multiplier * thread_count as f32);
         self.leaf_threshold = (tree.leaf_count as f32 / target_job_count) as i32;
         self.jobs = QuickList::with_capacity((target_job_count * 2.0) as i32, &mut *self.pool);
         unsafe {
@@ -107,11 +108,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
                 let leaf_index = Tree::encode(overlap.b);
                 let leaf = &*tree.leaves.get(leaf_index);
                 let node = &*tree.nodes.get(leaf.node_index());
-                let child_owning_leaf = if leaf.child_index() == 0 {
-                    &node.a
-                } else {
-                    &node.b
-                };
+                let child_owning_leaf = Tree::node_child(node, leaf.child_index());
                 tree.test_leaf_against_node(
                     leaf_index,
                     child_owning_leaf,
@@ -124,11 +121,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
             let leaf_index = Tree::encode(overlap.a);
             let leaf = &*tree.leaves.get(leaf_index);
             let node = &*tree.nodes.get(leaf.node_index());
-            let child_owning_leaf = if leaf.child_index() == 0 {
-                &node.a
-            } else {
-                &node.b
-            };
+            let child_owning_leaf = Tree::node_child(node, leaf.child_index());
             tree.test_leaf_against_node(
                 leaf_index,
                 child_owning_leaf,
@@ -205,6 +198,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         }
     }
 
+    #[inline(always)]
     unsafe fn dispatch_test_for_nodes(
         &mut self,
         a: &NodeChild,

@@ -7,7 +7,7 @@ use crate::physics::collidables::shape::{
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::physics::collision_detection::sweep_task_registry::{
-    ISweepFilter, SweepTask, SweepTaskRegistry,
+    SweepFilterRef, SweepTask, SweepTaskRegistry,
 };
 use crate::physics::collision_detection::sweep_tasks::compound_pair_sweep_overlap_finder::ICompoundPairSweepOverlapFinder;
 use crate::utilities::memory::buffer_pool::BufferPool;
@@ -97,6 +97,7 @@ impl<
         _minimum_progression: f32,
         _convergence_threshold: f32,
         _maximum_iteration_count: i32,
+        _pool: *mut BufferPool,
         _t0: &mut f32,
         _t1: &mut f32,
         _hit_location: &mut Vec3,
@@ -119,7 +120,7 @@ impl<
         convergence_threshold: f32,
         maximum_iteration_count: i32,
         flip_required: bool,
-        filter: *mut u8,
+        filter: SweepFilterRef,
         shapes: *mut Shapes,
         sweep_tasks: *mut SweepTaskRegistry,
         pool: *mut BufferPool,
@@ -148,16 +149,14 @@ impl<
             &mut *pool,
             &mut overlaps,
         );
-        // ABI convention: `filter` points to a `*mut dyn ISweepFilter` fat-pointer local, hence the double deref.
-        let filter_ref = &**(filter as *const *const dyn ISweepFilter);
         for i in 0..overlaps.child_count {
             let child_overlaps = overlaps.get_overlaps_for_child(i);
             for j in 0..child_overlaps.count {
                 let triangle_index = child_overlaps.overlaps[j as usize];
                 let allow = if flip_required {
-                    filter_ref.allow_test(triangle_index, child_overlaps.child_index)
+                    filter.allow_test(triangle_index, child_overlaps.child_index)
                 } else {
-                    filter_ref.allow_test(child_overlaps.child_index, triangle_index)
+                    filter.allow_test(child_overlaps.child_index, triangle_index)
                 };
                 if allow {
                     let mut child_b = std::mem::MaybeUninit::<TChildShapeB>::uninit();
@@ -195,6 +194,7 @@ impl<
                             minimum_progression,
                             convergence_threshold,
                             maximum_iteration_count,
+                            pool,
                             &mut t0_candidate,
                             &mut t1_candidate,
                             &mut hit_location_candidate,
@@ -206,6 +206,8 @@ impl<
                             *hit_location = hit_location_candidate;
                             *hit_normal = hit_normal_candidate;
                         }
+                    } else {
+                        debug_assert!(false, "no sweep task registered for the child pair");
                     }
                 }
             }

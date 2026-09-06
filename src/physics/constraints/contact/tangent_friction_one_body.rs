@@ -4,10 +4,9 @@ use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::utilities::matrix2x3_wide::Matrix2x3Wide;
 use crate::utilities::symmetric2x2_wide::Symmetric2x2Wide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::simd::num::SimdFloat;
 
 /// Handles the tangent friction implementation for one body contact constraints.
 pub struct TangentFrictionOneBody;
@@ -108,9 +107,8 @@ impl TangentFrictionOneBody {
         let mut accumulated_magnitude = Vector::<f32>::splat(0.0);
         Vector2Wide::length(accumulated_impulse, &mut accumulated_magnitude);
         //Note division by zero guard.
-        let scale = Vector::<f32>::splat(1.0).simd_min(
-            *maximum_impulse / accumulated_magnitude.simd_max(Vector::<f32>::splat(1e-16)),
-        );
+        let scale = Vector::<f32>::splat(1.0)
+            .hw_min(*maximum_impulse / Vector::<f32>::splat(1e-16).hw_max(accumulated_magnitude));
         let temp = *accumulated_impulse;
         Vector2Wide::scale(&temp, &scale, accumulated_impulse);
 

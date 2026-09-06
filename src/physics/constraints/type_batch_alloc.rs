@@ -14,6 +14,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::vector::Vector;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 
 /// Sets one lane of the body references bundle at `inner_index` to the given body indices.
@@ -535,12 +536,17 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
     let mut target_inner_index: i32 = -1;
 
     // Build broadcasted body indices with kinematic flag stripped.
-    // Using a fixed-size array (max 4 bodies per constraint) instead of stackalloc.
-    let mut broadcasted_storage = [Simd::splat(0i32); 4];
+    // Fixed inline storage; no registered type processor constrains more than four bodies.
+    debug_assert!(bodies_per_constraint <= 4);
+    let mut broadcasted_storage = MaybeUninit::<[Vector<i32>; 4]>::uninit();
+    let broadcasted_body_indices = broadcasted_storage.as_mut_ptr() as *mut Vector<i32>;
     for i in 0..bodies_per_constraint {
-        broadcasted_storage[i] = Simd::splat(encoded_body_indices[i] & Bodies::BODY_REFERENCE_MASK);
+        unsafe {
+            *broadcasted_body_indices.add(i) =
+                Simd::splat(encoded_body_indices[i] & Bodies::BODY_REFERENCE_MASK);
+        }
     }
-    let broadcasted_body_indices = broadcasted_storage.as_ptr();
+    let broadcasted_body_indices = broadcasted_body_indices as *const Vector<i32>;
 
     let bundle_count = type_batch.bundle_count();
     let body_references_ptr = type_batch.body_references.as_mut_ptr();

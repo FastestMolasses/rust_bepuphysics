@@ -2,6 +2,7 @@
 
 use glam::Vec3;
 
+use crate::out;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::motor_settings::{MotorSettings, MotorSettingsWide};
 use crate::physics::constraints::servo_settings::ServoSettingsWide;
@@ -10,6 +11,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 
 /// Constrains the angular velocity of one body to the target.
 #[repr(C)]
@@ -84,10 +86,11 @@ impl OneBodyAngularMotorFunctions {
         impulse_to_velocity: &Symmetric3x3Wide,
         csi: &Vector3Wide,
     ) {
-        let mut velocity_change = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(csi, impulse_to_velocity, &mut velocity_change);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::add(angular_velocity, &velocity_change, &mut tmp);
+        let velocity_change = out!(Symmetric3x3Wide::transform_without_overlap(
+            csi,
+            impulse_to_velocity
+        ));
+        let tmp = out!(Vector3Wide::add(angular_velocity, &velocity_change));
         *angular_velocity = tmp;
     }
 
@@ -119,27 +122,33 @@ impl OneBodyAngularMotorFunctions {
         wsv_a: &mut BodyVelocityWide,
     ) {
         // Jacobians are just the identity matrix.
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        let mut maximum_impulse = Vector::<f32>::splat(0.0);
-        MotorSettingsWide::compute_softness(
-            &prestep.settings,
-            dt,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-            &mut maximum_impulse,
-        );
-        let mut unsoftened_effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::invert(
-            &inertia_a.inverse_inertia_tensor,
-            &mut unsoftened_effective_mass,
-        );
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut maximum_impulse = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            MotorSettingsWide::compute_softness(
+                &prestep.settings,
+                dt,
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+                &mut *maximum_impulse.as_mut_ptr(),
+            );
+        }
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
+        let maximum_impulse = unsafe { maximum_impulse.assume_init() };
+        let unsoftened_effective_mass =
+            out!(Symmetric3x3Wide::invert(&inertia_a.inverse_inertia_tensor));
 
         // csi = projection.BiasImpulse - accumulatedImpulse * projection.SoftnessImpulseScale - csiaAngular;
-        let mut diff = Vector3Wide::default();
-        Vector3Wide::subtract(&prestep.target_velocity, &wsv_a.angular, &mut diff);
-        let mut csi = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&diff, &unsoftened_effective_mass, &mut csi);
+        let diff = out!(Vector3Wide::subtract(
+            &prestep.target_velocity,
+            &wsv_a.angular
+        ));
+        let mut csi = out!(Symmetric3x3Wide::transform_without_overlap(
+            &diff,
+            &unsoftened_effective_mass
+        ));
         let scaled_csi = csi * effective_mass_cfm_scale;
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);

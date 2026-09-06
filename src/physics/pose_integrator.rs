@@ -358,6 +358,8 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
         let bundle_dt: Vector<f32> = Simd::splat(substep_dt);
         let handle_to_location = &bodies.handle_to_location;
         let zero_inertia = BodyInertiaWide::default();
+        // Discard destination for the inertia `out` parameter; the access filter never writes it.
+        let mut discarded_inertia = BodyInertiaWide::default();
         let lanes = Vector::<f32>::LEN as i32;
 
         for bundle_index in bundle_start_index..bundle_end_index {
@@ -380,8 +382,6 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
             let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
             let mut velocity = std::mem::MaybeUninit::<BodyVelocityWide>::uninit();
-            // AccessNoInertia never gathers inertia; this stays uninitialized and unread.
-            let mut dummy_inertia = std::mem::MaybeUninit::<BodyInertiaWide>::uninit();
 
             bodies.gather_state::<AccessNoInertia>(
                 &body_indices_vector,
@@ -389,7 +389,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 &mut *position.as_mut_ptr(),
                 &mut *orientation.as_mut_ptr(),
                 &mut *velocity.as_mut_ptr(),
-                &mut *dummy_inertia.as_mut_ptr(),
+                &mut discarded_inertia,
             );
             let position = position.assume_init();
             let orientation = orientation.assume_init();
@@ -429,6 +429,8 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
         let half_dt = bundle_dt * Simd::splat(0.5f32);
         let handle_to_location = &bodies.handle_to_location;
         let zero_inertia = BodyInertiaWide::default();
+        // Discard destination for the inertia `out` parameter; the access filter never writes it.
+        let mut discarded_inertia = BodyInertiaWide::default();
         let lanes = Vector::<f32>::LEN as i32;
 
         for bundle_index in bundle_start_index..bundle_end_index {
@@ -451,8 +453,6 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
             let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
             let mut velocity = std::mem::MaybeUninit::<BodyVelocityWide>::uninit();
-            // AccessNoInertia never gathers inertia; this stays uninitialized and unread.
-            let mut dummy_inertia = std::mem::MaybeUninit::<BodyInertiaWide>::uninit();
 
             bodies.gather_state::<AccessNoInertia>(
                 &body_indices_vector,
@@ -460,7 +460,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 &mut *position.as_mut_ptr(),
                 &mut *orientation.as_mut_ptr(),
                 &mut *velocity.as_mut_ptr(),
-                &mut *dummy_inertia.as_mut_ptr(),
+                &mut discarded_inertia,
             );
             let mut position = position.assume_init();
             let mut orientation = orientation.assume_init();

@@ -54,3 +54,15 @@ impl std::fmt::Debug for CostOrFlag {
         write!(f, "CostOrFlag {{ ... }}")
     }
 }
+
+// NodeChild's exact field offsets are load-bearing: it is punned as a BoundingBox4 by the
+// binned builder, the SAH metric, and the bounds intersection tests.
+const _: () = {
+    assert!(std::mem::size_of::<NodeChild>() == 32);
+    assert!(std::mem::offset_of!(NodeChild, min) == 0);
+    assert!(std::mem::offset_of!(NodeChild, index) == 12);
+    assert!(std::mem::offset_of!(NodeChild, max) == 16);
+    assert!(std::mem::offset_of!(NodeChild, leaf_count) == 28);
+    assert!(std::mem::size_of::<Node>() == 64);
+    assert!(std::mem::size_of::<Metanode>() == 12);
+};

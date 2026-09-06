@@ -5,7 +5,7 @@ use crate::physics::collidables::capsule::CapsuleWide;
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex2ContactManifoldWide;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -43,7 +43,7 @@ impl CapsuleBoxTester {
         // Get the closest point on the capsule segment to the box center.
         let mut dot = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(local_offset_a, capsule_axis, &mut dot);
-        let clamped_dot = (-a.half_length).simd_max(a.half_length.simd_min(dot));
+        let clamped_dot = a.half_length.hw_min((-a.half_length).hw_max(dot));
         let mut offset_to_capsule = Vector3Wide::default();
         Vector3Wide::scale_to(capsule_axis, &clamped_dot, &mut offset_to_capsule);
         let mut diff = Vector3Wide::default();
@@ -84,22 +84,22 @@ impl CapsuleBoxTester {
             *capsule_axis_x * ab_x + *capsule_axis_y * ab_y - *capsule_axis_z * *offset_az;
         *ta = (da_offset_b + *offset_az * *capsule_axis_z)
             / Vector::<f32>::splat(1e-15)
-                .simd_max(Vector::<f32>::splat(1.0) - *capsule_axis_z * *capsule_axis_z);
+                .hw_max(Vector::<f32>::splat(1.0) - *capsule_axis_z * *capsule_axis_z);
         let mut tb = *ta * *capsule_axis_z + *offset_az;
 
         let absdadb = capsule_axis_z.abs();
         let b_onto_a_offset = *box_half_length * absdadb;
         let a_onto_b_offset = *capsule_half_length * absdadb;
         *ta_min = (-*capsule_half_length)
-            .simd_max((da_offset_b - b_onto_a_offset).simd_min(*capsule_half_length));
+            .hw_max(capsule_half_length.hw_min(da_offset_b - b_onto_a_offset));
         *ta_max = capsule_half_length
-            .simd_min((da_offset_b + b_onto_a_offset).simd_max(-*capsule_half_length));
+            .hw_min((-*capsule_half_length).hw_max(da_offset_b + b_onto_a_offset));
         let b_min =
-            (-*box_half_length).simd_max((*offset_az - a_onto_b_offset).simd_min(*box_half_length));
+            (-*box_half_length).hw_max(box_half_length.hw_min(*offset_az - a_onto_b_offset));
         let b_max =
-            box_half_length.simd_min((*offset_az + a_onto_b_offset).simd_max(-*box_half_length));
-        *ta = ta.simd_max(*ta_min).simd_min(*ta_max);
-        tb = tb.simd_max(b_min).simd_min(b_max);
+            box_half_length.hw_min((-*box_half_length).hw_max(*offset_az + a_onto_b_offset));
+        *ta = ta.hw_max(*ta_min).hw_min(*ta_max);
+        tb = tb.hw_max(b_min).hw_min(b_max);
 
         closest_point_on_a.x = *ta * *capsule_axis_x + *offset_ax;
         closest_point_on_a.y = *ta * *capsule_axis_y + *offset_ay;
@@ -425,13 +425,13 @@ impl CapsuleBoxTester {
         let x_dot = nx * fxn;
         let y_dot = ny * fyn;
         let z_dot = nz * fzn;
-        let use_x = x_dot.simd_gt(y_dot.simd_max(z_dot));
+        let use_x = x_dot.simd_gt(y_dot.hw_max(z_dot));
         let use_y = y_dot.simd_gt(z_dot) & !use_x;
         let use_z = !use_x & !use_y;
 
         let face_normal_dot_local_normal = use_x.select(x_dot, use_y.select(y_dot, z_dot));
         let inverse_fndln = Vector::<f32>::splat(1.0)
-            / face_normal_dot_local_normal.simd_max(Vector::<f32>::splat(1e-15));
+            / Vector::<f32>::splat(1e-15).hw_max(face_normal_dot_local_normal);
         let capsule_axis_dot_fn = use_x.select(
             capsule_axis.x * fxn,
             use_y.select(capsule_axis.y * fyn, capsule_axis.z * fzn),
@@ -466,8 +466,8 @@ impl CapsuleBoxTester {
 
         let epsilon_scale = b
             .half_width
-            .simd_max(b.half_height.simd_max(b.half_length))
-            .simd_min(a.half_length.simd_max(a.radius));
+            .hw_max(b.half_height.hw_max(b.half_length))
+            .hw_min(a.half_length.hw_max(a.radius));
         let epsilon = epsilon_scale * Vector::<f32>::splat(1e-3);
         let half_extent_x = epsilon + use_x.select(b.half_height, b.half_width);
         let half_extent_y = epsilon + use_z.select(b.half_height, b.half_length);
@@ -479,10 +479,10 @@ impl CapsuleBoxTester {
         let tx1 = (ts_center_x + half_extent_x) * inv_axis_x;
         let ty0 = (ts_center_y - half_extent_y) * inv_axis_y;
         let ty1 = (ts_center_y + half_extent_y) * inv_axis_y;
-        let mut min_x = tx0.simd_min(tx1);
-        let mut max_x = tx0.simd_max(tx1);
-        let mut min_y = ty0.simd_min(ty1);
-        let mut max_y = ty0.simd_max(ty1);
+        let mut min_x = tx0.hw_min(tx1);
+        let mut max_x = tx0.hw_max(tx1);
+        let mut min_y = ty0.hw_min(ty1);
+        let mut max_y = ty0.hw_max(ty1);
 
         let use_fallback_x = ts_axis_x.abs().simd_lt(Vector::<f32>::splat(1e-15));
         let use_fallback_y = ts_axis_y.abs().simd_lt(Vector::<f32>::splat(1e-15));
@@ -495,13 +495,13 @@ impl CapsuleBoxTester {
         min_y = use_fallback_y.select(center_contained_y.select(large_neg, large_pos), min_y);
         max_y = use_fallback_y.select(center_contained_y.select(large_pos, large_neg), max_y);
 
-        let face_min = min_x.simd_max(min_y);
-        let face_max = max_x.simd_min(max_y);
-        let t_min_raw = a.half_length.simd_min(face_min).simd_max(-a.half_length);
-        let t_max_raw = a.half_length.simd_min(face_max).simd_max(-a.half_length);
+        let face_min = min_x.hw_max(min_y);
+        let face_max = max_x.hw_min(max_y);
+        let t_min_raw = face_min.hw_min(a.half_length).hw_max(-a.half_length);
+        let t_max_raw = face_max.hw_min(a.half_length).hw_max(-a.half_length);
         let face_interval_exists = face_max.simd_ge(face_min);
-        let t_min = face_interval_exists.select(t_min_raw.simd_min(ta), ta);
-        let t_max = face_interval_exists.select(t_max_raw.simd_max(ta), ta);
+        let t_min = face_interval_exists.select(t_min_raw.hw_min(ta), ta);
+        let t_max = face_interval_exists.select(t_max_raw.hw_max(ta), ta);
 
         let separation_min = t_center + t_axis * t_min;
         let separation_max = t_center + t_axis * t_max;

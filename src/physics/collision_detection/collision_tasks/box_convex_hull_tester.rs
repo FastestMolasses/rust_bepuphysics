@@ -4,7 +4,7 @@ use crate::physics::collidables::box_shape::{BoxSupportFinder, BoxWide};
 use crate::physics::collidables::convex_hull::{ConvexHullSupportFinder, ConvexHullWide};
 use crate::physics::collision_detection::collision_tasks::convex_hull_test_helper::ConvexHullTestHelper;
 use crate::physics::collision_detection::collision_tasks::manifold_candidate_helper::{
-    ManifoldCandidateHelper, ManifoldCandidateScalar,
+    ManifoldCandidateHelper, ManifoldCandidateScalar, ScratchSpill,
 };
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
 use crate::physics::collision_detection::depth_refiner::DepthRefiner;
@@ -13,8 +13,9 @@ use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::mem::MaybeUninit;
@@ -40,6 +41,7 @@ impl BoxConvexHullTester {
         orientation_a: &QuaternionWide,
         orientation_b: &QuaternionWide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut Convex4ContactManifoldWide,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
@@ -86,8 +88,8 @@ impl BoxConvexHullTester {
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
         let epsilon_scale = a
             .half_width
-            .simd_max(a.half_height.simd_max(a.half_length))
-            .simd_min(hull_epsilon_scale);
+            .hw_max(a.half_height.hw_max(a.half_length))
+            .hw_min(hull_epsilon_scale);
         let depth_threshold = -*speculative_margin;
 
         let mut depth = Vector::<f32>::default();
@@ -248,11 +250,18 @@ impl BoxConvexHullTester {
 
         // To find the contact manifold, we clip box edges against the hull face per-slot.
         // There can be no more than 8 contacts from edge intersections, but more from hull faces with many vertices.
-        // Clamped to the candidate buffer's capacity (C# stackallocs the unbounded count).
-        let maximum_contact_count = 8usize.max(maximum_face_vertex_count).min(128);
+        const INLINE_CANDIDATE_CAPACITY: usize = 128;
+        let maximum_contact_count = 8usize.max(maximum_face_vertex_count);
         // SAFETY: uninitialized; every index below candidate_count is written before it is read.
-        let mut candidates_buf: [MaybeUninit<ManifoldCandidateScalar>; 128] =
+        let mut candidates_inline: [MaybeUninit<ManifoldCandidateScalar>; INLINE_CANDIDATE_CAPACITY] =
             unsafe { MaybeUninit::uninit().assume_init() };
+        let candidates_spill = ScratchSpill::<ManifoldCandidateScalar>::new(
+            maximum_contact_count,
+            INLINE_CANDIDATE_CAPACITY,
+            pool,
+        );
+        let candidates =
+            candidates_spill.or_inline(candidates_inline.as_mut_ptr() as *mut ManifoldCandidateScalar);
 
         for slot_index in 0..pair_count as usize {
             if inactive_lanes.as_array()[slot_index] < 0 {
@@ -358,7 +367,7 @@ impl BoxConvexHullTester {
                     + hull_edge_plane_normal_y4 * hull_edge_start_to_box_edge_y
                     + hull_edge_plane_normal_z4 * hull_edge_start_to_box_edge_z;
                 maximum_vertex_containment_dots =
-                    maximum_vertex_containment_dots.simd_max(box_vertex_containment_dots);
+                    maximum_vertex_containment_dots.hw_max(box_vertex_containment_dots);
                 let numerator = hull_edge_start_to_box_edge_x * edge_plane_normal_x
                     + hull_edge_start_to_box_edge_y * edge_plane_normal_y
                     + hull_edge_start_to_box_edge_z * edge_plane_normal_z;
@@ -444,7 +453,7 @@ impl BoxConvexHullTester {
                     // Create max contact.
                     let point =
                         hull_edge_offset * earliest_exit + previous_vertex - hull_face_origin;
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: point.dot(hull_face_x),
                         y: point.dot(hull_face_y),
                         feature_id: base_feature_id + end_id as i32,
@@ -458,7 +467,7 @@ impl BoxConvexHullTester {
                     // Create min contact.
                     let point =
                         hull_edge_offset * latest_entry + previous_vertex - hull_face_origin;
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: point.dot(hull_face_x),
                         y: point.dot(hull_face_y),
                         feature_id: base_feature_id + start_id as i32,
@@ -512,7 +521,7 @@ impl BoxConvexHullTester {
 
                 // Check each of 4 box vertices for containment inside hull face.
                 if maximum_vertex_containment_dots[0] <= 0.0 {
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: projected_tangent_x[0],
                         y: projected_tangent_y[0],
                         feature_id: 0,
@@ -522,7 +531,7 @@ impl BoxConvexHullTester {
                 if candidate_count < maximum_contact_count
                     && maximum_vertex_containment_dots[1] <= 0.0
                 {
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: projected_tangent_x[1],
                         y: projected_tangent_y[1],
                         feature_id: 1,
@@ -532,7 +541,7 @@ impl BoxConvexHullTester {
                 if candidate_count < maximum_contact_count
                     && maximum_vertex_containment_dots[2] <= 0.0
                 {
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: projected_tangent_x[2],
                         y: projected_tangent_y[2],
                         feature_id: 2,
@@ -542,7 +551,7 @@ impl BoxConvexHullTester {
                 if candidate_count < maximum_contact_count
                     && maximum_vertex_containment_dots[3] <= 0.0
                 {
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: projected_tangent_x[3],
                         y: projected_tangent_y[3],
                         feature_id: 3,
@@ -561,7 +570,7 @@ impl BoxConvexHullTester {
             let mut slot_hull_orientation = Matrix3x3::default();
             Matrix3x3Wide::read_slot(&hull_orientation, slot_index, &mut slot_hull_orientation);
             ManifoldCandidateHelper::reduce_scalar(
-                candidates_buf.as_mut_ptr() as *mut ManifoldCandidateScalar,
+                candidates,
                 candidate_count as i32,
                 slot_box_face_normal,
                 1.0 / slot_box_face_normal.dot(slot_local_normal),
@@ -575,6 +584,7 @@ impl BoxConvexHullTester {
                 slot_offset_b,
                 slot_index,
                 manifold,
+                pool,
             );
         }
 

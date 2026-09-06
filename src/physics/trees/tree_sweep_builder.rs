@@ -34,9 +34,22 @@ impl RefComparer<i32> for IndexMapComparer {
         unsafe {
             let centroid_a = *self.centroids.add(*a as usize);
             let centroid_b = *self.centroids.add(*b as usize);
-            centroid_a
-                .partial_cmp(&centroid_b)
-                .unwrap_or(Ordering::Equal)
+            // .NET float.CompareTo: NaN sorts below every value and equals itself.
+            if centroid_a < centroid_b {
+                Ordering::Less
+            } else if centroid_a > centroid_b {
+                Ordering::Greater
+            } else if centroid_a == centroid_b {
+                Ordering::Equal
+            } else if centroid_a.is_nan() {
+                if centroid_b.is_nan() {
+                    Ordering::Equal
+                } else {
+                    Ordering::Less
+                }
+            } else {
+                Ordering::Greater
+            }
         }
     }
 }

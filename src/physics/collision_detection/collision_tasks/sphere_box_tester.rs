@@ -5,7 +5,7 @@ use crate::physics::collidables::sphere::SphereWide;
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex1ContactManifoldWide;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -39,16 +39,16 @@ impl SphereBoxTester {
 
         let clamped_x = local_offset_b
             .x
-            .simd_max(-b.half_width)
-            .simd_min(b.half_width);
+            .hw_max(-b.half_width)
+            .hw_min(b.half_width);
         let clamped_y = local_offset_b
             .y
-            .simd_max(-b.half_height)
-            .simd_min(b.half_height);
+            .hw_max(-b.half_height)
+            .hw_min(b.half_height);
         let clamped_z = local_offset_b
             .z
-            .simd_max(-b.half_length)
-            .simd_min(b.half_length);
+            .hw_max(-b.half_length)
+            .hw_min(b.half_length);
         let clamped_local_offset_b = Vector3Wide {
             x: clamped_x,
             y: clamped_y,
@@ -72,7 +72,7 @@ impl SphereBoxTester {
         let depth_x = b.half_width - local_offset_b.x.abs();
         let depth_y = b.half_height - local_offset_b.y.abs();
         let depth_z = b.half_length - local_offset_b.z.abs();
-        let inside_depth = depth_x.simd_min(depth_y.simd_min(depth_z));
+        let inside_depth = depth_x.hw_min(depth_y.hw_min(depth_z));
         let use_x = inside_depth.simd_eq(depth_x);
         let use_y = inside_depth.simd_eq(depth_y) & !use_x;
         let use_z = !(use_x | use_y);

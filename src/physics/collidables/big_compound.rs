@@ -7,7 +7,9 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 use super::compound::{Compound, CompoundChild, IOverlapCollector};
 use super::compound_builder::CompoundBuilder;
 use super::mesh::{ShapeTreeOverlapEnumerator, ShapeTreeSweepLeafTester};
-use super::shape::{ICompoundShape, IDisposableShape, IShape, IShapeRayHitHandler};
+use super::shape::{
+    ICompoundShape, IDisposableShape, IShape, IShapeRayHitHandler, ShapeRayHitHandlerRef,
+};
 use super::shapes::Shapes;
 
 use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose};
@@ -22,6 +24,7 @@ use crate::physics::collision_detection::collision_tasks::convex_compound_overla
 use crate::physics::trees::node::NodeChild;
 use crate::physics::trees::tree::Tree;
 use crate::utilities::bounding_box::BoundingBox;
+use crate::utilities::vector::HwMinMax;
 
 /// Compound shape containing a bunch of shapes accessible through a tree acceleration structure.
 /// Useful for compounds with lots of children.
@@ -88,22 +91,20 @@ impl<THandler: IShapeRayHitHandler> IRayLeafTester for BigCompoundLeafTester<'_,
                 normal: &mut hit_normal,
             };
 
-            if let Some(batch) = self.shapes.get_batch(child.shape_index.type_id() as usize) {
-                let child_pose = RigidPose {
-                    position: child.local_position,
-                    orientation: child.local_orientation,
-                };
-                // trees::RayData and collision_detection::RayData have identical field layout.
-                let cd_ray = &*(ray_data as *const RayData);
-                batch.ray_test(
-                    child.shape_index.index() as usize,
-                    &child_pose,
-                    cd_ray,
-                    &mut *maximum_t,
-                    pool,
-                    &mut tester,
-                );
-            }
+            let child_pose = RigidPose {
+                position: child.local_position,
+                orientation: child.local_orientation,
+            };
+            // trees::RayData and collision_detection::RayData have identical field layout.
+            let cd_ray = &*(ray_data as *const RayData);
+            self.shapes.ray_test(
+                &child.shape_index,
+                &child_pose,
+                cd_ray,
+                &mut *maximum_t,
+                pool,
+                &mut tester,
+            );
 
             if hit_t >= 0.0 {
                 // Rotate the normal back to world space.
@@ -271,8 +272,8 @@ impl BigCompound {
                 &mut child_min,
                 &mut child_max,
             );
-            *min = min.min(child_min);
-            *max = max.max(child_max);
+            *min = min.hw_min(child_min);
+            *max = max.hw_max(child_max);
         }
     }
 
@@ -509,6 +510,7 @@ impl ICompoundShape for BigCompound {
         local_min: &Vec3,
         local_max: &Vec3,
         pool: &mut BufferPool,
+        _shapes: &Shapes,
         overlaps: &mut TOverlaps,
     ) {
         // Adapter: bridge IOverlapCollector to IBreakableForEach<i32> for tree query.
@@ -540,6 +542,10 @@ impl ICompoundShape for BigCompound {
         );
     }
 
+    fn shape_ray_ref(&self) -> super::shapes::ShapeRayRef {
+        super::shapes::ShapeRayRef::BigCompound(self)
+    }
+
     unsafe fn ray_test_shape(
         &self,
         pose: &RigidPose,
@@ -547,27 +553,9 @@ impl ICompoundShape for BigCompound {
         maximum_t: &mut f32,
         shape_batches: &Shapes,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     ) {
-        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
-        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
-        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
-            fn allow_test(&self, child_index: i32) -> bool {
-                self.0.allow_test(child_index)
-            }
-            fn on_ray_hit(
-                &mut self,
-                ray: &RayData,
-                maximum_t: &mut f32,
-                t: f32,
-                normal: Vec3,
-                child_index: i32,
-            ) {
-                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
-            }
-        }
-        let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test(pose, ray, maximum_t, shape_batches, pool, &mut wrapper);
+        self.ray_test(pose, ray, maximum_t, shape_batches, pool, hit_handler);
     }
 
     unsafe fn ray_test_shape_batched(
@@ -576,27 +564,9 @@ impl ICompoundShape for BigCompound {
         rays: &mut crate::physics::trees::ray_batcher::RaySource,
         shape_batches: &Shapes,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     ) {
-        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
-        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
-        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
-            fn allow_test(&self, child_index: i32) -> bool {
-                self.0.allow_test(child_index)
-            }
-            fn on_ray_hit(
-                &mut self,
-                ray: &RayData,
-                maximum_t: &mut f32,
-                t: f32,
-                normal: Vec3,
-                child_index: i32,
-            ) {
-                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
-            }
-        }
-        let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test_batched(pose, rays, shape_batches, pool, &mut wrapper);
+        self.ray_test_batched(pose, rays, shape_batches, pool, hit_handler);
     }
 }
 

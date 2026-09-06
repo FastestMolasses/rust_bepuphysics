@@ -13,6 +13,7 @@ pub struct PendingAdd {
 }
 
 /// Contains the pending pair cache changes created by a single worker during the last execution of narrow phase pair processing.
+#[repr(C)]
 #[derive(Default)]
 pub struct WorkerPendingPairChanges {
     /// The set of pair-pointer associations created by this worker that should be added to the pair mapping.

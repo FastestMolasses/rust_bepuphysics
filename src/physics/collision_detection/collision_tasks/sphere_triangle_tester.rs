@@ -7,7 +7,7 @@ use crate::physics::collision_detection::mesh_reduction::FACE_COLLISION_FLAG;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -26,7 +26,7 @@ impl SphereTriangleTester {
         local_normal_candidate: &Vector3Wide,
     ) {
         let use_candidate = distance_squared_candidate.simd_lt(*distance_squared);
-        *distance_squared = distance_squared.simd_min(*distance_squared_candidate);
+        *distance_squared = distance_squared_candidate.hw_min(*distance_squared);
         *local_normal = Vector3Wide::conditional_select(
             &use_candidate.to_simd(),
             local_normal_candidate,
@@ -115,7 +115,7 @@ impl SphereTriangleTester {
             let mut edge_dot_edge = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&edge_direction, &edge_direction, &mut edge_dot_edge);
             let edge_scale = Vector::<f32>::splat(0.0)
-                .simd_max(Vector::<f32>::splat(1.0).simd_min(-neg_offset_dot_edge / edge_dot_edge));
+                .hw_max(Vector::<f32>::splat(1.0).hw_min(-neg_offset_dot_edge / edge_dot_edge));
             let mut point_on_edge = Vector3Wide::default();
             Vector3Wide::scale_to(&edge_direction, &edge_scale, &mut point_on_edge);
             let mut point_on_edge_final = Vector3Wide::default();
@@ -146,13 +146,10 @@ impl SphereTriangleTester {
             );
         }
 
-        manifold.feature_id = outside_any_edge
-            .to_simd()
-            .simd_eq(Vector::<i32>::splat(0))
-            .select(
-                Vector::<i32>::splat(FACE_COLLISION_FLAG),
-                Vector::<i32>::splat(0),
-            );
+        manifold.feature_id = outside_any_edge.select(
+            Vector::<i32>::splat(0),
+            Vector::<i32>::splat(FACE_COLLISION_FLAG),
+        );
 
         // Contact position on mesh surface
         Matrix3x3Wide::transform_without_overlap(

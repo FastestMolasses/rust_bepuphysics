@@ -18,6 +18,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 
 /// Checks whether a bundle of constraints should integrate, returning a per-lane mask.
@@ -358,15 +359,16 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                 // Check for empty (-1) or kinematic slots.
                 let integration_mask = build_dynamic_integration_mask(encoded_body_indices);
 
+                let mut local_inertia = MaybeUninit::<BodyInertiaWide>::uninit();
                 bodies.gather_state::<AccessAll>(
                     encoded_body_indices,
                     false, // local inertia, not world
                     position,
                     orientation,
                     velocity,
-                    inertia, // this will hold local inertia
+                    &mut *local_inertia.as_mut_ptr(),
                 );
-                let local_inertia = inertia.clone();
+                let local_inertia = local_inertia.assume_init();
                 let decoded_indices = decode_body_indices(encoded_body_indices, &integration_mask);
                 integrate_pose_and_velocity(
                     angular_integration_mode,
@@ -406,17 +408,18 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                 let (bundle_mode, integration_mask) = bundle_should_integrate(bundle_index, flags);
 
                 // Always gather with AccessAll since integration requires full state.
+                let mut gathered_inertia = MaybeUninit::<BodyInertiaWide>::uninit();
                 bodies.gather_state::<AccessAll>(
                     encoded_body_indices,
                     bundle_mode == BundleIntegrationMode::None, // world inertia if no integration
                     position,
                     orientation,
                     velocity,
-                    inertia,
+                    &mut *gathered_inertia.as_mut_ptr(),
                 );
+                let gathered_inertia = gathered_inertia.assume_init();
 
                 if bundle_mode != BundleIntegrationMode::None {
-                    let gathered_inertia = inertia.clone();
                     let decoded_indices =
                         decode_body_indices(encoded_body_indices, &integration_mask);
                     integrate_pose_and_velocity(
@@ -439,6 +442,8 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                         &integration_mask,
                     );
                     bodies.scatter_inertia(inertia, encoded_body_indices, &integration_mask);
+                } else {
+                    *inertia = gathered_inertia;
                 }
             }
         }
@@ -448,15 +453,16 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
             BatchIntegrationMode::Always => {
                 let integration_mask = build_dynamic_integration_mask(encoded_body_indices);
 
+                let mut local_inertia = MaybeUninit::<BodyInertiaWide>::uninit();
                 bodies.gather_state::<AccessAll>(
                     encoded_body_indices,
                     false, // local inertia
                     position,
                     orientation,
                     velocity,
-                    inertia,
+                    &mut *local_inertia.as_mut_ptr(),
                 );
-                let local_inertia = inertia.clone();
+                let local_inertia = local_inertia.assume_init();
                 let decoded_indices = decode_body_indices(encoded_body_indices, &integration_mask);
                 integrate_velocity(
                     angular_integration_mode,
@@ -488,17 +494,18 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                 let flags = &*integration_flags.get(body_index_in_constraint);
                 let (bundle_mode, integration_mask) = bundle_should_integrate(bundle_index, flags);
 
+                let mut gathered_inertia = MaybeUninit::<BodyInertiaWide>::uninit();
                 bodies.gather_state::<AccessAll>(
                     encoded_body_indices,
                     bundle_mode == BundleIntegrationMode::None,
                     position,
                     orientation,
                     velocity,
-                    inertia,
+                    &mut *gathered_inertia.as_mut_ptr(),
                 );
+                let gathered_inertia = gathered_inertia.assume_init();
 
                 if bundle_mode != BundleIntegrationMode::None {
-                    let gathered_inertia = inertia.clone();
                     let decoded_indices =
                         decode_body_indices(encoded_body_indices, &integration_mask);
                     integrate_velocity(
@@ -516,6 +523,8 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                         inertia,
                     );
                     bodies.scatter_inertia(inertia, encoded_body_indices, &integration_mask);
+                } else {
+                    *inertia = gathered_inertia;
                 }
             }
         }

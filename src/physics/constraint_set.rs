@@ -6,6 +6,7 @@ use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
 
 #[derive(Default)]
+#[repr(C)]
 pub struct ConstraintSet {
     pub batches: QuickList<ConstraintBatch>,
     pub sequential_fallback: SequentialFallbackBatch,
@@ -17,18 +18,6 @@ impl ConstraintSet {
             batches: QuickList::with_capacity(initial_batch_capacity, pool),
             sequential_fallback: SequentialFallbackBatch::default(),
         }
-    }
-
-    /// Gets the total number of bundles across all types and batches.
-    pub fn bundle_count(&self) -> i32 {
-        let mut count = 0;
-        for i in 0..self.batches.count {
-            let batch = self.batches.get(i);
-            for j in 0..batch.type_batches.count {
-                count += batch.type_batches.get(j).bundle_count() as i32;
-            }
-        }
-        count
     }
 
     /// Gets the total number of constraints across all types and batches.

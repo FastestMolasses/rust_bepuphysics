@@ -24,6 +24,7 @@ pub struct BodyConstraintReference {
 /// While the pose integrator would technically benefit from (AO)SOA, it would only help in a magical infinite bandwidth scenario.
 /// In practice, the pose integrator's actual AOSOA-benefitting chunk can't even scale to 2 threads, even with only 4-wide SIMD.
 /// On top of that, the narrow phase and solver both need to access the body's information in a noncontiguous way.
+#[repr(C)]
 pub struct BodySet {
     /// Remaps a body index to its handle.
     pub index_to_handle: Buffer<BodyHandle>,
@@ -255,21 +256,7 @@ impl BodySet {
         pool.resize_to_at_least(&mut self.index_to_handle, target_body_capacity, self.count);
         pool.resize_to_at_least(&mut self.collidables, target_body_capacity, self.count);
         pool.resize_to_at_least(&mut self.activity, target_body_capacity, self.count);
-        // Constraints buffer uses raw pointer copy since QuickList<T> is not Copy
-        unsafe {
-            let old_ptr = self.constraints.as_ptr();
-            let old_len = self.constraints.len();
-            let mut new_buf =
-                pool.take_at_least::<QuickList<BodyConstraintReference>>(target_body_capacity);
-            let copy_count = self.count.min(old_len);
-            if copy_count > 0 && !old_ptr.is_null() {
-                std::ptr::copy_nonoverlapping(old_ptr, new_buf.as_mut_ptr(), copy_count as usize);
-            }
-            if self.constraints.allocated() {
-                pool.return_buffer(&mut self.constraints);
-            }
-            self.constraints = new_buf;
-        }
+        pool.resize_to_at_least(&mut self.constraints, target_body_capacity, self.count);
     }
 
     /// Clears the set, disposing of all per-body constraint lists.

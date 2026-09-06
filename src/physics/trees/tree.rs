@@ -178,9 +178,9 @@ impl Tree {
             "Not enough data for the specified leaf count."
         );
 
-        let leaves = pool.take_at_least::<Leaf>(leaf_count);
-        let nodes = pool.take_at_least::<Node>(node_count);
-        let metanodes = pool.take_at_least::<Metanode>(node_count);
+        let leaves = pool.take::<Leaf>(leaf_count);
+        let nodes = pool.take::<Node>(node_count);
+        let metanodes = pool.take::<Metanode>(node_count);
 
         std::ptr::copy_nonoverlapping(
             data.as_ptr().add(leaves_start),

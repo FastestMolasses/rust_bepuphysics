@@ -5,11 +5,10 @@ use crate::physics::helpers::Helpers;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::num::SimdFloat;
 
 /// Restricts axes attached to two bodies to fall within a maximum swing angle.
 #[repr(C)]
@@ -28,12 +27,12 @@ pub struct SwingLimit {
 impl SwingLimit {
     /// Gets the maximum swing angle based on MinimumDot.
     pub fn maximum_swing_angle(&self) -> f32 {
-        self.minimum_dot.acos()
+        (self.minimum_dot as f64).acos() as f32
     }
 
     /// Sets the maximum swing angle, updating MinimumDot.
     pub fn set_maximum_swing_angle(&mut self, value: f32) {
-        self.minimum_dot = value.cos();
+        self.minimum_dot = (value as f64).cos() as f32;
     }
 
     pub fn apply_description(
@@ -289,7 +288,7 @@ impl SwingLimitFunctions {
         let error = axis_dot - prestep.minimum_dot;
         // Note the negation: we want to oppose the separation.
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
-        let bias_velocity = -(error * inverse_dt_wide).simd_min(error * position_error_to_velocity);
+        let bias_velocity = -(error * inverse_dt_wide).hw_min(error * position_error_to_velocity);
 
         // JB = -JA. (angularVelocityA - angularVelocityB) * (JA * effectiveMass)
         let mut difference = Vector3Wide::default();

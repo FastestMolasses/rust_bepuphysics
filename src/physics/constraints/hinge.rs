@@ -46,6 +46,21 @@ impl Hinge {
         _bundle_index: usize,
         inner_index: usize,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            use crate::physics::constraints::constraint_checker::ConstraintChecker;
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_hinge_axis_a,
+                "Hinge",
+                "local_hinge_axis_a",
+            );
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_hinge_axis_b,
+                "Hinge",
+                "local_hinge_axis_b",
+            );
+            ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "Hinge");
+        }
         Vector3Wide::write_slot(
             self.local_offset_a,
             inner_index,

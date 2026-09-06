@@ -1,11 +1,7 @@
+use crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-
-pub trait EqualityComparerRef<T> {
-    fn equals(&self, a: &T, b: &T) -> bool;
-    fn hash(&self, item: &T) -> u64;
-}
 
 /// IEqualityComparerRef wrapper around an EqualityComparer.
 pub struct WrapperEqualityComparer<T> {
@@ -27,14 +23,14 @@ impl<T> Default for WrapperEqualityComparer<T> {
     }
 }
 
-impl<T: Eq + Hash> EqualityComparerRef<T> for WrapperEqualityComparer<T> {
-    fn equals(&self, a: &T, b: &T) -> bool {
-        a == b
-    }
-
-    fn hash(&self, item: &T) -> u64 {
+impl<T: Eq + Hash> RefEqualityComparer<T> for WrapperEqualityComparer<T> {
+    fn hash(&self, item: &T) -> i32 {
         let mut hasher = DefaultHasher::new();
         item.hash(&mut hasher);
-        hasher.finish()
+        hasher.finish() as i32
+    }
+
+    fn equals(&self, a: &T, b: &T) -> bool {
+        a == b
     }
 }

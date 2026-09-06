@@ -33,6 +33,39 @@ pub struct DistanceServo {
 impl DistanceServo {
     pub const CONSTRAINT_TYPE_ID: i32 = DistanceServoTypeProcessor::BATCH_TYPE_ID;
 
+    #[inline(always)]
+    pub fn new(
+        local_offset_a: Vec3,
+        local_offset_b: Vec3,
+        target_distance: f32,
+        spring_settings: SpringSettings,
+        servo_settings: ServoSettings,
+    ) -> Self {
+        Self {
+            local_offset_a,
+            local_offset_b,
+            target_distance,
+            servo_settings,
+            spring_settings,
+        }
+    }
+
+    #[inline(always)]
+    pub fn new_with_default_servo(
+        local_offset_a: Vec3,
+        local_offset_b: Vec3,
+        target_distance: f32,
+        spring_settings: SpringSettings,
+    ) -> Self {
+        Self::new(
+            local_offset_a,
+            local_offset_b,
+            target_distance,
+            spring_settings,
+            ServoSettings::default_settings(),
+        )
+    }
+
     pub fn apply_description(
         &self,
         prestep_data: &mut DistanceServoPrestepData,
@@ -45,7 +78,11 @@ impl DistanceServo {
                 self.target_distance >= 0.0,
                 "DistanceServo.target_distance must be nonnegative."
             );
-            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "DistanceServo");
+            ConstraintChecker::assert_valid_servo_and_spring_settings(
+                &self.servo_settings,
+                &self.spring_settings,
+                "DistanceServo",
+            );
         }
 
         Vector3Wide::write_slot(

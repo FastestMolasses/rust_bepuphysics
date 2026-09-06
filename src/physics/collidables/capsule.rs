@@ -8,7 +8,7 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_ex;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::ray::RayWide;
@@ -100,7 +100,7 @@ impl IConvexShape for Capsule {
         d *= inverse_d_length;
 
         // Move the origin up to the earliest possible impact time.
-        let t_offset = 0.0f32.max(-o.dot(d) - (self.half_length + self.radius));
+        let t_offset = 0.0f32.hw_max(-o.dot(d) - (self.half_length + self.radius));
         o += d * t_offset;
 
         let oh = Vec3::new(o.x, 0.0, o.z);
@@ -144,9 +144,9 @@ impl IConvexShape for Capsule {
         } else {
             // Ray is parallel to the axis.
             sphere_y = if d.y > 0.0 {
-                o.y.min(self.half_length).max(-self.half_length)
+                self.half_length.hw_min(o.y).hw_max(-self.half_length)
             } else {
-                o.y.max(-self.half_length).min(self.half_length)
+                (-self.half_length).hw_max(o.y).hw_min(self.half_length)
             };
         }
 
@@ -166,7 +166,7 @@ impl IConvexShape for Capsule {
             *normal = Vec3::ZERO;
             return false;
         }
-        *t = (-cap_b - cap_discriminant.sqrt()).max(-t_offset);
+        *t = (-cap_b - cap_discriminant.sqrt()).hw_max(-t_offset);
         *normal = (os + d * *t) / self.radius;
         *t = (*t + t_offset) * inverse_d_length;
         let n = *normal;
@@ -238,6 +238,7 @@ impl IShapeWide<Capsule> for CapsuleWide {
         }
     }
 
+    #[inline(always)]
     fn get_bounds(
         &self,
         orientations: &mut QuaternionWide,
@@ -296,7 +297,7 @@ impl IShapeWide<Capsule> for CapsuleWide {
         let mut od = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&o, &d, &mut od);
         let zero_f = Vector::<f32>::splat(0.0);
-        let t_offset = (-od - (self.half_length + self.radius)).simd_max(zero_f);
+        let t_offset = (-od - (self.half_length + self.radius)).hw_max(zero_f);
         let mut o_offset = Vector3Wide::default();
         Vector3Wide::scale_to(&d, &t_offset, &mut o_offset);
         let mut o_shifted = Vector3Wide::default();
@@ -314,7 +315,7 @@ impl IShapeWide<Capsule> for CapsuleWide {
         let cylinder_intersected_mask =
             (b_val.simd_le(zero_f) | c.simd_le(zero_f)) & discriminant.simd_ge(zero_f);
 
-        let cylinder_t = ((-b_val - discriminant.abs().sqrt()) / a).simd_max(-t_offset);
+        let cylinder_t = (-t_offset).hw_max((-b_val - discriminant.sqrt()) / a);
         Vector3Wide::scale_to(&d, &cylinder_t, &mut o_offset);
         let mut cylinder_hit = Vector3Wide::default();
         Vector3Wide::add(&o, &o_offset, &mut cylinder_hit);
@@ -327,8 +328,8 @@ impl IShapeWide<Capsule> for CapsuleWide {
         // Sphere cap intersection for lanes not using the cylinder
         let negated_half_length = -self.half_length;
         let parallel_sphere_y = d.y.simd_lt(zero_f).select(
-            negated_half_length.simd_max(o.y.simd_min(self.half_length)),
-            self.half_length.simd_min(o.y.simd_max(negated_half_length)),
+            negated_half_length.hw_max(o.y.hw_min(self.half_length)),
+            self.half_length.hw_min(o.y.hw_max(negated_half_length)),
         );
         let non_parallel_sphere_y = cylinder_hit
             .y
@@ -347,7 +348,7 @@ impl IShapeWide<Capsule> for CapsuleWide {
         let cap_intersected_mask =
             (cap_b.simd_le(zero_f) | cap_c.simd_le(zero_f)) & cap_discriminant.simd_ge(zero_f);
 
-        let cap_t = (-cap_b - cap_discriminant.abs().sqrt()).simd_max(-t_offset);
+        let cap_t = (-t_offset).hw_max(-cap_b - cap_discriminant.sqrt());
         Vector3Wide::scale_to(&d, &cap_t, &mut o_offset);
         let mut cap_hit = Vector3Wide::default();
         Vector3Wide::add(&o, &o_offset, &mut cap_hit);

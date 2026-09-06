@@ -5,7 +5,7 @@ use crate::physics::collidables::shape::ICompoundShape;
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::physics::collision_detection::sweep_task_registry::{
-    ISweepFilter, SweepTask, SweepTaskRegistry,
+    SweepFilterRef, SweepTask, SweepTaskRegistry,
 };
 use crate::physics::collision_detection::sweep_tasks::compound_pair_sweep_overlap_finder::ICompoundPairSweepOverlapFinder;
 use crate::utilities::memory::buffer_pool::BufferPool;
@@ -61,6 +61,7 @@ impl<
         _minimum_progression: f32,
         _convergence_threshold: f32,
         _maximum_iteration_count: i32,
+        _pool: *mut BufferPool,
         _t0: &mut f32,
         _t1: &mut f32,
         _hit_location: &mut Vec3,
@@ -83,7 +84,7 @@ impl<
         convergence_threshold: f32,
         maximum_iteration_count: i32,
         flip_required: bool,
-        filter: *mut u8,
+        filter: SweepFilterRef,
         shapes: *mut Shapes,
         sweep_tasks: *mut SweepTaskRegistry,
         pool: *mut BufferPool,
@@ -112,8 +113,6 @@ impl<
             &mut *pool,
             &mut overlaps,
         );
-        // ABI convention: `filter` points to a `*mut dyn ISweepFilter` fat-pointer local, hence the double deref.
-        let filter_ref = &**(filter as *const *const dyn ISweepFilter);
         for i in 0..overlaps.child_count {
             let child_overlaps = overlaps.get_overlaps_for_child(i);
             let child_a = a.get_child(child_overlaps.child_index);
@@ -129,9 +128,9 @@ impl<
                 let (child_shape_data_b, _) =
                     batch_b.get_shape_data(child_b.shape_index.index() as usize);
                 let allow = if flip_required {
-                    filter_ref.allow_test(child_index_b, child_overlaps.child_index)
+                    filter.allow_test(child_index_b, child_overlaps.child_index)
                 } else {
-                    filter_ref.allow_test(child_overlaps.child_index, child_index_b)
+                    filter.allow_test(child_overlaps.child_index, child_index_b)
                 };
                 if allow {
                     if let Some(task) = (&*sweep_tasks).get_task(child_type_a, child_type_b) {
@@ -155,6 +154,7 @@ impl<
                             minimum_progression,
                             convergence_threshold,
                             maximum_iteration_count,
+                            pool,
                             &mut t0_candidate,
                             &mut t1_candidate,
                             &mut hit_location_candidate,

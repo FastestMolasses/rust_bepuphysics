@@ -46,6 +46,50 @@ const FLAG_FOR_ROOT_REFINEMENT_SUBTREE: i32 = 1 << 30;
 /// Upper bound on target_task_count for the reify MT dispatch (C# asserts targetTaskCount < 1024).
 const MAX_REIFY_TASKS: usize = 1024;
 
+/// Reify tasks and contexts kept inline before spilling to the worker's pool; C# stackallocs both.
+const INLINE_REIFY_TASKS: usize = 64;
+
+const _: () = assert!(
+    INLINE_REIFY_TASKS * (size_of::<Task>() + size_of::<ReifyRefinementContext>()) <= 4096
+);
+
+/// Stand-in for C#'s `stackalloc T[count]`: inline storage with a `BufferPool` spill for
+/// counts beyond `N`. `dispose` must be called on every path that constructed one.
+struct StackScratch<T, const N: usize> {
+    inline: MaybeUninit<[T; N]>,
+    spill: Buffer<T>,
+}
+
+impl<T, const N: usize> StackScratch<T, N> {
+    #[inline(always)]
+    fn take(count: i32, pool: &mut BufferPool) -> Self {
+        Self {
+            inline: MaybeUninit::uninit(),
+            spill: if count > N as i32 {
+                pool.take(count)
+            } else {
+                Buffer::default()
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn as_mut_ptr(&mut self) -> *mut T {
+        if self.spill.allocated() {
+            self.spill.as_mut_ptr()
+        } else {
+            self.inline.as_mut_ptr() as *mut T
+        }
+    }
+
+    #[inline(always)]
+    fn dispose(&mut self, pool: &mut BufferPool) {
+        if self.spill.allocated() {
+            pool.return_buffer(&mut self.spill);
+        }
+    }
+}
+
 /// A max-heap entry for the priority-queue based root refinement collection.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -66,7 +110,7 @@ impl BinaryHeap {
     }
 
     pub fn with_capacity(capacity: i32, pool: &mut BufferPool) -> Self {
-        Self::new(pool.take_at_least(capacity))
+        Self::new(pool.take(capacity))
     }
 
     pub fn dispose(&mut self, pool: &mut BufferPool) {
@@ -307,9 +351,15 @@ impl Tree {
             (target_task_count as usize) < MAX_REIFY_TASKS,
             "Excessive task count for reify"
         );
-        let mut tasks: [MaybeUninit<Task>; MAX_REIFY_TASKS] = MaybeUninit::uninit().assume_init();
-        let mut contexts: [MaybeUninit<ReifyRefinementContext>; MAX_REIFY_TASKS] =
-            MaybeUninit::uninit().assume_init();
+        let pool = dispatcher.worker_pool_ptr(worker_index);
+        let mut task_scratch =
+            StackScratch::<Task, INLINE_REIFY_TASKS>::take(target_task_count, &mut *pool);
+        let mut context_scratch = StackScratch::<ReifyRefinementContext, INLINE_REIFY_TASKS>::take(
+            target_task_count,
+            &mut *pool,
+        );
+        let tasks = task_scratch.as_mut_ptr();
+        let contexts = context_scratch.as_mut_ptr();
         let tree_ptr = self as *const Tree as *mut Tree;
 
         let mut previous_end = 0i32;
@@ -319,7 +369,8 @@ impl Tree {
             } else {
                 nodes_per_task
             };
-            contexts[i].write(ReifyRefinementContext {
+            let context = contexts.add(i);
+            context.write(ReifyRefinementContext {
                 refinement_node_indices,
                 refinement_nodes,
                 tree: tree_ptr,
@@ -327,19 +378,16 @@ impl Tree {
                 end_index: previous_end + c,
             });
             previous_end += c;
-        }
-        for i in 0..target_task_count as usize {
-            tasks[i].write(Task::with_context(
+            tasks.add(i).write(Task::with_context(
                 Self::reify_root_refinement_task,
-                contexts[i].as_mut_ptr() as *mut c_void,
+                context as *mut c_void,
                 i as i64,
             ));
         }
-        let tasks_slice = std::slice::from_raw_parts_mut(
-            tasks.as_mut_ptr() as *mut Task,
-            target_task_count as usize,
-        );
+        let tasks_slice = std::slice::from_raw_parts_mut(tasks, target_task_count as usize);
         (*task_stack).run_tasks_unfiltered(tasks_slice, worker_index, dispatcher, 0);
+        context_scratch.dispose(&mut *pool);
+        task_scratch.dispose(&mut *pool);
     }
 
     unsafe fn reify_subtree_refinement_task(
@@ -374,9 +422,15 @@ impl Tree {
             (target_task_count as usize) < MAX_REIFY_TASKS,
             "Excessive task count for reify"
         );
-        let mut tasks: [MaybeUninit<Task>; MAX_REIFY_TASKS] = MaybeUninit::uninit().assume_init();
-        let mut contexts: [MaybeUninit<ReifyRefinementContext>; MAX_REIFY_TASKS] =
-            MaybeUninit::uninit().assume_init();
+        let pool = dispatcher.worker_pool_ptr(worker_index);
+        let mut task_scratch =
+            StackScratch::<Task, INLINE_REIFY_TASKS>::take(target_task_count, &mut *pool);
+        let mut context_scratch = StackScratch::<ReifyRefinementContext, INLINE_REIFY_TASKS>::take(
+            target_task_count,
+            &mut *pool,
+        );
+        let tasks = task_scratch.as_mut_ptr();
+        let contexts = context_scratch.as_mut_ptr();
         let tree_ptr = self as *const Tree as *mut Tree;
 
         let mut previous_end = 0i32;
@@ -386,7 +440,8 @@ impl Tree {
             } else {
                 nodes_per_task
             };
-            contexts[i].write(ReifyRefinementContext {
+            let context = contexts.add(i);
+            context.write(ReifyRefinementContext {
                 refinement_node_indices,
                 refinement_nodes,
                 tree: tree_ptr,
@@ -394,19 +449,16 @@ impl Tree {
                 end_index: previous_end + c,
             });
             previous_end += c;
-        }
-        for i in 0..target_task_count as usize {
-            tasks[i].write(Task::with_context(
+            tasks.add(i).write(Task::with_context(
                 Self::reify_subtree_refinement_task,
-                contexts[i].as_mut_ptr() as *mut c_void,
+                context as *mut c_void,
                 i as i64,
             ));
         }
-        let tasks_slice = std::slice::from_raw_parts_mut(
-            tasks.as_mut_ptr() as *mut Task,
-            target_task_count as usize,
-        );
+        let tasks_slice = std::slice::from_raw_parts_mut(tasks, target_task_count as usize);
         (*task_stack).run_tasks_unfiltered(tasks_slice, worker_index, dispatcher, 0);
+        context_scratch.dispose(&mut *pool);
+        task_scratch.dispose(&mut *pool);
     }
 
     // ── MT Refine2 infrastructure ──
@@ -457,7 +509,7 @@ impl Tree {
             root_refinement_subtrees.count - 1
         );
         let mut root_refinement_nodes: Buffer<Node> =
-            pool.take_at_least(root_refinement_node_indices.count);
+            pool.take(root_refinement_node_indices.count);
         if task_count > 1 {
             Tree::binned_build_static(
                 root_refinement_subtrees
@@ -542,7 +594,7 @@ impl Tree {
             QuickList::<i32>::with_capacity(context.subtree_refinement_size, pool);
         let mut subtree_refinement_leaves =
             QuickList::<NodeChild>::with_capacity(context.subtree_refinement_size, pool);
-        let subtree_stack_buffer: Buffer<i32> = pool.take_at_least(context.subtree_refinement_size);
+        let subtree_stack_buffer: Buffer<i32> = pool.take(context.subtree_refinement_size);
 
         context.tree.collect_subtrees_for_subtree_refinement(
             subtree_refinement_target as i32,
@@ -551,8 +603,7 @@ impl Tree {
             &mut subtree_refinement_leaves,
         );
 
-        let mut refinement_nodes: Buffer<Node> =
-            pool.take_at_least(subtree_refinement_node_indices.count);
+        let mut refinement_nodes: Buffer<Node> = pool.take(subtree_refinement_node_indices.count);
 
         if task_count > 1 {
             Tree::binned_build_static(
@@ -673,7 +724,7 @@ impl Tree {
 
         let root_refinement_count = if root_refinement_size > 0 { 1 } else { 0 };
         let task_count = root_refinement_count + subtree_refinement_targets.count;
-        let mut tasks: Buffer<Task> = pool.take_at_least(task_count);
+        let mut tasks: Buffer<Task> = pool.take(task_count);
 
         let mut total_leaf_count_in_subtrees = 0i32;
         for i in 0..subtree_refinement_targets.count {
@@ -929,9 +980,6 @@ impl Tree {
             let allocated = root_refinement_subtrees.allocate_unsafely();
             *allocated = *child;
             allocated.index |= FLAG_FOR_ROOT_REFINEMENT_SUBTREE;
-        } else if child.index < 0 {
-            // Leaf node
-            *root_refinement_subtrees.allocate_unsafely() = *child;
         } else {
             if Self::is_node_child_subtree_refinement_target(
                 subtree_refinement_root_bundles,
@@ -1038,7 +1086,7 @@ impl Tree {
                 debug_assert!(allocated.index < FLAG_FOR_ROOT_REFINEMENT_SUBTREE);
                 allocated.index |= FLAG_FOR_ROOT_REFINEMENT_SUBTREE;
             } else {
-                let metric = Self::compute_bounds_metric_vecs(&child.min, &child.max);
+                let metric = Self::compute_bounds_metric(child);
                 heap.insert(child.index, metric * child.leaf_count as f32);
             }
         }
@@ -1179,7 +1227,7 @@ impl Tree {
         }
 
         let refinement_nodes_allocation: Buffer<Node> =
-            pool.take_at_least(root_refinement_size.max(subtree_refinement_size));
+            pool.take(root_refinement_size.max(subtree_refinement_size));
 
         if root_refinement_size > 0 {
             let mut root_refinement_subtrees =
@@ -1248,7 +1296,7 @@ impl Tree {
             QuickList::<i32>::with_capacity(subtree_refinement_size, pool);
         let mut subtree_refinement_leaves =
             QuickList::<NodeChild>::with_capacity(subtree_refinement_size, pool);
-        let subtree_stack_buffer: Buffer<i32> = pool.take_at_least(subtree_refinement_size);
+        let subtree_stack_buffer: Buffer<i32> = pool.take(subtree_refinement_size);
 
         for i in 0..subtree_refinement_targets.count {
             self.collect_subtrees_for_subtree_refinement(

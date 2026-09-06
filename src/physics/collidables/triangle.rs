@@ -8,7 +8,7 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3::Symmetric3x3;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::mesh_inertia_helper::MeshInertiaHelper;
@@ -115,8 +115,8 @@ impl IConvexShape for Triangle {
         Matrix3x3::transform(&self.a, &basis, &mut world_a);
         Matrix3x3::transform(&self.b, &basis, &mut world_b);
         Matrix3x3::transform(&self.c, &basis, &mut world_c);
-        *min = world_a.min(world_b.min(world_c));
-        *max = world_a.max(world_b.max(world_c));
+        *min = world_a.hw_min(world_b.hw_min(world_c));
+        *max = world_a.hw_max(world_b.hw_max(world_c));
     }
 
     fn ray_test(
@@ -187,7 +187,7 @@ impl TriangleWide {
         ca_length_squared: &Vector<f32>,
         epsilon_scale: &mut Vector<f32>,
     ) {
-        *epsilon_scale = ab_length_squared.simd_max(*ca_length_squared).sqrt();
+        *epsilon_scale = ab_length_squared.hw_max(*ca_length_squared).sqrt();
     }
 
     /// Computes the degenerate triangle epsilon.
@@ -318,6 +318,7 @@ impl IShapeWide<Triangle> for TriangleWide {
         Vector3Wide::write_slot(source.c, index, &mut self.c);
     }
 
+    #[inline(always)]
     fn get_bounds(
         &self,
         orientations: &mut QuaternionWide,
@@ -335,12 +336,12 @@ impl IShapeWide<Triangle> for TriangleWide {
         Matrix3x3Wide::transform_without_overlap(&self.b, &basis, &mut world_b);
         let mut world_c = Vector3Wide::default();
         Matrix3x3Wide::transform_without_overlap(&self.c, &basis, &mut world_c);
-        min.x = world_a.x.simd_min(world_b.x.simd_min(world_c.x));
-        min.y = world_a.y.simd_min(world_b.y.simd_min(world_c.y));
-        min.z = world_a.z.simd_min(world_b.z.simd_min(world_c.z));
-        max.x = world_a.x.simd_max(world_b.x.simd_max(world_c.x));
-        max.y = world_a.y.simd_max(world_b.y.simd_max(world_c.y));
-        max.z = world_a.z.simd_max(world_b.z.simd_max(world_c.z));
+        min.x = world_a.x.hw_min(world_b.x.hw_min(world_c.x));
+        min.y = world_a.y.hw_min(world_b.y.hw_min(world_c.y));
+        min.z = world_a.z.hw_min(world_b.z.hw_min(world_c.z));
+        max.x = world_a.x.hw_max(world_b.x.hw_max(world_c.x));
+        max.y = world_a.y.hw_max(world_b.y.hw_max(world_c.y));
+        max.z = world_a.z.hw_max(world_b.z.hw_max(world_c.z));
 
         let mut a_length_squared = Vector::<f32>::splat(0.0);
         let mut b_length_squared = Vector::<f32>::splat(0.0);
@@ -349,7 +350,7 @@ impl IShapeWide<Triangle> for TriangleWide {
         Vector3Wide::length_squared_to(&self.b, &mut b_length_squared);
         Vector3Wide::length_squared_to(&self.c, &mut c_length_squared);
         *maximum_radius = a_length_squared
-            .simd_max(b_length_squared.simd_max(c_length_squared))
+            .hw_max(b_length_squared.hw_max(c_length_squared))
             .sqrt();
         *maximum_angular_expansion = *maximum_radius;
     }
@@ -450,7 +451,7 @@ impl ISupportFinder<Triangle, TriangleWide> for TriangleSupportFinder {
         Vector3Wide::dot(&shape.a, direction, &mut a_dot);
         Vector3Wide::dot(&shape.b, direction, &mut b_dot);
         Vector3Wide::dot(&shape.c, direction, &mut c_dot);
-        let max_val = a_dot.simd_max(b_dot.simd_max(c_dot));
+        let max_val = a_dot.hw_max(b_dot.hw_max(c_dot));
         let pick_a = max_val.simd_eq(a_dot).to_simd();
         let pick_c = max_val.simd_eq(c_dot).to_simd();
         *support = Vector3Wide::conditional_select(&pick_a, &shape.a, &shape.b);
@@ -484,7 +485,7 @@ impl crate::physics::collision_detection::support_finder::ISupportFinder<Triangl
         Vector3Wide::dot(&shape.a, direction, &mut a_dot);
         Vector3Wide::dot(&shape.b, direction, &mut b_dot);
         Vector3Wide::dot(&shape.c, direction, &mut c_dot);
-        let max_val = a_dot.simd_max(b_dot.simd_max(c_dot));
+        let max_val = a_dot.hw_max(b_dot.hw_max(c_dot));
         let pick_a = max_val.simd_eq(a_dot).to_simd();
         let pick_c = max_val.simd_eq(c_dot).to_simd();
         *support = Vector3Wide::conditional_select(&pick_a, &shape.a, &shape.b);

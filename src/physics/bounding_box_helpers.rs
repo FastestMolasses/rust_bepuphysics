@@ -4,7 +4,7 @@ use std::simd::StdFloat;
 
 use crate::utilities::math_helper;
 use crate::utilities::quaternion_ex;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use crate::physics::body_properties::{BodyVelocity, BodyVelocityWide, RigidPose};
@@ -37,7 +37,7 @@ impl BoundingBoxHelpers {
         6) cos(x) ≈ 1 - x^2 / 2! + x^4 / 4! - x^6 / 6!
         */
         let pi_over_3 = Vector::<f32>::splat(std::f32::consts::FRAC_PI_3);
-        let a = (angular_speed * vector_dt).simd_min(pi_over_3);
+        let a = (angular_speed * vector_dt).hw_min(pi_over_3);
         let a2 = a * a;
         let a4 = a2 * a2;
         let a6 = a4 * a2;
@@ -46,7 +46,7 @@ impl BoundingBoxHelpers {
             - a6 * Vector::<f32>::splat(1.0 / 720.0);
         // Note that it's impossible for angular motion to cause an increase in bounding box size
         // beyond (maximumRadius-minimumRadius) on any given axis.
-        maximum_angular_expansion.simd_min(
+        maximum_angular_expansion.hw_min(
             (Vector::<f32>::splat(-2.0) * maximum_radius * maximum_radius * cos_angle_minus_one)
                 .sqrt(),
         )
@@ -127,12 +127,12 @@ impl BoundingBoxHelpers {
         );
         let neg_max_expansion = -maximum_expansion;
         // Clamp displacement to maximum expansion (in-place to avoid aliasing)
-        min_displacement.x = min_displacement.x.simd_max(neg_max_expansion);
-        min_displacement.y = min_displacement.y.simd_max(neg_max_expansion);
-        min_displacement.z = min_displacement.z.simd_max(neg_max_expansion);
-        max_displacement.x = max_displacement.x.simd_min(maximum_expansion);
-        max_displacement.y = max_displacement.y.simd_min(maximum_expansion);
-        max_displacement.z = max_displacement.z.simd_min(maximum_expansion);
+        min_displacement.x = neg_max_expansion.hw_max(min_displacement.x);
+        min_displacement.y = neg_max_expansion.hw_max(min_displacement.y);
+        min_displacement.z = neg_max_expansion.hw_max(min_displacement.z);
+        max_displacement.x = maximum_expansion.hw_min(max_displacement.x);
+        max_displacement.y = maximum_expansion.hw_min(max_displacement.y);
+        max_displacement.z = maximum_expansion.hw_min(max_displacement.z);
 
         min.x += min_displacement.x;
         min.y += min_displacement.y;
@@ -204,12 +204,12 @@ impl BoundingBoxHelpers {
 
         // Clamp the expansion to the pair imposed limit.
         let neg_max = -maximum_allowed_expansion;
-        max_expansion.x = max_expansion.x.simd_min(maximum_allowed_expansion);
-        max_expansion.y = max_expansion.y.simd_min(maximum_allowed_expansion);
-        max_expansion.z = max_expansion.z.simd_min(maximum_allowed_expansion);
-        min_expansion.x = min_expansion.x.simd_max(neg_max);
-        min_expansion.y = min_expansion.y.simd_max(neg_max);
-        min_expansion.z = min_expansion.z.simd_max(neg_max);
+        max_expansion.x = maximum_allowed_expansion.hw_min(max_expansion.x);
+        max_expansion.y = maximum_allowed_expansion.hw_min(max_expansion.y);
+        max_expansion.z = maximum_allowed_expansion.hw_min(max_expansion.z);
+        min_expansion.x = neg_max.hw_max(min_expansion.x);
+        min_expansion.y = neg_max.hw_max(min_expansion.y);
+        min_expansion.z = neg_max.hw_max(min_expansion.z);
 
         // Apply expansion and offset by local position.
         *min += min_expansion;
@@ -251,8 +251,8 @@ impl BoundingBoxHelpers {
         let linear_displacement = linear_velocity * dt;
         let zero = Vec3::ZERO;
         let broadcast_expansion = Vec3::splat(angular_expansion);
-        *min_expansion = linear_displacement.min(zero) - broadcast_expansion;
-        *max_expansion = linear_displacement.max(zero) + broadcast_expansion;
+        *min_expansion = zero.hw_min(linear_displacement) - broadcast_expansion;
+        *max_expansion = zero.hw_max(linear_displacement) + broadcast_expansion;
     }
 
     /// Computes bounds expansion from linear and angular velocities (scalar) with clamping.
@@ -269,8 +269,8 @@ impl BoundingBoxHelpers {
     ) {
         let linear_displacement = linear_velocity * dt;
         let zero = Vec3::ZERO;
-        *min_expansion = linear_displacement.min(zero);
-        *max_expansion = linear_displacement.max(zero);
+        *min_expansion = zero.hw_min(linear_displacement);
+        *max_expansion = zero.hw_max(linear_displacement);
         let angular_expansion = Vec3::splat(Self::get_angular_bounds_expansion(
             angular_velocity.length(),
             dt,
@@ -280,9 +280,9 @@ impl BoundingBoxHelpers {
 
         let maximum_allowed_expansion_broadcasted = Vec3::splat(maximum_allowed_expansion);
         *min_expansion =
-            (-maximum_allowed_expansion_broadcasted).max(*min_expansion - angular_expansion);
+            (-maximum_allowed_expansion_broadcasted).hw_max(*min_expansion - angular_expansion);
         *max_expansion =
-            maximum_allowed_expansion_broadcasted.min(*max_expansion + angular_expansion);
+            maximum_allowed_expansion_broadcasted.hw_min(*max_expansion + angular_expansion);
     }
 
     /// Expands min/max bounding box using linear and angular velocities (scalar).
@@ -336,8 +336,8 @@ impl BoundingBoxHelpers {
     /// Expands bounding box by an expansion vector (scalar).
     #[inline(always)]
     pub fn expand_bounding_box_by_expansion(expansion: Vec3, min: &mut Vec3, max: &mut Vec3) {
-        let min_expansion = expansion.min(Vec3::ZERO);
-        let max_expansion = expansion.max(Vec3::ZERO);
+        let min_expansion = Vec3::ZERO.hw_min(expansion);
+        let max_expansion = Vec3::ZERO.hw_max(expansion);
         *min += min_expansion;
         *max += max_expansion;
     }

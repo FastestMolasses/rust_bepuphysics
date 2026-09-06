@@ -2,6 +2,7 @@
 
 use glam::Vec3;
 
+use crate::out;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 #[cfg(debug_assertions)]
 use crate::physics::constraints::constraint_checker::ConstraintChecker;
@@ -17,6 +18,7 @@ use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 
 /// Constrains a point on body B to be on a line attached to body A.
 #[repr(C)]
@@ -151,37 +153,28 @@ impl PointOnLineServoFunctions {
         inertia_b: &BodyInertiaWide,
         csi: &Vector2Wide,
     ) {
-        let mut linear_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(csi, linear_jacobian, &mut linear_impulse_a);
-        let mut angular_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(csi, angular_jacobian_a, &mut angular_impulse_a);
-        let mut angular_impulse_b = Vector3Wide::default();
-        Matrix2x3Wide::transform(csi, angular_jacobian_b, &mut angular_impulse_b);
-        let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+        let linear_impulse_a = out!(Matrix2x3Wide::transform(csi, linear_jacobian));
+        let angular_impulse_a = out!(Matrix2x3Wide::transform(csi, angular_jacobian_a));
+        let angular_impulse_b = out!(Matrix2x3Wide::transform(csi, angular_jacobian_b));
+        let angular_change_a = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_change_a,
-        );
-        let mut angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let angular_change_b = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut angular_change_b,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
         let linear_change_a = Vector3Wide::scale(&linear_impulse_a, &inertia_a.inverse_mass);
         let negated_linear_change_b =
             Vector3Wide::scale(&linear_impulse_a, &inertia_b.inverse_mass);
 
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::add(&linear_change_a, &velocity_a.linear, &mut tmp);
-        velocity_a.linear = tmp;
-        Vector3Wide::add(&angular_change_a, &velocity_a.angular, &mut tmp);
-        velocity_a.angular = tmp;
-        Vector3Wide::subtract(&velocity_b.linear, &negated_linear_change_b, &mut tmp);
-        velocity_b.linear = tmp;
-        Vector3Wide::add(&angular_change_b, &velocity_b.angular, &mut tmp);
-        velocity_b.angular = tmp;
+        velocity_a.linear = out!(Vector3Wide::add(&linear_change_a, &velocity_a.linear));
+        velocity_a.angular = out!(Vector3Wide::add(&angular_change_a, &velocity_a.angular));
+        velocity_b.linear = out!(Vector3Wide::subtract(
+            &velocity_b.linear,
+            &negated_linear_change_b
+        ));
+        velocity_b.angular = out!(Vector3Wide::add(&angular_change_b, &velocity_b.angular));
     }
 
     #[inline(always)]
@@ -197,39 +190,37 @@ impl PointOnLineServoFunctions {
         angular_ja: &mut Matrix2x3Wide,
         angular_jb: &mut Matrix2x3Wide,
     ) {
-        let mut local_tangent_x = Vector3Wide::default();
-        let mut local_tangent_y = Vector3Wide::default();
-        Helpers::build_orthonormal_basis(
-            local_direction,
-            &mut local_tangent_x,
-            &mut local_tangent_y,
-        );
-        let mut orientation_matrix_a = Matrix3x3Wide::default();
-        Matrix3x3Wide::create_from_quaternion(orientation_a, &mut orientation_matrix_a);
-        let mut anchor_a = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+        let mut local_tangent_x = MaybeUninit::<Vector3Wide>::uninit();
+        let mut local_tangent_y = MaybeUninit::<Vector3Wide>::uninit();
+        unsafe {
+            Helpers::build_orthonormal_basis(
+                local_direction,
+                &mut *local_tangent_x.as_mut_ptr(),
+                &mut *local_tangent_y.as_mut_ptr(),
+            );
+        }
+        let local_tangent_x = unsafe { local_tangent_x.assume_init() };
+        let local_tangent_y = unsafe { local_tangent_y.assume_init() };
+        let orientation_matrix_a = out!(Matrix3x3Wide::create_from_quaternion(orientation_a));
+        let anchor_a = out!(Matrix3x3Wide::transform_without_overlap(
             local_offset_a,
-            &orientation_matrix_a,
-            &mut anchor_a,
-        );
-        let mut offset_b = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(local_offset_b, orientation_b, &mut offset_b);
+            &orientation_matrix_a
+        ));
+        let offset_b = out!(QuaternionWide::transform_without_overlap(
+            local_offset_b,
+            orientation_b
+        ));
 
         // Find offsetA by computing the closest point on the line to anchorB.
-        let mut direction = Vector3Wide::default();
-        Matrix3x3Wide::transform_without_overlap(
+        let direction = out!(Matrix3x3Wide::transform_without_overlap(
             local_direction,
-            &orientation_matrix_a,
-            &mut direction,
-        );
-        let mut anchor_b = Vector3Wide::default();
-        Vector3Wide::add(&offset_b, ab, &mut anchor_b);
+            &orientation_matrix_a
+        ));
+        let anchor_b = out!(Vector3Wide::add(&offset_b, ab));
         Vector3Wide::subtract(&anchor_b, &anchor_a, anchor_offset);
-        let mut d = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(anchor_offset, &direction, &mut d);
+        let d = out!(Vector3Wide::dot(anchor_offset, &direction));
         let line_start_to_closest = Vector3Wide::scale(&direction, &d);
-        let mut offset_a = Vector3Wide::default();
-        Vector3Wide::add(&line_start_to_closest, &anchor_a, &mut offset_a);
+        let offset_a = out!(Vector3Wide::add(&line_start_to_closest, &anchor_a));
 
         Matrix3x3Wide::transform_without_overlap(
             &local_tangent_x,
@@ -262,24 +253,28 @@ impl PointOnLineServoFunctions {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut ab = Vector3Wide::default();
-        Vector3Wide::subtract(position_b, position_a, &mut ab);
-        let mut _anchor_offset = Vector3Wide::default();
-        let mut linear_jacobian = Matrix2x3Wide::default();
-        let mut angular_ja = Matrix2x3Wide::default();
-        let mut angular_jb = Matrix2x3Wide::default();
-        Self::compute_jacobians(
-            &ab,
-            orientation_a,
-            orientation_b,
-            &prestep.local_direction,
-            &prestep.local_offset_a,
-            &prestep.local_offset_b,
-            &mut _anchor_offset,
-            &mut linear_jacobian,
-            &mut angular_ja,
-            &mut angular_jb,
-        );
+        let ab = out!(Vector3Wide::subtract(position_b, position_a));
+        let mut anchor_offset = MaybeUninit::<Vector3Wide>::uninit();
+        let mut linear_jacobian = MaybeUninit::<Matrix2x3Wide>::uninit();
+        let mut angular_ja = MaybeUninit::<Matrix2x3Wide>::uninit();
+        let mut angular_jb = MaybeUninit::<Matrix2x3Wide>::uninit();
+        unsafe {
+            Self::compute_jacobians(
+                &ab,
+                orientation_a,
+                orientation_b,
+                &prestep.local_direction,
+                &prestep.local_offset_a,
+                &prestep.local_offset_b,
+                &mut *anchor_offset.as_mut_ptr(),
+                &mut *linear_jacobian.as_mut_ptr(),
+                &mut *angular_ja.as_mut_ptr(),
+                &mut *angular_jb.as_mut_ptr(),
+            );
+        }
+        let linear_jacobian = unsafe { linear_jacobian.assume_init() };
+        let angular_ja = unsafe { angular_ja.assume_init() };
+        let angular_jb = unsafe { angular_jb.assume_init() };
         Self::apply_impulse(
             wsv_a,
             wsv_b,
@@ -306,136 +301,138 @@ impl PointOnLineServoFunctions {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut ab = Vector3Wide::default();
-        Vector3Wide::subtract(position_b, position_a, &mut ab);
-        let mut anchor_offset = Vector3Wide::default();
-        let mut linear_jacobian = Matrix2x3Wide::default();
-        let mut angular_ja = Matrix2x3Wide::default();
-        let mut angular_jb = Matrix2x3Wide::default();
-        Self::compute_jacobians(
-            &ab,
-            orientation_a,
-            orientation_b,
-            &prestep.local_direction,
-            &prestep.local_offset_a,
-            &prestep.local_offset_b,
-            &mut anchor_offset,
-            &mut linear_jacobian,
-            &mut angular_ja,
-            &mut angular_jb,
-        );
+        let ab = out!(Vector3Wide::subtract(position_b, position_a));
+        let mut anchor_offset = MaybeUninit::<Vector3Wide>::uninit();
+        let mut linear_jacobian = MaybeUninit::<Matrix2x3Wide>::uninit();
+        let mut angular_ja = MaybeUninit::<Matrix2x3Wide>::uninit();
+        let mut angular_jb = MaybeUninit::<Matrix2x3Wide>::uninit();
+        unsafe {
+            Self::compute_jacobians(
+                &ab,
+                orientation_a,
+                orientation_b,
+                &prestep.local_direction,
+                &prestep.local_offset_a,
+                &prestep.local_offset_b,
+                &mut *anchor_offset.as_mut_ptr(),
+                &mut *linear_jacobian.as_mut_ptr(),
+                &mut *angular_ja.as_mut_ptr(),
+                &mut *angular_jb.as_mut_ptr(),
+            );
+        }
+        let anchor_offset = unsafe { anchor_offset.assume_init() };
+        let linear_jacobian = unsafe { linear_jacobian.assume_init() };
+        let angular_ja = unsafe { angular_ja.assume_init() };
+        let angular_jb = unsafe { angular_jb.assume_init() };
 
         let inverse_mass_sum = inertia_a.inverse_mass + inertia_b.inverse_mass;
-        let mut linear_contribution = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::sandwich_scale(
+        let linear_contribution = out!(Symmetric2x2Wide::sandwich_scale(
             &linear_jacobian,
-            &inverse_mass_sum,
-            &mut linear_contribution,
-        );
-        let mut angular_contribution_a = Symmetric2x2Wide::default();
-        Symmetric3x3Wide::matrix_sandwich(
+            &inverse_mass_sum
+        ));
+        let angular_contribution_a = out!(Symmetric3x3Wide::matrix_sandwich(
             &angular_ja,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_contribution_a,
-        );
-        let mut angular_contribution_b = Symmetric2x2Wide::default();
-        Symmetric3x3Wide::matrix_sandwich(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let angular_contribution_b = out!(Symmetric3x3Wide::matrix_sandwich(
             &angular_jb,
-            &inertia_b.inverse_inertia_tensor,
-            &mut angular_contribution_b,
-        );
-        let mut inverse_effective_mass = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::add(
+            &inertia_b.inverse_inertia_tensor
+        ));
+        let inverse_effective_mass = out!(Symmetric2x2Wide::add(
             &angular_contribution_a,
-            &angular_contribution_b,
-            &mut inverse_effective_mass,
-        );
-        let mut tmp_sym = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::add(&inverse_effective_mass, &linear_contribution, &mut tmp_sym);
-        inverse_effective_mass = tmp_sym;
+            &angular_contribution_b
+        ));
+        let inverse_effective_mass = out!(Symmetric2x2Wide::add(
+            &inverse_effective_mass,
+            &linear_contribution
+        ));
 
-        let mut effective_mass = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::invert_without_overlap(&inverse_effective_mass, &mut effective_mass);
+        let effective_mass = out!(Symmetric2x2Wide::invert_without_overlap(
+            &inverse_effective_mass
+        ));
 
-        let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(
-            &prestep.spring_settings,
-            dt,
-            &mut position_error_to_velocity,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-        );
-        let mut effective_mass_scaled = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::scale(
+        let mut position_error_to_velocity = MaybeUninit::<Vector<f32>>::uninit();
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            SpringSettingsWide::compute_springiness(
+                &prestep.spring_settings,
+                dt,
+                &mut *position_error_to_velocity.as_mut_ptr(),
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+            );
+        }
+        let position_error_to_velocity = unsafe { position_error_to_velocity.assume_init() };
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
+        let effective_mass = out!(Symmetric2x2Wide::scale(
             &effective_mass,
-            &effective_mass_cfm_scale,
-            &mut effective_mass_scaled,
-        );
-        effective_mass = effective_mass_scaled;
+            &effective_mass_cfm_scale
+        ));
 
         // CSV computation
-        let mut linear_csv_a = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+        let linear_csv_a = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_a.linear,
-            &linear_jacobian,
-            &mut linear_csv_a,
-        );
-        let mut negated_linear_csv_b = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &linear_jacobian
+        ));
+        let negated_linear_csv_b = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_b.linear,
-            &linear_jacobian,
-            &mut negated_linear_csv_b,
-        );
-        let mut angular_csv_a = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &linear_jacobian
+        ));
+        let angular_csv_a = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_a.angular,
-            &angular_ja,
-            &mut angular_csv_a,
-        );
-        let mut angular_csv_b = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &angular_ja
+        ));
+        let angular_csv_b = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_b.angular,
-            &angular_jb,
-            &mut angular_csv_b,
-        );
-        let mut linear_csv = Vector2Wide::default();
-        Vector2Wide::subtract(&linear_csv_a, &negated_linear_csv_b, &mut linear_csv);
-        let mut angular_csv = Vector2Wide::default();
-        Vector2Wide::add(&angular_csv_a, &angular_csv_b, &mut angular_csv);
-        let mut csv = Vector2Wide::default();
-        Vector2Wide::add(&linear_csv, &angular_csv, &mut csv);
+            &angular_jb
+        ));
+        let linear_csv = out!(Vector2Wide::subtract(&linear_csv_a, &negated_linear_csv_b));
+        let angular_csv = out!(Vector2Wide::add(&angular_csv_a, &angular_csv_b));
+        let csv = out!(Vector2Wide::add(&linear_csv, &angular_csv));
 
         // Position error and bias velocity.
-        let mut error = Vector2Wide::default();
-        Vector3Wide::dot(&anchor_offset, &linear_jacobian.x, &mut error.x);
-        Vector3Wide::dot(&anchor_offset, &linear_jacobian.y, &mut error.y);
-        let mut bias_velocity = Vector2Wide::default();
-        let mut maximum_impulse = Vector::<f32>::splat(0.0);
-        ServoSettingsWide::compute_clamped_bias_velocity_2d(
-            &error,
-            &position_error_to_velocity,
-            &prestep.servo_settings,
-            dt,
-            inverse_dt,
-            &mut bias_velocity,
-            &mut maximum_impulse,
-        );
+        let mut error = MaybeUninit::<Vector2Wide>::uninit();
+        unsafe {
+            Vector3Wide::dot(
+                &anchor_offset,
+                &linear_jacobian.x,
+                &mut (*error.as_mut_ptr()).x,
+            );
+            Vector3Wide::dot(
+                &anchor_offset,
+                &linear_jacobian.y,
+                &mut (*error.as_mut_ptr()).y,
+            );
+        }
+        let error = unsafe { error.assume_init() };
+        let mut bias_velocity = MaybeUninit::<Vector2Wide>::uninit();
+        let mut maximum_impulse = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            ServoSettingsWide::compute_clamped_bias_velocity_2d(
+                &error,
+                &position_error_to_velocity,
+                &prestep.servo_settings,
+                dt,
+                inverse_dt,
+                &mut *bias_velocity.as_mut_ptr(),
+                &mut *maximum_impulse.as_mut_ptr(),
+            );
+        }
+        let bias_velocity = unsafe { bias_velocity.assume_init() };
+        let maximum_impulse = unsafe { maximum_impulse.assume_init() };
 
-        let mut bias_minus_csv = Vector2Wide::default();
-        Vector2Wide::subtract(&bias_velocity, &csv, &mut bias_minus_csv);
-        let mut csi = Vector2Wide::default();
-        Symmetric2x2Wide::transform_without_overlap(&bias_minus_csv, &effective_mass, &mut csi);
-        let mut softness_contribution = Vector2Wide::default();
-        Vector2Wide::scale(
+        let bias_minus_csv = out!(Vector2Wide::subtract(&bias_velocity, &csv));
+        let csi = out!(Symmetric2x2Wide::transform_without_overlap(
+            &bias_minus_csv,
+            &effective_mass
+        ));
+        let softness_contribution = out!(Vector2Wide::scale(
             accumulated_impulses,
-            &softness_impulse_scale,
-            &mut softness_contribution,
-        );
-        let mut tmp_v2 = Vector2Wide::default();
-        Vector2Wide::subtract(&csi, &softness_contribution, &mut tmp_v2);
-        csi = tmp_v2;
+            &softness_impulse_scale
+        ));
+        let mut csi = out!(Vector2Wide::subtract(&csi, &softness_contribution));
         ServoSettingsWide::clamp_impulse_2d(&maximum_impulse, accumulated_impulses, &mut csi);
         Self::apply_impulse(
             wsv_a,

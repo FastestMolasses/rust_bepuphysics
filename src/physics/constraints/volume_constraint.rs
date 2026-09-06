@@ -1,10 +1,12 @@
+use crate::out;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::math_helper;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::simd::num::SimdFloat;
+use glam::Vec3;
+use std::mem::MaybeUninit;
 
 pub const BATCH_TYPE_ID: i32 = 32;
 
@@ -23,12 +25,29 @@ pub struct VolumeConstraintPrestepData {
 }
 
 impl VolumeConstraint {
+    /// Creates a new volume constraint, initializing the target volume using a set of initial positions.
+    #[inline(always)]
+    pub fn new(a: Vec3, b: Vec3, c: Vec3, d: Vec3, spring_settings: SpringSettings) -> Self {
+        Self {
+            target_scaled_volume: (b - a).cross(c - a).dot(d - a),
+            spring_settings,
+        }
+    }
+
     pub fn apply_description(
         &self,
         prestep_data: &mut VolumeConstraintPrestepData,
         _bundle_index: usize,
         inner_index: usize,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            use crate::physics::constraints::constraint_checker::ConstraintChecker;
+            ConstraintChecker::assert_valid_spring_settings(
+                &self.spring_settings,
+                "VolumeConstraint",
+            );
+        }
         unsafe {
             *GatherScatter::get_mut(&mut prestep_data.target_scaled_volume, inner_index) =
                 self.target_scaled_volume;
@@ -95,39 +114,23 @@ impl VolumeConstraintFunctions {
         velocity_c: &mut BodyVelocityWide,
         velocity_d: &mut BodyVelocityWide,
     ) {
-        let mut negative_velocity_change_a = Vector3Wide::default();
-        Vector3Wide::scale_to(
+        let negative_velocity_change_a = out!(Vector3Wide::scale_to(
             negated_jacobian_a,
-            &(*inverse_mass_a * *impulse),
-            &mut negative_velocity_change_a,
-        );
-        let mut velocity_change_b = Vector3Wide::default();
-        Vector3Wide::scale_to(
-            jacobian_b,
-            &(*inverse_mass_b * *impulse),
-            &mut velocity_change_b,
-        );
-        let mut velocity_change_c = Vector3Wide::default();
-        Vector3Wide::scale_to(
-            jacobian_c,
-            &(*inverse_mass_c * *impulse),
-            &mut velocity_change_c,
-        );
-        let mut velocity_change_d = Vector3Wide::default();
-        Vector3Wide::scale_to(
-            jacobian_d,
-            &(*inverse_mass_d * *impulse),
-            &mut velocity_change_d,
-        );
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::subtract(&velocity_a.linear, &negative_velocity_change_a, &mut tmp);
-        velocity_a.linear = tmp;
-        Vector3Wide::add(&velocity_b.linear, &velocity_change_b, &mut tmp);
-        velocity_b.linear = tmp;
-        Vector3Wide::add(&velocity_c.linear, &velocity_change_c, &mut tmp);
-        velocity_c.linear = tmp;
-        Vector3Wide::add(&velocity_d.linear, &velocity_change_d, &mut tmp);
-        velocity_d.linear = tmp;
+            &(*inverse_mass_a * *impulse)
+        ));
+        let velocity_change_b =
+            out!(Vector3Wide::scale_to(jacobian_b, &(*inverse_mass_b * *impulse)));
+        let velocity_change_c =
+            out!(Vector3Wide::scale_to(jacobian_c, &(*inverse_mass_c * *impulse)));
+        let velocity_change_d =
+            out!(Vector3Wide::scale_to(jacobian_d, &(*inverse_mass_d * *impulse)));
+        velocity_a.linear = out!(Vector3Wide::subtract(
+            &velocity_a.linear,
+            &negative_velocity_change_a
+        ));
+        velocity_b.linear = out!(Vector3Wide::add(&velocity_b.linear, &velocity_change_b));
+        velocity_c.linear = out!(Vector3Wide::add(&velocity_c.linear, &velocity_change_c));
+        velocity_d.linear = out!(Vector3Wide::add(&velocity_d.linear, &velocity_change_d));
     }
 
     #[inline(always)]
@@ -167,7 +170,7 @@ impl VolumeConstraintFunctions {
         let jacobian_length_squared =
             *contribution_a + *contribution_b + *contribution_c + *contribution_d;
         // Guard against the collinear degeneracy (all cross products vanish; generic coplanar cases stay nonzero).
-        let jacobian_length_squared = jacobian_length_squared.simd_max(Vector::<f32>::splat(1e-14));
+        let jacobian_length_squared = Vector::<f32>::splat(1e-14).hw_max(jacobian_length_squared);
         *inverse_jacobian_length = math_helper::fast_reciprocal_square_root(jacobian_length_squared);
     }
 
@@ -192,32 +195,39 @@ impl VolumeConstraintFunctions {
         wsv_c: &mut BodyVelocityWide,
         wsv_d: &mut BodyVelocityWide,
     ) {
-        let mut ad = Vector3Wide::default();
-        let mut negated_ja = Vector3Wide::default();
-        let mut jacobian_b = Vector3Wide::default();
-        let mut jacobian_c = Vector3Wide::default();
-        let mut jacobian_d = Vector3Wide::default();
-        let mut _contribution_a = Vector::<f32>::splat(0.0);
-        let mut _contribution_b = Vector::<f32>::splat(0.0);
-        let mut _contribution_c = Vector::<f32>::splat(0.0);
-        let mut _contribution_d = Vector::<f32>::splat(0.0);
-        let mut inverse_jacobian_length = Vector::<f32>::splat(0.0);
-        Self::compute_jacobian(
-            position_a,
-            position_b,
-            position_c,
-            position_d,
-            &mut ad,
-            &mut negated_ja,
-            &mut jacobian_b,
-            &mut jacobian_c,
-            &mut jacobian_d,
-            &mut _contribution_a,
-            &mut _contribution_b,
-            &mut _contribution_c,
-            &mut _contribution_d,
-            &mut inverse_jacobian_length,
-        );
+        let mut ad = MaybeUninit::<Vector3Wide>::uninit();
+        let mut negated_ja = MaybeUninit::<Vector3Wide>::uninit();
+        let mut jacobian_b = MaybeUninit::<Vector3Wide>::uninit();
+        let mut jacobian_c = MaybeUninit::<Vector3Wide>::uninit();
+        let mut jacobian_d = MaybeUninit::<Vector3Wide>::uninit();
+        let mut contribution_a = MaybeUninit::<Vector<f32>>::uninit();
+        let mut contribution_b = MaybeUninit::<Vector<f32>>::uninit();
+        let mut contribution_c = MaybeUninit::<Vector<f32>>::uninit();
+        let mut contribution_d = MaybeUninit::<Vector<f32>>::uninit();
+        let mut inverse_jacobian_length = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            Self::compute_jacobian(
+                position_a,
+                position_b,
+                position_c,
+                position_d,
+                &mut *ad.as_mut_ptr(),
+                &mut *negated_ja.as_mut_ptr(),
+                &mut *jacobian_b.as_mut_ptr(),
+                &mut *jacobian_c.as_mut_ptr(),
+                &mut *jacobian_d.as_mut_ptr(),
+                &mut *contribution_a.as_mut_ptr(),
+                &mut *contribution_b.as_mut_ptr(),
+                &mut *contribution_c.as_mut_ptr(),
+                &mut *contribution_d.as_mut_ptr(),
+                &mut *inverse_jacobian_length.as_mut_ptr(),
+            );
+        }
+        let negated_ja = unsafe { negated_ja.assume_init() };
+        let jacobian_b = unsafe { jacobian_b.assume_init() };
+        let jacobian_c = unsafe { jacobian_c.assume_init() };
+        let jacobian_d = unsafe { jacobian_d.assume_init() };
+        let inverse_jacobian_length = unsafe { inverse_jacobian_length.assume_init() };
         // The accumulated impulse is in unit-jacobian space; replay it through inverseJacobianLength * J_raw.
         Self::apply_impulse(
             &inertia_a.inverse_mass,
@@ -259,72 +269,81 @@ impl VolumeConstraintFunctions {
         wsv_c: &mut BodyVelocityWide,
         wsv_d: &mut BodyVelocityWide,
     ) {
-        let mut ad = Vector3Wide::default();
-        let mut negated_ja = Vector3Wide::default();
-        let mut jacobian_b = Vector3Wide::default();
-        let mut jacobian_c = Vector3Wide::default();
-        let mut jacobian_d = Vector3Wide::default();
-        let mut contribution_a = Vector::<f32>::splat(0.0);
-        let mut contribution_b = Vector::<f32>::splat(0.0);
-        let mut contribution_c = Vector::<f32>::splat(0.0);
-        let mut contribution_d = Vector::<f32>::splat(0.0);
-        let mut inverse_jacobian_length = Vector::<f32>::splat(0.0);
-        Self::compute_jacobian(
-            position_a,
-            position_b,
-            position_c,
-            position_d,
-            &mut ad,
-            &mut negated_ja,
-            &mut jacobian_b,
-            &mut jacobian_c,
-            &mut jacobian_d,
-            &mut contribution_a,
-            &mut contribution_b,
-            &mut contribution_c,
-            &mut contribution_d,
-            &mut inverse_jacobian_length,
-        );
+        let mut ad = MaybeUninit::<Vector3Wide>::uninit();
+        let mut negated_ja = MaybeUninit::<Vector3Wide>::uninit();
+        let mut jacobian_b = MaybeUninit::<Vector3Wide>::uninit();
+        let mut jacobian_c = MaybeUninit::<Vector3Wide>::uninit();
+        let mut jacobian_d = MaybeUninit::<Vector3Wide>::uninit();
+        let mut contribution_a = MaybeUninit::<Vector<f32>>::uninit();
+        let mut contribution_b = MaybeUninit::<Vector<f32>>::uninit();
+        let mut contribution_c = MaybeUninit::<Vector<f32>>::uninit();
+        let mut contribution_d = MaybeUninit::<Vector<f32>>::uninit();
+        let mut inverse_jacobian_length = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            Self::compute_jacobian(
+                position_a,
+                position_b,
+                position_c,
+                position_d,
+                &mut *ad.as_mut_ptr(),
+                &mut *negated_ja.as_mut_ptr(),
+                &mut *jacobian_b.as_mut_ptr(),
+                &mut *jacobian_c.as_mut_ptr(),
+                &mut *jacobian_d.as_mut_ptr(),
+                &mut *contribution_a.as_mut_ptr(),
+                &mut *contribution_b.as_mut_ptr(),
+                &mut *contribution_c.as_mut_ptr(),
+                &mut *contribution_d.as_mut_ptr(),
+                &mut *inverse_jacobian_length.as_mut_ptr(),
+            );
+        }
+        let ad = unsafe { ad.assume_init() };
+        let negated_ja = unsafe { negated_ja.assume_init() };
+        let jacobian_b = unsafe { jacobian_b.assume_init() };
+        let jacobian_c = unsafe { jacobian_c.assume_init() };
+        let jacobian_d = unsafe { jacobian_d.assume_init() };
+        let contribution_a = unsafe { contribution_a.assume_init() };
+        let contribution_b = unsafe { contribution_b.assume_init() };
+        let contribution_c = unsafe { contribution_c.assume_init() };
+        let contribution_d = unsafe { contribution_d.assume_init() };
+        let inverse_jacobian_length = unsafe { inverse_jacobian_length.assume_init() };
         let inverse_jacobian_length_squared = inverse_jacobian_length * inverse_jacobian_length;
 
         // Guard against degenerate configurations (e.g. all points collinear) where all contributions are zero.
-        let inverse_effective_mass = (inverse_jacobian_length_squared
-            * (contribution_a * inertia_a.inverse_mass
-                + contribution_b * inertia_b.inverse_mass
-                + contribution_c * inertia_c.inverse_mass
-                + contribution_d * inertia_d.inverse_mass))
-            .simd_max(Vector::<f32>::splat(1e-14));
-
-        let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(
-            &prestep.spring_settings,
-            dt,
-            &mut position_error_to_velocity,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
+        let inverse_effective_mass = Vector::<f32>::splat(1e-14).hw_max(
+            inverse_jacobian_length_squared
+                * (contribution_a * inertia_a.inverse_mass
+                    + contribution_b * inertia_b.inverse_mass
+                    + contribution_c * inertia_c.inverse_mass
+                    + contribution_d * inertia_d.inverse_mass),
         );
+
+        let mut position_error_to_velocity = MaybeUninit::<Vector<f32>>::uninit();
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            SpringSettingsWide::compute_springiness(
+                &prestep.spring_settings,
+                dt,
+                &mut *position_error_to_velocity.as_mut_ptr(),
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+            );
+        }
+        let position_error_to_velocity = unsafe { position_error_to_velocity.assume_init() };
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
 
         let effective_mass = effective_mass_cfm_scale / inverse_effective_mass;
         // Compute the position error and bias velocities. Note the order of subtraction when calculating error- we want the bias velocity to counteract the separation.
-        let mut volume = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&jacobian_d, &ad, &mut volume);
+        let volume = out!(Vector3Wide::dot(&jacobian_d, &ad));
         let bias_velocity =
             (prestep.target_scaled_volume - volume) * inverse_jacobian_length * position_error_to_velocity;
 
-        let mut negated_velocity_contribution_a = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(
-            &negated_ja,
-            &wsv_a.linear,
-            &mut negated_velocity_contribution_a,
-        );
-        let mut velocity_contribution_b = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&jacobian_b, &wsv_b.linear, &mut velocity_contribution_b);
-        let mut velocity_contribution_c = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&jacobian_c, &wsv_c.linear, &mut velocity_contribution_c);
-        let mut velocity_contribution_d = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&jacobian_d, &wsv_d.linear, &mut velocity_contribution_d);
+        let negated_velocity_contribution_a = out!(Vector3Wide::dot(&negated_ja, &wsv_a.linear));
+        let velocity_contribution_b = out!(Vector3Wide::dot(&jacobian_b, &wsv_b.linear));
+        let velocity_contribution_c = out!(Vector3Wide::dot(&jacobian_c, &wsv_c.linear));
+        let velocity_contribution_d = out!(Vector3Wide::dot(&jacobian_d, &wsv_d.linear));
         let csv = inverse_jacobian_length
             * (velocity_contribution_b + velocity_contribution_c + velocity_contribution_d
                 - negated_velocity_contribution_a);

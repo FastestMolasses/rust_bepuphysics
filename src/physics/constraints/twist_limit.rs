@@ -12,7 +12,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Quat;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
-use std::simd::Select;
+use std::simd::{Mask, Select};
 
 /// Constrains two bodies' rotations around attached twist axes to a range of permitted twist angles.
 #[repr(C)]
@@ -157,9 +157,8 @@ impl TwistLimitFunctions {
         let use_min = min_error.abs().simd_lt(max_error.abs()).to_simd();
 
         // If we use the maximum bound, flip the jacobian.
-        *error = use_min
-            .simd_lt(Vector::<i32>::splat(0))
-            .select(-min_error, max_error);
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        *error = unsafe { Mask::from_simd_unchecked(use_min) }.select(-min_error, max_error);
         let mut negated_jacobian_a = Vector3Wide::default();
         Vector3Wide::negate(jacobian_a, &mut negated_jacobian_a);
         *jacobian_a = Vector3Wide::conditional_select(&use_min, &negated_jacobian_a, jacobian_a);

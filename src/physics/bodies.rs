@@ -2,6 +2,7 @@
 
 use crate::physics::body_description::BodyDescription;
 use crate::physics::body_properties::{BodyInertia, BodyInertiaWide, RigidPose};
+use crate::physics::body_reference::BodyReference;
 use crate::physics::body_set::{BodyConstraintReference, BodySet};
 use crate::physics::collidables::collidable::Collidable;
 use crate::physics::collidables::collidable_reference::{CollidableMobility, CollidableReference};
@@ -287,6 +288,7 @@ impl Bodies {
         set.get_description(location.index, description);
     }
 
+    #[inline(always)]
     fn resize_handles_impl(
         pool: &mut BufferPool,
         handle_to_location: &mut Buffer<BodyMemoryLocation>,
@@ -490,6 +492,7 @@ impl Bodies {
         }
     }
 
+    #[inline(always)]
     fn update_for_kinematic_state_change(
         &mut self,
         handle: BodyHandle,
@@ -541,6 +544,7 @@ impl Bodies {
         }
     }
 
+    #[inline(always)]
     fn update_for_shape_change(
         &mut self,
         handle: BodyHandle,
@@ -649,9 +653,9 @@ impl Bodies {
     }
 
     /// Gets a BodyReference for the given handle.
-    pub fn get_body_reference(&self, handle: BodyHandle) -> BodyHandle {
+    pub fn get_body_reference(&mut self, handle: BodyHandle) -> BodyReference {
         self.validate_existing_handle(handle);
-        handle
+        BodyReference::new(handle, self as *mut Bodies)
     }
 
     /// Removes an active body by its index. Connected constraints are removed.
@@ -714,6 +718,7 @@ impl Bodies {
     }
 
     /// Removes a body from the simulation by its handle.
+    #[inline(always)]
     pub fn remove(&mut self, handle: BodyHandle) {
         self.validate_existing_handle(handle);
         unsafe {
@@ -765,6 +770,7 @@ impl Bodies {
     }
 
     /// Updates the broad phase index stored on a body's collidable.
+    #[inline(always)]
     pub(crate) fn update_collidable_broad_phase_index(
         &mut self,
         handle: BodyHandle,
@@ -864,6 +870,7 @@ impl Bodies {
     ///
     /// # Safety
     /// The active_body_index must be a valid index into the active set.
+    #[inline(always)]
     pub(crate) unsafe fn enumerate_connected_body_indices<
         E: crate::utilities::for_each_ref::IForEach<i32>,
     >(

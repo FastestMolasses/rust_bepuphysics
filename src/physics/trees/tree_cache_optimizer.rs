@@ -146,15 +146,18 @@ impl Tree {
             lower_target_node_count
         };
         if node_optimization_count_a > 0 {
+            let a_index = self.nodes.get(target_node_index).a.index;
             self.cache_optimized_limited_subtree_internal(
-                node.a.index,
+                a_index,
                 target_node_index + 1,
                 node_optimization_count_a,
             );
         }
         if node_optimization_count_b > 0 {
+            // The A-side recursion can displace B's node, rewriting this slot's stored index.
+            let b_index = self.nodes.get(target_node_index).b.index;
             self.cache_optimized_limited_subtree_internal(
-                node.b.index,
+                b_index,
                 target_node_index + node.a.leaf_count,
                 node_optimization_count_b,
             );
@@ -198,14 +201,16 @@ impl Tree {
         let node_count = (start_node.a.leaf_count + start_node.b.leaf_count - 2).min(target_count);
         for i in 0..node_count {
             let parent_index = target_node_index + i;
-            let node = *self.nodes.get(parent_index);
             let target_location_a = parent_index + 1;
-            let target_location_b = parent_index + node.a.leaf_count;
-            if node.a.index >= 0 && node.a.index != target_location_a {
-                self.swap_nodes(node.a.index, target_location_a);
+            let target_location_b = parent_index + self.nodes.get(parent_index).a.leaf_count;
+            let a_index = self.nodes.get(parent_index).a.index;
+            if a_index >= 0 && a_index != target_location_a {
+                self.swap_nodes(a_index, target_location_a);
             }
-            if node.b.index >= 0 && node.b.index != target_location_b {
-                self.swap_nodes(node.b.index, target_location_b);
+            // The A swap can displace B's node, rewriting this slot's stored index.
+            let b_index = self.nodes.get(parent_index).b.index;
+            if b_index >= 0 && b_index != target_location_b {
+                self.swap_nodes(b_index, target_location_b);
             }
         }
         node_count

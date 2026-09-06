@@ -59,21 +59,18 @@ pub fn default_refinement_scheduler(
     // to collect subtrees for refinement and costs more.
     let root_ref_size_f = target_root_refinement_size as f32;
     let subtree_ref_size_f = *subtree_refinement_size as f32;
-    let denom = subtree_ref_size_f * subtree_ref_size_f.log2();
-    let subtree_refinements_per_root_refinement_in_cost = if denom > 0.0 {
-        root_ref_size_f * root_ref_size_f.log2() / denom
-    } else {
-        0.0
-    };
+    let subtree_refinements_per_root_refinement_in_cost =
+        root_ref_size_f * root_ref_size_f.log2() / (subtree_ref_size_f * subtree_ref_size_f.log2());
     // If we're refining the root, reduce the number of subtree refinements to avoid cost spikes.
     let adjustment = if refine_root {
         subtree_refinements_per_root_refinement_in_cost
     } else {
         0.0
     };
-    let divisor = subtree_ref_size_f.max(1.0);
-    *subtree_refinement_count =
-        0i32.max((target_optimized_leaf_count as f32 / divisor - adjustment).round() as i32);
+    *subtree_refinement_count = 0i32.max(
+        (target_optimized_leaf_count as f32 / subtree_ref_size_f - adjustment).round_ties_even()
+            as i32,
+    );
     if !refine_root {
         *subtree_refinement_count = 1i32.max(*subtree_refinement_count);
     }
@@ -613,7 +610,7 @@ impl BroadPhase {
                     deterministic,
                     use_priority_queue: use_priority_queue_active,
                     target_nodes: if self.active_tree.leaf_count > 2 {
-                        pool.take_at_least::<Node>(self.active_tree.nodes.len())
+                        pool.take::<Node>(self.active_tree.nodes.len())
                     } else {
                         Buffer::default()
                     },

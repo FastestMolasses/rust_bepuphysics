@@ -4,7 +4,7 @@ use crate::physics::collidables::convex_hull::{ConvexHullSupportFinder, ConvexHu
 use crate::physics::collidables::triangle::TriangleWide;
 use crate::physics::collision_detection::collision_tasks::convex_hull_test_helper::ConvexHullTestHelper;
 use crate::physics::collision_detection::collision_tasks::manifold_candidate_helper::{
-    ManifoldCandidateHelper, ManifoldCandidateScalar,
+    ManifoldCandidateHelper, ManifoldCandidateScalar, ScratchSpill,
 };
 use crate::physics::collision_detection::collision_tasks::triangle_cylinder_tester::PretransformedTriangleSupportFinder;
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
@@ -15,10 +15,12 @@ use crate::physics::helpers::Helpers;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 use std::simd::Select;
 
@@ -38,6 +40,7 @@ impl TriangleConvexHullTester {
         orientation_a: &QuaternionWide,
         orientation_b: &QuaternionWide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut Convex4ContactManifoldWide,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
@@ -167,7 +170,7 @@ impl TriangleConvexHullTester {
         );
         let mut hull_epsilon_scale = zero_f;
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
-        let epsilon_scale = triangle_epsilon_scale.simd_min(hull_epsilon_scale);
+        let epsilon_scale = triangle_epsilon_scale.hw_min(hull_epsilon_scale);
         // Degenerate triangles don't contribute contacts.
         inactive_lanes |= !nondegenerate_mask;
         inactive_lanes |= hull_inside_and_below_triangle;
@@ -426,8 +429,18 @@ impl TriangleConvexHullTester {
         let inverse_triangle_normal_dot_local_normal = one_f / triangle_normal_dot_local_normal;
 
         // Maximum contacts: 6 from edge intersections + hull face vertex count.
+        const INLINE_CANDIDATE_CAPACITY: usize = 128;
         let maximum_contact_count = 6usize.max(maximum_face_vertex_count);
-        let mut candidates_buf = [ManifoldCandidateScalar::default(); 128];
+        // SAFETY: uninitialized; every index below candidate_count is written before it is read.
+        let mut candidates_inline: [MaybeUninit<ManifoldCandidateScalar>; INLINE_CANDIDATE_CAPACITY] =
+            MaybeUninit::uninit().assume_init();
+        let candidates_spill = ScratchSpill::<ManifoldCandidateScalar>::new(
+            maximum_contact_count,
+            INLINE_CANDIDATE_CAPACITY,
+            pool,
+        );
+        let candidates = candidates_spill
+            .or_inline(candidates_inline.as_mut_ptr() as *mut ManifoldCandidateScalar);
 
         // Per-slot scalar loop: clip triangle edges against hull face edges.
         for slot_index in 0..pair_count as usize {
@@ -531,7 +544,7 @@ impl TriangleConvexHullTester {
                     let projected_vertex = vertex - slot_local_normal * projection_t;
                     // Use triangle.A as the surface basis origin.
                     let to_vertex = projected_vertex - slot_triangle_a;
-                    let c = &mut candidates_buf[candidate_count];
+                    let c = &mut *candidates.add(candidate_count);
                     c.x = to_vertex.dot(slot_triangle_tangent_x);
                     c.y = to_vertex.dot(slot_triangle_tangent_y);
                     // Vertex contacts occupy the feature indices after the edge slots.
@@ -602,7 +615,7 @@ impl TriangleConvexHullTester {
             // AB edge contacts. Note triangle A is origin for surface basis.
             if earliest_exit_ab >= latest_entry_ab && candidate_count < maximum_contact_count {
                 let point = slot_triangle_ab * earliest_exit_ab;
-                let c = &mut candidates_buf[candidate_count];
+                let c = &mut *candidates.add(candidate_count);
                 c.x = point.dot(slot_triangle_tangent_x);
                 c.y = point.dot(slot_triangle_tangent_y);
                 c.feature_id = 0;
@@ -613,7 +626,7 @@ impl TriangleConvexHullTester {
                 && candidate_count < maximum_contact_count
             {
                 let point = slot_triangle_ab * latest_entry_ab;
-                let c = &mut candidates_buf[candidate_count];
+                let c = &mut *candidates.add(candidate_count);
                 c.x = point.dot(slot_triangle_tangent_x);
                 c.y = point.dot(slot_triangle_tangent_y);
                 c.feature_id = 1;
@@ -623,7 +636,7 @@ impl TriangleConvexHullTester {
             // BC edge contacts.
             if earliest_exit_bc >= latest_entry_bc && candidate_count < maximum_contact_count {
                 let point = slot_triangle_bc * earliest_exit_bc + slot_triangle_ab;
-                let c = &mut candidates_buf[candidate_count];
+                let c = &mut *candidates.add(candidate_count);
                 c.x = point.dot(slot_triangle_tangent_x);
                 c.y = point.dot(slot_triangle_tangent_y);
                 c.feature_id = 2;
@@ -634,7 +647,7 @@ impl TriangleConvexHullTester {
                 && candidate_count < maximum_contact_count
             {
                 let point = slot_triangle_bc * latest_entry_bc + slot_triangle_ab;
-                let c = &mut candidates_buf[candidate_count];
+                let c = &mut *candidates.add(candidate_count);
                 c.x = point.dot(slot_triangle_tangent_x);
                 c.y = point.dot(slot_triangle_tangent_y);
                 c.feature_id = 3;
@@ -644,7 +657,7 @@ impl TriangleConvexHullTester {
             // CA edge contacts.
             if earliest_exit_ca >= latest_entry_ca && candidate_count < maximum_contact_count {
                 let point = slot_triangle_ca * earliest_exit_ca - slot_triangle_ca;
-                let c = &mut candidates_buf[candidate_count];
+                let c = &mut *candidates.add(candidate_count);
                 c.x = point.dot(slot_triangle_tangent_x);
                 c.y = point.dot(slot_triangle_tangent_y);
                 c.feature_id = 4;
@@ -655,7 +668,7 @@ impl TriangleConvexHullTester {
                 && candidate_count < maximum_contact_count
             {
                 let point = slot_triangle_ca * latest_entry_ca - slot_triangle_ca;
-                let c = &mut candidates_buf[candidate_count];
+                let c = &mut *candidates.add(candidate_count);
                 c.x = point.dot(slot_triangle_tangent_x);
                 c.y = point.dot(slot_triangle_tangent_y);
                 c.feature_id = 5;
@@ -668,7 +681,7 @@ impl TriangleConvexHullTester {
             let mut slot_hull_orientation = Matrix3x3::default();
             Matrix3x3Wide::read_slot(&hull_orientation, slot_index, &mut slot_hull_orientation);
             ManifoldCandidateHelper::reduce_scalar(
-                candidates_buf.as_mut_ptr(),
+                candidates,
                 candidate_count as i32,
                 slot_face_normal,
                 -1.0 / slot_face_normal.dot(slot_local_normal),
@@ -682,6 +695,7 @@ impl TriangleConvexHullTester {
                 slot_offset_b,
                 slot_index,
                 manifold,
+                pool,
             );
         }
 

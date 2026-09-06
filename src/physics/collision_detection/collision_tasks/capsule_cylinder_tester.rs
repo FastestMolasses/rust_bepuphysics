@@ -6,7 +6,7 @@ use crate::physics::collision_detection::convex_contact_manifold_wide::Convex2Co
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
@@ -37,7 +37,7 @@ impl CapsuleCylinderTester {
         let need_horizontal_clamp = horizontal_dist_sq.simd_gt(*radius_squared);
         let clamp_scale = b.radius / StdFloat::sqrt(horizontal_dist_sq);
         clamped.x = need_horizontal_clamp.select(clamp_scale * p.x, p.x);
-        clamped.y = (-b.half_length).simd_max(b.half_length.simd_min(p.y));
+        clamped.y = (-b.half_length).hw_max(b.half_length.hw_min(p.y));
         clamped.z = need_horizontal_clamp.select(clamp_scale * p.z, p.z);
     }
 
@@ -74,7 +74,7 @@ impl CapsuleCylinderTester {
             );
             let mut conservative_new_t = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(&clamped, line_direction, &mut conservative_new_t);
-            conservative_new_t = min.simd_max(max.simd_min(conservative_new_t - origin_dot));
+            conservative_new_t = min.hw_max(max.hw_min(conservative_new_t - origin_dot));
             let change = conservative_new_t - *t;
             let lane_should_deactivate = change.abs().simd_lt(epsilon).to_simd();
             lane_deactivated |= lane_should_deactivate;
@@ -120,22 +120,22 @@ impl CapsuleCylinderTester {
         let db_offset_b = local_offset_b.y;
         let dadb = da.y;
         *ta = (da_offset_b - db_offset_b * dadb)
-            / (Vector::<f32>::splat(1.0) - dadb * dadb).simd_max(Vector::<f32>::splat(1e-15));
+            / Vector::<f32>::splat(1e-15).hw_max(Vector::<f32>::splat(1.0) - dadb * dadb);
         *tb = *ta * dadb - db_offset_b;
 
         let absdadb = dadb.abs();
         let b_onto_a_offset = *b_half_length * absdadb;
         let a_onto_b_offset = *a_half_length * absdadb;
         *ta_min =
-            (-*a_half_length).simd_max((*a_half_length).simd_min(da_offset_b - b_onto_a_offset));
+            (-*a_half_length).hw_max((*a_half_length).hw_min(da_offset_b - b_onto_a_offset));
         *ta_max =
-            (*a_half_length).simd_min((-*a_half_length).simd_max(da_offset_b + b_onto_a_offset));
+            (*a_half_length).hw_min((-*a_half_length).hw_max(da_offset_b + b_onto_a_offset));
         *tb_min =
-            (-*b_half_length).simd_max((*b_half_length).simd_min(-a_onto_b_offset - db_offset_b));
+            (-*b_half_length).hw_max((*b_half_length).hw_min(-a_onto_b_offset - db_offset_b));
         *tb_max =
-            (*b_half_length).simd_min((-*b_half_length).simd_max(a_onto_b_offset - db_offset_b));
-        *ta = (*ta).simd_max(*ta_min).simd_min(*ta_max);
-        *tb = (*tb).simd_max(*tb_min).simd_min(*tb_max);
+            (*b_half_length).hw_min((-*b_half_length).hw_max(a_onto_b_offset - db_offset_b));
+        *ta = (*ta).hw_max(*ta_min).hw_min(*ta_max);
+        *tb = (*tb).hw_max(*tb_min).hw_min(*tb_max);
     }
 
     /// Computes the contact interval between the capsule segment and a cylinder side segment.
@@ -177,7 +177,7 @@ impl CapsuleCylinderTester {
         const LOWER_THRESHOLD: f32 = 0.02 * 0.02;
         const UPPER_THRESHOLD: f32 = 0.15 * 0.15;
         let interval_weight =
-            Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0).simd_min(
+            Vector::<f32>::splat(0.0).hw_max(Vector::<f32>::splat(1.0).hw_min(
                 (Vector::<f32>::splat(UPPER_THRESHOLD) - squared_angle)
                     * Vector::<f32>::splat(1.0 / (UPPER_THRESHOLD - LOWER_THRESHOLD)),
             ));
@@ -318,11 +318,10 @@ impl CapsuleCylinderTester {
             );
             let cylinder_contribution = (b.half_length * internal_edge_normal.y).abs()
                 + b.radius
-                    * StdFloat::sqrt(
-                        (Vector::<f32>::splat(1.0)
-                            - internal_edge_normal.y * internal_edge_normal.y)
-                            .simd_max(Vector::<f32>::splat(0.0)),
-                    );
+                    * StdFloat::sqrt(Vector::<f32>::splat(0.0).hw_max(
+                        Vector::<f32>::splat(1.0)
+                            - internal_edge_normal.y * internal_edge_normal.y,
+                    ));
             let mut capsule_axis_dot_normal = Vector::<f32>::splat(0.0);
             Vector3Wide::dot(
                 &capsule_axis,
@@ -445,18 +444,14 @@ impl CapsuleCylinderTester {
             let mut coefficient_a = Vector::<f32>::splat(0.0);
             Vector2Wide::dot(&projected_offset, &projected_offset, &mut coefficient_a);
             let inverse_a = Vector::<f32>::splat(1.0) / coefficient_a;
-            let t_offset_val =
-                StdFloat::sqrt(
-                    (coefficient_b * coefficient_b - coefficient_a * coefficient_c)
-                        .simd_max(Vector::<f32>::splat(0.0)),
-                ) * inverse_a;
+            let t_offset_val = StdFloat::sqrt(Vector::<f32>::splat(0.0).hw_max(
+                coefficient_b * coefficient_b - coefficient_a * coefficient_c,
+            )) * inverse_a;
             let t_base = -coefficient_b * inverse_a;
-            let mut t_min_cap = (t_base - t_offset_val)
-                .simd_max(Vector::<f32>::splat(0.0))
-                .simd_min(Vector::<f32>::splat(1.0));
-            let mut t_max_cap = (t_base + t_offset_val)
-                .simd_max(Vector::<f32>::splat(0.0))
-                .simd_min(Vector::<f32>::splat(1.0));
+            let mut t_min_cap = Vector::<f32>::splat(0.0)
+                .hw_max(Vector::<f32>::splat(1.0).hw_min(t_base - t_offset_val));
+            let mut t_max_cap = Vector::<f32>::splat(0.0)
+                .hw_max(Vector::<f32>::splat(1.0).hw_min(t_base + t_offset_val));
             let use_fallback_cap = coefficient_a.abs().simd_lt(Vector::<f32>::splat(1e-12));
             t_min_cap = use_fallback_cap.select(Vector::<f32>::splat(0.0), t_min_cap);
             t_max_cap = use_fallback_cap.select(Vector::<f32>::splat(0.0), t_max_cap);

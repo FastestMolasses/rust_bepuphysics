@@ -1,6 +1,7 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionBatcher.cs
 
 use crate::physics::body_properties::BodyVelocity;
+use crate::physics::collidables::shape::IShape;
 use crate::physics::collidables::sphere::Sphere;
 use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::collision_detection::collision_batcher_continuations::{
@@ -23,8 +24,10 @@ use crate::physics::collision_detection::untyped_list::UntypedList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
+use std::mem::MaybeUninit;
 
 /// A raw byte blob that doesn't auto-resize. Used for caching shape data.
+#[repr(C)]
 #[derive(Default)]
 pub(crate) struct UntypedBlob {
     pub buffer: Buffer<u8>,
@@ -46,6 +49,7 @@ impl UntypedBlob {
 }
 
 /// A pending batch of collision pairs plus cached shape data.
+#[repr(C)]
 #[derive(Default)]
 pub(crate) struct CollisionBatch {
     pub pairs: UntypedList,
@@ -167,6 +171,93 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
         );
     }
 
+    /// Adds a collision pair using shape type indices, with zero relative velocity and no
+    /// bounding box expansion.
+    #[inline(always)]
+    pub unsafe fn add_default_velocity(
+        &mut self,
+        shape_index_a: TypedIndex,
+        shape_index_b: TypedIndex,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        speculative_margin: f32,
+        continuation: PairContinuation,
+    ) {
+        let default_velocity = BodyVelocity::default();
+        self.add(
+            shape_index_a,
+            shape_index_b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            &default_velocity,
+            &default_velocity,
+            speculative_margin,
+            0.0,
+            continuation,
+        );
+    }
+
+    /// Adds a collision pair by value, caching both shapes into the batch's shape blob.
+    #[inline(always)]
+    pub unsafe fn add_shapes<TShapeA: IShape, TShapeB: IShape>(
+        &mut self,
+        shape_a: TShapeA,
+        shape_b: TShapeB,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        speculative_margin: f32,
+        pair_id: i32,
+    ) {
+        self.add_with_cached_shapes(
+            TShapeA::type_id(),
+            TShapeB::type_id(),
+            std::mem::size_of::<TShapeA>() as i32,
+            std::mem::size_of::<TShapeB>() as i32,
+            &shape_a as *const TShapeA as *const u8,
+            &shape_b as *const TShapeB as *const u8,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            speculative_margin,
+            pair_id,
+        );
+    }
+
+    /// Adds a collision pair directly with pointers to shape data, with zero relative velocity and
+    /// no bounding box expansion.
+    #[inline(always)]
+    pub unsafe fn add_directly_default_velocity(
+        &mut self,
+        shape_type_a: i32,
+        shape_type_b: i32,
+        shape_a: *const u8,
+        shape_b: *const u8,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        speculative_margin: f32,
+        pair_continuation: &PairContinuation,
+    ) {
+        let default_velocity = BodyVelocity::default();
+        self.add_directly(
+            shape_type_a,
+            shape_type_b,
+            shape_a,
+            shape_b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            &default_velocity,
+            &default_velocity,
+            speculative_margin,
+            0.0,
+            pair_continuation,
+        );
+    }
+
     /// Adds a collision pair directly with pointers to shape data.
     #[inline(always)]
     pub unsafe fn add_directly(
@@ -186,7 +277,41 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
     ) {
         let type_matrix = &*self.type_matrix;
         let reference = type_matrix.get_task_reference(shape_type_a, shape_type_b);
+        self.add_directly_with_reference(
+            reference,
+            shape_type_a,
+            shape_type_b,
+            shape_a,
+            shape_b,
+            offset_b,
+            orientation_a,
+            orientation_b,
+            velocity_a,
+            velocity_b,
+            speculative_margin,
+            maximum_expansion,
+            pair_continuation,
+        );
+    }
 
+    /// Adds a collision pair directly using an already-resolved task reference.
+    #[inline(always)]
+    unsafe fn add_directly_with_reference(
+        &mut self,
+        reference: &crate::physics::collision_detection::collision_task_registry::CollisionTaskReference,
+        shape_type_a: i32,
+        shape_type_b: i32,
+        shape_a: *const u8,
+        shape_b: *const u8,
+        offset_b: Vec3,
+        orientation_a: Quat,
+        orientation_b: Quat,
+        velocity_a: &BodyVelocity,
+        velocity_b: &BodyVelocity,
+        speculative_margin: f32,
+        maximum_expansion: f32,
+        pair_continuation: &PairContinuation,
+    ) {
         if reference.task_index < 0 {
             // No task for this shape type pair. Immediately respond with an empty manifold.
             let mut manifold = ConvexContactManifold::default();
@@ -307,7 +432,8 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
             self.cache_shapes(reference, shape_a, shape_b, shape_size_a, shape_size_b);
         let default_velocity = BodyVelocity::default();
         let continuation = PairContinuation::direct(pair_id);
-        self.add_directly(
+        self.add_directly_with_reference(
+            reference,
             shape_type_a,
             shape_type_b,
             cached_shape_a,
@@ -606,21 +732,24 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
     }
 
     /// Reports the flush result of a continuation to the appropriate callbacks.
-    fn report_flush_result(&mut self, pair_id: i32, flush_result: FlushResult) {
-        match flush_result {
-            FlushResult::Nonconvex(mut manifold) => {
-                self.callbacks.on_pair_completed(pair_id, &mut manifold);
+    fn report_flush_result(&mut self, pair_id: i32, mut flush_result: FlushResult) {
+        match &mut flush_result {
+            FlushResult::Nonconvex(manifold) => {
+                self.callbacks.on_pair_completed(pair_id, manifold);
             }
-            FlushResult::Convex(mut manifold) => {
-                self.callbacks.on_pair_completed(pair_id, &mut manifold);
+            FlushResult::Convex(manifold) => {
+                self.callbacks.on_pair_completed(pair_id, manifold);
             }
         }
     }
 
     /// Reports an empty collision result.
     pub fn process_empty_result(&mut self, continuation: &PairContinuation) {
-        let mut manifold = ConvexContactManifold::default();
-        self.process_convex_result(&mut manifold, continuation);
+        let mut manifold = MaybeUninit::<ConvexContactManifold>::uninit();
+        unsafe {
+            (*manifold.as_mut_ptr()).count = 0;
+            self.process_convex_result(&mut *manifold.as_mut_ptr(), continuation);
+        }
     }
 
     /// Submits a subpair whose testing was blocked by user callback as complete to any relevant continuations.
@@ -679,6 +808,7 @@ impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
     }
 
     /// Forces any remaining partial batches to execute and disposes the batcher.
+    #[inline]
     pub fn flush(&mut self) {
         unsafe {
             let type_matrix = &*self.type_matrix;

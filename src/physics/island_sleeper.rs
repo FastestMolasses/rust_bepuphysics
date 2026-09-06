@@ -16,6 +16,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use crate::utilities::vector::HwMinMax;
 use glam::Vec3;
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -65,6 +66,7 @@ pub struct IslandSleeper {
     type_batch_constraint_removal_job_count: i32,
 }
 
+#[repr(C)]
 struct WorkerTraversalResults {
     traversed_bodies: IndexSet,
     islands: QuickList<IslandScaffold>,
@@ -84,6 +86,7 @@ impl WorkerTraversalResults {
 
 /// Describes cached broad phase data for a sleeping body's collidable.
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct CachedBroadPhaseData {
     reference: CollidableReference,
     bounds_min: Vec3,
@@ -91,12 +94,14 @@ struct CachedBroadPhaseData {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct InactiveSetReference {
     index: i32,
     broad_phase_data: Buffer<CachedBroadPhaseData>,
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct GatheringJob {
     target_set_index: i32,
     source_indices: QuickList<i32>,
@@ -119,6 +124,7 @@ enum RemovalJobType {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct RemovalJob {
     job_type: RemovalJobType,
 }
@@ -404,7 +410,7 @@ impl IslandSleeper {
         }
 
         let candidate_count =
-            (1.0f32).max(active_count as f32 * self.tested_fraction_per_frame) as i32;
+            (1.0f32).hw_max(active_count as f32 * self.tested_fraction_per_frame) as i32;
         let pool = unsafe { &mut *self.pool };
         let mut traversal_start_body_indices = QuickList::with_capacity(candidate_count, pool);
 
@@ -429,7 +435,7 @@ impl IslandSleeper {
 
         // If the simulation is too small to generate parallel work, don't bother using threading.
         // (Passing None forces the single-threaded codepath.)
-        let thread_dispatcher = if active_count < (2.0 / self.tested_fraction_per_frame) as i32 {
+        let thread_dispatcher = if (active_count as f32) < 2.0 / self.tested_fraction_per_frame {
             None
         } else {
             thread_dispatcher

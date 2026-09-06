@@ -5,6 +5,7 @@ use crate::physics::handles::ConstraintHandle;
 use crate::physics::solver::Solver;
 use crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer;
 use crate::utilities::collections::quick_dictionary::QuickDictionary;
+use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
@@ -45,10 +46,11 @@ pub struct CollidablePairComparer;
 impl RefEqualityComparer<CollidablePair> for CollidablePairComparer {
     #[inline(always)]
     fn equals(&self, a: &CollidablePair, b: &CollidablePair) -> bool {
-        // Compare as u64 for speed
+        // Compare as u64 for speed. CollidablePair is only 4-byte aligned, so this must be an
+        // unaligned read; it still lowers to a single load per operand.
         unsafe {
-            *(a as *const CollidablePair as *const u64)
-                == *(b as *const CollidablePair as *const u64)
+            std::ptr::read_unaligned(a as *const CollidablePair as *const u64)
+                == std::ptr::read_unaligned(b as *const CollidablePair as *const u64)
         }
     }
 
@@ -250,7 +252,10 @@ impl PairCache {
 
     /// Prepares flush jobs by returning the pair freshness buffer, ensuring mapping capacity,
     /// and adding a FlushPairCacheChanges job to the job list.
-    pub fn prepare_flush_jobs(&mut self, jobs: &mut Vec<super::narrow_phase::NarrowPhaseFlushJob>) {
+    pub fn prepare_flush_jobs(
+        &mut self,
+        jobs: &mut QuickList<super::narrow_phase::NarrowPhaseFlushJob>,
+    ) {
         // The freshness cache should have already been used to generate constraint removal requests;
         // dispose it now.
         let pool_ref = unsafe { &mut *self.pool };
@@ -271,10 +276,13 @@ impl PairCache {
         self.mapping
             .ensure_capacity(largest_intermediate_size, pool_ref);
 
-        jobs.push(super::narrow_phase::NarrowPhaseFlushJob {
-            job_type: super::narrow_phase::NarrowPhaseFlushJobType::FlushPairCacheChanges,
-            index: 0,
-        });
+        jobs.add(
+            super::narrow_phase::NarrowPhaseFlushJob {
+                job_type: super::narrow_phase::NarrowPhaseFlushJobType::FlushPairCacheChanges,
+                index: 0,
+            },
+            pool_ref,
+        );
     }
 
     /// Completes a constraint addition by recording the constraint handle in the pair cache
@@ -283,6 +291,7 @@ impl PairCache {
     /// # Safety
     /// `narrow_phase` and `solver` must be valid and non-aliased.
     /// `impulses` must point to valid contact impulses of the appropriate type for the constraint.
+    #[inline(always)]
     pub(crate) unsafe fn complete_constraint_add(
         &mut self,
         narrow_phase: *const super::narrow_phase::NarrowPhase,
@@ -365,12 +374,13 @@ impl PairCache {
         }
 
         if self.worker_pending_changes.len() > 1 {
-            if let Some(dispatcher) = self.cached_dispatcher {
-                for i in 0..self.worker_pending_changes.len() {
-                    unsafe {
-                        let worker_pool = &mut *(&*dispatcher).worker_pool_ptr(i);
-                        (*self.worker_pending_changes.get_mut(i)).dispose(worker_pool);
-                    }
+            let dispatcher = self
+                .cached_dispatcher
+                .expect("cached dispatcher must be set when multiple worker caches exist");
+            for i in 0..self.worker_pending_changes.len() {
+                unsafe {
+                    let worker_pool = &mut *(&*dispatcher).worker_pool_ptr(i);
+                    (*self.worker_pending_changes.get_mut(i)).dispose(worker_pool);
                 }
             }
         } else {

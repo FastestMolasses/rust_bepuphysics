@@ -56,6 +56,7 @@ enum PhaseOneJobType {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct PhaseOneJob {
     job_type: PhaseOneJobType,
     batch_index: i32,
@@ -75,6 +76,7 @@ enum PhaseTwoJobType {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct CopyConstraintRegionJob {
     source_start: i32,
     target_start: i32,
@@ -87,25 +89,14 @@ struct CopyConstraintRegionJob {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct FallbackAddSource {
     source_set: i32,
     source_type_batch_index: i32,
 }
 
-struct AddFallbackTypeBatchConstraintsJob {
-    sources: Buffer<FallbackAddSource>,
-    type_id: i32,
-    target_type_batch: i32,
-}
-
 #[derive(Clone, Copy)]
 #[repr(C)]
-union PhaseTwoJobData {
-    copy_constraint_region: CopyConstraintRegionJob,
-    // Fallback constraints handled via separate storage
-}
-
-#[derive(Clone, Copy)]
 struct PhaseTwoJob {
     job_type: PhaseTwoJobType,
     copy_constraint_region: CopyConstraintRegionJob,
@@ -636,6 +627,7 @@ impl IslandAwakener {
                     highest_occupied_type_index: 0,
                 }
             }
+            #[inline(always)]
             fn add(&mut self, type_id: i32, count: i32) {
                 *self.type_counts.get_mut(type_id) += count;
                 if type_id > self.highest_occupied_type_index {
@@ -706,7 +698,7 @@ impl IslandAwakener {
         let solver_ptr = solver as *mut Solver;
         for _batch_index in (*solver_ptr).active_set().batches.count..highest_new_batch_count {
             *(*solver_ptr).active_set_mut().batches.allocate_unsafely() =
-                ConstraintBatch::new(pool, 16);
+                ConstraintBatch::new(pool, 32);
             *(*solver_ptr).batch_referenced_handles.allocate_unsafely() = IndexSet::new(
                 pool,
                 bodies_mut.handle_pool.highest_possibly_claimed_id() + 1,
@@ -1045,6 +1037,7 @@ impl IslandAwakener {
             }
             phase_two.dispose(pool);
         }
+        self.unique_set_indices = QuickList::default();
     }
 }
 

@@ -17,6 +17,7 @@ use crate::physics::constraints::type_processor::TypeProcessor;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::pose_integration::{AngularIntegrationMode, IPoseIntegratorCallbacks};
 use crate::physics::pose_integrator::IPoseIntegrator;
+use crate::physics::sequential_fallback_batch::SequentialFallbackBatch;
 use crate::physics::solve_description::{SolveDescription, SubstepVelocityIterationScheduler};
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::collections::index_set::IndexSet;
@@ -27,7 +28,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::memory::id_pool::IdPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 
@@ -213,6 +214,9 @@ impl crate::utilities::collections::equaility_comparer_ref::RefEqualityComparer<
 }
 
 impl Solver {
+    /// No registered constraint type may reference more bodies than this; four body type processors are the widest that exist.
+    pub const MAXIMUM_BODIES_PER_CONSTRAINT: usize = 4;
+
     /// Gets a reference to the active set of constraints, stored in the first set slot.
     #[inline(always)]
     pub fn active_set(&self) -> &ConstraintSet {
@@ -262,8 +266,8 @@ impl Solver {
         type_id: i32,
         minimum_initial_capacity_for_type: i32,
     ) {
-        debug_assert!(type_id >= 0, "Type id must be nonnegative.");
-        debug_assert!(
+        assert!(type_id >= 0, "Type id must be nonnegative.");
+        assert!(
             minimum_initial_capacity_for_type >= 0,
             "Capacity must be nonnegative."
         );
@@ -374,6 +378,14 @@ impl Solver {
         initial_island_capacity: i32,
         minimum_capacity_per_type_batch: i32,
     ) -> Self {
+        assert!(
+            solve_description.substep_count >= 1,
+            "Substep count must be positive."
+        );
+        assert!(
+            solve_description.velocity_iteration_count >= 1,
+            "Iteration count must be positive."
+        );
         let pool_ref = unsafe { &mut *pool };
         let bodies_ref = unsafe { &*bodies };
 
@@ -393,12 +405,12 @@ impl Solver {
             constrained_kinematic_lock: std::sync::atomic::AtomicBool::new(false),
             constrained_kinematic_handles: QuickSet::with_capacity(
                 bodies_ref.handle_to_location.len(),
-                3,
+                2,
                 pool_ref,
                 PrimitiveComparer::default(),
             ),
-            substep_count: solve_description.substep_count.max(1),
-            velocity_iteration_count: solve_description.velocity_iteration_count.max(1),
+            substep_count: solve_description.substep_count,
+            velocity_iteration_count: solve_description.velocity_iteration_count,
             velocity_iteration_scheduler: solve_description.velocity_iteration_scheduler,
             minimum_capacity_per_type_batch,
             minimum_initial_capacity_per_type_batch: Vec::new(),
@@ -449,10 +461,13 @@ impl Solver {
             let processor = TDescription::create_type_processor();
             self.type_processors[type_id_usize] = Some(processor);
         } else {
-            debug_assert!(
-                false,
-                "A type processor has already been registered for constraint type id {}.",
-                type_id
+            debug_assert_eq!(
+                self.type_processors[type_id_usize]
+                    .as_ref()
+                    .unwrap()
+                    .type_id,
+                type_id,
+                "Cannot register two types with the same type id."
             );
         }
     }
@@ -635,7 +650,7 @@ impl Solver {
                     dynamic_body_handles,
                     bodies_ref,
                     pool,
-                    8,
+                    SequentialFallbackBatch::DEFAULT_MINIMUM_BODY_CAPACITY,
                 );
         }
 
@@ -777,11 +792,11 @@ impl Solver {
         type_id: i32,
         apply_fn: impl FnOnce(&mut TypeBatch, i32, i32),
     ) -> ConstraintHandle {
-        let mut encoded_body_indices = [0i32; 8]; // stack alloc — matches C# stackalloc
-        let mut blocking_body_handles = [BodyHandle(0); 8]; // stack alloc — matches C# stackalloc
-        debug_assert!(
-            body_handles.len() <= 8,
-            "Body handles exceeds stack buffer size"
+        let mut encoded_body_indices = [0i32; Self::MAXIMUM_BODIES_PER_CONSTRAINT];
+        let mut blocking_body_handles = [BodyHandle(0); Self::MAXIMUM_BODIES_PER_CONSTRAINT];
+        assert!(
+            body_handles.len() <= Self::MAXIMUM_BODIES_PER_CONSTRAINT,
+            "Body handle count exceeds the maximum bodies per constraint."
         );
         let blocking_count = self.get_blocking_body_handles(
             body_handles,
@@ -1070,6 +1085,7 @@ impl Solver {
         );
     }
 
+    #[inline(always)]
     unsafe fn enumerate_connected_body_references_from_type_batch<E: IForEach<i32>>(
         &self,
         type_batch: &TypeBatch,
@@ -1270,7 +1286,7 @@ impl Solver {
         let bodies = &*(*self_ptr).bodies;
 
         // KinematicToDynamicEnumerator: collects dynamic body handles and encoded body indices.
-        const MAXIMUM_BODIES_PER_CONSTRAINT: usize = 4;
+        const MAXIMUM_BODIES_PER_CONSTRAINT: usize = Solver::MAXIMUM_BODIES_PER_CONSTRAINT;
 
         struct KinematicToDynamicEnumerator<'a> {
             index_to_handle: &'a Buffer<BodyHandle>,
@@ -1326,11 +1342,12 @@ impl Solver {
             encoded_body_indices_buf[constraint.body_index_in_constraint as usize] &=
                 Bodies::BODY_REFERENCE_MASK;
 
-            let dynamic_handles_slice: Vec<BodyHandle> = dynamic_body_handles_buf
-                [..enumerator.dynamic_count as usize]
-                .iter()
-                .map(|&v| BodyHandle(v))
-                .collect();
+            let dynamic_handle_ints = &dynamic_body_handles_buf[..enumerator.dynamic_count as usize];
+            // BodyHandle is repr(transparent) over i32; see the layout assertions in handles.rs.
+            let dynamic_handles_slice = std::slice::from_raw_parts(
+                dynamic_handle_ints.as_ptr() as *const BodyHandle,
+                dynamic_handle_ints.len(),
+            );
             let encoded_slice = &encoded_body_indices_buf[..enumerator.encoded_count as usize];
 
             let (synchronized_batch_count, fallback_exists) =
@@ -1341,12 +1358,10 @@ impl Solver {
 
             let mut target_batch_index = -1i32;
             for batch_index in 0..synchronized_batch_count {
-                let dynamic_handle_ints: Vec<i32> =
-                    dynamic_handles_slice.iter().map(|h| h.0).collect();
                 if (*self_ptr)
                     .batch_referenced_handles
                     .get(batch_index)
-                    .can_fit(&dynamic_handle_ints)
+                    .can_fit(dynamic_handle_ints)
                 {
                     debug_assert!(
                         batch_index != constraint_location.batch_index,
@@ -1391,7 +1406,7 @@ impl Solver {
                 self_ptr,
                 (*self_ptr).bodies,
                 target_batch_index,
-                &dynamic_handles_slice,
+                dynamic_handles_slice,
                 encoded_slice,
             );
         }
@@ -3036,9 +3051,9 @@ impl Solver {
                 let type_batch_minimum_block_count =
                     tb_bundle_count as f32 * inverse_maximum_block_size;
                 let type_batch_block_count = 1i32.max(
-                    type_batch_maximum_block_count.min(
+                    type_batch_maximum_block_count.hw_min(
                         type_batch_minimum_block_count
-                            .max(target_blocks_per_batch as f32 * type_batch_size_fraction),
+                            .hw_max(target_blocks_per_batch as f32 * type_batch_size_fraction),
                     ) as i32,
                 );
                 let mut previous_end = 0;
@@ -3276,13 +3291,12 @@ impl Solver {
     /// integration responsibility assigned to the constraint that references it.
     /// For fallback batches: additionally checks that this is the earliest constraint slot
     /// referencing that body (by encoded (typeBatchIndex, indexInTypeBatch) ordering).
-    unsafe fn compute_integration_responsibilities_for_constraint_region(
+    unsafe fn compute_integration_responsibilities_for_constraint_region<const IS_FALLBACK: bool>(
         &self,
         batch_index: i32,
         type_batch_index: i32,
         constraint_start: i32,
         exclusive_constraint_end: i32,
-        is_fallback_batch: bool,
     ) -> bool {
         let first_observed_for_batch = self.bodies_first_observed_in_batches.get(batch_index);
         // Use raw pointer to get mutable access to integration flags (safe: we guarantee exclusive access by design)
@@ -3325,7 +3339,7 @@ impl Solver {
                 for bundle_inner_index in 0..count_in_bundle {
                     let raw_body_index = *bundle_start.add(bundle_inner_index as usize);
 
-                    if is_fallback_batch {
+                    if IS_FALLBACK {
                         // Fallback batches can contain empty lanes marked with -1.
                         if raw_body_index == -1 {
                             continue;
@@ -3336,7 +3350,7 @@ impl Solver {
                     let body_handle = body_active_set.index_to_handle.get(body_index).0;
 
                     if first_observed_for_batch.contains(body_handle) {
-                        if is_fallback_batch {
+                        if IS_FALLBACK {
                             // For fallback batch: must also be the *earliest* constraint slot for this body.
                             let mut earliest_index: u64 = u64::MAX;
                             let constraints_for_body = body_active_set.constraints.get(body_index);
@@ -3400,13 +3414,15 @@ impl Solver {
             }
             let (batch, type_batch, start, end) =
                 *self.integration_responsibility_prepass_jobs.span.get(job_index);
-            let has_responsibilities = self.compute_integration_responsibilities_for_constraint_region(
-                batch,
-                type_batch,
-                start,
-                end,
-                batch == self.fallback_batch_threshold,
-            );
+            let has_responsibilities = if batch == self.fallback_batch_threshold {
+                self.compute_integration_responsibilities_for_constraint_region::<true>(
+                    batch, type_batch, start, end,
+                )
+            } else {
+                self.compute_integration_responsibilities_for_constraint_region::<false>(
+                    batch, type_batch, start, end,
+                )
+            };
             *(self
                 .job_aligned_integration_responsibilities
                 .get_ptr(job_index) as *mut bool) = has_responsibilities;
@@ -3642,12 +3658,11 @@ impl Solver {
                     for j in 0..batch.type_batches.count {
                         let type_batch = batch.type_batches.get(j);
                         let has_responsibilities = self
-                            .compute_integration_responsibilities_for_constraint_region(
+                            .compute_integration_responsibilities_for_constraint_region::<false>(
                                 i,
                                 j,
                                 0,
                                 type_batch.constraint_count,
-                                false,
                             );
                         *self
                             .coarse_batch_integration_responsibilities
@@ -3663,12 +3678,11 @@ impl Solver {
                     for j in 0..batch.type_batches.count {
                         let type_batch = batch.type_batches.get(j);
                         let has_responsibilities = self
-                            .compute_integration_responsibilities_for_constraint_region(
+                            .compute_integration_responsibilities_for_constraint_region::<true>(
                                 self.fallback_batch_threshold,
                                 j,
                                 0,
                                 type_batch.constraint_count,
-                                true,
                             );
                         *self
                             .coarse_batch_integration_responsibilities
@@ -3773,13 +3787,6 @@ impl Solver {
             // Single-threaded path.
             let inverse_dt = 1.0 / substep_dt;
             let self_ptr = self as *mut Self;
-
-            let active_set = (*self_ptr).sets.get_mut(0);
-            let batch_count = active_set.batches.count;
-
-            if batch_count == 0 {
-                return;
-            }
 
             let bodies = &*(*self_ptr).bodies;
 

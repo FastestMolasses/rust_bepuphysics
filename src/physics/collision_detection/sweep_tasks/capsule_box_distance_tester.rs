@@ -5,7 +5,7 @@ use crate::physics::collidables::capsule::CapsuleWide;
 use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -95,7 +95,7 @@ fn get_edge_closest_point(
 
     // Note division by zero guard.
     let mut ta = (abda - abdb * dadb)
-        / Vector::<f32>::splat(1e-15).simd_max(Vector::<f32>::splat(1.0) - dadb * dadb);
+        / Vector::<f32>::splat(1e-15).hw_max(Vector::<f32>::splat(1.0) - dadb * dadb);
 
     // In some cases, ta won't be in a useful location. Need to constrain it to the projection of the box edge onto the capsule edge.
     let use_edge_x_f = edge_direction_index.simd_eq(Simd::splat(0));
@@ -106,10 +106,10 @@ fn get_edge_closest_point(
     );
     let b_onto_a_offset = b_half_extent * dadb.abs();
     let ta_min =
-        (-*capsule_half_length).simd_max((*capsule_half_length).simd_min(abda - b_onto_a_offset));
+        (-*capsule_half_length).hw_max((*capsule_half_length).hw_min(abda - b_onto_a_offset));
     let ta_max =
-        (*capsule_half_length).simd_min((-*capsule_half_length).simd_max(abda + b_onto_a_offset));
-    ta = ta.simd_max(ta_min).simd_min(ta_max);
+        (*capsule_half_length).hw_min((-*capsule_half_length).hw_max(abda + b_onto_a_offset));
+    ta = ta.hw_max(ta_min).hw_min(ta_max);
 
     let mut offset_along_capsule = Vector3Wide::default();
     Vector3Wide::scale_to(capsule_axis, &ta, &mut offset_along_capsule);
@@ -127,9 +127,9 @@ fn test_endpoint_normal(
     normal: &mut Vector3Wide,
 ) {
     let clamped = Vector3Wide {
-        x: endpoint.x.simd_max(-b.half_width).simd_min(b.half_width),
-        y: endpoint.y.simd_max(-b.half_height).simd_min(b.half_height),
-        z: endpoint.z.simd_max(-b.half_length).simd_min(b.half_length),
+        x: b.half_width.hw_min((-b.half_width).hw_max(endpoint.x)),
+        y: b.half_height.hw_min((-b.half_height).hw_max(endpoint.y)),
+        z: b.half_length.hw_min((-b.half_length).hw_max(endpoint.z)),
     };
     Vector3Wide::subtract(endpoint, &clamped, normal);
 
@@ -165,9 +165,7 @@ fn test_vertex_axis(
     // closest point on axis to origin = offsetA - (offsetA * capsuleAxis) * capsuleAxis
     let mut dot = Vector::<f32>::default();
     Vector3Wide::dot(offset_a, capsule_axis, &mut dot);
-    let clamped_dot = dot
-        .simd_max(-*capsule_half_length)
-        .simd_min(*capsule_half_length);
+    let clamped_dot = (*capsule_half_length).hw_min((-*capsule_half_length).hw_max(dot));
     let mut axis_offset = Vector3Wide::default();
     Vector3Wide::scale_to(capsule_axis, &clamped_dot, &mut axis_offset);
     let mut closest_on_axis = Vector3Wide::default();
@@ -224,7 +222,7 @@ fn select_for_edge(
     edge_direction_index_candidate: &Vector<i32>,
 ) {
     let use_candidate = edge_depth_candidate.simd_lt(*edge_depth).to_simd();
-    *edge_depth = edge_depth.simd_min(*edge_depth_candidate);
+    *edge_depth = edge_depth.hw_min(*edge_depth_candidate);
     *edge_local_normal = Vector3Wide::conditional_select(
         &use_candidate,
         edge_local_normal_candidate,
@@ -244,7 +242,7 @@ fn select3(
     local_closest_candidate: &Vector3Wide,
 ) {
     let use_candidate = depth_candidate.simd_lt(*depth).to_simd();
-    *depth = depth.simd_min(*depth_candidate);
+    *depth = depth.hw_min(*depth_candidate);
     *local_normal =
         Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
     *local_closest =
@@ -259,7 +257,7 @@ fn select2(
     local_normal_candidate: &Vector3Wide,
 ) {
     let use_candidate = depth_candidate.simd_lt(*depth).to_simd();
-    *depth = depth.simd_min(*depth_candidate);
+    *depth = depth.hw_min(*depth_candidate);
     *local_normal =
         Vector3Wide::conditional_select(&use_candidate, local_normal_candidate, local_normal);
 }

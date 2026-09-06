@@ -38,7 +38,11 @@ impl BallSocketServo {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "BallSocketServo");
+            ConstraintChecker::assert_valid_servo_and_spring_settings(
+                &self.servo_settings,
+                &self.spring_settings,
+                "BallSocketServo",
+            );
         }
         Vector3Wide::write_slot(
             self.local_offset_a,

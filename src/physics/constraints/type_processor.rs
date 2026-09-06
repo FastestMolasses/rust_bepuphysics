@@ -69,15 +69,47 @@ unsafe fn copy_lane_raw(
     let source_base = (source_bundle as *const i32).add(source_inner);
     let target_base = (target_bundle as *mut i32).add(target_inner);
 
-    if size_in_ints == 0 {
-        return;
-    }
     *target_base = *source_base;
 
+    // Hand unrolled: the trip count is not a compile time constant here, so neither the JIT
+    // upstream nor LLVM will unroll it on its own.
     let mut offset = count;
-    while offset < size_in_ints {
+    while offset + count * 8 <= size_in_ints {
         *target_base.add(offset) = *source_base.add(offset);
         offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+    }
+    if offset + count * 4 <= size_in_ints {
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+    }
+    if offset + count * 2 <= size_in_ints {
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+        *target_base.add(offset) = *source_base.add(offset);
+        offset += count;
+    }
+    if offset + count <= size_in_ints {
+        *target_base.add(offset) = *source_base.add(offset);
     }
 }
 
@@ -135,72 +167,48 @@ pub trait ITypeProcessor {
     /// Copies constraint data from a sleeping set's type batch into the active set's type batch.
     fn copy_sleeping_to_active(
         &self,
-        _source_set: i32,
-        _batch_index: i32,
-        _source_type_batch_index: i32,
-        _target_type_batch_index: i32,
-        _source_start: i32,
-        _target_start: i32,
-        _count: i32,
-        _bodies: &crate::physics::bodies::Bodies,
-        _solver: &crate::physics::solver::Solver,
-    ) {
-        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
-        debug_assert!(
-            false,
-            "copy_sleeping_to_active was not overridden by this type processor."
-        );
-    }
+        source_set: i32,
+        batch_index: i32,
+        source_type_batch_index: i32,
+        target_type_batch_index: i32,
+        source_start: i32,
+        target_start: i32,
+        count: i32,
+        bodies: &crate::physics::bodies::Bodies,
+        solver: &crate::physics::solver::Solver,
+    );
 
     /// Gathers constraint data from the active set into an inactive type batch.
     /// For each constraint handle in the source scaffold, copies prestep data, accumulated impulses,
     /// sets index_to_handle, and converts body references from encoded indices to handles.
     fn gather_active_constraints(
         &self,
-        _bodies: &crate::physics::bodies::Bodies,
-        _solver: &crate::physics::solver::Solver,
-        _source_scaffold: &crate::physics::island_scaffold::IslandScaffoldTypeBatch,
-        _start_index: i32,
-        _end_index: i32,
-        _target_type_batch: &mut TypeBatch,
-    ) {
-        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
-        debug_assert!(
-            false,
-            "gather_active_constraints was not overridden by this type processor."
-        );
-    }
+        bodies: &crate::physics::bodies::Bodies,
+        solver: &crate::physics::solver::Solver,
+        source_scaffold: &crate::physics::island_scaffold::IslandScaffoldTypeBatch,
+        start_index: i32,
+        end_index: i32,
+        target_type_batch: &mut TypeBatch,
+    );
 
     /// Adds body handles referenced by the waking type batch to the batch's referenced handles set.
     fn add_waking_body_handles_to_batch_references(
         &self,
-        _type_batch: &TypeBatch,
-        _target_batch_referenced_handles: &mut IndexSet,
-    ) {
-        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
-        debug_assert!(
-            false,
-            "add_waking_body_handles_to_batch_references was not overridden by this type processor."
-        );
-    }
+        type_batch: &TypeBatch,
+        target_batch_referenced_handles: &mut IndexSet,
+    );
 
     /// Adds constraints from a sleeping fallback type batch into the active set's fallback type batch.
     /// Unlike bulk copy, this goes through per-constraint allocation to maintain the fallback batch invariant
     /// (no duplicate bodies per bundle).
     fn add_sleeping_to_active_for_fallback(
         &self,
-        _source_set: i32,
-        _source_type_batch_index: i32,
-        _target_type_batch_index: i32,
-        _bodies: &crate::physics::bodies::Bodies,
-        _solver: &crate::physics::solver::Solver,
-    ) {
-        // Every concrete type processor must override this; a silent no-op would corrupt sleep/wake data.
-        debug_assert!(
-            false,
-            "add_sleeping_to_active_for_fallback was not overridden by this type processor."
-        );
-    }
+        source_set: i32,
+        source_type_batch_index: i32,
+        target_type_batch_index: i32,
+        bodies: &crate::physics::bodies::Bodies,
+        solver: &crate::physics::solver::Solver,
+    );
 
     /// Transfers a constraint from one batch's type batch to another batch's type batch of the same type.
     /// Uses pre-computed dynamic body handles and encoded body indices.
@@ -438,14 +446,7 @@ pub trait ITypeProcessor {
 
     /// Gets the count of body references in the type batch matching the given body index.
     /// Debug-only function. Performance does not matter.
-    fn get_body_reference_count(&self, _type_batch: &TypeBatch, _body: i32) -> i32 {
-        // Every concrete type processor must override this; a silent 0 would mask bookkeeping bugs.
-        debug_assert!(
-            false,
-            "get_body_reference_count was not overridden by this type processor."
-        );
-        0
-    }
+    fn get_body_reference_count(&self, type_batch: &TypeBatch, body: i32) -> i32;
 
     /// Warm-starts the constraints in the given type batch. The warm start applies previously
     /// accumulated impulses to the body velocities to accelerate convergence.

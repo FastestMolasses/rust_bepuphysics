@@ -1,4 +1,4 @@
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::ops::BitAnd;
 use std::simd::cmp::SimdPartialOrd;
@@ -158,7 +158,7 @@ pub fn sin(x: f32) -> f32 {
 #[inline(always)]
 pub fn acos(x: f32) -> f32 {
     let negative_input = x < 0.0;
-    let x = 1.0f32.min(x.abs());
+    let x = 1.0f32.hw_min(x.abs());
     // Rational approximation (scaling sqrt(1-x)) over [0, 1], use symmetry for the rest. TODO: FMA would help with precision.
     let numerator = (1.0 - x).sqrt()
         * (62.95741097600742
@@ -289,7 +289,7 @@ pub fn sin_simd(x: Vector<f32>) -> Vector<f32> {
 #[inline(always)]
 pub fn acos_simd(x: Vector<f32>) -> Vector<f32> {
     let negative_input = Vector::simd_lt(x, Vector::splat(0.0));
-    let x = SimdFloat::simd_min(Vector::splat(1.0), SimdFloat::abs(x));
+    let x = Vector::<f32>::splat(1.0).hw_min(SimdFloat::abs(x));
 
     // Rational approximation (scaling sqrt(1-x)) over [0, 1], use symmetry for the rest. TODO: FMA would help with precision.
     let numerator = Vector::sqrt(Vector::<f32>::splat(1.0) - x)
@@ -317,14 +317,12 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
     // The Vector<f32> width is fixed at compile time via target features,
     // so intrinsic selection must use cfg(target_feature) — not runtime detection.
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    unsafe {
-        let v512 = _mm512_load_ps(v.as_array().as_ptr());
-        let result512 = _mm512_rcp14_ps(v512);
-        std::mem::transmute(result512)
+    {
+        Vector::<f32>::splat(1.0) / v
     }
     #[cfg(all(
         target_arch = "x86_64",
-        target_feature = "avx",
+        target_feature = "avx2",
         not(target_feature = "avx512f")
     ))]
     unsafe {
@@ -335,7 +333,7 @@ pub fn fast_reciprocal(v: Vector<f32>) -> Vector<f32> {
     #[cfg(all(
         target_arch = "x86_64",
         target_feature = "sse",
-        not(target_feature = "avx")
+        not(target_feature = "avx2")
     ))]
     unsafe {
         let v128 = _mm_load_ps(v.as_array().as_ptr());
@@ -363,14 +361,12 @@ pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
     // The Vector<f32> width is fixed at compile time via target features,
     // so intrinsic selection must use cfg(target_feature) — not runtime detection.
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    unsafe {
-        let v512 = _mm512_load_ps(v.as_array().as_ptr());
-        let result512 = _mm512_rsqrt14_ps(v512);
-        std::mem::transmute(result512)
+    {
+        Vector::<f32>::splat(1.0) / v.sqrt()
     }
     #[cfg(all(
         target_arch = "x86_64",
-        target_feature = "avx",
+        target_feature = "avx2",
         not(target_feature = "avx512f")
     ))]
     unsafe {
@@ -381,7 +377,7 @@ pub fn fast_reciprocal_square_root(v: Vector<f32>) -> Vector<f32> {
     #[cfg(all(
         target_arch = "x86_64",
         target_feature = "sse",
-        not(target_feature = "avx")
+        not(target_feature = "avx2")
     ))]
     unsafe {
         let v128 = _mm_load_ps(v.as_array().as_ptr());

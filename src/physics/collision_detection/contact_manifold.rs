@@ -98,6 +98,22 @@ pub trait IContactManifold {
         depth: &mut f32,
         feature_id: &mut i32,
     );
+
+    /// Sets the contact at the given index. Contact normals are shared across a convex manifold,
+    /// so setting one contact in a convex manifold changes the whole manifold's normal.
+    fn set_contact(&mut self, contact_index: i32, value: &Contact);
+
+    /// Gets a mutable reference to a contact's depth.
+    fn get_depth_mut(&mut self, contact_index: i32) -> &mut f32;
+
+    /// Gets a mutable reference to a contact's normal (the manifold-wide normal in a convex manifold).
+    fn get_normal_mut(&mut self, contact_index: i32) -> &mut Vec3;
+
+    /// Gets a mutable reference to the offset from collidable A to the requested contact.
+    fn get_offset_mut(&mut self, contact_index: i32) -> &mut Vec3;
+
+    /// Gets a mutable reference to a contact's feature id.
+    fn get_feature_id_mut(&mut self, contact_index: i32) -> &mut i32;
 }
 
 /// Contains the data associated with a nonconvex contact manifold.
@@ -281,6 +297,31 @@ impl IContactManifold for NonconvexContactManifold {
             *feature_id = contact.feature_id;
         }
     }
+
+    #[inline(always)]
+    fn set_contact(&mut self, contact_index: i32, value: &Contact) {
+        unsafe { *self.get_contact_mut(contact_index) = *value };
+    }
+
+    #[inline(always)]
+    fn get_depth_mut(&mut self, contact_index: i32) -> &mut f32 {
+        unsafe { &mut self.get_contact_mut(contact_index).depth }
+    }
+
+    #[inline(always)]
+    fn get_normal_mut(&mut self, contact_index: i32) -> &mut Vec3 {
+        unsafe { &mut self.get_contact_mut(contact_index).normal }
+    }
+
+    #[inline(always)]
+    fn get_offset_mut(&mut self, contact_index: i32) -> &mut Vec3 {
+        unsafe { &mut self.get_contact_mut(contact_index).offset }
+    }
+
+    #[inline(always)]
+    fn get_feature_id_mut(&mut self, contact_index: i32) -> &mut i32 {
+        unsafe { &mut self.get_contact_mut(contact_index).feature_id }
+    }
 }
 
 /// Contains the data associated with a convex contact manifold.
@@ -455,5 +496,34 @@ impl IContactManifold for ConvexContactManifold {
             *depth = contact.depth;
             *feature_id = contact.feature_id;
         }
+    }
+
+    #[inline(always)]
+    fn set_contact(&mut self, contact_index: i32, value: &Contact) {
+        self.normal = value.normal;
+        let target = unsafe { self.get_contact_mut(contact_index) };
+        target.offset = value.offset;
+        target.depth = value.depth;
+        target.feature_id = value.feature_id;
+    }
+
+    #[inline(always)]
+    fn get_depth_mut(&mut self, contact_index: i32) -> &mut f32 {
+        unsafe { &mut self.get_contact_mut(contact_index).depth }
+    }
+
+    #[inline(always)]
+    fn get_normal_mut(&mut self, _contact_index: i32) -> &mut Vec3 {
+        &mut self.normal
+    }
+
+    #[inline(always)]
+    fn get_offset_mut(&mut self, contact_index: i32) -> &mut Vec3 {
+        unsafe { &mut self.get_contact_mut(contact_index).offset }
+    }
+
+    #[inline(always)]
+    fn get_feature_id_mut(&mut self, contact_index: i32) -> &mut i32 {
+        unsafe { &mut self.get_contact_mut(contact_index).feature_id }
     }
 }

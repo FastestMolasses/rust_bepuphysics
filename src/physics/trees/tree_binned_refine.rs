@@ -8,6 +8,7 @@ use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::vector::HwMinMax;
 use glam::Vec3;
 use std::mem;
 
@@ -267,8 +268,8 @@ impl Tree {
             let centroid = &*resources
                 .centroids
                 .add(*local_index_map.add(i as usize) as usize);
-            centroid_bounding_box.min = centroid_bounding_box.min.min(*centroid);
-            centroid_bounding_box.max = centroid_bounding_box.max.max(*centroid);
+            centroid_bounding_box.min = (*centroid).hw_min(centroid_bounding_box.min);
+            centroid_bounding_box.max = (*centroid).hw_max(centroid_bounding_box.max);
         }
 
         let null_bounding_box = BoundingBox {
@@ -308,7 +309,7 @@ impl Tree {
             return;
         }
 
-        let bin_count = MAXIMUM_BIN_COUNT.min((count as f32 * 0.25).max(2.0) as i32);
+        let bin_count = MAXIMUM_BIN_COUNT.min((count as f32 * 0.25).hw_max(2.0) as i32);
 
         let inverse_bin_size = Vec3::new(
             if span.x > EPSILON {
@@ -595,17 +596,18 @@ impl Tree {
 
         let cost_a;
         if subtree_count_a > 1 {
+            let mut child_cost_a = 0.0f32;
             let idx = self.create_staging_node_binned(
                 resources,
                 start,
                 subtree_count_a,
                 staging_nodes_count,
-                &mut 0.0,
+                &mut child_cost_a,
             );
             // Re-borrow staging node
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
             staging_node.a.index = idx;
-            cost_a = Self::compute_bounds_metric_bb(&a_bounds);
+            cost_a = child_cost_a + Self::compute_bounds_metric_bb(&a_bounds);
         } else {
             debug_assert_eq!(subtree_count_a, 1);
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
@@ -615,16 +617,17 @@ impl Tree {
 
         let cost_b;
         if subtree_count_b > 1 {
+            let mut child_cost_b = 0.0f32;
             let idx = self.create_staging_node_binned(
                 resources,
                 split_index,
                 subtree_count_b,
                 staging_nodes_count,
-                &mut 0.0,
+                &mut child_cost_b,
             );
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
             staging_node.b.index = idx;
-            cost_b = Self::compute_bounds_metric_bb(&b_bounds);
+            cost_b = child_cost_b + Self::compute_bounds_metric_bb(&b_bounds);
         } else {
             debug_assert_eq!(subtree_count_b, 1);
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);

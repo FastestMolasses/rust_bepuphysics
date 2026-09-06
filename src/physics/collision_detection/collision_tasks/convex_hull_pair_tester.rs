@@ -3,7 +3,7 @@
 use crate::physics::collidables::convex_hull::{ConvexHullSupportFinder, ConvexHullWide};
 use crate::physics::collision_detection::collision_tasks::convex_hull_test_helper::ConvexHullTestHelper;
 use crate::physics::collision_detection::collision_tasks::manifold_candidate_helper::{
-    ManifoldCandidateHelper, ManifoldCandidateScalar,
+    ManifoldCandidateHelper, ManifoldCandidateScalar, ScratchSpill,
 };
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
 use crate::physics::collision_detection::depth_refiner::DepthRefiner;
@@ -11,8 +11,9 @@ use crate::physics::helpers::Helpers;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::mem::MaybeUninit;
@@ -53,6 +54,7 @@ impl ConvexHullPairTester {
         orientation_a: &QuaternionWide,
         orientation_b: &QuaternionWide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut Convex4ContactManifoldWide,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
@@ -94,7 +96,7 @@ impl ConvexHullPairTester {
         let mut b_epsilon_scale = zero_f;
         a.estimate_epsilon_scale(&inactive_lanes, &mut a_epsilon_scale);
         b.estimate_epsilon_scale(&inactive_lanes, &mut b_epsilon_scale);
-        let epsilon_scale = a_epsilon_scale.simd_min(b_epsilon_scale);
+        let epsilon_scale = a_epsilon_scale.hw_min(b_epsilon_scale);
         let depth_threshold = -*speculative_margin;
 
         let mut depth = zero_f;
@@ -236,20 +238,14 @@ impl ConvexHullPairTester {
 
             // Create cached edge data for A.
             // Transform A's vertices into B-local space.
-            // 64-entry stack fast path, heap spill for larger faces (C# stackallocs the unbounded count).
             // SAFETY: uninitialized; the fill loop writes every element before it is read.
-            let mut cached_edges_stack: [MaybeUninit<CachedEdge>; 64] =
+            const INLINE_EDGE_CAPACITY: usize = 64;
+            let mut cached_edges_inline: [MaybeUninit<CachedEdge>; INLINE_EDGE_CAPACITY] =
                 unsafe { MaybeUninit::uninit().assume_init() };
-            let mut cached_edges_heap: Vec<MaybeUninit<CachedEdge>>;
-            let cached_edges: &mut [MaybeUninit<CachedEdge>] = if face_count_a <= 64 {
-                &mut cached_edges_stack[..face_count_a]
-            } else {
-                cached_edges_heap = Vec::with_capacity(face_count_a);
-                unsafe {
-                    cached_edges_heap.set_len(face_count_a);
-                }
-                &mut cached_edges_heap[..]
-            };
+            let cached_edges_spill =
+                ScratchSpill::<CachedEdge>::new(face_count_a, INLINE_EDGE_CAPACITY, pool);
+            let cached_edges_ptr =
+                cached_edges_spill.or_inline(cached_edges_inline.as_mut_ptr() as *mut CachedEdge);
             let previous_index_a = a_slot.face_vertex_indices[face_start_a + face_count_a - 1];
             let mut previous_vertex_a = Vec3::ZERO;
             Vector3Wide::read_slot(
@@ -278,22 +274,29 @@ impl ConvexHullPairTester {
                 // Note flipped cross order; local normal points from B to A.
                 let edge_plane_normal = slot_local_normal.cross(vertex - previous_vertex_a);
                 previous_vertex_a = vertex;
-                cached_edges[edge_index].write(CachedEdge {
+                cached_edges_ptr.add(edge_index).write(CachedEdge {
                     vertex,
                     edge_plane_normal,
                     maximum_containment_dot: f32::MIN,
                 });
             }
+            let cached_edges = std::slice::from_raw_parts_mut(cached_edges_ptr, face_count_a);
 
             // Clip B's face edges against A's face, and test A's vertices against B's face.
             let maximum_candidate_count = face_count_a
                 .max(face_count_b)
                 .max((face_count_a * 2).min(face_count_b * 2));
-            // Clamped to the buffer's capacity so the candidate_count guards below cannot index past it.
-            let maximum_candidate_count = maximum_candidate_count.min(128);
+            const INLINE_CANDIDATE_CAPACITY: usize = 128;
             // SAFETY: uninitialized; every index below candidate_count is written before it is read.
-            let mut candidates_buf: [MaybeUninit<ManifoldCandidateScalar>; 128] =
+            let mut candidates_inline: [MaybeUninit<ManifoldCandidateScalar>; INLINE_CANDIDATE_CAPACITY] =
                 unsafe { MaybeUninit::uninit().assume_init() };
+            let candidates_spill = ScratchSpill::<ManifoldCandidateScalar>::new(
+                maximum_candidate_count,
+                INLINE_CANDIDATE_CAPACITY,
+                pool,
+            );
+            let candidates = candidates_spill
+                .or_inline(candidates_inline.as_mut_ptr() as *mut ManifoldCandidateScalar);
             let mut candidate_count = 0usize;
 
             let previous_index_b_init = b_slot.face_vertex_indices[face_start_b + face_count_b - 1];
@@ -322,7 +325,6 @@ impl ConvexHullPairTester {
                 let mut earliest_exit = f32::MAX;
 
                 for edge_a in cached_edges.iter_mut() {
-                    let edge_a = unsafe { edge_a.assume_init_mut() };
                     // Check containment of A vertex in this B edge.
                     let edge_b_to_edge_a = edge_a.vertex - previous_vertex_b;
                     let containment_dot = edge_b_to_edge_a.dot(edge_plane_normal_b);
@@ -377,7 +379,7 @@ impl ConvexHullPairTester {
                         // Create max contact.
                         let point =
                             edge_offset_b * earliest_exit + previous_vertex_b - b_face_origin;
-                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        candidates.add(candidate_count).write(ManifoldCandidateScalar {
                             x: point.dot(b_face_x),
                             y: point.dot(b_face_y),
                             feature_id: base_feature_id + end_id as i32,
@@ -391,7 +393,7 @@ impl ConvexHullPairTester {
                         // Create min contact.
                         let point =
                             edge_offset_b * latest_entry + previous_vertex_b - b_face_origin;
-                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        candidates.add(candidate_count).write(ManifoldCandidateScalar {
                             x: point.dot(b_face_x),
                             y: point.dot(b_face_y),
                             feature_id: base_feature_id + start_id as i32,
@@ -411,7 +413,6 @@ impl ConvexHullPairTester {
                 if candidate_count >= maximum_candidate_count {
                     break;
                 }
-                let edge = unsafe { edge.assume_init_ref() };
                 if edge.maximum_containment_dot <= 0.0 {
                     // This vertex was contained by all B edge plane normals.
                     // Project it onto B's surface.
@@ -420,7 +421,7 @@ impl ConvexHullPairTester {
                         * inverse_local_normal_a_dot_face_normal_b;
                     let b_face_to_projected = b_face_to_vertex_a - slot_local_normal * distance;
 
-                    candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                    candidates.add(candidate_count).write(ManifoldCandidateScalar {
                         x: b_face_x.dot(b_face_to_projected),
                         y: b_face_y.dot(b_face_to_projected),
                         feature_id: i as i32,
@@ -435,11 +436,11 @@ impl ConvexHullPairTester {
             let mut slot_offset_b = Vec3::ZERO;
             Vector3Wide::read_slot(offset_b, slot_index, &mut slot_offset_b);
             ManifoldCandidateHelper::reduce_scalar(
-                candidates_buf.as_mut_ptr() as *mut ManifoldCandidateScalar,
+                candidates,
                 candidate_count as i32,
                 slot_face_normal_a,
                 1.0 / slot_face_normal_a.dot(slot_local_normal),
-                unsafe { cached_edges[0].assume_init_ref() }.vertex,
+                cached_edges[0].vertex,
                 b_face_origin,
                 b_face_x,
                 b_face_y,
@@ -449,6 +450,7 @@ impl ConvexHullPairTester {
                 slot_offset_b,
                 slot_index,
                 manifold,
+                pool,
             );
         }
 

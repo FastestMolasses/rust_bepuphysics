@@ -112,7 +112,7 @@ mod x86_impl {
                 let slot_index_is_lesser = _mm256_cmpgt_epi32(slot_index, j_vector);
                 // slot_is_equal = test_value == values
                 let slot_is_equal =
-                    _mm256_castps_si256(_mm256_cmp_ps::<_CMP_EQ_OS>(test_vector, values));
+                    _mm256_castps_si256(_mm256_cmp_ps::<_CMP_EQ_OQ>(test_vector, values));
                 // slot_precedes_value = lesser OR (equal AND index_lesser)
                 let slot_precedes_value = _mm256_or_si256(
                     slot_is_lesser,

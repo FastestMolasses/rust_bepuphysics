@@ -1,3 +1,4 @@
+use crate::out;
 use crate::physics::constraints::linear_axis_servo::LinearAxisServoFunctions;
 use crate::physics::constraints::motor_settings::{MotorSettings, MotorSettingsWide};
 use crate::physics::constraints::servo_settings::ServoSettingsWide;
@@ -7,6 +8,7 @@ use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 
 pub const BATCH_TYPE_ID: i32 = 39;
 
@@ -37,6 +39,16 @@ impl LinearAxisMotor {
         _bundle_index: usize,
         inner_index: usize,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            use crate::physics::constraints::constraint_checker::ConstraintChecker;
+            ConstraintChecker::assert_unit_length_vec3(
+                self.local_axis,
+                "LinearAxisMotor",
+                "local_axis",
+            );
+            ConstraintChecker::assert_valid_motor_settings(&self.settings, "LinearAxisMotor");
+        }
         Vector3Wide::write_slot(
             self.local_offset_a,
             inner_index,
@@ -126,36 +138,36 @@ impl LinearAxisMotorFunctions {
         wsv_a: &mut crate::physics::body_properties::BodyVelocityWide,
         wsv_b: &mut crate::physics::body_properties::BodyVelocityWide,
     ) {
-        let mut ab = Vector3Wide::default();
-        Vector3Wide::subtract(position_b, position_a, &mut ab);
-        let mut _plane_normal_dot = Vector::<f32>::splat(0.0);
-        let mut normal = Vector3Wide::default();
-        let mut angular_ja = Vector3Wide::default();
-        let mut angular_jb = Vector3Wide::default();
-        LinearAxisServoFunctions::compute_jacobians(
-            &ab,
-            orientation_a,
-            orientation_b,
-            &prestep.local_plane_normal,
-            &prestep.local_offset_a,
-            &prestep.local_offset_b,
-            &mut _plane_normal_dot,
-            &mut normal,
-            &mut angular_ja,
-            &mut angular_jb,
-        );
-        let mut angular_impulse_to_velocity_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+        let ab = out!(Vector3Wide::subtract(position_b, position_a));
+        let mut plane_normal_dot = MaybeUninit::<Vector<f32>>::uninit();
+        let mut normal = MaybeUninit::<Vector3Wide>::uninit();
+        let mut angular_ja = MaybeUninit::<Vector3Wide>::uninit();
+        let mut angular_jb = MaybeUninit::<Vector3Wide>::uninit();
+        unsafe {
+            LinearAxisServoFunctions::compute_jacobians(
+                &ab,
+                orientation_a,
+                orientation_b,
+                &prestep.local_plane_normal,
+                &prestep.local_offset_a,
+                &prestep.local_offset_b,
+                &mut *plane_normal_dot.as_mut_ptr(),
+                &mut *normal.as_mut_ptr(),
+                &mut *angular_ja.as_mut_ptr(),
+                &mut *angular_jb.as_mut_ptr(),
+            );
+        }
+        let normal = unsafe { normal.assume_init() };
+        let angular_ja = unsafe { angular_ja.assume_init() };
+        let angular_jb = unsafe { angular_jb.assume_init() };
+        let angular_impulse_to_velocity_a = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_ja,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_impulse_to_velocity_a,
-        );
-        let mut angular_impulse_to_velocity_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let angular_impulse_to_velocity_b = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_jb,
-            &inertia_b.inverse_inertia_tensor,
-            &mut angular_impulse_to_velocity_b,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
         LinearAxisServoFunctions::apply_impulse(
             &normal,
             &angular_impulse_to_velocity_a,
@@ -183,51 +195,64 @@ impl LinearAxisMotorFunctions {
         wsv_a: &mut crate::physics::body_properties::BodyVelocityWide,
         wsv_b: &mut crate::physics::body_properties::BodyVelocityWide,
     ) {
-        let mut ab = Vector3Wide::default();
-        Vector3Wide::subtract(position_b, position_a, &mut ab);
-        let mut _plane_normal_dot = Vector::<f32>::splat(0.0);
-        let mut normal = Vector3Wide::default();
-        let mut angular_ja = Vector3Wide::default();
-        let mut angular_jb = Vector3Wide::default();
-        LinearAxisServoFunctions::compute_jacobians(
-            &ab,
-            orientation_a,
-            orientation_b,
-            &prestep.local_plane_normal,
-            &prestep.local_offset_a,
-            &prestep.local_offset_b,
-            &mut _plane_normal_dot,
-            &mut normal,
-            &mut angular_ja,
-            &mut angular_jb,
-        );
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        let mut maximum_impulse = Vector::<f32>::splat(0.0);
-        MotorSettingsWide::compute_softness(
-            &prestep.settings,
-            dt,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-            &mut maximum_impulse,
-        );
-        let mut angular_impulse_to_velocity_a = Vector3Wide::default();
-        let mut angular_impulse_to_velocity_b = Vector3Wide::default();
-        let mut effective_mass = Vector::<f32>::splat(0.0);
-        LinearAxisServoFunctions::compute_effective_mass(
-            &angular_ja,
-            &angular_jb,
-            inertia_a,
-            inertia_b,
-            &effective_mass_cfm_scale,
-            &mut angular_impulse_to_velocity_a,
-            &mut angular_impulse_to_velocity_b,
-            &mut effective_mass,
-        );
+        let ab = out!(Vector3Wide::subtract(position_b, position_a));
+        let mut plane_normal_dot = MaybeUninit::<Vector<f32>>::uninit();
+        let mut normal = MaybeUninit::<Vector3Wide>::uninit();
+        let mut angular_ja = MaybeUninit::<Vector3Wide>::uninit();
+        let mut angular_jb = MaybeUninit::<Vector3Wide>::uninit();
+        unsafe {
+            LinearAxisServoFunctions::compute_jacobians(
+                &ab,
+                orientation_a,
+                orientation_b,
+                &prestep.local_plane_normal,
+                &prestep.local_offset_a,
+                &prestep.local_offset_b,
+                &mut *plane_normal_dot.as_mut_ptr(),
+                &mut *normal.as_mut_ptr(),
+                &mut *angular_ja.as_mut_ptr(),
+                &mut *angular_jb.as_mut_ptr(),
+            );
+        }
+        let normal = unsafe { normal.assume_init() };
+        let angular_ja = unsafe { angular_ja.assume_init() };
+        let angular_jb = unsafe { angular_jb.assume_init() };
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut maximum_impulse = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            MotorSettingsWide::compute_softness(
+                &prestep.settings,
+                dt,
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+                &mut *maximum_impulse.as_mut_ptr(),
+            );
+        }
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
+        let maximum_impulse = unsafe { maximum_impulse.assume_init() };
+        let mut angular_impulse_to_velocity_a = MaybeUninit::<Vector3Wide>::uninit();
+        let mut angular_impulse_to_velocity_b = MaybeUninit::<Vector3Wide>::uninit();
+        let mut effective_mass = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            LinearAxisServoFunctions::compute_effective_mass(
+                &angular_ja,
+                &angular_jb,
+                inertia_a,
+                inertia_b,
+                &effective_mass_cfm_scale,
+                &mut *angular_impulse_to_velocity_a.as_mut_ptr(),
+                &mut *angular_impulse_to_velocity_b.as_mut_ptr(),
+                &mut *effective_mass.as_mut_ptr(),
+            );
+        }
+        let angular_impulse_to_velocity_a = unsafe { angular_impulse_to_velocity_a.assume_init() };
+        let angular_impulse_to_velocity_b = unsafe { angular_impulse_to_velocity_b.assume_init() };
+        let effective_mass = unsafe { effective_mass.assume_init() };
 
         // csv = dot(wsvA.Linear - wsvB.Linear, normal) + dot(wsvA.Angular, angularJA) + dot(wsvB.Angular, angularJB)
-        let mut linear_diff = Vector3Wide::default();
-        Vector3Wide::subtract(&wsv_a.linear, &wsv_b.linear, &mut linear_diff);
+        let linear_diff = out!(Vector3Wide::subtract(&wsv_a.linear, &wsv_b.linear));
         let csv = Vector3Wide::dot_val(&linear_diff, &normal)
             + Vector3Wide::dot_val(&wsv_a.angular, &angular_ja)
             + Vector3Wide::dot_val(&wsv_b.angular, &angular_jb);

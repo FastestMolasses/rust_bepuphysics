@@ -5,6 +5,7 @@ use super::tree::Tree;
 use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::vector::HwMinMax;
 
 impl Tree {
     pub(crate) fn refit_and_measure(&self, child: &mut NodeChild) -> f32 {
@@ -150,7 +151,7 @@ impl Tree {
 
             // The root's own change is not included since refines cannot change
             // the volume of the root.
-            if postmetric >= 1e-10 {
+            if postmetric as f64 >= 1e-10 {
                 child_change / postmetric
             } else {
                 0.0
@@ -210,14 +211,13 @@ impl Tree {
                  have been corrupted by infinites or NaNs."
             );
         }
-        let refine_aggressiveness = (cost_change * refine_aggressiveness_scale).max(0.0);
-        let refine_portion = (refine_aggressiveness * 0.25).min(1.0);
+        let refine_aggressiveness = (0.0f32).hw_max(cost_change * refine_aggressiveness_scale);
+        let refine_portion = (1.0f32).hw_min(refine_aggressiveness * 0.25);
 
-        let target_refinement_scale = (self.node_count as f32).min(
-            (refinement_candidates_count as f32 * refine_aggressiveness_scale * 0.03)
-                .ceil()
-                .max(2.0)
-                + refinement_candidates_count as f32 * refine_portion,
+        let target_refinement_scale = (self.node_count as f32).hw_min(
+            (2.0f32).hw_max(
+                (refinement_candidates_count as f32 * refine_aggressiveness_scale * 0.03).ceil(),
+            ) + refinement_candidates_count as f32 * refine_portion,
         );
 
         let refinement_period =

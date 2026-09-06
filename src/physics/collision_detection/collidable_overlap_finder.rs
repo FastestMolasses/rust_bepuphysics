@@ -13,7 +13,6 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Trait for types that can dispatch broad phase overlap testing.
-/// Matches C#'s abstract `CollidableOverlapFinder` base class.
 struct SelfOverlapHandler<TCallbacks: INarrowPhaseCallbacks> {
     narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
     leaves: Buffer<CollidableReference>,
@@ -102,6 +101,12 @@ unsafe fn execute_intertree_job_impl<TCallbacks: INarrowPhaseCallbacks>(
     // Workers only touch their own overlap_handlers slot, so a shared reference is sound here.
     let test = &*(ctx as *const MultithreadedIntertreeTest<IntertreeOverlapHandler<TCallbacks>>);
     test.execute_job(job_index, worker_index);
+}
+
+unsafe fn drop_state_impl<TCallbacks: INarrowPhaseCallbacks>(state: *mut u8) {
+    drop(Box::from_raw(
+        state as *mut OverlapFinderState<TCallbacks>,
+    ));
 }
 
 unsafe fn flush_worker_impl<TCallbacks: INarrowPhaseCallbacks>(np: *mut u8, worker_index: i32) {
@@ -288,9 +293,10 @@ unsafe fn dispatch_overlaps_impl<TCallbacks: INarrowPhaseCallbacks>(
 pub struct CollidableOverlapFinder {
     narrow_phase: *mut u8,
     broad_phase: *mut BroadPhase,
-    /// Type-erased `*mut OverlapFinderState<TCallbacks>`; allocated once in `new`, never freed.
+    /// Owned, type-erased `*mut OverlapFinderState<TCallbacks>`; released by `dispose`.
     state: *mut u8,
     dispatch_fn: DispatchFn,
+    drop_state_fn: unsafe fn(*mut u8),
 }
 
 impl CollidableOverlapFinder {
@@ -312,6 +318,15 @@ impl CollidableOverlapFinder {
             broad_phase,
             state: Box::into_raw(state) as *mut u8,
             dispatch_fn: dispatch_overlaps_impl::<TCallbacks>,
+            drop_state_fn: drop_state_impl::<TCallbacks>,
+        }
+    }
+
+    /// Releases the per-callbacks test contexts and handler storage. Idempotent.
+    pub fn dispose(&mut self) {
+        if !self.state.is_null() {
+            unsafe { (self.drop_state_fn)(self.state) };
+            self.state = std::ptr::null_mut();
         }
     }
 
@@ -322,6 +337,7 @@ impl CollidableOverlapFinder {
         dt: f32,
         thread_dispatcher: Option<&dyn IThreadDispatcher>,
     ) {
+        debug_assert!(!self.state.is_null(), "Overlap finder was already disposed.");
         unsafe {
             (self.dispatch_fn)(
                 self.narrow_phase,
@@ -331,5 +347,11 @@ impl CollidableOverlapFinder {
                 thread_dispatcher,
             );
         }
+    }
+}
+
+impl Drop for CollidableOverlapFinder {
+    fn drop(&mut self) {
+        self.dispose();
     }
 }

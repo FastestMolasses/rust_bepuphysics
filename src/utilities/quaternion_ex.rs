@@ -372,7 +372,7 @@ pub fn angle_from_quaternion(q: Quat) -> f32 {
     if qw > 1.0 {
         return 0.0;
     }
-    2.0 * qw.acos()
+    2.0 * ((qw as f64).acos() as f32)
 }
 
 /// Computes the axis angle representation of a normalized quaternion.
@@ -393,7 +393,7 @@ pub fn axis_angle_from_quaternion(q: Quat, axis: &mut Vec3, angle: &mut f32) {
     let length_squared = axis.length_squared();
     if length_squared > 1e-14 {
         *axis /= length_squared.sqrt();
-        *angle = 2.0 * math_helper::clamp(qw, -1.0, 1.0).acos();
+        *angle = 2.0 * ((math_helper::clamp(qw, -1.0, 1.0) as f64).acos() as f32);
     } else {
         *axis = Vec3::Y;
         *angle = 0.0;
@@ -419,7 +419,7 @@ pub fn quaternion_between_normalized_vectors(v1: Vec3, v2: Vec3, q: &mut Quat) {
         if abs_x < abs_y && abs_x < abs_z {
             *q = Quat::from_xyzw(0.0, -v1.z, v1.y, 0.0);
         } else if abs_y < abs_z {
-            *q = Quat::from_xyzw(v1.z, 0.0, -v1.x, 0.0);
+            *q = Quat::from_xyzw(-v1.z, 0.0, v1.x, 0.0);
         } else {
             *q = Quat::from_xyzw(-v1.y, v1.x, 0.0, 0.0);
         }

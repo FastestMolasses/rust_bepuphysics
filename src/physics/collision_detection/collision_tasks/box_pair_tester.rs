@@ -8,7 +8,7 @@ use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4Co
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
 use std::ptr::addr_of_mut;
@@ -332,19 +332,19 @@ impl BoxPairTester {
         let large_negative = Vector::<f32>::splat(-f32::MAX);
         let large_positive = Vector::<f32>::splat(f32::MAX);
         let min0 = dont_use_fallback.select(
-            t00.simd_min(t01),
+            t00.hw_min(t01),
             edge_start_is_inside0.select(large_negative, large_positive),
         );
         let max0 = dont_use_fallback.select(
-            t00.simd_max(t01),
+            t00.hw_max(t01),
             edge_start_is_inside0.select(large_positive, large_negative),
         );
         let min1 = dont_use_fallback.select(
-            t10.simd_min(t11),
+            t10.hw_min(t11),
             edge_start_is_inside1.select(large_negative, large_positive),
         );
         let max1 = dont_use_fallback.select(
-            t10.simd_max(t11),
+            t10.hw_max(t11),
             edge_start_is_inside1.select(large_positive, large_negative),
         );
         (min0, max0, min1, max1)
@@ -384,10 +384,10 @@ impl BoxPairTester {
         );
         let negative_half_span_b = -*half_span_b;
         // Intersection of the two intervals
-        let min0 = negative_half_span_b.simd_max(min_x0.simd_max(min_y0));
-        let max0 = half_span_b.simd_min(max_x0.simd_min(max_y0));
-        let min1 = negative_half_span_b.simd_max(min_x1.simd_max(min_y1));
-        let max1 = half_span_b.simd_min(max_x1.simd_min(max_y1));
+        let min0 = negative_half_span_b.hw_max(min_x0.hw_max(min_y0));
+        let max0 = half_span_b.hw_min(max_x0.hw_min(max_y0));
+        let min1 = negative_half_span_b.hw_max(min_x1.hw_max(min_y1));
+        let max1 = half_span_b.hw_min(max_x1.hw_min(max_y1));
         (min0, max0, min1, max1)
     }
 
@@ -837,7 +837,7 @@ impl BoxPairTester {
             let abs_ax_dot = ax_dot.abs();
             let abs_ay_dot = ay_dot.abs();
             let abs_az_dot = az_dot.abs();
-            let max_a_dot = abs_ax_dot.simd_max(abs_ay_dot.simd_max(abs_az_dot));
+            let max_a_dot = abs_ax_dot.hw_max(abs_ay_dot.hw_max(abs_az_dot));
             let use_ax = max_a_dot.simd_eq(abs_ax_dot).to_simd();
             let use_ay = max_a_dot.simd_eq(abs_ay_dot).to_simd() & !use_ax;
 
@@ -890,7 +890,7 @@ impl BoxPairTester {
             let abs_bx_dot = bx_dot.abs();
             let abs_by_dot = by_dot.abs();
             let abs_bz_dot = bz_dot.abs();
-            let max_b_dot = abs_bx_dot.simd_max(abs_by_dot.simd_max(abs_bz_dot));
+            let max_b_dot = abs_bx_dot.hw_max(abs_by_dot.hw_max(abs_bz_dot));
             let use_bx = max_b_dot.simd_eq(abs_bx_dot).to_simd();
             let use_by = max_b_dot.simd_eq(abs_by_dot).to_simd() & !use_bx;
             let use_bx_f = use_bx.simd_lt(Vector::<i32>::splat(0));
@@ -959,8 +959,8 @@ impl BoxPairTester {
             let vertex_a11 = vertex_a1 + edge_offset_ay;
 
             let epsilon_scale = half_span_ax
-                .simd_max(half_span_ay.simd_max(half_span_az))
-                .simd_min(half_span_bx.simd_max(half_span_by.simd_max(half_span_bz)));
+                .hw_max(half_span_ay.hw_max(half_span_az))
+                .hw_min(half_span_bx.hw_max(half_span_by.hw_max(half_span_bz)));
 
             // Edge feature IDs
             let two = Vector::<i32>::splat(2);

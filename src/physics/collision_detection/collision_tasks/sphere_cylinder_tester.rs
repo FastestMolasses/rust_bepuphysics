@@ -5,7 +5,7 @@ use crate::physics::collidables::sphere::SphereWide;
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex1ContactManifoldWide;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -51,7 +51,7 @@ impl SphereCylinderTester {
         );
         let clamped_y = b
             .half_length
-            .simd_min((-b.half_length).simd_max(cylinder_local_offset_a.y));
+            .hw_min((-b.half_length).hw_max(cylinder_local_offset_a.y));
         let clamped_z = horizontal_clamp_required.select(
             cylinder_local_offset_a.z * horizontal_clamp_multiplier,
             cylinder_local_offset_a.z,

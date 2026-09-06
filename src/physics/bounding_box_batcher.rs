@@ -4,10 +4,9 @@ use crate::physics::bodies::Bodies;
 use crate::physics::body_properties::{BodyVelocity, MotionState, RigidPose};
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
 use crate::physics::collidables::collidable::Collidable;
-use crate::physics::collidables::convex_hull::ConvexHull;
 use crate::physics::collidables::shape::{
-    ICompoundShape, IConvexShape, IDisposableShape, INonConvexBounds, IShapeWide,
-    IShapeWideAllocation,
+    initialize_internal_allocation, ICompoundShape, IConvexShape, IDisposableShape,
+    INonConvexBounds, IShapeWide, WideAllocationScratch,
 };
 use crate::physics::collidables::shapes::{
     CompoundShapeBatch, ConvexShapeBatch, HomogeneousCompoundShapeBatch, ShapeBatch, Shapes,
@@ -18,7 +17,7 @@ use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::mem::MaybeUninit;
@@ -140,10 +139,6 @@ pub struct BoundingBoxBatcher {
 
 pub const COLLIDABLES_PER_FLUSH: i32 = 16;
 
-/// Upper bound on IShapeWideAllocation::internal_allocation_size_of() across all convex wide
-/// shape types; only ConvexHullWide is nonzero (VECTOR_WIDTH * size_of::<ConvexHull>()).
-const MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE: usize = VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
-
 impl BoundingBoxBatcher {
     pub fn new(
         bodies: *mut Bodies,
@@ -177,14 +172,9 @@ impl BoundingBoxBatcher {
         // Every lane is written via write_slot before get_bounds reads it.
         let mut shape_wide_storage = MaybeUninit::<TShape::Wide>::uninit();
         let shape_wide = unsafe { &mut *shape_wide_storage.as_mut_ptr() };
-        let alloc_size = shape_wide.internal_allocation_size_of();
-        debug_assert!(alloc_size <= MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE);
-        // Stack-allocate internal memory for wide types that need it (e.g. ConvexHullWide).
-        let mut alloc_backing = [0u8; MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE];
-        if alloc_size > 0 {
-            let alloc_buffer = Buffer::<u8>::new(alloc_backing.as_mut_ptr(), alloc_size as i32, -1);
-            shape_wide.initialize_allocation(&alloc_buffer);
-        }
+        // The allocation storage must outlive shape_wide.
+        let mut alloc_scratch = MaybeUninit::<WideAllocationScratch>::uninit();
+        let _spilled = initialize_internal_allocation(shape_wide, &mut alloc_scratch, self.pool);
 
         let batch = self.batches.get(shape_batch.type_id());
         let shape_indices = &batch.shape_indices;
@@ -230,15 +220,18 @@ impl BoundingBoxBatcher {
             let motion_slice = batch
                 .motion_states
                 .slice_offset(bundle_start_index, count_in_bundle);
-            let mut positions = Vector3Wide::default();
-            let mut orientations = QuaternionWide::default();
-            let mut velocities = BodyVelocityWide::default();
+            let mut positions = MaybeUninit::<Vector3Wide>::uninit();
+            let mut orientations = MaybeUninit::<QuaternionWide>::uninit();
+            let mut velocities = MaybeUninit::<BodyVelocityWide>::uninit();
             Bodies::transpose_motion_states(
                 &motion_slice,
-                &mut positions,
-                &mut orientations,
-                &mut velocities,
+                &mut *positions.as_mut_ptr(),
+                &mut *orientations.as_mut_ptr(),
+                &mut *velocities.as_mut_ptr(),
             );
+            let positions = positions.assume_init();
+            let mut orientations = orientations.assume_init();
+            let velocities = velocities.assume_init();
 
             // Compute bounds from the wide shape bundle.
             let mut maximum_radius = Vector::<f32>::default();
@@ -269,7 +262,7 @@ impl BoundingBoxBatcher {
             let allow_expansion_beyond_speculative_margin =
                 Vector::<i32>::from_array(allow_expansion_beyond_span);
             speculative_margin = minimum_speculative_margin
-                .simd_max(maximum_speculative_margin.simd_min(speculative_margin));
+                .hw_max(maximum_speculative_margin.hw_min(speculative_margin));
             let f32_max_wide = Vector::<f32>::splat(f32::MAX);
             // ConditionalSelect: if mask bit is set (all-ones = -1), pick f32::MAX, else speculative_margin.
             let maximum_bounds_expansion = Vector::<i32>::from(
@@ -315,7 +308,7 @@ impl BoundingBoxBatcher {
                 if continuation.compound_child() {
                     collidable.speculative_margin = collidable
                         .speculative_margin
-                        .max(speculative_margin[inner_index as usize]);
+                        .hw_max(speculative_margin[inner_index as usize]);
                     let new_min = Vec3::new(
                         bundle_min.x[inner_index as usize],
                         bundle_min.y[inner_index as usize],
@@ -387,10 +380,10 @@ impl BoundingBoxBatcher {
             // Compute angular expansion from bounding box extents (simplified for non-convex).
             let abs_min = min.abs();
             let abs_max = max.abs();
-            let max_components = abs_min.max(abs_max);
+            let max_components = abs_min.hw_max(abs_max);
             let maximum_radius = max_components.length();
-            let min_components = abs_min.min(abs_max);
-            let minimum_radius = min_components.x.min(min_components.y.min(min_components.z));
+            let min_components = abs_min.hw_min(abs_max);
+            let minimum_radius = min_components.x.hw_min(min_components.y.hw_min(min_components.z));
             let maximum_angular_expansion = maximum_radius - minimum_radius;
 
             let angular_bounds_expansion = BoundingBoxHelpers::get_angular_bounds_expansion(
@@ -401,9 +394,9 @@ impl BoundingBoxBatcher {
             );
             let mut speculative_margin =
                 motion_state.velocity.linear.length() * self.dt + angular_bounds_expansion;
-            speculative_margin = speculative_margin
-                .max(collidable.minimum_speculative_margin)
-                .min(collidable.maximum_speculative_margin);
+            speculative_margin = collidable
+                .minimum_speculative_margin
+                .hw_max(collidable.maximum_speculative_margin.hw_min(speculative_margin));
             collidable.speculative_margin = speculative_margin;
 
             let maximum_allowed_expansion = if collidable
@@ -425,8 +418,8 @@ impl BoundingBoxBatcher {
                 &mut max_expansion,
             );
             let max_exp_vec = Vec3::splat(maximum_allowed_expansion);
-            min_expansion = min_expansion.max(-max_exp_vec);
-            max_expansion = max_expansion.min(max_exp_vec);
+            min_expansion = (-max_exp_vec).hw_max(min_expansion);
+            max_expansion = max_exp_vec.hw_min(max_expansion);
 
             let (min_ptr, max_ptr) =
                 broad_phase.get_active_bounds_pointers(collidable.broad_phase_index);
@@ -475,6 +468,7 @@ impl BoundingBoxBatcher {
         }
     }
 
+    #[inline(always)]
     fn add_internal(
         &mut self,
         shape_index: TypedIndex,

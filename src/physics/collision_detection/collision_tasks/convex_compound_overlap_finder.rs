@@ -5,14 +5,16 @@ use std::marker::PhantomData;
 use glam::Vec3;
 
 use crate::physics::bounding_box_helpers::BoundingBoxHelpers;
-use crate::physics::collidables::convex_hull::ConvexHull;
-use crate::physics::collidables::shape::{IConvexShape, IShapeWide, IShapeWideAllocation};
+use crate::physics::collidables::shape::{
+    initialize_internal_allocation, IConvexShape, IShapeWide, IShapeWideAllocation,
+    WideAllocationScratch,
+};
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_batcher::BoundsTestedPair;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::{Vector, VECTOR_WIDTH};
+use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::convex_compound_collision_task::IConvexCompoundOverlapFinder;
@@ -41,21 +43,15 @@ pub trait IBoundsQueryableCompound {
     /// `overlaps` must point to a valid overlaps collection of the appropriate type.
     unsafe fn find_local_overlaps_sweep(
         &self,
-        _min: Vec3,
-        _max: Vec3,
-        _sweep: Vec3,
-        _maximum_t: f32,
-        _pool: &mut BufferPool,
-        _shapes: &Shapes,
-        _overlaps: *mut u8,
-    ) {
-        todo!("Sweep-specific overlap finding not yet implemented for this compound type. All concrete compound types must override find_local_overlaps_sweep.")
-    }
+        min: Vec3,
+        max: Vec3,
+        sweep: Vec3,
+        maximum_t: f32,
+        pool: &mut BufferPool,
+        shapes: &Shapes,
+        overlaps: *mut u8,
+    );
 }
-
-/// Upper bound on internal_allocation_size_of() across convex wide types; only ConvexHullWide is nonzero.
-const MAX_CONVEX_WIDE_INTERNAL_ALLOCATION_SIZE: usize =
-    VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
 
 /// Finds overlapping children between a convex shape and a compound/mesh container.
 pub struct ConvexCompoundOverlapFinder<TConvex, TConvexWide, TCompound>
@@ -89,15 +85,10 @@ where
         let lanes = Vector::<f32>::LEN as i32;
 
         let mut convex_wide = TConvexWide::default();
-        let alloc_size = convex_wide.internal_allocation_size_of();
-        debug_assert!(alloc_size <= MAX_CONVEX_WIDE_INTERNAL_ALLOCATION_SIZE);
-        // Stack storage for IShapeWide internal allocations (e.g. ConvexHullWide).
-        // Typed as [ConvexHull; N] rather than bytes so it has ConvexHull's alignment when reinterpreted as Buffer<ConvexHull>.
-        let mut alloc_backing = std::mem::MaybeUninit::<[ConvexHull; VECTOR_WIDTH]>::uninit();
-        if alloc_size > 0 {
-            let buf = Buffer::new(alloc_backing.as_mut_ptr() as *mut u8, alloc_size as i32, -1);
-            convex_wide.initialize_allocation(&buf);
-        }
+        // The allocation storage must outlive convex_wide.
+        let mut alloc_scratch = std::mem::MaybeUninit::<WideAllocationScratch>::uninit();
+        let _spilled =
+            initialize_internal_allocation(&mut convex_wide, &mut alloc_scratch, pool as *mut _);
 
         let mut offset_b = Vector3Wide::default();
         let mut orientation_a = QuaternionWide::default();

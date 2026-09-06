@@ -4,7 +4,7 @@ use std::ops::Mul;
 
 /// 3 row, 3 column matrix.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
-#[repr(C, align(16))]
+#[repr(C)]
 pub struct Matrix3x3 {
     /// First row of the matrix.
     pub x: Vec3,
@@ -314,8 +314,8 @@ impl Matrix3x3 {
         let xz = axis.x * axis.z;
         let yz = axis.y * axis.z;
 
-        let sin_angle = angle.sin();
-        let one_minus_cos_angle = 1.0 - angle.cos();
+        let sin_angle = (angle as f64).sin() as f32;
+        let one_minus_cos_angle = 1.0 - (angle as f64).cos() as f32;
 
         result.x = Vec3::new(
             1.0 + one_minus_cos_angle * (xx - 1.0),

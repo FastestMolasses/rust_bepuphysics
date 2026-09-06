@@ -15,6 +15,7 @@ use crate::physics::collision_detection::convex_contact_manifold_wide::{
     Convex1ContactManifoldWide, Convex2ContactManifoldWide, Convex4ContactManifoldWide,
 };
 use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
@@ -45,6 +46,7 @@ macro_rules! impl_pair_tester_0orient {
                 _orientation_a: &QuaternionWide,
                 _orientation_b: &QuaternionWide,
                 _pair_count: i32,
+                _pool: *mut BufferPool,
                 _manifold: &mut $manifold,
             ) {
                 unreachable!("test_two_orientations called on 0-orientation tester");
@@ -56,6 +58,7 @@ macro_rules! impl_pair_tester_0orient {
                 _offset_b: &Vector3Wide,
                 _orientation_b: &QuaternionWide,
                 _pair_count: i32,
+                _pool: *mut BufferPool,
                 _manifold: &mut $manifold,
             ) {
                 unreachable!("test_one_orientation called on 0-orientation tester");
@@ -66,6 +69,7 @@ macro_rules! impl_pair_tester_0orient {
                 speculative_margin: &Vector<f32>,
                 offset_b: &Vector3Wide,
                 pair_count: i32,
+                _pool: *mut BufferPool,
                 manifold: &mut $manifold,
             ) {
                 unsafe {
@@ -91,6 +95,7 @@ macro_rules! impl_pair_tester_1orient {
                 _orientation_a: &QuaternionWide,
                 _orientation_b: &QuaternionWide,
                 _pair_count: i32,
+                _pool: *mut BufferPool,
                 _manifold: &mut $manifold,
             ) {
                 unreachable!("test_two_orientations called on 1-orientation tester");
@@ -102,6 +107,7 @@ macro_rules! impl_pair_tester_1orient {
                 offset_b: &Vector3Wide,
                 orientation_b: &QuaternionWide,
                 pair_count: i32,
+                _pool: *mut BufferPool,
                 manifold: &mut $manifold,
             ) {
                 unsafe {
@@ -122,6 +128,7 @@ macro_rules! impl_pair_tester_1orient {
                 _speculative_margin: &Vector<f32>,
                 _offset_b: &Vector3Wide,
                 _pair_count: i32,
+                _pool: *mut BufferPool,
                 _manifold: &mut $manifold,
             ) {
                 unreachable!("test_no_orientation called on 1-orientation tester");
@@ -145,6 +152,7 @@ macro_rules! impl_pair_tester_2orient {
                 orientation_a: &QuaternionWide,
                 orientation_b: &QuaternionWide,
                 pair_count: i32,
+                _pool: *mut BufferPool,
                 manifold: &mut $manifold,
             ) {
                 unsafe {
@@ -167,6 +175,7 @@ macro_rules! impl_pair_tester_2orient {
                 _offset_b: &Vector3Wide,
                 _orientation_b: &QuaternionWide,
                 _pair_count: i32,
+                _pool: *mut BufferPool,
                 _manifold: &mut $manifold,
             ) {
                 unreachable!("test_one_orientation called on 2-orientation tester");
@@ -177,6 +186,67 @@ macro_rules! impl_pair_tester_2orient {
                 _speculative_margin: &Vector<f32>,
                 _offset_b: &Vector3Wide,
                 _pair_count: i32,
+                _pool: *mut BufferPool,
+                _manifold: &mut $manifold,
+            ) {
+                unreachable!("test_no_orientation called on 2-orientation tester");
+            }
+        }
+    };
+}
+
+/// Same as `impl_pair_tester_2orient`, but for testers whose scratch requirements depend on
+/// unbounded hull data and so need the batcher's pool.
+macro_rules! impl_pair_tester_2orient_pooled {
+    ($tester:ty, $wide_a:ty, $wide_b:ty, $manifold:ty) => {
+        impl IPairTester<$wide_a, $wide_b, $manifold> for $tester {
+            fn batch_size() -> i32 {
+                Self::BATCH_SIZE
+            }
+            fn test_two_orientations(
+                a: &$wide_a,
+                b: &$wide_b,
+                speculative_margin: &Vector<f32>,
+                offset_b: &Vector3Wide,
+                orientation_a: &QuaternionWide,
+                orientation_b: &QuaternionWide,
+                pair_count: i32,
+                pool: *mut BufferPool,
+                manifold: &mut $manifold,
+            ) {
+                unsafe {
+                    <$tester>::test(
+                        a,
+                        b,
+                        speculative_margin,
+                        offset_b,
+                        orientation_a,
+                        orientation_b,
+                        pair_count,
+                        pool,
+                        manifold,
+                    );
+                }
+            }
+            fn test_one_orientation(
+                _a: &$wide_a,
+                _b: &$wide_b,
+                _speculative_margin: &Vector<f32>,
+                _offset_b: &Vector3Wide,
+                _orientation_b: &QuaternionWide,
+                _pair_count: i32,
+                _pool: *mut BufferPool,
+                _manifold: &mut $manifold,
+            ) {
+                unreachable!("test_one_orientation called on 2-orientation tester");
+            }
+            fn test_no_orientation(
+                _a: &$wide_a,
+                _b: &$wide_b,
+                _speculative_margin: &Vector<f32>,
+                _offset_b: &Vector3Wide,
+                _pair_count: i32,
+                _pool: *mut BufferPool,
                 _manifold: &mut $manifold,
             ) {
                 unreachable!("test_no_orientation called on 2-orientation tester");
@@ -292,7 +362,7 @@ impl_pair_tester_2orient!(
     CylinderWide,
     Convex4ContactManifoldWide
 );
-impl_pair_tester_2orient!(
+impl_pair_tester_2orient_pooled!(
     BoxConvexHullTester,
     BoxWide,
     ConvexHullWide,
@@ -310,7 +380,7 @@ impl_pair_tester_2orient!(
     CylinderWide,
     Convex4ContactManifoldWide
 );
-impl_pair_tester_2orient!(
+impl_pair_tester_2orient_pooled!(
     TriangleConvexHullTester,
     TriangleWide,
     ConvexHullWide,
@@ -322,13 +392,13 @@ impl_pair_tester_2orient!(
     CylinderWide,
     Convex4ContactManifoldWide
 );
-impl_pair_tester_2orient!(
+impl_pair_tester_2orient_pooled!(
     CylinderConvexHullTester,
     CylinderWide,
     ConvexHullWide,
     Convex4ContactManifoldWide
 );
-impl_pair_tester_2orient!(
+impl_pair_tester_2orient_pooled!(
     ConvexHullPairTester,
     ConvexHullWide,
     ConvexHullWide,

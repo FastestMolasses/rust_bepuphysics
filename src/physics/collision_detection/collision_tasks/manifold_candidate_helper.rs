@@ -1,7 +1,10 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ManifoldCandidateHelper.cs
 
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
+use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
@@ -15,6 +18,59 @@ pub struct ManifoldCandidateScalar {
     pub x: f32,
     pub y: f32,
     pub feature_id: i32,
+}
+
+/// Cold spill for a scalar scratch buffer whose element count can exceed its inline capacity.
+/// C# stackallocs these with a runtime count; an oversized hull face takes from the batcher's
+/// pool instead of truncating.
+pub(crate) struct ScratchSpill<T> {
+    buffer: Buffer<T>,
+    pool: *mut BufferPool,
+}
+
+impl<T> ScratchSpill<T> {
+    /// Empty (the caller's inline storage suffices) when `count <= inline_capacity`.
+    ///
+    /// # Safety
+    /// `pool` must remain valid and exclusively usable by this thread until the spill is dropped.
+    #[inline(always)]
+    pub unsafe fn new(count: usize, inline_capacity: usize, pool: *mut BufferPool) -> Self {
+        Self {
+            buffer: if count <= inline_capacity {
+                Buffer::default()
+            } else {
+                Self::allocate(count, pool)
+            },
+            pool,
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    unsafe fn allocate(count: usize, pool: *mut BufferPool) -> Buffer<T> {
+        (*pool).take_at_least::<T>(count as i32)
+    }
+
+    /// The spilled allocation if there is one, otherwise the caller's inline storage.
+    #[inline(always)]
+    pub fn or_inline(&self, inline: *mut T) -> *mut T {
+        if self.buffer.allocated() {
+            self.buffer.as_ptr() as *mut T
+        } else {
+            inline
+        }
+    }
+}
+
+impl<T> Drop for ScratchSpill<T> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        if self.buffer.allocated() {
+            unsafe {
+                (*self.pool).return_buffer(&mut self.buffer);
+            }
+        }
+    }
 }
 
 /// A SIMD-wide manifold candidate.
@@ -54,12 +110,15 @@ impl ManifoldCandidateHelper {
         pair_count: i32,
     ) {
         for i in 0..pair_count as usize {
-            if new_contact_exists[i] < 0 {
-                let target_index = count[i] as usize;
+            if *GatherScatter::get::<i32>(new_contact_exists, i) < 0 {
+                let target_index = *GatherScatter::get::<i32>(count, i) as usize;
                 let target = &mut *candidates.add(target_index);
-                target.x.as_mut_array()[i] = candidate.x[i];
-                target.y.as_mut_array()[i] = candidate.y[i];
-                target.feature_id.as_mut_array()[i] = candidate.feature_id[i];
+                *GatherScatter::get_mut::<f32>(&mut target.x, i) =
+                    *GatherScatter::get::<f32>(&candidate.x, i);
+                *GatherScatter::get_mut::<f32>(&mut target.y, i) =
+                    *GatherScatter::get::<f32>(&candidate.y, i);
+                *GatherScatter::get_mut::<i32>(&mut target.feature_id, i) =
+                    *GatherScatter::get::<i32>(&candidate.feature_id, i);
             }
         }
         let ones = Vector::<i32>::splat(1);
@@ -78,13 +137,17 @@ impl ManifoldCandidateHelper {
         pair_count: i32,
     ) {
         for i in 0..pair_count as usize {
-            if new_contact_exists[i] < 0 {
-                let target_index = count[i] as usize;
+            if *GatherScatter::get::<i32>(new_contact_exists, i) < 0 {
+                let target_index = *GatherScatter::get::<i32>(count, i) as usize;
                 let target = &mut *candidates.add(target_index);
-                target.x.as_mut_array()[i] = candidate.x[i];
-                target.y.as_mut_array()[i] = candidate.y[i];
-                target.depth.as_mut_array()[i] = candidate.depth[i];
-                target.feature_id.as_mut_array()[i] = candidate.feature_id[i];
+                *GatherScatter::get_mut::<f32>(&mut target.x, i) =
+                    *GatherScatter::get::<f32>(&candidate.x, i);
+                *GatherScatter::get_mut::<f32>(&mut target.y, i) =
+                    *GatherScatter::get::<f32>(&candidate.y, i);
+                *GatherScatter::get_mut::<f32>(&mut target.depth, i) =
+                    *GatherScatter::get::<f32>(&candidate.depth, i);
+                *GatherScatter::get_mut::<i32>(&mut target.feature_id, i) =
+                    *GatherScatter::get::<i32>(&candidate.feature_id, i);
             }
         }
         let ones = Vector::<i32>::splat(1);
@@ -267,6 +330,7 @@ impl ManifoldCandidateHelper {
     }
 
     /// Internal reduction: picks up to 4 contacts from candidates using deepest + spread heuristic.
+    #[inline(always)]
     unsafe fn internal_reduce(
         candidates: *mut ManifoldCandidate,
         max_candidate_count: i32,
@@ -474,6 +538,7 @@ impl ManifoldCandidateHelper {
         world_offset_b: Vec3,
         slot_index: usize,
         manifold: &mut Convex4ContactManifoldWide,
+        pool: *mut BufferPool,
     ) {
         if candidate_count == 0 {
             return;
@@ -485,11 +550,13 @@ impl ManifoldCandidateHelper {
         let base_dot = face_center_a_to_face_center_b.dot(dot_axis);
         let x_dot = tangent_bx.dot(dot_axis);
         let y_dot = tangent_by.dot(dot_axis);
-        // Use a fixed-size buffer for depths - convex hulls have bounded face vertex counts.
         // Left uninitialized; every consumed index is written by the loop below before any read.
-        let mut candidate_depths_buf: [std::mem::MaybeUninit<f32>; 128] =
+        const INLINE_DEPTH_CAPACITY: usize = 128;
+        let mut candidate_depths_buf: [std::mem::MaybeUninit<f32>; INLINE_DEPTH_CAPACITY] =
             unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let candidate_depths = candidate_depths_buf.as_mut_ptr() as *mut f32;
+        let depths_spill =
+            ScratchSpill::<f32>::new(candidate_count as usize, INLINE_DEPTH_CAPACITY, pool);
+        let candidate_depths = depths_spill.or_inline(candidate_depths_buf.as_mut_ptr() as *mut f32);
         for i in (0..candidate_count as usize).rev() {
             let c = &*candidates.add(i);
             let d = base_dot + c.x * x_dot + c.y * y_dot;

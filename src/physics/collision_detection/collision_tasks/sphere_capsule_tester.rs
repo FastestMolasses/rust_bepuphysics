@@ -4,7 +4,7 @@ use crate::physics::collidables::capsule::CapsuleWide;
 use crate::physics::collidables::sphere::SphereWide;
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex1ContactManifoldWide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 
@@ -32,7 +32,7 @@ impl SphereCapsuleTester {
         QuaternionWide::transform_unit_xy(orientation_b, &mut x, &mut y);
         let mut t = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&y, offset_b, &mut t);
-        t = b.half_length.simd_min((-b.half_length).simd_max(-t));
+        t = b.half_length.hw_min((-b.half_length).hw_max(-t));
         let mut capsule_local_closest = Vector3Wide::default();
         Vector3Wide::scale_to(&y, &t, &mut capsule_local_closest);
 

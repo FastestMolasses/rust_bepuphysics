@@ -293,15 +293,15 @@ impl Matrix3x3Wide {
     }
 }
 
-impl Mul<Vector3Wide> for Matrix3x3Wide {
+impl Mul<Matrix3x3Wide> for Vector3Wide {
     type Output = Vector3Wide;
 
     #[inline(always)]
-    fn mul(self, rhs: Vector3Wide) -> Self::Output {
+    fn mul(self, rhs: Matrix3x3Wide) -> Self::Output {
         Vector3Wide {
-            x: rhs.x * self.x.x + rhs.y * self.y.x + rhs.z * self.z.x,
-            y: rhs.x * self.x.y + rhs.y * self.y.y + rhs.z * self.z.y,
-            z: rhs.x * self.x.z + rhs.y * self.y.z + rhs.z * self.z.z,
+            x: self.x * rhs.x.x + self.y * rhs.y.x + self.z * rhs.z.x,
+            y: self.x * rhs.x.y + self.y * rhs.y.y + self.z * rhs.z.y,
+            z: self.x * rhs.x.z + self.y * rhs.y.z + self.z * rhs.z.z,
         }
     }
 }

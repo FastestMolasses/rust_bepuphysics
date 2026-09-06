@@ -2,15 +2,21 @@
 
 use crate::physics::body_properties::{RigidPose, RigidPoseWide};
 use crate::physics::collidables::ray::RayWide;
-use crate::physics::collidables::shape::{IConvexShape, IShapeWide};
+use crate::physics::collidables::shape::{
+    IConvexShape, IShapeWide, SpilledAllocation, WideAllocationScratch,
+    WIDE_ALLOCATION_SCRATCH_SIZE,
+};
 use crate::physics::collision_detection::ray_batchers::{
     IShapeRayHitHandler, RayData as CollisionRayData,
 };
 use crate::physics::trees::ray_batcher::RaySourceTrait;
 use crate::utilities::gather_scatter::GatherScatter;
+use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
+use std::mem::MaybeUninit;
 
 /// Helper for creating runtime-specialized vectorized ray intersection tests
 /// with shapes that support broadcasting.
@@ -29,6 +35,7 @@ impl WideRayTester {
         shape: &TShape,
         pose: &RigidPose,
         ray_source: &mut TRaySource,
+        pool: &mut BufferPool,
         ray_hit_handler: &mut TRayHitHandler,
     ) where
         TShape: IConvexShape<Wide = TShapeWide>,
@@ -39,25 +46,31 @@ impl WideRayTester {
         let mut ray_wide = RayWide::default();
         let mut wide = TShapeWide::default();
 
-        // Handle internal allocation for shape types that need it (e.g. ConvexHullWide).
-        // Held at function scope so the backing memory outlives every use of `wide`.
-        let _wide_memory: Vec<u8> = if wide.internal_allocation_size() > 0 {
-            let alloc_size = wide.internal_allocation_size();
-            let mut memory = vec![0u8; alloc_size];
-            let buffer = crate::utilities::memory::buffer::Buffer::new(
-                memory.as_mut_ptr(),
-                alloc_size as i32,
-                0,
-            );
-            wide.initialize(&buffer);
-            memory
-        } else {
-            Vec::new()
+        // Internal allocation for shape types that need it (e.g. ConvexHullWide). Both the scratch
+        // and the spill guard are held at function scope so the memory outlives every use of `wide`.
+        let mut scratch = MaybeUninit::<WideAllocationScratch>::uninit();
+        let _spilled = {
+            let mut spilled = SpilledAllocation {
+                buffer: Buffer::default(),
+                pool: pool as *mut BufferPool,
+            };
+            let size = wide.internal_allocation_size();
+            if size > 0 {
+                let memory = if size <= WIDE_ALLOCATION_SCRATCH_SIZE {
+                    Buffer::new(scratch.as_mut_ptr() as *mut u8, size as i32, -1)
+                } else {
+                    spilled.buffer = pool.take_at_least::<u8>(size as i32);
+                    Buffer::new(spilled.buffer.as_mut_ptr(), size as i32, spilled.buffer.id())
+                };
+                wide.initialize(&memory);
+            }
+            spilled
         };
         wide.broadcast(shape);
 
-        let mut poses = RigidPoseWide::default();
-        RigidPoseWide::broadcast(pose, &mut poses);
+        let mut poses_storage = MaybeUninit::<RigidPoseWide>::uninit();
+        let poses = &mut *poses_storage.as_mut_ptr();
+        RigidPoseWide::broadcast(pose, poses);
 
         let vector_count = Vector::<f32>::LEN as i32;
         let ray_count = ray_source.ray_count();
@@ -107,7 +120,7 @@ impl WideRayTester {
             let mut t_wide = Vector::<f32>::splat(0.0);
             let mut normal_wide = Vector3Wide::default();
             wide.ray_test(
-                &mut poses,
+                poses,
                 &mut ray_wide,
                 &mut intersected,
                 &mut t_wide,

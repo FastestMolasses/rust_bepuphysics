@@ -7,6 +7,8 @@ use crate::physics::collidables::typed_index::TypedIndex;
 use crate::physics::handles::StaticHandle;
 use crate::physics::static_description::StaticDescription;
 use crate::physics::statics::Statics;
+use crate::utilities::bounding_box::BoundingBox;
+use glam::Vec3;
 
 /// Convenience structure for directly referring to a static's properties.
 ///
@@ -120,7 +122,28 @@ impl StaticReference {
         self.statics_mut().set_shape(self.handle, new_shape);
     }
 
-    // TODO: BoundingBox and GetBoundsReferencesFromBroadPhase
+    /// Gets a copy of the static's bounding box.
+    ///
+    /// # Safety
+    /// The static must have a shape and a live broad phase leaf.
+    pub unsafe fn bounding_box(&self) -> BoundingBox {
+        let (min, max) = self.get_bounds_references_from_broad_phase();
+        BoundingBox::new(*min, *max)
+    }
+
+    /// Gets direct pointers to the static's bounding box minimum and maximum in the broad phase.
+    ///
+    /// # Safety
+    /// The static must have a shape and a live broad phase leaf.
+    pub unsafe fn get_bounds_references_from_broad_phase(&self) -> (*mut Vec3, *mut Vec3) {
+        let collidable = self.get_static();
+        debug_assert!(
+            collidable.shape.exists(),
+            "Statics must have a shape. Something's not right here."
+        );
+        let broad_phase = &*self.statics().broad_phase;
+        broad_phase.get_static_bounds_pointers(collidable.broad_phase_index)
+    }
 
     /// Updates the static's bounds in the broad phase for its current state.
     pub fn update_bounds(&self) {

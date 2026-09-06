@@ -177,7 +177,11 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
     }
 
     /// Resizes the internal buffers.
+    #[inline(always)]
     pub fn resize(&mut self, new_size: i32, pool: &mut impl UnmanagedMemoryPool) {
+        if BufferPool::get_capacity_for_count::<T>(new_size) == self.span.len() {
+            return;
+        }
         let mut new_span = pool.take_at_least::<T>(new_size);
         let table_capacity =
             (new_span.len() << self.table_power_offset).max(1 << self.table_power_offset);
@@ -243,6 +247,7 @@ impl<T: Copy, TEqualityComparer: RefEqualityComparer<T>> QuickSet<T, TEqualityCo
 
     /// Removes an element by its table and element indices.
     /// Can only be used if the indices are known to be valid.
+    #[inline(always)]
     pub fn fast_remove_at(&mut self, table_index: i32, element_index: i32) {
         // Maintain the invariant: all items are either at their desired index
         // or in a contiguous block clockwise from the desired index.

@@ -8,7 +8,7 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
-use std::simd::Select;
+use std::simd::{Mask, Select};
 
 /// Constrains the center of two bodies to be separated by a distance within a range.
 #[repr(C)]
@@ -213,7 +213,8 @@ impl CenterDistanceLimitFunctions {
         let effective_mass =
             effective_mass_cfm_scale / (inertia_a.inverse_mass + inertia_b.inverse_mass);
 
-        let error = use_minimum.simd_lt(Vector::<i32>::splat(0)).select(
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let error = unsafe { Mask::from_simd_unchecked(use_minimum) }.select(
             prestep.minimum_distance - distance,
             distance - prestep.maximum_distance,
         );

@@ -1,4 +1,5 @@
 use glam::{Quat, Vec3};
+use std::mem::size_of;
 
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
@@ -7,7 +8,9 @@ use crate::utilities::quaternion_ex;
 use crate::utilities::quaternion_wide::QuaternionWide;
 
 use super::compound_builder::CompoundBuilder;
-use super::shape::{ICompoundShape, IDisposableShape, IShape, IShapeRayHitHandler};
+use super::shape::{
+    ICompoundShape, IDisposableShape, IShape, IShapeRayHitHandler, ShapeRayHitHandlerRef,
+};
 use super::shapes::Shapes;
 use super::typed_index::TypedIndex;
 use crate::physics::body_properties::{BodyInertia, BodyVelocity, RigidPose, RigidPoseWide};
@@ -18,6 +21,7 @@ use crate::physics::collision_detection::collision_tasks::compound_pair_overlaps
 };
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::utilities::bounding_box::BoundingBox;
+use crate::utilities::vector::HwMinMax;
 
 /// Collects overlap results from compound overlap queries.
 pub trait IOverlapCollector {
@@ -66,10 +70,15 @@ impl CompoundChild {
 /// Does not make use of any internal acceleration structure;
 /// should be used only with small groups of shapes.
 #[derive(Default, Clone, Copy)]
+#[repr(C)]
 pub struct Compound {
     /// Buffer of children within this compound.
     pub children: Buffer<CompoundChild>,
 }
+
+const _: () = {
+    assert!(size_of::<Compound>() == size_of::<Buffer<CompoundChild>>());
+};
 
 impl Compound {
     /// Type id of list based compound shapes.
@@ -189,8 +198,9 @@ impl Compound {
             let local_pose_radius_squared = child_pose.position.length_squared();
             let mut angular_contribution = angular_contribution_to_child_linear;
             if contribution_length_squared > local_pose_radius_squared {
-                angular_contribution *=
-                    local_pose_radius_squared.sqrt() / contribution_length_squared.sqrt();
+                angular_contribution *= ((local_pose_radius_squared as f64).sqrt()
+                    / (contribution_length_squared as f64).sqrt())
+                    as f32;
             }
             child_velocity.linear = velocity.linear + angular_contribution;
             child_pose.position += pose.position;
@@ -295,8 +305,8 @@ impl Compound {
                 &mut child_min,
                 &mut child_max,
             );
-            *min = min.min(child_min);
-            *max = max.max(child_max);
+            *min = min.hw_min(child_min);
+            *max = max.hw_max(child_max);
         }
     }
 
@@ -323,64 +333,61 @@ impl Compound {
             if hit_handler.allow_test(i as i32) {
                 let child = &self.children[i];
 
-                // Get the child shape batch and perform a ray test
-                if let Some(batch) = shape_batches.get_batch(child.shape_index.type_id() as usize) {
-                    let child_pose = RigidPose {
-                        position: child.local_position,
-                        orientation: child.local_orientation,
-                    };
+                let child_pose = RigidPose {
+                    position: child.local_position,
+                    orientation: child.local_orientation,
+                };
 
-                    // Build a ray in compound-local space
-                    let mut local_ray = RayData::default();
-                    local_ray.origin = local_origin;
-                    local_ray.direction = local_direction;
-                    local_ray.id = 0;
+                // Build a ray in compound-local space
+                let mut local_ray = RayData::default();
+                local_ray.origin = local_origin;
+                local_ray.direction = local_direction;
+                local_ray.id = 0;
 
-                    // Use a child shape tester to capture the hit, then rotate normal to world space
-                    struct CompoundChildShapeTester {
+                // Use a child shape tester to capture the hit, then rotate normal to world space
+                struct CompoundChildShapeTester {
+                    t: f32,
+                    normal: Vec3,
+                }
+
+                impl IShapeRayHitHandler for CompoundChildShapeTester {
+                    fn allow_test(&self, _child_index: i32) -> bool {
+                        true
+                    }
+                    fn on_ray_hit(
+                        &mut self,
+                        _ray: &RayData,
+                        _maximum_t: &mut f32,
                         t: f32,
                         normal: Vec3,
+                        _child_index: i32,
+                    ) {
+                        self.t = t;
+                        self.normal = normal;
                     }
+                }
 
-                    impl IShapeRayHitHandler for CompoundChildShapeTester {
-                        fn allow_test(&self, _child_index: i32) -> bool {
-                            true
-                        }
-                        fn on_ray_hit(
-                            &mut self,
-                            _ray: &RayData,
-                            _maximum_t: &mut f32,
-                            t: f32,
-                            normal: Vec3,
-                            _child_index: i32,
-                        ) {
-                            self.t = t;
-                            self.normal = normal;
-                        }
-                    }
+                let mut tester = CompoundChildShapeTester {
+                    t: -1.0,
+                    normal: Vec3::ZERO,
+                };
 
-                    let mut tester = CompoundChildShapeTester {
-                        t: -1.0,
-                        normal: Vec3::ZERO,
-                    };
+                unsafe {
+                    shape_batches.ray_test(
+                        &child.shape_index,
+                        &child_pose,
+                        &local_ray,
+                        maximum_t,
+                        pool,
+                        &mut tester,
+                    );
+                }
 
-                    unsafe {
-                        batch.ray_test(
-                            child.shape_index.index() as usize,
-                            &child_pose,
-                            &local_ray,
-                            maximum_t,
-                            pool,
-                            &mut tester,
-                        );
-                    }
-
-                    if tester.t >= 0.0 {
-                        // Rotate the normal from compound-local space to world space
-                        let mut rotated_normal = Vec3::ZERO;
-                        Matrix3x3::transform(&tester.normal, &orientation, &mut rotated_normal);
-                        hit_handler.on_ray_hit(ray, maximum_t, tester.t, rotated_normal, i as i32);
-                    }
+                if tester.t >= 0.0 {
+                    // Rotate the normal from compound-local space to world space
+                    let mut rotated_normal = Vec3::ZERO;
+                    Matrix3x3::transform(&tester.normal, &orientation, &mut rotated_normal);
+                    hit_handler.on_ray_hit(ray, maximum_t, tester.t, rotated_normal, i as i32);
                 }
             }
         }
@@ -476,15 +483,33 @@ impl ICompoundShape for Compound {
 
     fn find_local_overlaps<TOverlaps: IOverlapCollector>(
         &self,
-        _local_min: &Vec3,
-        _local_max: &Vec3,
+        local_min: &Vec3,
+        local_max: &Vec3,
         _pool: &mut BufferPool,
+        shapes: &Shapes,
         overlaps: &mut TOverlaps,
     ) {
-        // List-based compounds have no acceleration structure.
-        // Just report all children as potentially overlapping.
         for i in 0..self.children.len() {
-            overlaps.add(i);
+            let child = &self.children[i as usize];
+            let mut child_min = Vec3::ZERO;
+            let mut child_max = Vec3::ZERO;
+            if let Some(batch) = shapes.get_batch(child.shape_index.type_id() as usize) {
+                let mut _max_radius = 0.0f32;
+                let mut _max_angular = 0.0f32;
+                batch.compute_bounds_with_angular_data(
+                    child.shape_index.index() as usize,
+                    child.local_orientation,
+                    &mut _max_radius,
+                    &mut _max_angular,
+                    &mut child_min,
+                    &mut child_max,
+                );
+            }
+            child_min += child.local_position;
+            child_max += child.local_position;
+            if BoundingBox::intersects_bounds(child_min, child_max, *local_min, *local_max) {
+                overlaps.add(i);
+            }
         }
     }
 
@@ -504,6 +529,10 @@ impl ICompoundShape for Compound {
         );
     }
 
+    fn shape_ray_ref(&self) -> super::shapes::ShapeRayRef {
+        super::shapes::ShapeRayRef::Compound(self)
+    }
+
     unsafe fn ray_test_shape(
         &self,
         pose: &RigidPose,
@@ -511,27 +540,9 @@ impl ICompoundShape for Compound {
         maximum_t: &mut f32,
         shape_batches: &Shapes,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     ) {
-        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
-        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
-        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
-            fn allow_test(&self, child_index: i32) -> bool {
-                self.0.allow_test(child_index)
-            }
-            fn on_ray_hit(
-                &mut self,
-                ray: &RayData,
-                maximum_t: &mut f32,
-                t: f32,
-                normal: Vec3,
-                child_index: i32,
-            ) {
-                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
-            }
-        }
-        let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test(pose, ray, maximum_t, shape_batches, pool, &mut wrapper);
+        self.ray_test(pose, ray, maximum_t, shape_batches, pool, hit_handler);
     }
 
     unsafe fn ray_test_shape_batched(
@@ -540,27 +551,9 @@ impl ICompoundShape for Compound {
         rays: &mut crate::physics::trees::ray_batcher::RaySource,
         shape_batches: &Shapes,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     ) {
-        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
-        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
-        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
-            fn allow_test(&self, child_index: i32) -> bool {
-                self.0.allow_test(child_index)
-            }
-            fn on_ray_hit(
-                &mut self,
-                ray: &RayData,
-                maximum_t: &mut f32,
-                t: f32,
-                normal: Vec3,
-                child_index: i32,
-            ) {
-                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
-            }
-        }
-        let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test_batched(pose, rays, shape_batches, pool, &mut wrapper);
+        self.ray_test_batched(pose, rays, shape_batches, pool, hit_handler);
     }
 }
 
@@ -582,6 +575,8 @@ impl IBoundsQueryableCompound for Compound {
         for pair_index in 0..query_bounds.len() {
             let pair = &query_bounds[pair_index as usize];
             let compound = unsafe { &*(pair.container as *const Compound) };
+            let overlaps_for_pair =
+                overlaps.get_overlaps_for_pair(pair_index) as *mut TSubpairOverlaps;
             for i in 0..compound.children.len() as usize {
                 let child = &compound.children[i];
                 let mut min_bound = Vec3::ZERO;
@@ -601,8 +596,9 @@ impl IBoundsQueryableCompound for Compound {
                 min_bound += child.local_position;
                 max_bound += child.local_position;
                 if BoundingBox::intersects_bounds(min_bound, max_bound, pair.min, pair.max) {
-                    let overlaps_for_pair = overlaps.get_overlaps_for_pair(pair_index);
-                    *overlaps_for_pair.allocate(pool) = i as i32;
+                    unsafe {
+                        *(*overlaps_for_pair).allocate(pool) = i as i32;
+                    }
                 }
             }
         }

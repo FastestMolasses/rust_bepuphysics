@@ -5,7 +5,7 @@ use crate::physics::collidables::cylinder::{CylinderSupportFinder, CylinderWide}
 use crate::physics::collision_detection::collision_tasks::box_cylinder_tester::BoxCylinderTester;
 use crate::physics::collision_detection::collision_tasks::convex_hull_test_helper::ConvexHullTestHelper;
 use crate::physics::collision_detection::collision_tasks::manifold_candidate_helper::{
-    ManifoldCandidateHelper, ManifoldCandidateScalar,
+    ManifoldCandidateHelper, ManifoldCandidateScalar, ScratchSpill,
 };
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex4ContactManifoldWide;
 use crate::physics::collision_detection::depth_refiner::DepthRefiner;
@@ -14,8 +14,9 @@ use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::{Vec2, Vec3};
@@ -149,6 +150,7 @@ impl CylinderConvexHullTester {
         orientation_a: &QuaternionWide,
         orientation_b: &QuaternionWide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut Convex4ContactManifoldWide,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
@@ -195,8 +197,8 @@ impl CylinderConvexHullTester {
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
         let epsilon_scale = a
             .half_length
-            .simd_max(a.radius)
-            .simd_min(hull_epsilon_scale);
+            .hw_max(a.radius)
+            .hw_min(hull_epsilon_scale);
         let depth_threshold = -*speculative_margin;
 
         let mut depth = Vector::<f32>::default();
@@ -315,10 +317,9 @@ impl CylinderConvexHullTester {
                 maximum_candidate_count = slot_max;
             }
         }
-        // Clamped to the buffer's capacity so the candidate_count guards below cannot index past it.
-        let maximum_candidate_count = maximum_candidate_count.min(128);
+        const INLINE_CANDIDATE_CAPACITY: usize = 128;
         // SAFETY: uninitialized; every index below candidate_count is written before it is read.
-        let mut candidates_buf: [MaybeUninit<ManifoldCandidateScalar>; 128] =
+        let mut candidates_inline: [MaybeUninit<ManifoldCandidateScalar>; INLINE_CANDIDATE_CAPACITY] =
             unsafe { MaybeUninit::uninit().assume_init() };
 
         let mut slot_offset_indices = Vector::<i32>::splat(0);
@@ -354,6 +355,15 @@ impl CylinderConvexHullTester {
 
             if use_cap.as_array()[slot_index] < 0 {
                 // Cap path: clip hull edges against cylinder cap circle.
+                // At most two candidates per hull face edge plus the four cap interior points, so the
+                // storage can stay below the (deliberately overestimated) guard count.
+                let candidates_spill = ScratchSpill::<ManifoldCandidateScalar>::new(
+                    maximum_candidate_count.min(2 * face_count + 4),
+                    INLINE_CANDIDATE_CAPACITY,
+                    pool,
+                );
+                let candidates = candidates_spill
+                    .or_inline(candidates_inline.as_mut_ptr() as *mut ManifoldCandidateScalar);
                 let mut candidate_count = 0usize;
                 let mut slot_cap_center = Vec3::ZERO;
                 Vector3Wide::read_slot(&cap_center, slot_index, &mut slot_cap_center);
@@ -432,7 +442,7 @@ impl CylinderConvexHullTester {
                         interior_point_containment_dots = -interior_point_containment_dots;
                     }
                     maximum_interior_containment_dots =
-                        interior_point_containment_dots.simd_max(maximum_interior_containment_dots);
+                        interior_point_containment_dots.hw_max(maximum_interior_containment_dots);
 
                     // Test hull edge against cap circle.
                     let mut t_min = 0.0f32;
@@ -454,7 +464,7 @@ impl CylinderConvexHullTester {
 
                         if t_max >= t_min && candidate_count < maximum_candidate_count {
                             let point_2d = hull_edge_offset * t_max + previous_vertex_2d;
-                            candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                            candidates.add(candidate_count).write(ManifoldCandidateScalar {
                                 x: point_2d.x,
                                 y: point_2d.y,
                                 feature_id: base_feature_id + end_id as i32,
@@ -464,7 +474,7 @@ impl CylinderConvexHullTester {
                         if t_min < t_max && t_min > 0.0 && candidate_count < maximum_candidate_count
                         {
                             let point_2d = hull_edge_offset * t_min + previous_vertex_2d;
-                            candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                            candidates.add(candidate_count).write(ManifoldCandidateScalar {
                                 x: point_2d.x,
                                 y: point_2d.y,
                                 feature_id: base_feature_id + start_id as i32,
@@ -483,7 +493,7 @@ impl CylinderConvexHullTester {
                 let maximum_interior_containment_dots = maximum_interior_containment_dots.to_array();
                 if candidate_count < maximum_candidate_count {
                     if maximum_interior_containment_dots[0] <= 0.0 {
-                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        candidates.add(candidate_count).write(ManifoldCandidateScalar {
                             x: interior_points_x[0],
                             y: interior_points_y[0],
                             feature_id: 0,
@@ -493,7 +503,7 @@ impl CylinderConvexHullTester {
                     if candidate_count < maximum_candidate_count
                         && maximum_interior_containment_dots[1] <= 0.0
                     {
-                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        candidates.add(candidate_count).write(ManifoldCandidateScalar {
                             x: interior_points_x[1],
                             y: interior_points_y[1],
                             feature_id: 1,
@@ -503,7 +513,7 @@ impl CylinderConvexHullTester {
                     if candidate_count < maximum_candidate_count
                         && maximum_interior_containment_dots[2] <= 0.0
                     {
-                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        candidates.add(candidate_count).write(ManifoldCandidateScalar {
                             x: interior_points_x[2],
                             y: interior_points_y[2],
                             feature_id: 2,
@@ -513,7 +523,7 @@ impl CylinderConvexHullTester {
                     if candidate_count < maximum_candidate_count
                         && maximum_interior_containment_dots[3] <= 0.0
                     {
-                        candidates_buf[candidate_count].write(ManifoldCandidateScalar {
+                        candidates.add(candidate_count).write(ManifoldCandidateScalar {
                             x: interior_points_x[3],
                             y: interior_points_y[3],
                             feature_id: 3,
@@ -541,7 +551,7 @@ impl CylinderConvexHullTester {
                 Matrix3x3Wide::read_slot(&hull_orientation, slot_index, &mut slot_hull_orientation);
                 // Note: parameters flipped — working on cap, pushed back onto hull in postpass.
                 ManifoldCandidateHelper::reduce_scalar(
-                    candidates_buf.as_mut_ptr() as *mut ManifoldCandidateScalar,
+                    candidates,
                     candidate_count as i32,
                     slot_hull_face_normal,
                     -1.0 / slot_local_normal.dot(slot_hull_face_normal),
@@ -555,6 +565,7 @@ impl CylinderConvexHullTester {
                     slot_offset_b,
                     slot_index,
                     manifold,
+                    pool,
                 );
             } else {
                 // Side edge path: clip cylinder side edge against hull face edges.

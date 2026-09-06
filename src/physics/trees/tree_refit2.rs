@@ -11,6 +11,17 @@ use crate::utilities::thread_dispatcher::IThreadDispatcher;
 use std::ffi::c_void;
 use std::mem::MaybeUninit;
 
+/// Merges `a` and `b` into `dst`; `dst`'s non-bounds lanes are preserved by the merge itself, so
+/// it can be targeted directly rather than through a temporary.
+#[inline(always)]
+unsafe fn merge_children_into(dst: &mut NodeChild, a: &NodeChild, b: &NodeChild) {
+    BoundingBox::create_merged_unsafe_with_preservation(
+        a,
+        b,
+        &mut *(dst as *mut NodeChild as *mut MaybeUninit<NodeChild>),
+    );
+}
+
 /// Context for MT refit (plain, non-cache-optimizing).
 #[repr(C)]
 struct RefitContext {
@@ -39,9 +50,7 @@ impl Tree {
             if node.b.index >= 0 {
                 self.refit2_recursive(&mut node.b);
             }
-            let mut merged = MaybeUninit::new(*child_in_parent);
-            BoundingBox::create_merged_unsafe_with_preservation(&node.a, &node.b, &mut merged);
-            *child_in_parent = merged.assume_init();
+            merge_children_into(child_in_parent, &node.a, &node.b);
         }
     }
 
@@ -122,13 +131,7 @@ impl Tree {
             // Re-borrow target_node after recursive calls.
             let target_node =
                 &mut *(tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
-            let mut merged = MaybeUninit::new(*child_in_parent);
-            BoundingBox::create_merged_unsafe_with_preservation(
-                &target_node.a,
-                &target_node.b,
-                &mut merged,
-            );
-            *child_in_parent = merged.assume_init();
+            merge_children_into(child_in_parent, &target_node.a, &target_node.b);
         }
     }
 
@@ -169,7 +172,7 @@ impl Tree {
             return;
         }
         let old_nodes = self.nodes;
-        self.nodes = pool.take_at_least::<Node>(old_nodes.len());
+        self.nodes = pool.take::<Node>(old_nodes.len());
         self.refit2_with_cache_optimization_from_source(&old_nodes);
         if dispose_original_nodes {
             let mut old = old_nodes;
@@ -228,9 +231,7 @@ impl Tree {
                 }
             }
         }
-        let mut merged = MaybeUninit::new(*child_in_parent);
-        BoundingBox::create_merged_unsafe_with_preservation(&node.a, &node.b, &mut merged);
-        *child_in_parent = merged.assume_init();
+        merge_children_into(child_in_parent, &node.a, &node.b);
     }
 
     unsafe fn refit2_task(
@@ -473,13 +474,7 @@ impl Tree {
         }
         let target_node =
             &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
-        let mut merged = MaybeUninit::new(*child_in_parent);
-        BoundingBox::create_merged_unsafe_with_preservation(
-            &target_node.a,
-            &target_node.b,
-            &mut merged,
-        );
-        *child_in_parent = merged.assume_init();
+        merge_children_into(child_in_parent, &target_node.a, &target_node.b);
     }
 
     unsafe fn refit2_with_cache_opt_task(
@@ -598,7 +593,7 @@ impl Tree {
         let thread_count = dispatcher.thread_count();
         let mut task_stack = TaskStack::new(pool, dispatcher, thread_count, 128, 128);
         let old_nodes = self.nodes;
-        self.nodes = pool.take_at_least::<Node>(old_nodes.len());
+        self.nodes = pool.take::<Node>(old_nodes.len());
         self.refit2_with_cache_opt_internal_mt(
             pool,
             dispatcher,
@@ -630,7 +625,7 @@ impl Tree {
             return;
         }
         let old_nodes = self.nodes;
-        self.nodes = pool.take_at_least::<Node>(old_nodes.len());
+        self.nodes = pool.take::<Node>(old_nodes.len());
         self.refit2_with_cache_opt_internal_mt(
             pool,
             dispatcher,

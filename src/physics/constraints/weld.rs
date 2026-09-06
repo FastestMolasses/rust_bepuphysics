@@ -1,3 +1,5 @@
+use crate::out;
+use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
 use crate::utilities::gather_scatter::GatherScatter;
@@ -8,6 +10,7 @@ use crate::utilities::symmetric6x6_wide::Symmetric6x6Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::{Quat, Vec3};
+use std::mem::MaybeUninit;
 
 pub const BATCH_TYPE_ID: i32 = 31;
 
@@ -26,6 +29,16 @@ impl Weld {
         _bundle_index: usize,
         inner_index: usize,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            use crate::physics::constraints::constraint_checker::ConstraintChecker;
+            ConstraintChecker::assert_unit_length_quat(
+                self.local_orientation,
+                "Weld",
+                "local_orientation",
+            );
+            ConstraintChecker::assert_valid_spring_settings(&self.spring_settings, "Weld");
+        }
         Vector3Wide::write_slot(
             self.local_offset,
             inner_index,
@@ -120,34 +133,31 @@ impl WeldFunctions {
         velocity_a.linear = velocity_a.linear + linear_change_a;
 
         // angularImpulseA = orientationCSI + worldOffset x offsetCSI
-        let mut offset_world_impulse = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(offset, offset_csi, &mut offset_world_impulse);
-        }
+        let offset_world_impulse =
+            out_unsafe!(Vector3Wide::cross_without_overlap(offset, offset_csi));
         let angular_impulse_a = offset_world_impulse + *orientation_csi;
-        let mut angular_change_a = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+        let angular_change_a = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_change_a,
-        );
+            &inertia_a.inverse_inertia_tensor
+        ));
         velocity_a.angular = velocity_a.angular + angular_change_a;
 
         // linearImpulseB = -offsetCSI
         let negated_linear_change_b = Vector3Wide::scale(offset_csi, &inertia_b.inverse_mass);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::subtract(&velocity_b.linear, &negated_linear_change_b, &mut tmp);
-        velocity_b.linear = tmp;
+        velocity_b.linear = out!(Vector3Wide::subtract(
+            &velocity_b.linear,
+            &negated_linear_change_b
+        ));
 
         // angularImpulseB = -orientationCSI
-        let mut negated_angular_change_b = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+        let negated_angular_change_b = out!(Symmetric3x3Wide::transform_without_overlap(
             orientation_csi,
-            &inertia_b.inverse_inertia_tensor,
-            &mut negated_angular_change_b,
-        );
-        Vector3Wide::subtract(&velocity_b.angular, &negated_angular_change_b, &mut tmp);
-        velocity_b.angular = tmp;
+            &inertia_b.inverse_inertia_tensor
+        ));
+        velocity_b.angular = out!(Vector3Wide::subtract(
+            &velocity_b.angular,
+            &negated_angular_change_b
+        ));
     }
 
     #[inline(always)]
@@ -163,12 +173,10 @@ impl WeldFunctions {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+        let offset = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset,
-            orientation_a,
-            &mut offset,
-        );
+            orientation_a
+        ));
         Self::apply_impulse(
             inertia_a,
             inertia_b,
@@ -196,72 +204,74 @@ impl WeldFunctions {
         wsv_b: &mut BodyVelocityWide,
     ) {
         // Compute world-space offset
-        let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+        let offset = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset,
-            orientation_a,
-            &mut offset,
-        );
+            orientation_a
+        ));
 
         // Effective mass = (J * M^-1 * JT)^-1, a 6x6 matrix decomposed into blocks:
         // [A, B^T]   where A = Ia^-1 + Ib^-1 (3x3 symmetric),
         // [B,   D]   B = skew(offset) * Ia^-1, D = Ma^-1+Mb^-1 + skew(offset)*Ia^-1*skew(offset)^T
-        let mut jmjt_a = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::add(
+        let jmjt_a = out!(Symmetric3x3Wide::add(
             &inertia_a.inverse_inertia_tensor,
-            &inertia_b.inverse_inertia_tensor,
-            &mut jmjt_a,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
         let x_ab = Matrix3x3Wide::create_cross_product(&offset);
-        let mut jmjt_b = Matrix3x3Wide::default();
-        Symmetric3x3Wide::multiply(&inertia_a.inverse_inertia_tensor, &x_ab, &mut jmjt_b);
-        let mut jmjt_d = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::complete_matrix_sandwich_transpose(&x_ab, &jmjt_b, &mut jmjt_d);
+        let jmjt_b = out!(Symmetric3x3Wide::multiply(
+            &inertia_a.inverse_inertia_tensor,
+            &x_ab
+        ));
+        let mut jmjt_d = out!(Symmetric3x3Wide::complete_matrix_sandwich_transpose(
+            &x_ab, &jmjt_b
+        ));
         let diagonal_add = inertia_a.inverse_mass + inertia_b.inverse_mass;
         jmjt_d.xx += diagonal_add;
         jmjt_d.yy += diagonal_add;
         jmjt_d.zz += diagonal_add;
 
         // Position error
-        let mut position_error = Vector3Wide::default();
-        let mut ab_plus_offset_b = Vector3Wide::default();
-        Vector3Wide::subtract(position_b, position_a, &mut ab_plus_offset_b);
-        Vector3Wide::subtract(&ab_plus_offset_b, &offset, &mut position_error);
+        let ab_plus_offset_b = out!(Vector3Wide::subtract(position_b, position_a));
+        let position_error = out!(Vector3Wide::subtract(&ab_plus_offset_b, &offset));
         // The above is positionB - positionA - offset, which is equivalent to (positionB + offsetB) - (positionA + offsetA)
         // but since offsetB = 0 for weld and offset = offsetA rotated, same thing.
 
         // Orientation error
-        let mut target_orientation_b = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(
+        let target_orientation_b = out!(QuaternionWide::concatenate_without_overlap(
             &prestep.local_orientation,
-            orientation_a,
-            &mut target_orientation_b,
-        );
+            orientation_a
+        ));
         let conjugated_target = QuaternionWide::conjugate(&target_orientation_b);
-        let mut rotation_error = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(
+        let rotation_error = out!(QuaternionWide::concatenate_without_overlap(
             &conjugated_target,
-            orientation_b,
-            &mut rotation_error,
-        );
-        let mut rotation_error_axis = Vector3Wide::default();
-        let mut rotation_error_length = Vector::<f32>::splat(0.0);
-        QuaternionWide::get_axis_angle_from_quaternion(
-            &rotation_error,
-            &mut rotation_error_axis,
-            &mut rotation_error_length,
-        );
+            orientation_b
+        ));
+        let mut rotation_error_axis = MaybeUninit::<Vector3Wide>::uninit();
+        let mut rotation_error_length = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            QuaternionWide::get_axis_angle_from_quaternion(
+                &rotation_error,
+                &mut *rotation_error_axis.as_mut_ptr(),
+                &mut *rotation_error_length.as_mut_ptr(),
+            );
+        }
+        let rotation_error_axis = unsafe { rotation_error_axis.assume_init() };
+        let rotation_error_length = unsafe { rotation_error_length.assume_init() };
 
-        let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(
-            &prestep.spring_settings,
-            dt,
-            &mut position_error_to_velocity,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-        );
+        let mut position_error_to_velocity = MaybeUninit::<Vector<f32>>::uninit();
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            SpringSettingsWide::compute_springiness(
+                &prestep.spring_settings,
+                dt,
+                &mut *position_error_to_velocity.as_mut_ptr(),
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+            );
+        }
+        let position_error_to_velocity = unsafe { position_error_to_velocity.assume_init() };
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
         let orientation_bias_velocity =
             rotation_error_axis * (rotation_error_length * position_error_to_velocity);
         let offset_bias_velocity = position_error * position_error_to_velocity;
@@ -283,17 +293,21 @@ impl WeldFunctions {
         };
 
         // Solve using LDLT decomposition of the 6x6 system
-        let mut orientation_csi = Vector3Wide::default();
-        let mut offset_csi = Vector3Wide::default();
-        Symmetric6x6Wide::ldlt_solve(
-            &orientation_csv,
-            &offset_csv,
-            &jmjt_a,
-            &jmjt_b,
-            &jmjt_d,
-            &mut orientation_csi,
-            &mut offset_csi,
-        );
+        let mut orientation_csi = MaybeUninit::<Vector3Wide>::uninit();
+        let mut offset_csi = MaybeUninit::<Vector3Wide>::uninit();
+        unsafe {
+            Symmetric6x6Wide::ldlt_solve(
+                &orientation_csv,
+                &offset_csv,
+                &jmjt_a,
+                &jmjt_b,
+                &jmjt_d,
+                &mut *orientation_csi.as_mut_ptr(),
+                &mut *offset_csi.as_mut_ptr(),
+            );
+        }
+        let mut orientation_csi = unsafe { orientation_csi.assume_init() };
+        let mut offset_csi = unsafe { offset_csi.assume_init() };
 
         // Apply CFM scale and softness
         orientation_csi.x = orientation_csi.x * effective_mass_cfm_scale

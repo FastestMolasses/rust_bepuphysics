@@ -152,6 +152,36 @@ impl<
     }
 
     #[inline(always)]
+    fn update_for_body_memory_move(
+        &self,
+        type_batch: &mut TypeBatch,
+        index_in_type_batch: i32,
+        body_index_in_constraint: i32,
+        new_body_location: i32,
+    ) -> bool {
+        unsafe {
+            let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+            crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
+                index_in_type_batch as usize,
+                &mut bundle_index,
+                &mut inner_index,
+            );
+            // Body references are laid out as 2 consecutive Vector<int>, one per body.
+            let vector_len = crate::utilities::vector::VECTOR_WIDTH;
+            let body_refs_base = type_batch.body_references.as_mut_ptr() as *mut i32;
+            let lane_offset = inner_index + body_index_in_constraint as usize * vector_len;
+            let reference_location =
+                &mut *body_refs_base.add(bundle_index * 2 * vector_len + lane_offset);
+
+            // Preserve the old kinematic mask so the caller doesn't have to re-query.
+            let is_kinematic = Bodies::is_encoded_kinematic_reference(*reference_location);
+            *reference_location =
+                new_body_location | (*reference_location & Bodies::KINEMATIC_MASK as i32);
+            is_kinematic
+        }
+    }
+
+    #[inline(always)]
     fn constrained_degrees_of_freedom(&self) -> i32 {
         self.constrained_degrees_of_freedom
     }
@@ -527,11 +557,6 @@ impl<
     ) {
         unsafe {
             let body_references = type_batch.body_references.as_ptr() as *const TwoBodyReferences;
-            let body_references_buf = std::slice::from_raw_parts(
-                body_references,
-                type_batch.body_references.len() as usize
-                    / std::mem::size_of::<TwoBodyReferences>(),
-            );
             for i in 0..constraint_count {
                 *first_source_index.add(i as usize) = local_constraint_start + i;
                 // Sort key = min(indexA, indexB) for the constraint
@@ -540,7 +565,7 @@ impl<
                     >> crate::utilities::bundle_indexing::BundleIndexing::vector_shift();
                 let inner_index =
                     constraint_index & crate::utilities::bundle_indexing::VECTOR_MASK as i32;
-                let refs = &body_references_buf[bundle_index as usize];
+                let refs = &*body_references.add(bundle_index as usize);
                 let index_a = refs.index_a[inner_index as usize];
                 let index_b = refs.index_b[inner_index as usize];
                 *first_sort_key.add(i as usize) = if index_a < index_b { index_a } else { index_b };

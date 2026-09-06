@@ -104,31 +104,89 @@ impl_primitive!(i32, i32, |v| v);
 // long/ulong.GetHashCode() => unchecked((int)this) ^ (int)(this >> 32)
 impl_primitive!(u64, u64, |v| (v as i32) ^ ((v >> 32) as i32));
 impl_primitive!(i64, i64, |v| (v as i32) ^ ((v >> 32) as i32));
-// IntPtr/UIntPtr.GetHashCode() on a 64-bit pointer size folds the same way as long/ulong.
+// IntPtr/UIntPtr.GetHashCode() folds like long/ulong on 64-bit targets and is the identity on 32-bit.
 impl_primitive!(usize, usize, |v| {
-    let l = v as i64;
-    (l as i32) ^ ((l >> 32) as i32)
+    #[cfg(target_pointer_width = "64")]
+    {
+        let l = v as u64;
+        (l as i32) ^ ((l >> 32) as i32)
+    }
+    #[cfg(not(target_pointer_width = "64"))]
+    {
+        v as i32
+    }
 });
 impl_primitive!(isize, isize, |v| {
-    let l = v as i64;
-    (l as i32) ^ ((l >> 32) as i32)
-});
-// float/double.GetHashCode(): raw bits, with all NaNs and both zeros normalized so equal values hash equal.
-impl_primitive!(f32, u32, |v| {
-    let bits = v as i32;
-    if bits.wrapping_sub(1) & 0x7FFF_FFFF >= 0x7F80_0000 {
-        bits & 0x7F80_0000
-    } else {
-        bits
+    #[cfg(target_pointer_width = "64")]
+    {
+        let l = v as i64;
+        (l as i32) ^ ((l >> 32) as i32)
+    }
+    #[cfg(not(target_pointer_width = "64"))]
+    {
+        v as i32
     }
 });
-impl_primitive!(f64, u64, |v| {
-    let mut bits = v as i64;
-    if bits.wrapping_sub(1) & 0x7FFF_FFFF_FFFF_FFFF >= 0x7FF0_0000_0000_0000 {
-        bits &= 0x7FF0_0000_0000_0000;
+// Floats compare and test equality numerically, so NaN is never equal to itself and the two zeros
+// are equal; GetHashCode() still works on raw bits, normalizing all NaNs and both zeros.
+impl Primitive for f32 {
+    unsafe fn cmp(&self, other: &Self) -> Ordering {
+        if *self > *other {
+            Ordering::Greater
+        } else if *self < *other {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
     }
-    (bits as i32) ^ ((bits >> 32) as i32)
-});
+
+    unsafe fn eq(&self, other: &Self) -> bool {
+        *self == *other
+    }
+
+    unsafe fn hash<H: Hasher>(&self, state: &mut H) {
+        let val = *(self as *const f32 as *const u32);
+        Hash::hash(&val, state);
+    }
+
+    fn dotnet_hash_code(&self) -> i32 {
+        let bits = unsafe { *(self as *const f32 as *const u32) } as i32;
+        if bits.wrapping_sub(1) & 0x7FFF_FFFF >= 0x7F80_0000 {
+            bits & 0x7F80_0000
+        } else {
+            bits
+        }
+    }
+}
+
+impl Primitive for f64 {
+    unsafe fn cmp(&self, other: &Self) -> Ordering {
+        if *self > *other {
+            Ordering::Greater
+        } else if *self < *other {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    }
+
+    unsafe fn eq(&self, other: &Self) -> bool {
+        *self == *other
+    }
+
+    unsafe fn hash<H: Hasher>(&self, state: &mut H) {
+        let val = *(self as *const f64 as *const u64);
+        Hash::hash(&val, state);
+    }
+
+    fn dotnet_hash_code(&self) -> i32 {
+        let mut bits = unsafe { *(self as *const f64 as *const u64) } as i64;
+        if bits.wrapping_sub(1) & 0x7FFF_FFFF_FFFF_FFFF >= 0x7FF0_0000_0000_0000 {
+            bits &= 0x7FF0_0000_0000_0000;
+        }
+        (bits as i32) ^ ((bits >> 32) as i32)
+    }
+}
 // char.GetHashCode() widens the UTF-16 code unit into an int.
 impl_primitive!(char, char, |v| v as i32);
 

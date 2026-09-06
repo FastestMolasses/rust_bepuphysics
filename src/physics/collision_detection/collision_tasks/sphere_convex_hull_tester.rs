@@ -7,7 +7,7 @@ use crate::physics::collision_detection::depth_refiner::DepthRefiner;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -62,7 +62,7 @@ impl SphereConvexHullTester {
             BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
         let mut hull_epsilon_scale = Vector::<f32>::splat(0.0);
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
-        let epsilon_scale = a.radius.simd_min(hull_epsilon_scale);
+        let epsilon_scale = a.radius.hw_min(hull_epsilon_scale);
 
         let mut depth = Vector::<f32>::splat(0.0);
         let mut local_normal = Vector3Wide::default();

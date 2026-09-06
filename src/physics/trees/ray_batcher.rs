@@ -8,11 +8,10 @@ use super::tree::{Tree, TRAVERSAL_STACK_CAPACITY};
 use super::tree_ray_cast::IRayLeafTester;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::memory::{buffer::Buffer, buffer_pool::BufferPool};
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::num::SimdFloat;
 
 /// Raw ray data containing origin, direction, and an identifier.
 #[repr(C)]
@@ -261,110 +260,28 @@ fn intersect(
 ) -> (Vector<f32>, Vector<i32>) {
     let t_x0 = min.x * ray.inverse_direction.x - ray.origin_over_direction.x;
     let t_x1 = max.x * ray.inverse_direction.x - ray.origin_over_direction.x;
-    let t_min_x = t_x0.simd_min(t_x1);
-    let t_max_x = t_x0.simd_max(t_x1);
+    let t_min_x = t_x0.hw_min(t_x1);
+    let t_max_x = t_x0.hw_max(t_x1);
 
     let t_y0 = min.y * ray.inverse_direction.y - ray.origin_over_direction.y;
     let t_y1 = max.y * ray.inverse_direction.y - ray.origin_over_direction.y;
-    let t_min_y = t_y0.simd_min(t_y1);
-    let t_max_y = t_y0.simd_max(t_y1);
+    let t_min_y = t_y0.hw_min(t_y1);
+    let t_max_y = t_y0.hw_max(t_y1);
 
     let t_z0 = min.z * ray.inverse_direction.z - ray.origin_over_direction.z;
     let t_z1 = max.z * ray.inverse_direction.z - ray.origin_over_direction.z;
-    let t_min_z = t_z0.simd_min(t_z1);
-    let t_max_z = t_z0.simd_max(t_z1);
+    let t_min_z = t_z0.hw_min(t_z1);
+    let t_max_z = t_z0.hw_max(t_z1);
 
     let t_min = Vector::<f32>::splat(0.0)
-        .simd_max(t_min_x)
-        .simd_max(t_min_y.simd_max(t_min_z));
+        .hw_max(t_min_x)
+        .hw_max(t_min_y.hw_max(t_min_z));
     let t_max = ray
         .maximum_t
-        .simd_min(t_max_x)
-        .simd_min(t_max_y.simd_min(t_max_z));
+        .hw_min(t_max_x)
+        .hw_min(t_max_y.hw_min(t_max_z));
     let intersected = t_min.simd_le(t_max).to_simd();
     (t_min, intersected)
-}
-
-/// Per-ray fallback traversal; duplicates the private `Tree::ray_cast_node`. Keep in sync with it.
-unsafe fn tree_ray_cast_fallback<TLeafTester: IRayLeafTester>(
-    tree: &Tree,
-    mut node_index: i32,
-    tree_ray: *mut TreeRay,
-    ray_data: *mut RayData,
-    mut stack: Buffer<i32>,
-    pool: &mut BufferPool,
-    leaf_tester: &mut TLeafTester,
-) {
-    debug_assert!(
-        (node_index >= 0 && node_index < tree.node_count)
-            || (Tree::encode(node_index) >= 0 && Tree::encode(node_index) < tree.leaf_count)
-    );
-    debug_assert!(
-        tree.leaf_count >= 2,
-        "This implementation assumes all nodes are filled."
-    );
-
-    let mut stack_end: i32 = 0;
-    loop {
-        if node_index < 0 {
-            // This is actually a leaf node.
-            let leaf_index = Tree::encode(node_index);
-            leaf_tester.test_leaf(leaf_index, ray_data, &mut (*tree_ray).maximum_t, pool);
-            // Leaves have no children; pull from the stack.
-            if stack_end == 0 {
-                break;
-            }
-            stack_end -= 1;
-            node_index = *stack.get(stack_end);
-        } else {
-            let node = tree.nodes.get(node_index);
-            let mut t_a = 0.0f32;
-            let a_intersected = Tree::intersects_ray(node.a.min, node.a.max, tree_ray, &mut t_a);
-            let mut t_b = 0.0f32;
-            let b_intersected = Tree::intersects_ray(node.b.min, node.b.max, tree_ray, &mut t_b);
-
-            if a_intersected {
-                if b_intersected {
-                    // Visit the earlier AABB intersection first.
-                    if stack_end == stack.len() {
-                        if stack.len() == TRAVERSAL_STACK_CAPACITY as i32 {
-                            // First allocation is on the stack.
-                            let mut new_stack: Buffer<i32> =
-                                pool.take_at_least(TRAVERSAL_STACK_CAPACITY as i32 * 2);
-                            stack.copy_to(0, &mut new_stack, 0, TRAVERSAL_STACK_CAPACITY as i32);
-                            stack = new_stack;
-                        } else {
-                            pool.resize(&mut stack, stack_end * 2, stack_end);
-                        }
-                    }
-                    if t_a < t_b {
-                        node_index = node.a.index;
-                        *stack.get_mut(stack_end) = node.b.index;
-                        stack_end += 1;
-                    } else {
-                        node_index = node.b.index;
-                        *stack.get_mut(stack_end) = node.a.index;
-                        stack_end += 1;
-                    }
-                } else {
-                    node_index = node.a.index;
-                }
-            } else if b_intersected {
-                node_index = node.b.index;
-            } else {
-                // No intersection. Pull from stack.
-                if stack_end == 0 {
-                    break;
-                }
-                stack_end -= 1;
-                node_index = *stack.get(stack_end);
-            }
-        }
-    }
-    if stack.len() > TRAVERSAL_STACK_CAPACITY as i32 {
-        // We rented a larger stack at some point. Return it.
-        pool.return_buffer(&mut stack);
-    }
 }
 
 /// Reusable structure for testing large numbers of rays against trees.
@@ -730,8 +647,7 @@ impl RayBatcher {
                     let ray_index = *ray_stack_start_ptr.offset(i as isize) as i32;
                     let tree_ray_ptr = self.batch_rays.get_mut_ptr(ray_index);
                     let ray_data_ptr = self.batch_original_rays.get_mut_ptr(ray_index);
-                    tree_ray_cast_fallback(
-                        tree,
+                    tree.ray_cast_node(
                         entry.node_index,
                         tree_ray_ptr,
                         ray_data_ptr,

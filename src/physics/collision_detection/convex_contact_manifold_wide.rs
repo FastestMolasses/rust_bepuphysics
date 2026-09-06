@@ -14,6 +14,7 @@ pub trait IContactManifoldWide {
 }
 
 /// Wide manifold for single-contact convex pairs.
+#[repr(C)]
 pub struct Convex1ContactManifoldWide {
     pub offset_a: Vector3Wide,
     pub normal: Vector3Wide,
@@ -21,6 +22,20 @@ pub struct Convex1ContactManifoldWide {
     pub feature_id: Vector<i32>,
     pub contact_exists: Vector<i32>,
 }
+
+const _: () = {
+    use std::mem::{offset_of, size_of};
+    const W: usize = size_of::<Vector<f32>>();
+    assert!(size_of::<Convex1ContactManifoldWide>() == 9 * W);
+    assert!(offset_of!(Convex1ContactManifoldWide, normal) == 3 * W);
+    assert!(offset_of!(Convex1ContactManifoldWide, contact_exists) == 8 * W);
+    assert!(size_of::<Convex2ContactManifoldWide>() == 15 * W);
+    assert!(offset_of!(Convex2ContactManifoldWide, normal) == 6 * W);
+    assert!(offset_of!(Convex2ContactManifoldWide, contact0_exists) == 13 * W);
+    assert!(size_of::<Convex4ContactManifoldWide>() == 27 * W);
+    assert!(offset_of!(Convex4ContactManifoldWide, normal) == 12 * W);
+    assert!(offset_of!(Convex4ContactManifoldWide, contact0_exists) == 23 * W);
+};
 
 impl IContactManifoldWide for Convex1ContactManifoldWide {
     #[inline(always)]
@@ -59,6 +74,7 @@ impl IContactManifoldWide for Convex1ContactManifoldWide {
 }
 
 /// Wide manifold for two-contact convex pairs.
+#[repr(C)]
 pub struct Convex2ContactManifoldWide {
     pub offset_a0: Vector3Wide,
     pub offset_a1: Vector3Wide,
@@ -124,6 +140,7 @@ impl IContactManifoldWide for Convex2ContactManifoldWide {
 }
 
 /// Wide manifold for four-contact convex pairs.
+#[repr(C)]
 pub struct Convex4ContactManifoldWide {
     pub offset_a0: Vector3Wide,
     pub offset_a1: Vector3Wide,

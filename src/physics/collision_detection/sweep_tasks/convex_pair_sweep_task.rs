@@ -2,22 +2,58 @@
 
 use crate::physics::body_properties::{BodyVelocity, RigidPose, RigidPoseWide};
 use crate::physics::collidables::compound::Compound;
-use crate::physics::collidables::shape::{IConvexShape, IShapeWide};
+use crate::physics::collidables::shape::{
+    IConvexShape, IShape, IShapeWide, SpilledAllocation, WideAllocationScratch,
+    WIDE_ALLOCATION_SCRATCH_SIZE,
+};
 use crate::physics::collidables::shapes::Shapes;
-use crate::physics::collision_detection::sweep_task_registry::{SweepTask, SweepTaskRegistry};
+use crate::physics::collision_detection::sweep_task_registry::{
+    SweepFilterRef, SweepTask, SweepTaskRegistry,
+};
 use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::physics::pose_integration::PoseIntegration;
+use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_ex;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::{Quat, Vec3};
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 
 const VECTOR_WIDTH: usize = crate::utilities::vector::VECTOR_WIDTH;
+
+/// Hands `wide` the internal allocation it asks for, taken from `scratch` when it fits and
+/// otherwise from `pool`. `scratch` and the returned guard must outlive every use of `wide`.
+#[inline(always)]
+unsafe fn initialize_internal_allocation<TShape: IShape, TShapeWide: IShapeWide<TShape>>(
+    wide: &mut TShapeWide,
+    scratch: &mut MaybeUninit<WideAllocationScratch>,
+    pool: *mut BufferPool,
+) -> SpilledAllocation {
+    let mut spilled = SpilledAllocation {
+        buffer: Buffer::default(),
+        pool,
+    };
+    let size = wide.internal_allocation_size();
+    if size > 0 {
+        let memory = if size <= WIDE_ALLOCATION_SCRATCH_SIZE {
+            Buffer::new(scratch.as_mut_ptr() as *mut u8, size as i32, -1)
+        } else {
+            spilled.buffer = (*pool).take_at_least::<u8>(size as i32);
+            Buffer::new(
+                spilled.buffer.as_mut_ptr(),
+                size as i32,
+                spilled.buffer.id(),
+            )
+        };
+        wide.initialize(&memory);
+    }
+    spilled
+}
 
 #[inline(always)]
 fn get_sphere_cast_interval(
@@ -220,7 +256,9 @@ impl<
             t1,
         );
         *hit_location = offset_b + linear_velocity_b * *t0;
-        *hit_normal = (-*hit_location).normalize_or_zero(); // Normals are calibrated to point from B to A.
+        // Normals are calibrated to point from B to A.
+        let unnormalized_hit_normal = -*hit_location;
+        *hit_normal = unnormalized_hit_normal / unnormalized_hit_normal.length();
         *hit_location += *hit_normal * maximum_radius_b;
         hit
     }
@@ -410,7 +448,8 @@ impl<
             t1,
         );
         *hit_location = offset_b_including_child_poses + linear_velocity_b * *t0;
-        *hit_normal = (-*hit_location).normalize_or_zero();
+        let unnormalized_hit_normal = -*hit_location;
+        *hit_normal = unnormalized_hit_normal / unnormalized_hit_normal.length();
         *hit_location += *hit_normal * (maximum_radius_b + nonlinear_expansion);
         hit
     }
@@ -429,7 +468,7 @@ impl<
         let mut dot_a = Vector::<f32>::default();
         Vector3Wide::dot(normal, &direction_a, &mut dot_a);
         let scale_a =
-            (Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0) - dot_a * dot_a)).sqrt();
+            (Vector::<f32>::splat(0.0).hw_max(Vector::<f32>::splat(1.0) - dot_a * dot_a)).sqrt();
         *velocity_contribution_a = Vector::<f32>::splat(self.tangent_speed_a) * scale_a;
         *maximum_displacement_a = Vector::<f32>::splat(self.twice_radius_a) * scale_a;
         let mut direction_b = Vector3Wide::default();
@@ -437,7 +476,7 @@ impl<
         let mut dot_b = Vector::<f32>::default();
         Vector3Wide::dot(normal, &direction_b, &mut dot_b);
         let scale_b =
-            (Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0) - dot_b * dot_b)).sqrt();
+            (Vector::<f32>::splat(0.0).hw_max(Vector::<f32>::splat(1.0) - dot_b * dot_b)).sqrt();
         *velocity_contribution_b = Vector::<f32>::splat(self.tangent_speed_b) * scale_b;
         *maximum_displacement_b = Vector::<f32>::splat(self.twice_radius_b) * scale_b;
     }
@@ -463,6 +502,7 @@ unsafe fn sweep<
     minimum_progression: f32,
     convergence_threshold: f32,
     maximum_iteration_count: i32,
+    pool: *mut BufferPool,
     sweep_modifier: &mut TSweepModifier,
     t0: &mut f32,
     t1: &mut f32,
@@ -474,28 +514,12 @@ unsafe fn sweep<
     let mut wide_a = TShapeWideA::default();
     let mut wide_b = TShapeWideB::default();
     // Held at function scope so the backing memory outlives every use of wide_a/wide_b.
-    let _wide_a_memory: Vec<u8> = if wide_a.internal_allocation_size() > 0 {
-        let mut memory = vec![0u8; wide_a.internal_allocation_size()];
-        wide_a.initialize(&crate::utilities::memory::buffer::Buffer::new(
-            memory.as_mut_ptr(),
-            memory.len() as i32,
-            -1,
-        ));
-        memory
-    } else {
-        Vec::new()
-    };
-    let _wide_b_memory: Vec<u8> = if wide_b.internal_allocation_size() > 0 {
-        let mut memory = vec![0u8; wide_b.internal_allocation_size()];
-        wide_b.initialize(&crate::utilities::memory::buffer::Buffer::new(
-            memory.as_mut_ptr(),
-            memory.len() as i32,
-            -1,
-        ));
-        memory
-    } else {
-        Vec::new()
-    };
+    let mut scratch_a = MaybeUninit::<WideAllocationScratch>::uninit();
+    let mut scratch_b = MaybeUninit::<WideAllocationScratch>::uninit();
+    let _spilled_a =
+        initialize_internal_allocation::<TShapeA, TShapeWideA>(&mut wide_a, &mut scratch_a, pool);
+    let _spilled_b =
+        initialize_internal_allocation::<TShapeB, TShapeWideB>(&mut wide_b, &mut scratch_b, pool);
     wide_a.broadcast(shape_a);
     wide_b.broadcast(shape_b);
     let linear_velocity_b = velocity_b.linear - velocity_a.linear;
@@ -619,41 +643,41 @@ unsafe fn sweep<
 
         let zero = Vector::<f32>::splat(0.0);
         let a_worst_case_distances =
-            zero.simd_max(distances - max_angular_expansion_a - nonlinear_maximum_displacement_a);
+            zero.hw_max(distances - max_angular_expansion_a - nonlinear_maximum_displacement_a);
         let angular_displacement_b = max_angular_expansion_b + nonlinear_maximum_displacement_b;
-        let b_worst_case_distances = zero.simd_max(distances - angular_displacement_b);
+        let b_worst_case_distances = zero.hw_max(distances - angular_displacement_b);
         let both_worst_case_distances =
-            zero.simd_max(a_worst_case_distances - angular_displacement_b);
+            zero.hw_max(a_worst_case_distances - angular_displacement_b);
         let division_guard = Vector::<f32>::splat(1e-15);
         let both_worst_case_next_time =
-            both_worst_case_distances / division_guard.simd_max(linear_velocity_along_normal);
+            both_worst_case_distances / division_guard.hw_max(linear_velocity_along_normal);
         let angular_contribution_a = nonlinear_velocity_contribution_a + tangent_speed_a;
         let angular_contribution_b = nonlinear_velocity_contribution_b + tangent_speed_b;
         let a_worst_case_next_time = a_worst_case_distances
-            / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_b);
+            / division_guard.hw_max(linear_velocity_along_normal + angular_contribution_b);
         let b_worst_case_next_time = b_worst_case_distances
-            / division_guard.simd_max(linear_velocity_along_normal + angular_contribution_a);
+            / division_guard.hw_max(linear_velocity_along_normal + angular_contribution_a);
         let best_case_next_time = distances
-            / division_guard.simd_max(
+            / division_guard.hw_max(
                 linear_velocity_along_normal + angular_contribution_a + angular_contribution_b,
             );
         let time_to_next = both_worst_case_next_time
-            .simd_max(a_worst_case_next_time)
-            .simd_max(b_worst_case_next_time.simd_max(best_case_next_time));
+            .hw_max(a_worst_case_next_time)
+            .hw_max(b_worst_case_next_time.hw_max(best_case_next_time));
         let a_worst_case_previous_time = a_worst_case_distances
-            / division_guard.simd_max(angular_contribution_b - linear_velocity_along_normal);
+            / division_guard.hw_max(angular_contribution_b - linear_velocity_along_normal);
         let b_worst_case_previous_time = b_worst_case_distances
-            / division_guard.simd_max(angular_contribution_a - linear_velocity_along_normal);
+            / division_guard.hw_max(angular_contribution_a - linear_velocity_along_normal);
         let best_case_previous_time = distances
-            / division_guard.simd_max(
+            / division_guard.hw_max(
                 angular_contribution_a + angular_contribution_b - linear_velocity_along_normal,
             );
         let time_to_previous = (-both_worst_case_next_time)
-            .simd_max(a_worst_case_previous_time)
-            .simd_max(b_worst_case_previous_time.simd_max(best_case_previous_time));
+            .hw_max(a_worst_case_previous_time)
+            .hw_max(b_worst_case_previous_time.hw_max(best_case_previous_time));
         let safe_interval_start = samples - time_to_previous;
         let safe_interval_end = samples + time_to_next;
-        let forced_interval_end = samples + time_to_next.simd_max(minimum_progression_wide);
+        let forced_interval_end = samples + time_to_next.hw_max(minimum_progression_wide);
 
         if intersections[0] < 0 {
             // First sample was intersected.
@@ -825,6 +849,7 @@ impl<
         minimum_progression: f32,
         convergence_threshold: f32,
         maximum_iteration_count: i32,
+        pool: *mut BufferPool,
         t0: &mut f32,
         t1: &mut f32,
         hit_location: &mut Vec3,
@@ -852,6 +877,7 @@ impl<
             minimum_progression,
             convergence_threshold,
             maximum_iteration_count,
+            pool,
             &mut sweep_modifier,
             t0,
             t1,
@@ -874,10 +900,10 @@ impl<
         convergence_threshold: f32,
         maximum_iteration_count: i32,
         _flip_required: bool,
-        _filter: *mut u8,
+        _filter: SweepFilterRef,
         _shapes: *mut Shapes,
         _sweep_tasks: *mut SweepTaskRegistry,
-        _pool: *mut BufferPool,
+        pool: *mut BufferPool,
         t0: &mut f32,
         t1: &mut f32,
         hit_location: &mut Vec3,
@@ -896,6 +922,7 @@ impl<
             minimum_progression,
             convergence_threshold,
             maximum_iteration_count,
+            pool,
             &mut sweep_modifier,
             t0,
             t1,

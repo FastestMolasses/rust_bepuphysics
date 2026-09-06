@@ -10,6 +10,7 @@ use crate::physics::collision_detection::broad_phase::BroadPhase;
 use crate::physics::handles::{BodyHandle, StaticHandle};
 use crate::physics::island_awakener::IslandAwakener;
 use crate::physics::static_description::StaticDescription;
+use crate::physics::static_reference::StaticReference;
 use crate::utilities::bounding_box::BoundingBox;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::for_each_ref::IBreakableForEach;
@@ -51,7 +52,7 @@ pub trait StaticChangeAwakeningFilter {
     /// Whether to allow awakening at all. If false, `should_awaken` is never called.
     fn allow_awakening(&self) -> bool;
     /// Determines whether a specific sleeping body should be forced awake.
-    fn should_awaken(&self, body_handle: BodyHandle, bodies: &Bodies) -> bool;
+    fn should_awaken(&mut self, body_handle: BodyHandle, bodies: &Bodies) -> bool;
 }
 
 /// Default awakening filter that only wakes up dynamic bodies.
@@ -62,7 +63,7 @@ impl StaticChangeAwakeningFilter for DefaultAwakeningFilter {
     fn allow_awakening(&self) -> bool {
         true
     }
-    fn should_awaken(&self, body_handle: BodyHandle, bodies: &Bodies) -> bool {
+    fn should_awaken(&mut self, body_handle: BodyHandle, bodies: &Bodies) -> bool {
         unsafe {
             let location = *bodies.handle_to_location.get(body_handle.0);
             let set = bodies.sets.get(location.set_index);
@@ -79,7 +80,7 @@ impl StaticChangeAwakeningFilter for NoAwakeningFilter {
     fn allow_awakening(&self) -> bool {
         false
     }
-    fn should_awaken(&self, _body_handle: BodyHandle, _bodies: &Bodies) -> bool {
+    fn should_awaken(&mut self, _body_handle: BodyHandle, _bodies: &Bodies) -> bool {
         false
     }
 }
@@ -239,7 +240,7 @@ impl Statics {
     pub fn add_filtered<F: StaticChangeAwakeningFilter>(
         &mut self,
         description: &StaticDescription,
-        filter: &F,
+        filter: &mut F,
     ) -> StaticHandle {
         if self.count == self.handle_to_index.len() {
             debug_assert!(
@@ -250,51 +251,35 @@ impl Statics {
             self.internal_resize(new_size);
         }
 
-        let pool_ptr = self.pool;
-        let _pool = unsafe { &mut *pool_ptr };
         let handle = StaticHandle(self.handle_pool.take());
         let index = self.count;
         self.count += 1;
 
-        // Ensure handle_to_index can hold the new handle.
-        if handle.0 >= self.handle_to_index.len() {
-            let new_cap = (handle.0 + 1).max(self.handle_to_index.len() * 2);
-            let old_len = self.handle_to_index.len();
-            let pool = unsafe { &mut *pool_ptr };
-            pool.resize_to_at_least(&mut self.handle_to_index, new_cap, old_len);
-            unsafe {
-                let ptr = self.handle_to_index.as_mut_ptr().add(old_len as usize) as *mut u8;
-                let count =
-                    ((self.handle_to_index.len() - old_len) as usize) * std::mem::size_of::<i32>();
-                std::ptr::write_bytes(ptr, 0xFF, count);
-            }
-        }
-
+        debug_assert!(handle.0 < self.handle_to_index.len());
         *self.handle_to_index.get_mut(handle.0) = index;
         *self.index_to_handle.get_mut(index) = handle;
         self.apply_description_by_index_without_broad_phase(index, description);
-        // Compute bounds and add to broad phase.
         let shapes = unsafe { &*self.shapes };
         let s = self.statics_buffer.get(index);
         let mut bounds = BoundingBox::default();
         shapes.update_bounds(&s.pose, &s.shape, &mut bounds);
+        // Awaken sleeping bodies near the new static's bounds before it enters the broad phase.
+        unsafe {
+            self.awaken_bodies_in_bounds(&bounds, filter);
+        }
         let broad_phase = unsafe { &mut *self.broad_phase };
         self.statics_buffer.get_mut(index).broad_phase_index = broad_phase.add_static(
             CollidableReference::from_static(handle),
             &bounds.min,
             &bounds.max,
         );
-        // Awaken sleeping bodies near the new static's bounds.
-        unsafe {
-            self.awaken_bodies_in_bounds(&bounds, filter);
-        }
         handle
     }
 
     /// Adds a new static body to the simulation. All sleeping dynamic bodies whose bounding
     /// boxes overlap the new static are forced active.
     pub fn add(&mut self, description: &StaticDescription) -> StaticHandle {
-        self.add_filtered(description, &DefaultAwakeningFilter)
+        self.add_filtered(description, &mut DefaultAwakeningFilter)
     }
 
     /// Adds a new static body to the simulation. No attempt is made to awaken sleeping bodies
@@ -306,14 +291,14 @@ impl Statics {
     /// the new statics overlap with a lot of existing statics, and there's no need to awaken
     /// sleeping bodies, this function can be used to avoid the cost of the query.
     pub fn add_without_awakening_bodies(&mut self, description: &StaticDescription) -> StaticHandle {
-        self.add_filtered(description, &NoAwakeningFilter)
+        self.add_filtered(description, &mut NoAwakeningFilter)
     }
 
     /// Awakens sleeping bodies whose broad phase bounds overlap the given bounding box.
     unsafe fn awaken_bodies_in_bounds<F: StaticChangeAwakeningFilter>(
         &mut self,
         bounds: &BoundingBox,
-        filter: &F,
+        filter: &mut F,
     ) {
         if !filter.allow_awakening() {
             return;
@@ -330,7 +315,7 @@ impl Statics {
             broad_phase: &'a BroadPhase,
             pool: *mut BufferPool,
             sleeping_sets: &'a mut QuickList<i32>,
-            filter: &'a F,
+            filter: &'a mut F,
         }
         impl<F: StaticChangeAwakeningFilter> IBreakableForEach<i32> for SleepingBodyCollector<'_, F> {
             #[inline(always)]
@@ -338,10 +323,13 @@ impl Statics {
                 let leaf = unsafe { *self.broad_phase.static_leaves.get(leaf_index) };
                 if leaf.mobility() != CollidableMobility::Static {
                     let body_handle = leaf.body_handle();
-                    let location = unsafe { *self.bodies.handle_to_location.get(body_handle.0) };
-                    if location.set_index > 0 && self.filter.should_awaken(body_handle, self.bodies)
-                    {
-                        // This is a sleeping body that passes the filter — add its set index.
+                    if self.filter.should_awaken(body_handle, self.bodies) {
+                        let location =
+                            unsafe { *self.bodies.handle_to_location.get(body_handle.0) };
+                        debug_assert!(
+                            location.set_index > 0,
+                            "Body collidables in the static tree must belong to a sleeping set."
+                        );
                         unsafe {
                             self.sleeping_sets.add(location.set_index, &mut *self.pool);
                         }
@@ -375,7 +363,7 @@ impl Statics {
     unsafe fn awaken_bodies_in_existing_bounds<F: StaticChangeAwakeningFilter>(
         &mut self,
         broad_phase_index: i32,
-        filter: &F,
+        filter: &mut F,
     ) {
         let broad_phase = &*self.broad_phase;
         let (min_ptr, max_ptr) = broad_phase.get_static_bounds_pointers(broad_phase_index);
@@ -389,11 +377,15 @@ impl Statics {
 
     /// Removes a static by its storage index. Wakes up nearby sleeping bodies.
     pub fn remove_at(&mut self, index: i32) {
-        self.remove_at_filtered(index, &DefaultAwakeningFilter);
+        self.remove_at_filtered(index, &mut DefaultAwakeningFilter);
     }
 
     /// Removes a static by its storage index with a custom awakening filter.
-    pub fn remove_at_filtered<F: StaticChangeAwakeningFilter>(&mut self, index: i32, filter: &F) {
+    pub fn remove_at_filtered<F: StaticChangeAwakeningFilter>(
+        &mut self,
+        index: i32,
+        filter: &mut F,
+    ) {
         debug_assert!(index >= 0 && index < self.count);
         self.validate_existing_handle(*self.index_to_handle.get(index));
         let handle = *self.index_to_handle.get(index);
@@ -447,7 +439,11 @@ impl Statics {
 
     /// Removes a static from the set. Any sleeping bodies with bounding boxes overlapping the
     /// removed static's bounding box and passing the given filter are forced active.
-    pub fn remove_filtered<F: StaticChangeAwakeningFilter>(&mut self, handle: StaticHandle, filter: &F) {
+    pub fn remove_filtered<F: StaticChangeAwakeningFilter>(
+        &mut self,
+        handle: StaticHandle,
+        filter: &mut F,
+    ) {
         self.validate_existing_handle(handle);
         let index = *self.handle_to_index.get(handle.0);
         self.remove_at_filtered(index, filter);
@@ -455,7 +451,7 @@ impl Statics {
 
     /// Removes a static from the set by its handle.
     pub fn remove(&mut self, handle: StaticHandle) {
-        self.remove_filtered(handle, &DefaultAwakeningFilter);
+        self.remove_filtered(handle, &mut DefaultAwakeningFilter);
     }
 
     /// Updates the bounds of a static in the broad phase for its current state.
@@ -476,7 +472,7 @@ impl Statics {
         &mut self,
         handle: StaticHandle,
         new_shape: TypedIndex,
-        filter: &F,
+        filter: &mut F,
     ) {
         self.validate_existing_handle(handle);
         debug_assert!(new_shape.exists(), "Statics must have a shape.");
@@ -498,7 +494,7 @@ impl Statics {
     /// Changes the shape of a static and updates its bounds in the broad phase.
     /// Sleeping bodies with bounding boxes overlapping the old or new bounds are forced active.
     pub fn set_shape(&mut self, handle: StaticHandle, new_shape: TypedIndex) {
-        self.set_shape_filtered(handle, new_shape, &DefaultAwakeningFilter);
+        self.set_shape_filtered(handle, new_shape, &mut DefaultAwakeningFilter);
     }
 
     /// Applies a new description to an existing static.
@@ -507,7 +503,7 @@ impl Statics {
         &mut self,
         handle: StaticHandle,
         description: &StaticDescription,
-        filter: &F,
+        filter: &mut F,
     ) {
         self.validate_existing_handle(handle);
         debug_assert!(
@@ -537,7 +533,7 @@ impl Statics {
     /// Applies a new description to an existing static.
     /// Sleeping bodies near old and new bounds are forced active.
     pub fn apply_description(&mut self, handle: StaticHandle, description: &StaticDescription) {
-        self.apply_description_filtered(handle, description, &DefaultAwakeningFilter);
+        self.apply_description_filtered(handle, description, &mut DefaultAwakeningFilter);
     }
 
     /// Gets the current description of the static referred to by a given handle.
@@ -556,6 +552,12 @@ impl Statics {
             StaticDescription::with_discrete(RigidPose::default(), TypedIndex::default());
         self.get_description(handle, &mut desc);
         desc
+    }
+
+    /// Gets a reference to a static by its handle.
+    pub fn get_static_reference(&mut self, handle: StaticHandle) -> StaticReference {
+        self.validate_existing_handle(handle);
+        StaticReference::new(handle, self as *mut Statics)
     }
 
     /// Clears all statics without returning memory to the pool.

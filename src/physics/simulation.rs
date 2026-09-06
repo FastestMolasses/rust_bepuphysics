@@ -16,6 +16,7 @@ use crate::physics::statics::Statics;
 use crate::physics::timestepper::ITimestepper;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use crate::utilities::vector::HwMinMax;
 
 // Forward declarations for types not yet fully translated
 pub struct Shapes {
@@ -120,7 +121,7 @@ impl Simulation {
             constraint_count_per_body_estimate: 8,
             constraints: 16384,
             constraints_per_type_batch: 256,
-            islands: 16,
+            islands: 0,
         });
 
         let pool = &mut *buffer_pool;
@@ -242,8 +243,8 @@ impl Simulation {
             constraint_remover,
             narrow_phase_callbacks,
             sizes.islands + 1,
-            1024,
-            512,
+            2048,
+            128,
         )));
 
         // Register default constraint types.
@@ -514,6 +515,10 @@ impl Simulation {
             (&mut *(self.broad_phase as *mut RealBroadPhase)).dispose();
         }
         {
+            use crate::physics::collision_detection::collidable_overlap_finder::CollidableOverlapFinder as RealOverlapFinder;
+            (&mut *(self.broad_phase_overlap_finder as *mut RealOverlapFinder)).dispose();
+        }
+        {
             use crate::physics::collision_detection::narrow_phase::NarrowPhase as RealNarrowPhase;
             (&mut *(self.narrow_phase as *mut RealNarrowPhase)).dispose();
         }
@@ -710,16 +715,14 @@ impl Simulation {
                     let (pose, shape) = self.simulation.get_pose_and_shape(collidable);
                     type RealShapes = crate::physics::collidables::shapes::Shapes;
                     let shapes = &*(self.simulation.shapes as *const RealShapes);
-                    if let Some(batch) = shapes.get_batch(shape.type_id() as usize) {
-                        batch.ray_test(
-                            shape.index() as usize,
-                            &*pose,
-                            &*ray_data,
-                            &mut *maximum_t,
-                            &mut *self.pool,
-                            &mut self.shape_hit_handler,
-                        );
-                    }
+                    shapes.ray_test(
+                        &shape,
+                        &*pose,
+                        &*ray_data,
+                        &mut *maximum_t,
+                        &mut *self.pool,
+                        &mut self.shape_hit_handler,
+                    );
                 }
             }
         }
@@ -771,7 +774,7 @@ impl Simulation {
     ) {
         use crate::physics::collision_detection::ray_batchers::IBroadPhaseSweepTester;
         use crate::physics::collision_detection::sweep_task_registry::{
-            ISweepFilter, SweepTaskRegistry,
+            ISweepFilter, SweepFilterRef, SweepTaskRegistry,
         };
 
         // SweepFilter delegates child-level filtering to the user's hit handler.
@@ -836,13 +839,10 @@ impl Simulation {
                         let mut hit_location = Vec3::ZERO;
                         let mut hit_normal = Vec3::ZERO;
 
-                        let mut filter = SweepFilter {
+                        let filter = SweepFilter {
                             hit_handler: &*self.hit_handler,
                             collidable_being_tested: collidable,
                         };
-                        // ABI shared with the compound sweep tasks' filter readers: pass a thin
-                        // pointer to a `*mut dyn ISweepFilter` fat-pointer local, not to the filter.
-                        let mut filter_dyn: *mut dyn ISweepFilter = &mut filter;
 
                         let result = unsafe {
                             task.sweep_filtered(
@@ -859,7 +859,7 @@ impl Simulation {
                                 self.minimum_progression,
                                 self.convergence_threshold,
                                 self.maximum_iteration_count,
-                                &mut filter_dyn as *mut _ as *mut u8,
+                                SweepFilterRef::new(&filter),
                                 self.simulation.shapes
                                     as *mut crate::physics::collidables::shapes::Shapes,
                                 narrow_phase.sweep_task_registry as *mut SweepTaskRegistry,
@@ -919,12 +919,13 @@ impl Simulation {
         );
     }
 
-    /// Sweeps a convex shape against the simulation with automatically estimated termination conditions.
+    /// Sweeps a convex shape against the simulation with explicit iterative sweep tuning.
     /// Simulation objects are treated as stationary during the sweep.
     ///
     /// # Safety
     /// The shape must be a valid convex shape. All simulation pointers must be valid.
-    pub unsafe fn sweep_shape<TShape: IConvexShape, H: ISweepHitHandler>(
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn sweep_shape_with_tuning<TShape: IConvexShape, H: ISweepHitHandler>(
         &self,
         shape: &TShape,
         pose: &RigidPose,
@@ -932,23 +933,13 @@ impl Simulation {
         maximum_t: f32,
         pool: *mut BufferPool,
         hit_handler: &mut H,
+        minimum_progression: f32,
+        convergence_threshold: f32,
+        maximum_iteration_count: i32,
     ) {
-        // Estimate reasonable termination conditions from shape size.
         let mut maximum_radius = 0.0f32;
         let mut maximum_angular_expansion = 0.0f32;
         shape.compute_angular_expansion_data(&mut maximum_radius, &mut maximum_angular_expansion);
-        let minimum_radius = maximum_radius - maximum_angular_expansion;
-        let size_estimate = minimum_radius.max(maximum_radius * 0.25);
-        let minimum_progression_distance = 0.1 * size_estimate;
-        let convergence_threshold_distance = 1e-5 * size_estimate;
-        let tangent_velocity =
-            (velocity.angular.length() * maximum_radius).min(maximum_angular_expansion / maximum_t);
-        let inverse_velocity = 1.0 / (velocity.linear.length() + tangent_velocity);
-        let minimum_progression_t = minimum_progression_distance * inverse_velocity;
-        let convergence_threshold_t = convergence_threshold_distance * inverse_velocity;
-        let maximum_iteration_count = 25;
-
-        // Compute bounding box.
         let mut min = Vec3::ZERO;
         let mut max = Vec3::ZERO;
         shape.compute_bounds(pose.orientation, &mut min, &mut max);
@@ -971,11 +962,53 @@ impl Simulation {
             maximum_t,
             pool,
             hit_handler,
-            minimum_progression_t,
-            convergence_threshold_t,
+            minimum_progression,
+            convergence_threshold,
             maximum_iteration_count,
             min,
             max,
+        );
+    }
+
+    /// Sweeps a convex shape against the simulation with automatically estimated termination conditions.
+    /// Simulation objects are treated as stationary during the sweep.
+    ///
+    /// # Safety
+    /// The shape must be a valid convex shape. All simulation pointers must be valid.
+    pub unsafe fn sweep_shape<TShape: IConvexShape, H: ISweepHitHandler>(
+        &self,
+        shape: &TShape,
+        pose: &RigidPose,
+        velocity: &BodyVelocity,
+        maximum_t: f32,
+        pool: *mut BufferPool,
+        hit_handler: &mut H,
+    ) {
+        // Estimate reasonable termination conditions from shape size.
+        let mut maximum_radius = 0.0f32;
+        let mut maximum_angular_expansion = 0.0f32;
+        shape.compute_angular_expansion_data(&mut maximum_radius, &mut maximum_angular_expansion);
+        let minimum_radius = maximum_radius - maximum_angular_expansion;
+        let size_estimate = minimum_radius.hw_max(maximum_radius * 0.25);
+        let minimum_progression_distance = 0.1 * size_estimate;
+        let convergence_threshold_distance = 1e-5 * size_estimate;
+        let tangent_velocity = (velocity.angular.length() * maximum_radius)
+            .hw_min(maximum_angular_expansion / maximum_t);
+        let inverse_velocity = 1.0 / (velocity.linear.length() + tangent_velocity);
+        let minimum_progression_t = minimum_progression_distance * inverse_velocity;
+        let convergence_threshold_t = convergence_threshold_distance * inverse_velocity;
+        let maximum_iteration_count = 25;
+
+        self.sweep_shape_with_tuning(
+            shape,
+            pose,
+            velocity,
+            maximum_t,
+            pool,
+            hit_handler,
+            minimum_progression_t,
+            convergence_threshold_t,
+            maximum_iteration_count,
         );
     }
 }

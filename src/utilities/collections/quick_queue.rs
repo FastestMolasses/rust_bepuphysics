@@ -186,49 +186,46 @@ impl<T: Copy> QuickQueue<T> {
 
     /// Resizes the queue's backing memory.
     fn resize(&mut self, new_size: i32, pool: &mut impl UnmanagedMemoryPool) {
-        let mut new_span = pool.take_at_least::<T>(new_size);
+        if BufferPool::get_capacity_for_count::<T>(new_size) != self.span.len() {
+            let mut new_span = pool.take_at_least::<T>(new_size);
 
-        // Truncate count if shrinking (matches C#: Count = Math.Min(Count, newSpan.Length))
-        if self.count > new_span.len() {
-            self.count = new_span.len();
+            // Truncate count if shrinking (matches C#: Count = Math.Min(Count, newSpan.Length))
+            if self.count > new_span.len() {
+                self.count = new_span.len();
+            }
+
+            // Copy elements from old span to new span, handling wrap-around
+            if self.last_index >= self.first_index {
+                // No wrap-around: elements are contiguous
+                self.span
+                    .copy_to(self.first_index, &mut new_span, 0, self.count);
+            } else if self.count > 0 {
+                // Wrap-around: copy in two parts
+                let elements_at_end = self.span.len() - self.first_index;
+                self.span
+                    .copy_to(self.first_index, &mut new_span, 0, elements_at_end);
+                self.span
+                    .copy_to(0, &mut new_span, elements_at_end, self.last_index + 1);
+            }
+
+            pool.return_buffer(&mut self.span);
+
+            self.span = new_span;
+            self.capacity_mask = Self::get_capacity_mask(new_span.len());
+            self.first_index = 0;
+            self.last_index = if self.count > 0 {
+                self.count - 1
+            } else {
+                self.capacity_mask
+            };
         }
-
-        // Copy elements from old span to new span, handling wrap-around
-        if self.last_index >= self.first_index {
-            // No wrap-around: elements are contiguous
-            self.span
-                .copy_to(self.first_index, &mut new_span, 0, self.count);
-        } else if self.count > 0 {
-            // Wrap-around: copy in two parts
-            let elements_at_end = self.span.len() - self.first_index;
-            self.span
-                .copy_to(self.first_index, &mut new_span, 0, elements_at_end);
-            self.span
-                .copy_to(0, &mut new_span, elements_at_end, self.last_index + 1);
-        }
-
-        pool.return_buffer(&mut self.span);
-
-        self.span = new_span;
-        self.capacity_mask = Self::get_capacity_mask(new_span.len());
-        self.first_index = 0;
-        self.last_index = if self.count > 0 {
-            self.count - 1
-        } else {
-            self.capacity_mask
-        };
     }
 
     /// Adds an element to the end of the queue, resizing if necessary.
     #[inline(always)]
     pub fn enqueue(&mut self, element: T, pool: &mut impl UnmanagedMemoryPool) {
         if self.count == self.span.len() {
-            let new_size = if self.count == 0 {
-                BufferPool::get_capacity_for_count::<T>(4)
-            } else {
-                self.count * 2
-            };
-            self.resize(new_size, pool);
+            self.resize(self.span.len() * 2, pool);
         }
         self.enqueue_unsafely(element);
     }
@@ -237,12 +234,7 @@ impl<T: Copy> QuickQueue<T> {
     #[inline(always)]
     pub fn enqueue_first(&mut self, element: T, pool: &mut impl UnmanagedMemoryPool) {
         if self.count == self.span.len() {
-            let new_size = if self.count == 0 {
-                BufferPool::get_capacity_for_count::<T>(4)
-            } else {
-                self.count * 2
-            };
-            self.resize(new_size, pool);
+            self.resize(self.span.len() * 2, pool);
         }
         self.enqueue_first_unsafely(element);
     }
@@ -401,7 +393,7 @@ impl<T: Copy> QuickQueue<T> {
     /// Uses C#'s conservative threshold: resizes when count >= capacity_mask (span.len() - 1).
     #[inline(always)]
     pub fn ensure_capacity(&mut self, count: i32, pool: &mut impl UnmanagedMemoryPool) {
-        if !self.span.allocated() || count >= self.capacity_mask {
+        if count >= self.capacity_mask {
             self.resize(count, pool);
         }
     }

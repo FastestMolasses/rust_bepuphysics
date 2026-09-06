@@ -28,7 +28,7 @@ pub struct CompoundMeshReduction {
     pub mesh_orientation: Quat,
     /// Nested nonconvex reduction for final manifold assembly.
     pub inner: NonconvexReduction,
-    /// Pointer to the mesh. TODO: Make flexible for different mesh types.
+    /// Pointer to the mesh (opaque).
     pub mesh: *mut u8,
     /// Type-erased tree-query thunk, populated per-TMesh at continuation-creation time.
     pub find_local_overlaps_thunk: Option<FindLocalOverlapsFn>,

@@ -9,7 +9,7 @@ use crate::physics::collision_detection::mesh_reduction::{
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -54,21 +54,21 @@ impl CapsuleTriangleTester {
         let mut dadb = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(capsule_axis, edge_direction, &mut dadb);
         *ta = (da_offset_b - db_offset_b * dadb)
-            / (Vector::<f32>::splat(1.0) - dadb * dadb).simd_max(Vector::<f32>::splat(1e-15));
+            / Vector::<f32>::splat(1e-15).hw_max(Vector::<f32>::splat(1.0) - dadb * dadb);
         *tb = *ta * dadb - db_offset_b;
 
-        let ta0 = (-*capsule_half_length).simd_max((*capsule_half_length).simd_min(da_offset_b));
+        let ta0 = (-*capsule_half_length).hw_max((*capsule_half_length).hw_min(da_offset_b));
         let ta1 = (*capsule_half_length)
-            .simd_min((-*capsule_half_length).simd_max(da_offset_b + edge_length * dadb));
-        let a_min = ta0.simd_min(ta1);
-        let a_max = ta0.simd_max(ta1);
+            .hw_min((-*capsule_half_length).hw_max(da_offset_b + edge_length * dadb));
+        let a_min = ta0.hw_min(ta1);
+        let a_max = ta0.hw_max(ta1);
         let a_onto_b_offset = *capsule_half_length * dadb.abs();
         *b_min = Vector::<f32>::splat(0.0)
-            .simd_max(edge_length.simd_min(-a_onto_b_offset - db_offset_b));
+            .hw_max(edge_length.hw_min(-a_onto_b_offset - db_offset_b));
         *b_max =
-            edge_length.simd_min(Vector::<f32>::splat(0.0).simd_max(a_onto_b_offset - db_offset_b));
-        *ta = (*ta).simd_min(a_max).simd_max(a_min);
-        *tb = (*tb).simd_min(*b_max).simd_max(*b_min);
+            edge_length.hw_min(Vector::<f32>::splat(0.0).hw_max(a_onto_b_offset - db_offset_b));
+        *ta = (*ta).hw_max(a_min).hw_min(a_max);
+        *tb = (*tb).hw_max(*b_min).hw_min(*b_max);
 
         let mut closest_on_capsule = Vector3Wide::default();
         Vector3Wide::scale_to(capsule_axis, ta, &mut closest_on_capsule);
@@ -140,7 +140,7 @@ impl CapsuleTriangleTester {
         Vector3Wide::dot(&triangle.b, normal, &mut nb);
         let mut nc = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&triangle.c, normal, &mut nc);
-        let extreme_on_triangle = na.simd_max(nb.simd_max(nc));
+        let extreme_on_triangle = na.hw_max(nb.hw_max(nc));
         *depth = extreme_on_triangle - extreme_on_capsule;
     }
 
@@ -167,7 +167,7 @@ impl CapsuleTriangleTester {
         Vector3Wide::dot(capsule_axis, &edge_plane_normal, &mut velocity);
         let velocity_is_positive = velocity.simd_gt(Vector::<f32>::splat(0.0));
         let t_val = velocity_is_positive.select(-distance, distance)
-            / velocity.abs().simd_max(Vector::<f32>::splat(1e-15));
+            / Vector::<f32>::splat(1e-15).hw_max(velocity.abs());
         *entry = velocity_is_positive.select(Vector::<f32>::splat(-f32::MAX), t_val);
         *exit = velocity_is_positive.select(t_val, Vector::<f32>::splat(f32::MAX));
     }
@@ -292,7 +292,7 @@ impl CapsuleTriangleTester {
         tb = use_ac.select(tb_cand, tb);
         b_min_val = use_ac.select(b_min_cand, b_min_val);
         b_max_val = use_ac.select(b_max_cand, b_max_val);
-        edge_depth = edge_depth_cand.simd_min(edge_depth);
+        edge_depth = edge_depth_cand.hw_min(edge_depth);
 
         // Test BC edge.
         let mut bc = Vector3Wide::default();
@@ -327,9 +327,9 @@ impl CapsuleTriangleTester {
         tb = use_bc.select(tb_cand, tb);
         b_min_val = use_bc.select(b_min_cand, b_min_val);
         b_max_val = use_bc.select(b_max_cand, b_max_val);
-        edge_depth = edge_depth_cand.simd_min(edge_depth);
+        edge_depth = edge_depth_cand.hw_min(edge_depth);
 
-        let depth = edge_depth.simd_min(face_depth);
+        let depth = edge_depth.hw_min(face_depth);
         let use_edge = edge_depth.simd_lt(face_depth);
         let local_normal =
             Vector3Wide::conditional_select(&use_edge.to_simd(), &edge_normal, &face_normal);
@@ -347,10 +347,8 @@ impl CapsuleTriangleTester {
         let mut nondegenerate_mask = Vector::<i32>::splat(0);
         let mut ab_length_sq = Vector::<f32>::splat(0.0);
         Vector3Wide::length_squared_to(&ab, &mut ab_length_sq);
-        let mut ca = Vector3Wide::default();
-        Vector3Wide::negate(&ac, &mut ca);
         let mut ca_length_sq = Vector::<f32>::splat(0.0);
-        Vector3Wide::length_squared_to(&ca, &mut ca_length_sq);
+        Vector3Wide::length_squared_to(&ac, &mut ca_length_sq);
         TriangleWide::compute_nondegenerate_triangle_mask(
             &ab_length_sq,
             &ca_length_sq,
@@ -393,7 +391,7 @@ impl CapsuleTriangleTester {
             const LOWER_THRESHOLD: f32 = 0.01 * 0.01;
             const UPPER_THRESHOLD: f32 = 0.05 * 0.05;
             let interval_weight =
-                Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0).simd_min(
+                Vector::<f32>::splat(0.0).hw_max(Vector::<f32>::splat(1.0).hw_min(
                     (Vector::<f32>::splat(UPPER_THRESHOLD) - squared_angle)
                         * Vector::<f32>::splat(1.0 / (UPPER_THRESHOLD - LOWER_THRESHOLD)),
                 ));
@@ -455,17 +453,17 @@ impl CapsuleTriangleTester {
                 &mut ca_entry,
                 &mut ca_exit,
             );
-            let triangle_interval_min = ab_entry.simd_max(bc_entry.simd_max(ca_entry));
-            let triangle_interval_max = ab_exit.simd_min(bc_exit.simd_min(ca_exit));
+            let triangle_interval_min = ab_entry.hw_max(bc_entry.hw_max(ca_entry));
+            let triangle_interval_max = ab_exit.hw_min(bc_exit.hw_min(ca_exit));
 
             let negative_half_length = -a.half_length;
-            let overlap_interval_min_clamped = triangle_interval_min.simd_max(negative_half_length);
-            let overlap_interval_max_clamped = triangle_interval_max.simd_min(a.half_length);
+            let overlap_interval_min_clamped = triangle_interval_min.hw_max(negative_half_length);
+            let overlap_interval_max_clamped = triangle_interval_max.hw_min(a.half_length);
             let interval_is_valid =
                 overlap_interval_max_clamped.simd_ge(overlap_interval_min_clamped);
-            let overlap_interval_min_final = overlap_interval_min_clamped.simd_min(a.half_length);
+            let overlap_interval_min_final = overlap_interval_min_clamped.hw_min(a.half_length);
             let overlap_interval_max_final =
-                overlap_interval_max_clamped.simd_max(negative_half_length);
+                overlap_interval_max_clamped.hw_max(negative_half_length);
 
             let mut clipped_on_a0 =
                 Vector3Wide::scale(&local_capsule_axis, &overlap_interval_min_final);

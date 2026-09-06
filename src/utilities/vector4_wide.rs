@@ -1,8 +1,8 @@
 use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use glam::Vec4;
 use std::simd::Select;
-use std::simd::{num::SimdFloat, Mask, StdFloat};
+use std::simd::{cmp::SimdPartialOrd, num::SimdFloat, StdFloat};
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -88,19 +88,19 @@ impl Vector4Wide {
     /// Computes the per-component minimum of two vectors.
     #[inline(always)]
     pub fn min(a: &Self, b: &Self, result: &mut Self) {
-        result.x = a.x.simd_min(b.x);
-        result.y = a.y.simd_min(b.y);
-        result.z = a.z.simd_min(b.z);
-        result.w = a.w.simd_min(b.w);
+        result.x = a.x.hw_min(b.x);
+        result.y = a.y.hw_min(b.y);
+        result.z = a.z.hw_min(b.z);
+        result.w = a.w.hw_min(b.w);
     }
 
     /// Computes the per-component maximum of two vectors.
     #[inline(always)]
     pub fn max(a: &Self, b: &Self, result: &mut Self) {
-        result.x = a.x.simd_max(b.x);
-        result.y = a.y.simd_max(b.y);
-        result.z = a.z.simd_max(b.z);
-        result.w = a.w.simd_max(b.w);
+        result.x = a.x.hw_max(b.x);
+        result.y = a.y.hw_max(b.y);
+        result.z = a.z.hw_max(b.z);
+        result.w = a.w.hw_max(b.w);
     }
 
     #[inline(always)]
@@ -167,7 +167,7 @@ impl Vector4Wide {
         right: &Self,
         result: &mut Self,
     ) {
-        let mask = Mask::from_simd(*condition);
+        let mask = condition.simd_lt(Vector::<i32>::splat(0));
         result.x = mask.select(left.x, right.x);
         result.y = mask.select(left.y, right.y);
         result.z = mask.select(left.z, right.z);

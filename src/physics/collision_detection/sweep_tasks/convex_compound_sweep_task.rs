@@ -5,7 +5,7 @@ use crate::physics::collidables::shape::{ICompoundShape, IConvexShape, IShapeWid
 use crate::physics::collidables::shapes::Shapes;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::physics::collision_detection::sweep_task_registry::{
-    ISweepFilter, SweepTask, SweepTaskRegistry,
+    SweepFilterRef, SweepTask, SweepTaskRegistry,
 };
 use crate::physics::collision_detection::sweep_tasks::convex_compound_sweep_overlap_finder::IConvexCompoundSweepOverlapFinder;
 use crate::utilities::memory::buffer_pool::BufferPool;
@@ -63,6 +63,7 @@ impl<
         _minimum_progression: f32,
         _convergence_threshold: f32,
         _maximum_iteration_count: i32,
+        _pool: *mut BufferPool,
         _t0: &mut f32,
         _t1: &mut f32,
         _hit_location: &mut Vec3,
@@ -85,7 +86,7 @@ impl<
         convergence_threshold: f32,
         maximum_iteration_count: i32,
         flip_required: bool,
-        filter: *mut u8,
+        filter: SweepFilterRef,
         shapes: *mut Shapes,
         sweep_tasks: *mut SweepTaskRegistry,
         pool: *mut BufferPool,
@@ -114,14 +115,12 @@ impl<
             &mut *pool,
             &mut overlaps,
         );
-        // ABI convention: `filter` points to a `*mut dyn ISweepFilter` fat-pointer local, hence the double deref.
-        let filter_ref = &**(filter as *const *const dyn ISweepFilter);
         for i in 0..overlaps.count {
             let compound_child_index = overlaps.overlaps[i as usize];
             let allow = if flip_required {
-                filter_ref.allow_test(compound_child_index, 0)
+                filter.allow_test(compound_child_index, 0)
             } else {
-                filter_ref.allow_test(0, compound_child_index)
+                filter.allow_test(0, compound_child_index)
             };
             if allow {
                 let child = compound.get_child(compound_child_index);
@@ -151,6 +150,7 @@ impl<
                         minimum_progression,
                         convergence_threshold,
                         maximum_iteration_count,
+                        pool,
                         &mut t0_candidate,
                         &mut t1_candidate,
                         &mut hit_location_candidate,

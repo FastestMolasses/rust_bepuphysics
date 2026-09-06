@@ -1,5 +1,6 @@
 // Translated from BepuPhysics/Constraints/Contact/IContactConstraintDescription.cs
 
+use crate::physics::collision_detection::narrow_phase_callbacks::PairMaterialProperties;
 use crate::physics::constraints::spring_settings::SpringSettings;
 use glam::Vec3;
 
@@ -44,12 +45,19 @@ pub struct NonconvexOneBodyManifoldConstraintProperties {
 
 /// Trait for convex one-body contact constraint descriptions.
 pub trait IConvexOneBodyContactConstraintDescription {
+    fn copy_manifold_wide_properties(&mut self, normal: &Vec3, material: &PairMaterialProperties);
     fn get_first_contact(&self) -> &ConstraintContactData;
     fn get_first_contact_mut(&mut self) -> &mut ConstraintContactData;
 }
 
 /// Trait for convex two-body contact constraint descriptions.
 pub trait IConvexTwoBodyContactConstraintDescription {
+    fn copy_manifold_wide_properties(
+        &mut self,
+        offset_b: &Vec3,
+        normal: &Vec3,
+        material: &PairMaterialProperties,
+    );
     fn get_first_contact(&self) -> &ConstraintContactData;
     fn get_first_contact_mut(&mut self) -> &mut ConstraintContactData;
 }
@@ -57,6 +65,7 @@ pub trait IConvexTwoBodyContactConstraintDescription {
 /// Trait for nonconvex one-body contact constraint descriptions.
 pub trait INonconvexOneBodyContactConstraintDescription {
     fn contact_count() -> i32;
+    fn copy_manifold_wide_properties(&mut self, material: &PairMaterialProperties);
     fn get_common_properties(&self) -> &NonconvexOneBodyManifoldConstraintProperties;
     fn get_common_properties_mut(&mut self) -> &mut NonconvexOneBodyManifoldConstraintProperties;
     fn get_first_contact(&self) -> &NonconvexConstraintContactData;
@@ -66,6 +75,7 @@ pub trait INonconvexOneBodyContactConstraintDescription {
 /// Trait for nonconvex two-body contact constraint descriptions.
 pub trait INonconvexTwoBodyContactConstraintDescription {
     fn contact_count() -> i32;
+    fn copy_manifold_wide_properties(&mut self, offset_b: &Vec3, material: &PairMaterialProperties);
     fn get_common_properties(&self) -> &NonconvexTwoBodyManifoldConstraintProperties;
     fn get_common_properties_mut(&mut self) -> &mut NonconvexTwoBodyManifoldConstraintProperties;
     fn get_first_contact(&self) -> &NonconvexConstraintContactData;

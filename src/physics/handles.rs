@@ -14,6 +14,21 @@ pub struct StaticHandle(pub i32);
 #[repr(transparent)]
 pub struct ConstraintHandle(pub i32);
 
+const _: () = {
+    assert!(
+        std::mem::size_of::<BodyHandle>() == std::mem::size_of::<i32>()
+            && std::mem::align_of::<BodyHandle>() == std::mem::align_of::<i32>()
+    );
+    assert!(
+        std::mem::size_of::<StaticHandle>() == std::mem::size_of::<i32>()
+            && std::mem::align_of::<StaticHandle>() == std::mem::align_of::<i32>()
+    );
+    assert!(
+        std::mem::size_of::<ConstraintHandle>() == std::mem::size_of::<i32>()
+            && std::mem::align_of::<ConstraintHandle>() == std::mem::align_of::<i32>()
+    );
+};
+
 // Simple implementations for Display for user-friendliness
 impl std::fmt::Display for BodyHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

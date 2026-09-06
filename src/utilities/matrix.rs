@@ -101,6 +101,7 @@ impl Matrix {
         Self::transpose_m_to(m as *const MatrixM, transposed as *mut MatrixM);
     }
 
+    #[inline(always)]
     pub fn transpose_to(m: &Self, transposed: &mut Self) {
         // Not an ideal implementation. Shuffles would be handy.
         let xy = m.x.y;
@@ -117,9 +118,7 @@ impl Matrix {
 
     #[inline(always)]
     pub fn transpose(m: Self) -> Self {
-        let mut result = unsafe { std::mem::zeroed() };
-        Self::transpose_to(&m, &mut result);
-        result
+        out!(Self::transpose_to(&m))
     }
 
     /// Transforms a vector with a transposed matrix.
@@ -198,8 +197,8 @@ impl Matrix {
         let xz = axis.x * axis.z;
         let yz = axis.y * axis.z;
 
-        let sin_angle = angle.sin();
-        let one_minus_cos_angle = 1.0 - angle.cos();
+        let sin_angle = (angle as f64).sin() as f32;
+        let one_minus_cos_angle = 1.0 - (angle as f64).cos() as f32;
 
         result.x = Vec4::new(
             1.0 + one_minus_cos_angle * (xx - 1.0),
@@ -248,6 +247,7 @@ impl Matrix {
         result.w = Vec4::new(0.0, 0.0, 0.0, 1.0);
     }
 
+    #[inline(always)]
     pub fn create_value_from_quaternion(quaternion: &Quat) -> Self {
         out!(Self::create_from_quaternion(quaternion))
     }
@@ -261,7 +261,7 @@ impl Matrix {
         far_clip: f32,
         perspective: &mut Self,
     ) {
-        let h = 1.0 / (field_of_view * 0.5).tan();
+        let h = 1.0 / ((field_of_view * 0.5) as f64).tan() as f32;
         let w = h / aspect_ratio;
         let m33 = far_clip / (near_clip - far_clip);
 
@@ -296,7 +296,7 @@ impl Matrix {
         far_clip: f32,
         perspective: &mut Self,
     ) {
-        let h = 1.0 / (field_of_view * 0.5).tan();
+        let h = 1.0 / ((field_of_view * 0.5) as f64).tan() as f32;
         let w = h / aspect_ratio;
         let m33 = far_clip / (far_clip - near_clip);
         perspective.x = Vec4::new(w, 0.0, 0.0, 0.0);
@@ -314,8 +314,8 @@ impl Matrix {
         far_clip: f32,
         perspective: &mut Self,
     ) {
-        let h = 1.0 / (vertical_fov * 0.5).tan();
-        let w = 1.0 / (horizontal_fov * 0.5).tan();
+        let h = 1.0 / ((vertical_fov * 0.5) as f64).tan() as f32;
+        let w = 1.0 / ((horizontal_fov * 0.5) as f64).tan() as f32;
         let m33: f32 = far_clip / (near_clip - far_clip);
         perspective.x = Vec4::new(w, 0.0, 0.0, 0.0);
         perspective.y = Vec4::new(0.0, h, 0.0, 0.0);
@@ -440,7 +440,8 @@ impl Matrix {
     pub fn create_view(position: Vec3, forward: Vec3, up_vector: Vec3, view_matrix: &mut Self) {
         let length = forward.length();
         let z = forward / -length;
-        let x = up_vector.cross(z).normalize();
+        let c = up_vector.cross(z);
+        let x = c / c.length();
         let y = z.cross(x);
 
         view_matrix.x = Vec4::new(x.x, y.x, z.x, 0.0);

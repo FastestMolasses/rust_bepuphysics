@@ -193,21 +193,24 @@ impl NonconvexReduction {
         let mut initial_best_score = -f32::MAX;
         let mut initial_best_score_index: i32 = 0;
         let maximum_allocated_candidate_count = self.child_count * 4;
-        const HEAP_ALLOCATION_THRESHOLD: i32 = 8192;
-        let remaining_contacts_buffer: Buffer<RemainingCandidate>;
-        let heap_allocated = maximum_allocated_candidate_count > HEAP_ALLOCATION_THRESHOLD;
-        // Stack storage for the common case (count is bounded by HEAP_ALLOCATION_THRESHOLD on this path).
-        let mut stack_storage: MaybeUninit<[RemainingCandidate; HEAP_ALLOCATION_THRESHOLD as usize]> =
-            MaybeUninit::uninit();
-        if heap_allocated {
-            remaining_contacts_buffer = pool.take(maximum_allocated_candidate_count);
+        const INLINE_CANDIDATE_CAPACITY: i32 = 256;
+        const _: () = assert!(
+            INLINE_CANDIDATE_CAPACITY as usize * std::mem::size_of::<RemainingCandidate>() <= 4096,
+            "Inline scratch must stay small enough to keep the frame cheap."
+        );
+        let mut inline_storage: MaybeUninit<
+            [RemainingCandidate; INLINE_CANDIDATE_CAPACITY as usize],
+        > = MaybeUninit::uninit();
+        let spilled = maximum_allocated_candidate_count > INLINE_CANDIDATE_CAPACITY;
+        let remaining_contacts_buffer: Buffer<RemainingCandidate> = if spilled {
+            pool.take(maximum_allocated_candidate_count)
         } else {
-            remaining_contacts_buffer = Buffer::new(
-                stack_storage.as_mut_ptr() as *mut RemainingCandidate,
+            Buffer::new(
+                inline_storage.as_mut_ptr() as *mut RemainingCandidate,
                 maximum_allocated_candidate_count,
-                -1, // No pool id for stack allocation
-            );
-        }
+                -1,
+            )
+        };
         let mut remaining_contacts = QuickList::new(remaining_contacts_buffer);
         let extremity_scale = maximum_distance * 5e-3;
         for child_index in 0..self.child_count {
@@ -300,7 +303,7 @@ impl NonconvexReduction {
             }
         }
 
-        if heap_allocated {
+        if spilled {
             remaining_contacts.dispose(pool);
         }
     }

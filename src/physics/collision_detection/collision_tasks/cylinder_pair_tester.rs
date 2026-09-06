@@ -7,7 +7,7 @@ use crate::physics::collision_detection::depth_refiner::DepthRefiner;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
@@ -105,7 +105,7 @@ impl CylinderPairTester {
         Vector2Wide::dot(line_position, line_position, &mut c_val);
         let radius_squared = *radius * *radius;
         c_val -= radius_squared;
-        let t_offset = StdFloat::sqrt((b_val * b_val - a_val * c_val).simd_max(zero_f)) * inverse_a;
+        let t_offset = StdFloat::sqrt(zero_f.hw_max(b_val * b_val - a_val * c_val)) * inverse_a;
         let t_base = -b_val * inverse_a;
         *t_min = t_base - t_offset;
         *t_max = t_base + t_offset;
@@ -198,8 +198,8 @@ impl CylinderPairTester {
         let depth_threshold = -*speculative_margin;
         let epsilon_scale = a
             .half_length
-            .simd_max(a.radius)
-            .simd_min(b.half_length.simd_max(b.radius));
+            .hw_max(a.radius)
+            .hw_min(b.half_length.hw_max(b.radius));
 
         let mut depth = Vector::<f32>::splat(0.0);
         let mut closest_on_b = Vector3Wide::default();
@@ -377,8 +377,8 @@ impl CylinderPairTester {
                     &mut contact1_t_min_a,
                     &mut contact1_t_max_a,
                 );
-                let first_line_t_min = contact1_t_min_a.simd_max(zero_f);
-                let first_line_t_max = contact1_t_max_a.simd_min(one_f);
+                let first_line_t_min = contact1_t_min_a.hw_max(zero_f);
+                let first_line_t_max = contact1_t_max_a.hw_min(one_f);
                 let mut scaled_dir = Vector2Wide::default();
                 Vector2Wide::scale(
                     &contact1_line_direction_on_b,
@@ -400,7 +400,7 @@ impl CylinderPairTester {
                         + (b.radius * b.radius - a.radius * a.radius)
                             * inverse_horiz_offset_length);
                 let second_line_start_t =
-                    horizontal_offset_length.simd_min(circle_intersection_t.simd_max(zero_f));
+                    horizontal_offset_length.hw_min(zero_f.hw_max(circle_intersection_t));
                 let mut second_line_start_on_b = Vector2Wide::default();
                 Vector2Wide::scale(
                     &horizontal_offset_direction,
@@ -463,8 +463,8 @@ impl CylinderPairTester {
                     &mut second_line_t_min_b,
                     &mut second_line_t_max_b,
                 );
-                let second_line_t_min = second_line_t_min_a.simd_max(second_line_t_min_b);
-                let second_line_t_max = second_line_t_max_a.simd_min(second_line_t_max_b);
+                let second_line_t_min = second_line_t_min_a.hw_max(second_line_t_min_b);
+                let second_line_t_max = second_line_t_max_a.hw_min(second_line_t_max_b);
 
                 let mut cap_contact2 = Vector2Wide::default();
                 let mut cap_contact3 = Vector2Wide::default();
@@ -661,10 +661,8 @@ impl CylinderPairTester {
                 &mut t_min,
                 &mut t_max,
             );
-            t_min = (-side_half_length)
-                .simd_max(t_min)
-                .simd_min(side_half_length);
-            t_max = t_max.simd_min(side_half_length);
+            t_min = side_half_length.hw_min((-side_half_length).hw_max(t_min));
+            t_max = side_half_length.hw_min(t_max);
 
             // Build contacts for both cases.
             let contact0_for_cap_a = Vector3Wide {

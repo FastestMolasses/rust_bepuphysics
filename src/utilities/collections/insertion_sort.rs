@@ -21,7 +21,7 @@ pub unsafe fn sort<TKey: Copy, TValue: Copy, TComparer>(
 
         while compare_index > start {
             let compare_key = keys.get_unchecked(compare_index - 1);
-            if comparer.compare(compare_key, &original_key) == Ordering::Greater {
+            if comparer.compare(&original_key, compare_key) == Ordering::Less {
                 // Shift elements up
                 ptr::copy_nonoverlapping(
                     keys.as_ptr().add(compare_index - 1),
@@ -39,8 +39,10 @@ pub unsafe fn sort<TKey: Copy, TValue: Copy, TComparer>(
             }
         }
 
-        *keys.get_unchecked_mut(compare_index) = original_key;
-        *values.get_unchecked_mut(compare_index) = original_value;
+        if compare_index != i {
+            *keys.get_unchecked_mut(compare_index) = original_key;
+            *values.get_unchecked_mut(compare_index) = original_value;
+        }
     }
 }
 
@@ -60,7 +62,7 @@ pub unsafe fn sort_keys_only<TKey: Copy, TComparer>(
 
         while compare_index > start {
             let compare_key = keys.get_unchecked(compare_index - 1);
-            if comparer.compare(compare_key, &original_key) == Ordering::Greater {
+            if comparer.compare(&original_key, compare_key) == Ordering::Less {
                 // Shift element up
                 ptr::copy_nonoverlapping(
                     keys.as_ptr().add(compare_index - 1),
@@ -73,6 +75,8 @@ pub unsafe fn sort_keys_only<TKey: Copy, TComparer>(
             }
         }
 
-        *keys.get_unchecked_mut(compare_index) = original_key;
+        if compare_index != i {
+            *keys.get_unchecked_mut(compare_index) = original_key;
+        }
     }
 }

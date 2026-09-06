@@ -41,7 +41,11 @@ impl AngularServo {
                 "AngularServo",
                 "target_relative_rotation_local_a",
             );
-            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "AngularServo");
+            ConstraintChecker::assert_valid_servo_and_spring_settings(
+                &self.servo_settings,
+                &self.spring_settings,
+                "AngularServo",
+            );
         }
         QuaternionWide::write_slot(
             self.target_relative_rotation_local_a,

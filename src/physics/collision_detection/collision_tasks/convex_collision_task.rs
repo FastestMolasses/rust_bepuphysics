@@ -1,19 +1,18 @@
 // Translated from BepuPhysics/CollisionDetection/CollisionTasks/ConvexCollisionTask.cs
 
 use super::pair_types::{ICollisionPair, ICollisionPairWide};
-use crate::physics::collidables::convex_hull::ConvexHull;
-use crate::physics::collidables::shape::IShapeWideAllocation;
+use crate::physics::collidables::shape::{
+    initialize_internal_allocation, IShapeWideAllocation, WideAllocationScratch,
+};
 use crate::physics::collision_detection::collision_task_registry::BatcherVtable;
 use crate::physics::collision_detection::contact_manifold::ConvexContactManifold;
 use crate::physics::collision_detection::convex_contact_manifold_wide::IContactManifoldWide;
 use crate::physics::collision_detection::untyped_list::UntypedList;
-use crate::utilities::memory::buffer::Buffer;
+use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::{Vector, VECTOR_WIDTH};
+use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-
-/// Upper bound on internal_allocation_size_of() across convex wide types; only ConvexHullWide is nonzero.
-const MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE: usize = VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
+use std::mem::MaybeUninit;
 
 /// Trait for pair testers that perform SIMD-wide collision tests between two shapes.
 pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
@@ -29,6 +28,7 @@ pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
         orientation_a: &QuaternionWide,
         orientation_b: &QuaternionWide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut TManifoldWide,
     );
 
@@ -40,6 +40,7 @@ pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
         offset_b: &Vector3Wide,
         orientation_b: &QuaternionWide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut TManifoldWide,
     );
 
@@ -50,6 +51,7 @@ pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
         speculative_margin: &Vector<f32>,
         offset_b: &Vector3Wide,
         pair_count: i32,
+        pool: *mut BufferPool,
         manifold: &mut TManifoldWide,
     );
 }
@@ -82,28 +84,13 @@ unsafe fn execute_batch_inner<
     let start = batch.buffer.as_ptr() as *const TPair;
     let mut pair_wide = TPairWide::default();
 
-    // Stack storage for IShapeWide internal allocations (e.g. ConvexHullWide); must outlive pair_wide.
-    // Typed as [ConvexHull; N] rather than bytes so it has ConvexHull's alignment when reinterpreted as Buffer<ConvexHull>.
-    let mut _alloc_a = std::mem::MaybeUninit::<[ConvexHull; VECTOR_WIDTH]>::uninit();
-    let mut _alloc_b = std::mem::MaybeUninit::<[ConvexHull; VECTOR_WIDTH]>::uninit();
-    {
-        let a_wide = pair_wide.get_shape_a_mut();
-        let alloc_size = a_wide.internal_allocation_size_of();
-        debug_assert!(alloc_size <= MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE);
-        if alloc_size > 0 {
-            let buf = Buffer::new(_alloc_a.as_mut_ptr() as *mut u8, alloc_size as i32, -1);
-            a_wide.initialize_allocation(&buf);
-        }
-    }
-    {
-        let b_wide = pair_wide.get_shape_b_mut();
-        let alloc_size = b_wide.internal_allocation_size_of();
-        debug_assert!(alloc_size <= MAX_SHAPE_WIDE_INTERNAL_ALLOCATION_SIZE);
-        if alloc_size > 0 {
-            let buf = Buffer::new(_alloc_b.as_mut_ptr() as *mut u8, alloc_size as i32, -1);
-            b_wide.initialize_allocation(&buf);
-        }
-    }
+    // The allocation storage must outlive pair_wide.
+    let mut alloc_a = MaybeUninit::<WideAllocationScratch>::uninit();
+    let mut alloc_b = MaybeUninit::<WideAllocationScratch>::uninit();
+    let _spilled_a =
+        initialize_internal_allocation(pair_wide.get_shape_a_mut(), &mut alloc_a, vtable.pool);
+    let _spilled_b =
+        initialize_internal_allocation(pair_wide.get_shape_b_mut(), &mut alloc_b, vtable.pool);
 
     let mut manifold_wide = TManifoldWide::default();
     let mut manifold = ConvexContactManifold::default();
@@ -131,6 +118,7 @@ unsafe fn execute_batch_inner<
                 pair_wide.get_orientation_a(),
                 pair_wide.get_orientation_b(),
                 count_in_bundle,
+                vtable.pool,
                 &mut manifold_wide,
             );
         } else if TPairWide::ORIENTATION_COUNT == 1 {
@@ -141,6 +129,7 @@ unsafe fn execute_batch_inner<
                 pair_wide.get_offset_b(),
                 pair_wide.get_orientation_b(),
                 count_in_bundle,
+                vtable.pool,
                 &mut manifold_wide,
             );
         } else {
@@ -151,6 +140,7 @@ unsafe fn execute_batch_inner<
                 pair_wide.get_speculative_margin(),
                 pair_wide.get_offset_b(),
                 count_in_bundle,
+                vtable.pool,
                 &mut manifold_wide,
             );
         }

@@ -6,7 +6,7 @@ use crate::utilities::symmetric2x2_wide::Symmetric2x2Wide;
 use crate::utilities::symmetric3x3::Symmetric3x3;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Sub};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -27,7 +27,7 @@ pub struct Symmetric3x3Wide {
 
 impl Symmetric3x3Wide {
     /// Inverts the matrix as if it is a symmetric matrix where M32 == M23, M13 == M31, and M21 == M12.
-    #[inline(always)]
+    #[inline]
     pub fn invert(m: &Self, inverse: &mut Self) {
         let xx = m.yy * m.zz - m.zy * m.zy;
         let yx = m.zy * m.zx - m.zz * m.yx;
@@ -327,6 +327,15 @@ impl Add<Symmetric3x3Wide> for Symmetric3x3Wide {
     #[inline(always)]
     fn add(self, rhs: Symmetric3x3Wide) -> Self::Output {
         out!(Symmetric3x3Wide::add(&self, &rhs))
+    }
+}
+
+impl Sub<Symmetric3x3Wide> for Symmetric3x3Wide {
+    type Output = Symmetric3x3Wide;
+
+    #[inline(always)]
+    fn sub(self, rhs: Symmetric3x3Wide) -> Self::Output {
+        out!(Symmetric3x3Wide::subtract(&self, &rhs))
     }
 }
 

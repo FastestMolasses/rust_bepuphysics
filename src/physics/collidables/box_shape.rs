@@ -7,7 +7,7 @@ use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::ray::RayWide;
@@ -93,7 +93,9 @@ impl IConvexShape for Box {
             + self.half_height * self.half_height
             + self.half_length * self.half_length)
             .sqrt();
-        let min_half = self.half_length.min(self.half_height.min(self.half_length));
+        let min_half = self
+            .half_length
+            .hw_min(self.half_height.hw_min(self.half_length));
         *maximum_angular_expansion = *maximum_radius - min_half;
     }
 
@@ -117,15 +119,15 @@ impl IConvexShape for Box {
             if local_direction.x < 0.0 { 1.0 } else { -1.0 },
             if local_direction.y < 0.0 { 1.0 } else { -1.0 },
             if local_direction.z < 0.0 { 1.0 } else { -1.0 },
-        ) / local_direction.abs().max(Vec3::splat(1e-15));
+        ) / Vec3::splat(1e-15).hw_max(local_direction.abs());
 
         let half_extent = Vec3::new(self.half_width, self.half_height, self.half_length);
         let negative_t = (local_offset - half_extent) * offset_to_t_scale;
         let positive_t = (local_offset + half_extent) * offset_to_t_scale;
-        let entry_t = negative_t.min(positive_t);
-        let exit_t = negative_t.max(positive_t);
+        let entry_t = negative_t.hw_min(positive_t);
+        let exit_t = negative_t.hw_max(positive_t);
 
-        let mut earliest_exit = exit_t.x.min(exit_t.y);
+        let mut earliest_exit = exit_t.x.hw_min(exit_t.y);
         if exit_t.z < earliest_exit {
             earliest_exit = exit_t.z;
         }
@@ -234,6 +236,7 @@ impl IShapeWide<Box> for BoxWide {
         }
     }
 
+    #[inline(always)]
     fn get_bounds(
         &self,
         orientations: &mut QuaternionWide,
@@ -264,7 +267,7 @@ impl IShapeWide<Box> for BoxWide {
         *maximum_angular_expansion = *maximum_radius
             - self
                 .half_length
-                .simd_min(self.half_height.simd_min(self.half_length));
+                .hw_min(self.half_height.hw_min(self.half_length));
     }
 
     fn minimum_wide_ray_count() -> i32 {
@@ -304,17 +307,17 @@ impl IShapeWide<Box> for BoxWide {
             .x
             .simd_gt(zero)
             .select(negative_one, Vector::<f32>::splat(1.0))
-            / local_direction.x.abs().simd_max(epsilon);
+            / epsilon.hw_max(local_direction.x.abs());
         let offset_to_t_scale_y = local_direction
             .y
             .simd_gt(zero)
             .select(negative_one, Vector::<f32>::splat(1.0))
-            / local_direction.y.abs().simd_max(epsilon);
+            / epsilon.hw_max(local_direction.y.abs());
         let offset_to_t_scale_z = local_direction
             .z
             .simd_gt(zero)
             .select(negative_one, Vector::<f32>::splat(1.0))
-            / local_direction.z.abs().simd_max(epsilon);
+            / epsilon.hw_max(local_direction.z.abs());
 
         // Compute impact times for each pair of planes in local space.
         let neg_t_x = (local_offset.x - self.half_width) * offset_to_t_scale_x;
@@ -324,16 +327,16 @@ impl IShapeWide<Box> for BoxWide {
         let pos_t_y = (local_offset.y + self.half_height) * offset_to_t_scale_y;
         let pos_t_z = (local_offset.z + self.half_length) * offset_to_t_scale_z;
 
-        let entry_t_x = neg_t_x.simd_min(pos_t_x);
-        let entry_t_y = neg_t_y.simd_min(pos_t_y);
-        let entry_t_z = neg_t_z.simd_min(pos_t_z);
-        let exit_t_x = neg_t_x.simd_max(pos_t_x);
-        let exit_t_y = neg_t_y.simd_max(pos_t_y);
-        let exit_t_z = neg_t_z.simd_max(pos_t_z);
+        let entry_t_x = neg_t_x.hw_min(pos_t_x);
+        let entry_t_y = neg_t_y.hw_min(pos_t_y);
+        let entry_t_z = neg_t_z.hw_min(pos_t_z);
+        let exit_t_x = neg_t_x.hw_max(pos_t_x);
+        let exit_t_y = neg_t_y.hw_max(pos_t_y);
+        let exit_t_z = neg_t_z.hw_max(pos_t_z);
 
-        let earliest_exit = exit_t_x.simd_min(exit_t_y).simd_min(exit_t_z);
-        let earliest_entry = entry_t_x.simd_max(entry_t_y).simd_max(entry_t_z);
-        *t = zero.simd_max(earliest_entry);
+        let earliest_exit = exit_t_x.hw_min(exit_t_y).hw_min(exit_t_z);
+        let earliest_entry = entry_t_x.hw_max(entry_t_y).hw_max(entry_t_z);
+        *t = zero.hw_max(earliest_entry);
         *intersected = t.simd_le(earliest_exit).to_simd();
 
         let use_x = earliest_entry.simd_eq(entry_t_x);

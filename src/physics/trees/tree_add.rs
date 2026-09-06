@@ -5,6 +5,7 @@ use super::node::{CostOrFlag, Metanode, Node, NodeChild};
 use super::tree::Tree;
 use crate::utilities::bounding_box::{BoundingBox, BoundingBox4};
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::vector::HwMinMax;
 use std::mem::MaybeUninit;
 
 /// Marker types for controlling rotation behavior during insertion.
@@ -214,7 +215,7 @@ impl Tree {
                     * (a.b.leaf_count + root.b.leaf_count) as f32
                     + cost_aa;
                 right_uses_a = cost_aab < cost_abb;
-                right_rotation_cost_change = cost_aab.min(cost_abb) - original_cost;
+                right_rotation_cost_change = cost_aab.hw_min(cost_abb) - original_cost;
             }
 
             if root.b.index >= 0 {
@@ -233,10 +234,10 @@ impl Tree {
                     * (b.b.leaf_count + root.a.leaf_count) as f32
                     + cost_ba;
                 left_uses_a = cost_baa < cost_bba;
-                left_rotation_cost_change = cost_baa.min(cost_bba) - original_cost;
+                left_rotation_cost_change = cost_baa.hw_min(cost_bba) - original_cost;
             }
 
-            if left_rotation_cost_change.min(right_rotation_cost_change) < 0.0 {
+            if left_rotation_cost_change.hw_min(right_rotation_cost_change) < 0.0 {
                 // A rotation is worth it.
                 if left_rotation_cost_change < right_rotation_cost_change {
                     // Left rotation wins!

@@ -12,7 +12,7 @@ use crate::physics::collision_detection::mesh_reduction::{
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
 use std::ptr::addr_of_mut;
@@ -33,9 +33,9 @@ impl BoxTriangleTester {
         vb: &Vector<f32>,
         vc: &Vector<f32>,
     ) -> Vector<f32> {
-        let min_b = va.simd_min(vb.simd_min(*vc));
-        let max_b = va.simd_max(vb.simd_max(*vc));
-        (*box_extreme - min_b).simd_min(max_b + *box_extreme)
+        let min_b = va.hw_min(vb.hw_min(*vc));
+        let max_b = va.hw_max(vb.hw_max(*vc));
+        (*box_extreme - min_b).hw_min(max_b + *box_extreme)
     }
 
     #[inline(always)]
@@ -129,7 +129,7 @@ impl BoxTriangleTester {
             &vc.z,
         );
         let use_y = dc.simd_lt(depth);
-        depth = depth.simd_min(dc);
+        depth = depth.hw_min(dc);
         ln_x = use_y.select(nc_x, ln_x);
         ln_y = use_y.select(nc_y, ln_y);
         ln_z = use_y.select(nc_z, ln_z);
@@ -152,7 +152,7 @@ impl BoxTriangleTester {
             &vc.y,
         );
         let use_z = dc.simd_lt(depth);
-        depth = depth.simd_min(dc);
+        depth = depth.hw_min(dc);
         ln_x = use_z.select(nc_x2, ln_x);
         ln_y = use_z.select(nc_y2, ln_y);
         ln_z = use_z.select(nc_z, ln_z);
@@ -176,7 +176,7 @@ impl BoxTriangleTester {
     ) {
         let use_candidate = depth_candidate.simd_lt(*depth).to_simd();
         *normal = Vector3Wide::conditional_select(&use_candidate, normal_candidate, normal);
-        *depth = depth.simd_min(*depth_candidate);
+        *depth = depth.hw_min(*depth_candidate);
     }
 
     #[inline(always)]
@@ -192,7 +192,7 @@ impl BoxTriangleTester {
         normal.x = use_candidate.select(*nx, normal.x);
         normal.y = use_candidate.select(*ny, normal.y);
         normal.z = use_candidate.select(*nz, normal.z);
-        *depth = depth.simd_min(*depth_candidate);
+        *depth = depth.hw_min(*depth_candidate);
     }
 
     /// Adds a point on the triangle to the manifold candidates.
@@ -261,11 +261,11 @@ impl BoxTriangleTester {
         let large_negative = Vector::<f32>::splat(-f32::MAX);
         let large_positive = Vector::<f32>::splat(f32::MAX);
         let min = dont_use_fallback.select(
-            t0.simd_min(t1),
+            t0.hw_min(t1),
             edge_start_is_inside.select(large_negative, large_positive),
         );
         let max = dont_use_fallback.select(
-            t0.simd_max(t1),
+            t0.hw_max(t1),
             edge_start_is_inside.select(large_positive, large_negative),
         );
         (min, max)
@@ -302,8 +302,8 @@ impl BoxTriangleTester {
             &tri_edge_start_to_v11,
             edge_plane_normal_y,
         );
-        let min = min_x.simd_max(min_y);
-        let max = Vector::<f32>::splat(1.0).simd_min(max_x.simd_min(max_y));
+        let min = min_x.hw_max(min_y);
+        let max = Vector::<f32>::splat(1.0).hw_min(max_x.hw_min(max_y));
         let min_location = *edge_start + Vector3Wide::scale(edge_direction, &min);
         let max_location = *edge_start + Vector3Wide::scale(edge_direction, &max);
 
@@ -875,8 +875,8 @@ impl BoxTriangleTester {
 
             let epsilon_scale = a
                 .half_width
-                .simd_max(a.half_height.simd_max(a.half_length))
-                .simd_min(triangle_epsilon_scale);
+                .hw_max(a.half_height.hw_max(a.half_length))
+                .hw_min(triangle_epsilon_scale);
 
             // Triangle tangent frame
             let tri_tangent_x =

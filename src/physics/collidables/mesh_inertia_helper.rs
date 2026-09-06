@@ -112,8 +112,8 @@ impl MeshInertiaHelper {
 
     /// Computes the inertia of a closed mesh.
     /// Triangles visible from outside the shape are assumed to have clockwise winding in right handed coordinates.
-    pub fn compute_closed_inertia(
-        triangle_source: &mut dyn ITriangleSource,
+    pub fn compute_closed_inertia<T: ITriangleSource>(
+        triangle_source: &mut T,
         mass: f32,
     ) -> (f32, Symmetric3x3) {
         let mut volume = 0.0f32;
@@ -130,8 +130,8 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the inertia of a closed mesh with center of mass.
-    pub fn compute_closed_inertia_with_center(
-        triangle_source: &mut dyn ITriangleSource,
+    pub fn compute_closed_inertia_with_center<T: ITriangleSource>(
+        triangle_source: &mut T,
         mass: f32,
     ) -> (f32, Symmetric3x3, Vec3) {
         let mut volume = 0.0f32;
@@ -152,7 +152,9 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the center of mass of a closed mesh.
-    pub fn compute_closed_center_of_mass(triangle_source: &mut dyn ITriangleSource) -> (f32, Vec3) {
+    pub fn compute_closed_center_of_mass<T: ITriangleSource>(
+        triangle_source: &mut T,
+    ) -> (f32, Vec3) {
         let mut center = Vec3::ZERO;
         let mut volume = 0.0f32;
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {
@@ -258,8 +260,8 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the inertia of an open mesh, treating it as a triangle soup.
-    pub fn compute_open_inertia(
-        triangle_source: &mut dyn ITriangleSource,
+    pub fn compute_open_inertia<T: ITriangleSource>(
+        triangle_source: &mut T,
         mass: f32,
     ) -> Symmetric3x3 {
         let mut area = 0.0f32;
@@ -275,8 +277,8 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the inertia of an open mesh with center of mass.
-    pub fn compute_open_inertia_with_center(
-        triangle_source: &mut dyn ITriangleSource,
+    pub fn compute_open_inertia_with_center<T: ITriangleSource>(
+        triangle_source: &mut T,
         mass: f32,
     ) -> (Symmetric3x3, Vec3) {
         let mut center = Vec3::ZERO;
@@ -296,7 +298,7 @@ impl MeshInertiaHelper {
     }
 
     /// Computes the center of mass of an open mesh, treating it as a triangle soup.
-    pub fn compute_open_center_of_mass(triangle_source: &mut dyn ITriangleSource) -> Vec3 {
+    pub fn compute_open_center_of_mass<T: ITriangleSource>(triangle_source: &mut T) -> Vec3 {
         let mut center = Vec3::ZERO;
         let mut area = 0.0f32;
         while let Some((a, b, c)) = triangle_source.get_next_triangle() {

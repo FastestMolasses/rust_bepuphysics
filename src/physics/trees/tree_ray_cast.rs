@@ -4,6 +4,7 @@ use super::ray_batcher::{RayData, TreeRay};
 use super::tree::{Tree, TRAVERSAL_STACK_CAPACITY};
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
+use crate::utilities::vector::HwMinMax;
 use glam::Vec3;
 
 /// Trait for testing ray intersections against leaves in the tree.
@@ -25,8 +26,8 @@ impl Tree {
     pub unsafe fn intersects_ray(min: Vec3, max: Vec3, ray: *const TreeRay, t: &mut f32) -> bool {
         let t0 = min * (*ray).inverse_direction - (*ray).origin_over_direction;
         let t1 = max * (*ray).inverse_direction - (*ray).origin_over_direction;
-        let t_exit = t0.max(t1);
-        let t_entry = t0.min(t1);
+        let t_exit = t0.hw_max(t1);
+        let t_entry = t0.hw_min(t1);
         // Note the use of broadcast and SIMD min/max here. This is much faster than using branches to compute
         // minimum elements, since the branches get mispredicted extremely frequently. Also note 4-wide
         // operations; they're actually faster than using narrower vectors due to some unnecessary codegen.
@@ -62,21 +63,20 @@ impl Tree {
         }
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
-            use std::simd::num::SimdFloat;
             use std::simd::Simd;
             let earliest_exit_v = Simd::<f32, 4>::splat((*ray).maximum_t)
-                .simd_min(Simd::<f32, 4>::splat(t_exit.x))
-                .simd_min(Simd::<f32, 4>::splat(t_exit.y).simd_min(Simd::<f32, 4>::splat(t_exit.z)));
+                .hw_min(Simd::<f32, 4>::splat(t_exit.x))
+                .hw_min(Simd::<f32, 4>::splat(t_exit.y).hw_min(Simd::<f32, 4>::splat(t_exit.z)));
             let earliest_exit = earliest_exit_v[0];
             let t_v = Simd::<f32, 4>::splat(t_entry.x)
-                .simd_max(Simd::<f32, 4>::splat(0.0))
-                .simd_max(Simd::<f32, 4>::splat(t_entry.y).simd_max(Simd::<f32, 4>::splat(t_entry.z)));
+                .hw_max(Simd::<f32, 4>::splat(0.0))
+                .hw_max(Simd::<f32, 4>::splat(t_entry.y).hw_max(Simd::<f32, 4>::splat(t_entry.z)));
             *t = t_v[0];
             *t <= earliest_exit
         }
     }
 
-    unsafe fn ray_cast_node<TLeafTester: IRayLeafTester>(
+    pub(crate) unsafe fn ray_cast_node<TLeafTester: IRayLeafTester>(
         &self,
         mut node_index: i32,
         tree_ray: *mut TreeRay,

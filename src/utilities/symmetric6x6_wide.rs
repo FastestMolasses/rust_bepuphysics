@@ -107,7 +107,7 @@ impl Symmetric6x6Wide {
 
     /// Solves [vLower, vUpper] = [resultLower, resultUpper] * [[a, b], [bT, d]] for [resultLower, resultUpper] using LDLT decomposition.
     /// [[a, b], [bT, d]] should be positive semidefinite.
-    #[inline(always)]
+    #[inline]
     pub fn ldlt_solve(
         v0: &Vector3Wide,
         v1: &Vector3Wide,

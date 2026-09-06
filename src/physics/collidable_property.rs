@@ -46,6 +46,10 @@ impl<T: Copy + Default> CollidableProperty<T> {
 
     /// Initializes the property collection if the deferred constructor was used.
     pub fn initialize(&mut self, body_handle_capacity: i32, static_handle_capacity: i32) {
+        assert!(
+            !self.body_data.allocated() && !self.static_data.allocated(),
+            "Initialize should only be used on a collection which was constructed without defining the Simulation."
+        );
         let pool = unsafe { &mut *self.pool };
         self.body_data = pool.take_at_least(body_handle_capacity);
         self.static_data = pool.take_at_least(static_handle_capacity);

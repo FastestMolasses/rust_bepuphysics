@@ -2,6 +2,7 @@
 
 use glam::Quat;
 
+use crate::out;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::servo_settings::{ServoSettings, ServoSettingsWide};
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
@@ -10,6 +11,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 
 /// Constrains a single body to a target orientation.
 #[repr(C)]
@@ -40,8 +42,9 @@ impl OneBodyAngularServo {
                 "OneBodyAngularServo",
                 "target_orientation",
             );
-            ConstraintChecker::assert_valid_servo_settings(
+            ConstraintChecker::assert_valid_servo_and_spring_settings(
                 &self.servo_settings,
+                &self.spring_settings,
                 "OneBodyAngularServo",
             );
         }
@@ -113,10 +116,11 @@ impl OneBodyAngularServoFunctions {
         csi: &Vector3Wide,
         angular_velocity: &mut Vector3Wide,
     ) {
-        let mut velocity_change = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(csi, inverse_inertia, &mut velocity_change);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::add(angular_velocity, &velocity_change, &mut tmp);
+        let velocity_change = out!(Symmetric3x3Wide::transform_without_overlap(
+            csi,
+            inverse_inertia
+        ));
+        let tmp = out!(Vector3Wide::add(angular_velocity, &velocity_change));
         *angular_velocity = tmp;
     }
 
@@ -149,51 +153,65 @@ impl OneBodyAngularServoFunctions {
     ) {
         // Jacobians are just the identity matrix.
         let inverse_orientation = QuaternionWide::conjugate(orientation_a);
-        let mut error_rotation = QuaternionWide::default();
-        QuaternionWide::concatenate_without_overlap(
+        let error_rotation = out!(QuaternionWide::concatenate_without_overlap(
             &inverse_orientation,
-            &prestep.target_orientation,
-            &mut error_rotation,
-        );
-        let mut error_axis = Vector3Wide::default();
-        let mut error_length = Vector::<f32>::splat(0.0);
-        QuaternionWide::get_axis_angle_from_quaternion(
-            &error_rotation,
-            &mut error_axis,
-            &mut error_length,
-        );
+            &prestep.target_orientation
+        ));
+        let mut error_axis = MaybeUninit::<Vector3Wide>::uninit();
+        let mut error_length = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            QuaternionWide::get_axis_angle_from_quaternion(
+                &error_rotation,
+                &mut *error_axis.as_mut_ptr(),
+                &mut *error_length.as_mut_ptr(),
+            );
+        }
+        let error_axis = unsafe { error_axis.assume_init() };
+        let error_length = unsafe { error_length.assume_init() };
 
-        let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(
-            &prestep.spring_settings,
-            dt,
-            &mut position_error_to_velocity,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-        );
-        let mut effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::invert(&inertia_a.inverse_inertia_tensor, &mut effective_mass);
+        let mut position_error_to_velocity = MaybeUninit::<Vector<f32>>::uninit();
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            SpringSettingsWide::compute_springiness(
+                &prestep.spring_settings,
+                dt,
+                &mut *position_error_to_velocity.as_mut_ptr(),
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+            );
+        }
+        let position_error_to_velocity = unsafe { position_error_to_velocity.assume_init() };
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
+        let effective_mass = out!(Symmetric3x3Wide::invert(&inertia_a.inverse_inertia_tensor));
 
-        let mut clamped_bias_velocity = Vector3Wide::default();
-        let mut maximum_impulse = Vector::<f32>::splat(0.0);
-        ServoSettingsWide::compute_clamped_bias_velocity_3d_axis(
-            &error_axis,
-            &error_length,
-            &position_error_to_velocity,
-            &prestep.servo_settings,
-            dt,
-            inverse_dt,
-            &mut clamped_bias_velocity,
-            &mut maximum_impulse,
-        );
+        let mut clamped_bias_velocity = MaybeUninit::<Vector3Wide>::uninit();
+        let mut maximum_impulse = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            ServoSettingsWide::compute_clamped_bias_velocity_3d_axis(
+                &error_axis,
+                &error_length,
+                &position_error_to_velocity,
+                &prestep.servo_settings,
+                dt,
+                inverse_dt,
+                &mut *clamped_bias_velocity.as_mut_ptr(),
+                &mut *maximum_impulse.as_mut_ptr(),
+            );
+        }
+        let clamped_bias_velocity = unsafe { clamped_bias_velocity.assume_init() };
+        let maximum_impulse = unsafe { maximum_impulse.assume_init() };
 
         // csi = projection.BiasImpulse - accumulatedImpulse * projection.SoftnessImpulseScale - csiaAngular;
-        let mut csv = Vector3Wide::default();
-        Vector3Wide::subtract(&clamped_bias_velocity, &wsv_a.angular, &mut csv);
-        let mut csi = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&csv, &effective_mass, &mut csi);
+        let csv = out!(Vector3Wide::subtract(
+            &clamped_bias_velocity,
+            &wsv_a.angular
+        ));
+        let mut csi = out!(Symmetric3x3Wide::transform_without_overlap(
+            &csv,
+            &effective_mass
+        ));
         let scaled_csi = csi * effective_mass_cfm_scale;
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);

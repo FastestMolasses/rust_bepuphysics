@@ -18,25 +18,31 @@ pub struct Contact2NonconvexPrestepData {
 }
 
 impl IContactPrestep for Contact2NonconvexPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         2
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl INonconvexContactPrestep for Contact2NonconvexPrestepData {
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &NonconvexContactPrestepData {
         debug_assert!(index < 2);
         unsafe { &*(&self.contact0 as *const NonconvexContactPrestepData).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut NonconvexContactPrestepData {
         debug_assert!(index < 2);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexContactPrestepData).add(index) }
@@ -44,9 +50,11 @@ impl INonconvexContactPrestep for Contact2NonconvexPrestepData {
 }
 
 impl ITwoBodyNonconvexContactPrestep for Contact2NonconvexPrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }
@@ -60,13 +68,16 @@ pub struct Contact2NonconvexAccumulatedImpulses {
 }
 
 impl INonconvexContactAccumulatedImpulses for Contact2NonconvexAccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         2
     }
+    #[inline(always)]
     fn get_impulses_for_contact(&self, index: usize) -> &NonconvexAccumulatedImpulses {
         debug_assert!(index < 2);
         unsafe { &*(&self.contact0 as *const NonconvexAccumulatedImpulses).add(index) }
     }
+    #[inline(always)]
     fn get_impulses_for_contact_mut(&mut self, index: usize) -> &mut NonconvexAccumulatedImpulses {
         debug_assert!(index < 2);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexAccumulatedImpulses).add(index) }
@@ -92,25 +103,31 @@ pub struct Contact2NonconvexOneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact2NonconvexOneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         2
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl INonconvexContactPrestep for Contact2NonconvexOneBodyPrestepData {
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &NonconvexContactPrestepData {
         debug_assert!(index < 2);
         unsafe { &*(&self.contact0 as *const NonconvexContactPrestepData).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut NonconvexContactPrestepData {
         debug_assert!(index < 2);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexContactPrestepData).add(index) }
@@ -138,25 +155,31 @@ pub struct Contact3NonconvexPrestepData {
 }
 
 impl IContactPrestep for Contact3NonconvexPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         3
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl INonconvexContactPrestep for Contact3NonconvexPrestepData {
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &NonconvexContactPrestepData {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const NonconvexContactPrestepData).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut NonconvexContactPrestepData {
         debug_assert!(index < 3);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexContactPrestepData).add(index) }
@@ -164,9 +187,11 @@ impl INonconvexContactPrestep for Contact3NonconvexPrestepData {
 }
 
 impl ITwoBodyNonconvexContactPrestep for Contact3NonconvexPrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }
@@ -181,13 +206,16 @@ pub struct Contact3NonconvexAccumulatedImpulses {
 }
 
 impl INonconvexContactAccumulatedImpulses for Contact3NonconvexAccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         3
     }
+    #[inline(always)]
     fn get_impulses_for_contact(&self, index: usize) -> &NonconvexAccumulatedImpulses {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const NonconvexAccumulatedImpulses).add(index) }
     }
+    #[inline(always)]
     fn get_impulses_for_contact_mut(&mut self, index: usize) -> &mut NonconvexAccumulatedImpulses {
         debug_assert!(index < 3);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexAccumulatedImpulses).add(index) }
@@ -214,25 +242,31 @@ pub struct Contact3NonconvexOneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact3NonconvexOneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         3
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl INonconvexContactPrestep for Contact3NonconvexOneBodyPrestepData {
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &NonconvexContactPrestepData {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const NonconvexContactPrestepData).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut NonconvexContactPrestepData {
         debug_assert!(index < 3);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexContactPrestepData).add(index) }
@@ -261,25 +295,31 @@ pub struct Contact4NonconvexPrestepData {
 }
 
 impl IContactPrestep for Contact4NonconvexPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         4
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl INonconvexContactPrestep for Contact4NonconvexPrestepData {
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &NonconvexContactPrestepData {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const NonconvexContactPrestepData).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut NonconvexContactPrestepData {
         debug_assert!(index < 4);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexContactPrestepData).add(index) }
@@ -287,9 +327,11 @@ impl INonconvexContactPrestep for Contact4NonconvexPrestepData {
 }
 
 impl ITwoBodyNonconvexContactPrestep for Contact4NonconvexPrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }
@@ -305,13 +347,16 @@ pub struct Contact4NonconvexAccumulatedImpulses {
 }
 
 impl INonconvexContactAccumulatedImpulses for Contact4NonconvexAccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         4
     }
+    #[inline(always)]
     fn get_impulses_for_contact(&self, index: usize) -> &NonconvexAccumulatedImpulses {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const NonconvexAccumulatedImpulses).add(index) }
     }
+    #[inline(always)]
     fn get_impulses_for_contact_mut(&mut self, index: usize) -> &mut NonconvexAccumulatedImpulses {
         debug_assert!(index < 4);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexAccumulatedImpulses).add(index) }
@@ -339,25 +384,31 @@ pub struct Contact4NonconvexOneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact4NonconvexOneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         4
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl INonconvexContactPrestep for Contact4NonconvexOneBodyPrestepData {
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &NonconvexContactPrestepData {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const NonconvexContactPrestepData).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut NonconvexContactPrestepData {
         debug_assert!(index < 4);
         unsafe { &mut *(&mut self.contact0 as *mut NonconvexContactPrestepData).add(index) }

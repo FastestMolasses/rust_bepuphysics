@@ -14,7 +14,7 @@ use crate::physics::collision_detection::support_finder::ISupportFinder;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
@@ -54,7 +54,7 @@ impl ISupportFinder<TriangleWide> for PretransformedTriangleSupportFinder {
         Vector3Wide::dot(&shape.a, direction, &mut a_dot);
         Vector3Wide::dot(&shape.b, direction, &mut b_dot);
         Vector3Wide::dot(&shape.c, direction, &mut c_dot);
-        let max = a_dot.simd_max(b_dot.simd_max(c_dot));
+        let max = a_dot.hw_max(b_dot.hw_max(c_dot));
         *support =
             Vector3Wide::conditional_select(&max.simd_eq(a_dot).to_simd(), &shape.a, &shape.b);
         *support =
@@ -130,9 +130,10 @@ impl TriangleCylinderTester {
             & abs_face_normal_a_dot_normal.simd_lt(face_normal_fallback_threshold);
         let needs_fallback_i = needs_fallback_face_normal.to_simd();
         if needs_fallback_i.simd_eq(Vector::<i32>::splat(-1)).any() {
-            let push_scale = ((abs_face_normal_a_dot_normal - face_normal_fallback_threshold)
-                / -face_normal_fallback_threshold)
-                .simd_max(zero_f);
+            let push_scale = zero_f.hw_max(
+                (abs_face_normal_a_dot_normal - face_normal_fallback_threshold)
+                    / -face_normal_fallback_threshold,
+            );
             let push = Vector3Wide::scale(normal, &(push_scale * Vector::<f32>::splat(0.1)));
             let mut pushed = Vector3Wide::default();
             Vector3Wide::add(triangle_normal, &push, &mut pushed);
@@ -340,7 +341,7 @@ impl TriangleCylinderTester {
 
         let depth_threshold = -*speculative_margin;
         let skip_depth_refine = triangle_normal_is_minimal | inactive_lanes;
-        let epsilon_scale = b.half_length.simd_max(b.radius);
+        let epsilon_scale = b.half_length.hw_max(b.radius);
         let local_normal;
         let closest_on_b;
         let depth;
@@ -431,7 +432,7 @@ impl TriangleCylinderTester {
             for c in candidates_buf.iter_mut() {
                 c.write(ManifoldCandidate::default());
             }
-            let candidates = candidates_buf[0].as_mut_ptr();
+            let candidates = candidates_buf.as_mut_ptr() as *mut ManifoldCandidate;
             let mut candidate_count = zero_i;
 
             let inverse_local_normal_y = one_f / local_normal.y;
@@ -498,12 +499,12 @@ impl TriangleCylinderTester {
                 &mut t_max_ca,
                 &mut intersected_ca,
             );
-            t_min_ab = t_min_ab.simd_max(zero_f).simd_min(one_f);
-            t_max_ab = t_max_ab.simd_max(zero_f).simd_min(one_f);
-            t_min_bc = t_min_bc.simd_max(zero_f).simd_min(one_f);
-            t_max_bc = t_max_bc.simd_max(zero_f).simd_min(one_f);
-            t_min_ca = t_min_ca.simd_max(zero_f).simd_min(one_f);
-            t_max_ca = t_max_ca.simd_max(zero_f).simd_min(one_f);
+            t_min_ab = t_min_ab.hw_max(zero_f).hw_min(one_f);
+            t_max_ab = t_max_ab.hw_max(zero_f).hw_min(one_f);
+            t_min_bc = t_min_bc.hw_max(zero_f).hw_min(one_f);
+            t_max_bc = t_max_bc.hw_max(zero_f).hw_min(one_f);
+            t_min_ca = t_min_ca.hw_max(zero_f).hw_min(one_f);
+            t_max_ca = t_max_ca.hw_max(zero_f).hw_min(one_f);
 
             // Use triangle tangent space for contact manifold.
             let mut triangle_ab_length = Vector::<f32>::splat(0.0);
@@ -842,7 +843,7 @@ impl TriangleCylinderTester {
             Vector3Wide::dot(&edge_plane_bc, &local_normal, &mut bc_edge_alignment);
             Vector3Wide::dot(&edge_plane_ca, &local_normal, &mut ca_edge_alignment);
             let max_alignment =
-                ab_edge_alignment.simd_max(bc_edge_alignment.simd_max(ca_edge_alignment));
+                ab_edge_alignment.hw_max(bc_edge_alignment.hw_max(ca_edge_alignment));
             let ab_is_dominant = max_alignment.simd_eq(ab_edge_alignment);
             let bc_is_dominant = max_alignment.simd_eq(bc_edge_alignment);
             let ab_is_dominant_i = ab_is_dominant.to_simd();
@@ -911,8 +912,8 @@ impl TriangleCylinderTester {
                 let unrestrict_weight = one_f - restrict_weight;
                 cylinder_t_min = regular_contribution + unrestrict_weight * cyl_t_min_unrestricted;
                 cylinder_t_max = regular_contribution + unrestrict_weight * cyl_t_max_unrestricted;
-                cylinder_t_min = cylinder_t_min.simd_max(zero_f).simd_min(one_f);
-                cylinder_t_max = cylinder_t_max.simd_max(zero_f).simd_min(one_f);
+                cylinder_t_min = zero_f.hw_max(cylinder_t_min).hw_min(one_f);
+                cylinder_t_max = zero_f.hw_max(cylinder_t_max).hw_min(one_f);
 
                 let inverse_depth_denominator =
                     Vector::<f32>::splat(-1.0) / horizontal_normal_length_squared;
@@ -1030,8 +1031,8 @@ impl TriangleCylinderTester {
                 exit_ca =
                     ca_is_dominant.select(exit_ca * restrict_weight + unrestrict_weight, exit_ca);
 
-                let side_tri_cyl_t_min = entry_ab.simd_max(entry_bc.simd_max(entry_ca));
-                let side_tri_cyl_t_max = exit_ab.simd_min(exit_bc.simd_min(exit_ca));
+                let side_tri_cyl_t_min = entry_ab.hw_max(entry_bc.hw_max(entry_ca));
+                let side_tri_cyl_t_max = exit_ab.hw_min(exit_bc.hw_min(exit_ca));
 
                 // Vertex fallback for degenerate intervals.
                 let use_vertex_fallback =
@@ -1051,11 +1052,11 @@ impl TriangleCylinderTester {
                     Vector3Wide::conditional_select(&use_b, &triangle_b_world, &vertex_fallback);
 
                 cylinder_t_min = use_side_triangle_face.select(
-                    side_tri_cyl_t_min.simd_max(zero_f).simd_min(one_f),
+                    zero_f.hw_max(one_f.hw_min(side_tri_cyl_t_min)),
                     cylinder_t_min,
                 );
                 cylinder_t_max = use_side_triangle_face.select(
-                    side_tri_cyl_t_max.simd_max(zero_f).simd_min(one_f),
+                    zero_f.hw_max(one_f.hw_min(side_tri_cyl_t_max)),
                     cylinder_t_max,
                 );
                 local_offset_b0.x = use_side_triangle_face.select(

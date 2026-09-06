@@ -4,11 +4,10 @@ use crate::physics::constraints::twist_servo::TwistServoFunctions;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::num::SimdFloat;
 
 /// Constrains the twist velocity between two bodies to a target.
 #[repr(C)]
@@ -235,8 +234,8 @@ impl TwistMotorFunctions {
             bias_impulse - *accumulated_impulses * softness_impulse_scale - csi_velocity_component;
         let previous_accumulated_impulse = *accumulated_impulses;
         *accumulated_impulses = (*accumulated_impulses + csi)
-            .simd_max(-maximum_impulse)
-            .simd_min(maximum_impulse);
+            .hw_min(maximum_impulse)
+            .hw_max(-maximum_impulse);
         let csi = *accumulated_impulses - previous_accumulated_impulse;
 
         TwistServoFunctions::apply_impulse(

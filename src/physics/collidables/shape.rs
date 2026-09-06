@@ -9,7 +9,9 @@ use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
 
 // Re-export from canonical location.
-pub use crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler;
+pub use crate::physics::collision_detection::ray_batchers::{
+    IShapeRayHitHandler, ShapeRayHitHandlerRef,
+};
 use crate::physics::trees::ray_batcher::RaySource;
 
 /// Defines a type usable as a shape by collidables.
@@ -58,9 +60,15 @@ pub trait IDisposableShape: IShape {
 /// Internal allocation interface for shape wide types that may need dynamic memory.
 /// Separated from `IShapeWide<TShape>` so it can be constrained without knowing TShape.
 pub trait IShapeWideAllocation {
+    /// Number of bytes this wide type requires for its internal allocation. Zero for most shapes.
+    const INTERNAL_ALLOCATION_SIZE: usize = 0;
+
+    /// Alignment the internal allocation must satisfy.
+    const INTERNAL_ALLOCATION_ALIGN: usize = 1;
+
     /// Gets the number of bytes required for internal allocations. Returns 0 for most shapes.
     fn internal_allocation_size_of(&self) -> usize {
-        0
+        Self::INTERNAL_ALLOCATION_SIZE
     }
     /// Provides memory for internal allocations. No-op for shapes with zero allocation size.
     fn initialize_allocation(&mut self, _memory: &Buffer<u8>) {}
@@ -86,6 +94,89 @@ pub trait IShapeWideAllocation {
             *dst.add(i * vector_width + index) = *src.add(i);
         }
     }
+}
+
+/// Alignment `WideAllocationScratch` guarantees for the memory it hands out.
+pub const WIDE_ALLOCATION_SCRATCH_ALIGN: usize = 64;
+
+/// Byte capacity of `WideAllocationScratch`, sized for the largest internal allocation any wide
+/// shape type currently asks for.
+pub const WIDE_ALLOCATION_SCRATCH_SIZE: usize = crate::utilities::vector::VECTOR_WIDTH
+    * std::mem::size_of::<crate::physics::collidables::convex_hull::ConvexHull>();
+
+/// Inline stack scratch backing `IShapeWideAllocation` internal allocations. Always held in a
+/// `MaybeUninit`; the wide shape writes every lane it later reads.
+#[repr(C, align(64))]
+pub struct WideAllocationScratch([std::mem::MaybeUninit<u8>; WIDE_ALLOCATION_SCRATCH_SIZE]);
+
+const _: () = assert!(
+    std::mem::align_of::<WideAllocationScratch>() == WIDE_ALLOCATION_SCRATCH_ALIGN,
+    "WIDE_ALLOCATION_SCRATCH_ALIGN must track the repr(align) on WideAllocationScratch"
+);
+
+/// Returns a spilled internal allocation to the pool it came from on every exit path, including
+/// an unwind out of the loop that uses it.
+pub struct SpilledAllocation {
+    pub buffer: Buffer<u8>,
+    pub pool: *mut BufferPool,
+}
+
+impl Drop for SpilledAllocation {
+    #[inline(always)]
+    fn drop(&mut self) {
+        if self.buffer.allocated() {
+            unsafe { (*self.pool).return_buffer(&mut self.buffer) };
+        }
+    }
+}
+
+/// Monomorphization-time proof that `WideAllocationScratch` can serve `TShapeWide`.
+struct ScratchFits<TShapeWide: IShapeWideAllocation>(std::marker::PhantomData<TShapeWide>);
+
+impl<TShapeWide: IShapeWideAllocation> ScratchFits<TShapeWide> {
+    const CHECK: () = {
+        assert!(
+            TShapeWide::INTERNAL_ALLOCATION_SIZE <= WIDE_ALLOCATION_SCRATCH_SIZE,
+            "wide shape internal allocation exceeds WIDE_ALLOCATION_SCRATCH_SIZE"
+        );
+        assert!(
+            TShapeWide::INTERNAL_ALLOCATION_ALIGN <= WIDE_ALLOCATION_SCRATCH_ALIGN,
+            "wide shape internal allocation alignment exceeds WIDE_ALLOCATION_SCRATCH_ALIGN"
+        );
+    };
+}
+
+/// Hands `wide` the internal allocation it asks for, taken from `scratch` when it fits and
+/// otherwise from `pool`. `scratch` and the returned guard must outlive every use of `wide`.
+///
+/// A wide type whose declared requirement exceeds the scratch is a compile error rather than a
+/// pool allocation on the hot path; the runtime spill only covers a `internal_allocation_size_of`
+/// override that reports more than `INTERNAL_ALLOCATION_SIZE`.
+///
+/// # Safety
+/// `pool` must stay valid for the lifetime of the returned guard.
+#[inline(always)]
+pub unsafe fn initialize_internal_allocation<TShapeWide: IShapeWideAllocation>(
+    wide: &mut TShapeWide,
+    scratch: &mut std::mem::MaybeUninit<WideAllocationScratch>,
+    pool: *mut BufferPool,
+) -> SpilledAllocation {
+    let () = ScratchFits::<TShapeWide>::CHECK;
+    let mut spilled = SpilledAllocation {
+        buffer: Buffer::default(),
+        pool,
+    };
+    let size = wide.internal_allocation_size_of();
+    if size > 0 {
+        let memory = if size <= WIDE_ALLOCATION_SCRATCH_SIZE {
+            Buffer::new(scratch.as_mut_ptr() as *mut u8, size as i32, -1)
+        } else {
+            spilled.buffer = (*pool).take_at_least::<u8>(size as i32);
+            Buffer::new(spilled.buffer.as_mut_ptr(), size as i32, spilled.buffer.id())
+        };
+        wide.initialize_allocation(&memory);
+    }
+    spilled
 }
 
 /// Widely vectorized bundle representation of a shape.
@@ -175,8 +266,10 @@ pub trait INonConvexBounds {
         max: &mut glam::Vec3,
     );
 
-    /// Tests a ray against this shape using dynamic dispatch for the hit handler.
-    /// Matches C# `IHomogeneousCompoundShape.RayTest`.
+    /// Identifies this shape for `Shapes::ray_test`'s monomorphized dispatch.
+    fn shape_ray_ref(&self) -> super::shapes::ShapeRayRef;
+
+    /// Tests a ray against this shape with an erased hit handler.
     ///
     /// # Safety
     /// Caller must ensure shape data and pose are valid.
@@ -186,10 +279,10 @@ pub trait INonConvexBounds {
         ray: &crate::physics::collision_detection::ray_batchers::RayData,
         maximum_t: &mut f32,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     );
 
-    /// Tests a batch of rays against this shape using dynamic dispatch for the hit handler.
+    /// Tests a batch of rays against this shape with an erased hit handler.
     ///
     /// # Safety
     /// Caller must ensure shape data, rays and pool are valid.
@@ -198,7 +291,7 @@ pub trait INonConvexBounds {
         pose: &RigidPose,
         rays: &mut RaySource,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     );
 }
 
@@ -211,7 +304,6 @@ pub trait ICompoundShape: IDisposableShape {
     fn get_child(&self, child_index: i32) -> &CompoundChild;
 
     /// Computes the bounding box of the compound shape.
-    /// Matches C# `ICompoundShape.ComputeBounds(orientation, shapeBatches, out min, out max)`.
     fn compute_bounds(
         &self,
         orientation: glam::Quat,
@@ -226,6 +318,7 @@ pub trait ICompoundShape: IDisposableShape {
         local_min: &glam::Vec3,
         local_max: &glam::Vec3,
         pool: &mut BufferPool,
+        shapes: &super::shapes::Shapes,
         overlaps: &mut TOverlaps,
     );
 
@@ -238,8 +331,10 @@ pub trait ICompoundShape: IDisposableShape {
         body_index: i32,
     );
 
-    /// Tests a ray against this compound shape using dynamic dispatch for the hit handler.
-    /// Matches C# `ICompoundShape.RayTest(pose, ray, ref maximumT, shapeBatches, ref hitHandler)`.
+    /// Identifies this shape for `Shapes::ray_test`'s monomorphized dispatch.
+    fn shape_ray_ref(&self) -> super::shapes::ShapeRayRef;
+
+    /// Tests a ray against this compound shape with an erased hit handler.
     ///
     /// # Safety
     /// Caller must ensure shape data and pose are valid.
@@ -250,10 +345,10 @@ pub trait ICompoundShape: IDisposableShape {
         maximum_t: &mut f32,
         shape_batches: &super::shapes::Shapes,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     );
 
-    /// Tests a batch of rays against this compound shape using dynamic dispatch for the hit handler.
+    /// Tests a batch of rays against this compound shape with an erased hit handler.
     ///
     /// # Safety
     /// Caller must ensure shape data, rays and pool are valid.
@@ -263,7 +358,7 @@ pub trait ICompoundShape: IDisposableShape {
         rays: &mut RaySource,
         shape_batches: &super::shapes::Shapes,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     );
 }
 

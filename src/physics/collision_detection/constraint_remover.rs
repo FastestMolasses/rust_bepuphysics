@@ -4,10 +4,13 @@ use crate::physics::bodies::Bodies;
 use crate::physics::handles::{BodyHandle, ConstraintHandle};
 use crate::physics::handy_enumerators::PassthroughReferenceCollector;
 use crate::physics::solver::Solver;
+use crate::utilities::collections::comparer_ref::RefComparer;
 use crate::utilities::collections::quicklist::QuickList;
+use crate::utilities::collections::quicksort::Quicksort;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
+use std::cmp::Ordering;
 use std::sync::Mutex;
 
 #[derive(Clone, Copy, Default)]
@@ -24,14 +27,33 @@ impl TypeBatchIndex {
     }
 }
 
+struct TypeBatchIndexComparer;
+
+impl RefComparer<TypeBatchIndex> for TypeBatchIndexComparer {
+    #[inline(always)]
+    fn compare(&self, a: &TypeBatchIndex, b: &TypeBatchIndex) -> Ordering {
+        a.as_i32().cmp(&b.as_i32())
+    }
+}
+
 /// Per-body removal target, identifying the constraint to remove and the body involved.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(crate) struct PerBodyRemovalTarget {
     pub encoded_body_index: i32,
     pub constraint_handle: ConstraintHandle,
     pub batch_index: i32,
     pub body_handle: BodyHandle,
 }
+
+const _: () = {
+    use std::mem::{offset_of, size_of};
+    assert!(size_of::<PerBodyRemovalTarget>() == 16);
+    assert!(offset_of!(PerBodyRemovalTarget, encoded_body_index) == 0);
+    assert!(offset_of!(PerBodyRemovalTarget, constraint_handle) == 4);
+    assert!(offset_of!(PerBodyRemovalTarget, batch_index) == 8);
+    assert!(offset_of!(PerBodyRemovalTarget, body_handle) == 12);
+};
 
 impl Default for PerBodyRemovalTarget {
     fn default() -> Self {
@@ -45,6 +67,7 @@ impl Default for PerBodyRemovalTarget {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 struct RemovalsForTypeBatch {
     constraint_handles_to_remove: QuickList<ConstraintHandle>,
     per_body_removal_targets: QuickList<PerBodyRemovalTarget>,
@@ -259,7 +282,7 @@ pub struct ConstraintRemover {
     thread_count: i32,
 
     batches: Option<RemovalCache>,
-    removed_type_batches: Vec<TypeBatchIndex>,
+    removed_type_batches: QuickList<TypeBatchIndex>,
     allocation_ids_to_free: QuickList<i32>,
     batch_removal_locker: Mutex<()>,
 }
@@ -285,7 +308,7 @@ impl ConstraintRemover {
             worker_caches: Vec::new(),
             thread_count: 0,
             batches: None,
-            removed_type_batches: Vec::new(),
+            removed_type_batches: QuickList::default(),
             allocation_ids_to_free: QuickList::default(),
             batch_removal_locker: Mutex::new(()),
         }
@@ -402,26 +425,13 @@ impl ConstraintRemover {
                 }
             }
             // Sort the batches by type batch index (deterministic ordering).
-            unsafe {
-                let count = batches.batch_count as usize;
-                let mut paired: Vec<(TypeBatchIndex, usize)> = (0..count)
-                    .map(|i| (*batches.type_batches.get(i as i32), i))
-                    .collect();
-                paired.sort_unstable_by_key(|a| a.0.as_i32());
-
-                // Apply the permutation to both TypeBatches and RemovalsForTypeBatches.
-                // RemovalsForTypeBatch is Copy, so we can just read and write.
-                let new_type_batches: Vec<TypeBatchIndex> =
-                    paired.iter().map(|(tb, _)| *tb).collect();
-                let new_removals: Vec<RemovalsForTypeBatch> = paired
-                    .iter()
-                    .map(|(_, old_idx)| *batches.removals_for_type_batches.get(*old_idx as i32))
-                    .collect();
-                for i in 0..count {
-                    *batches.type_batches.get_mut(i as i32) = new_type_batches[i];
-                    *batches.removals_for_type_batches.get_mut(i as i32) = new_removals[i];
-                }
-            }
+            Quicksort::sort(
+                batches.type_batches.as_slice_mut(),
+                batches.removals_for_type_batches.as_slice_mut(),
+                0,
+                batches.batch_count - 1,
+                &TypeBatchIndexComparer,
+            );
         }
 
         // Ensure that the solver's id pool is large enough to hold all constraint handles being removed.
@@ -438,7 +448,8 @@ impl ConstraintRemover {
             for i in 0..active_set.batches.count {
                 type_batch_count += active_set.batches.get(i).type_batches.count;
             }
-            self.removed_type_batches = Vec::with_capacity(type_batch_count as usize);
+            self.removed_type_batches =
+                QuickList::with_capacity(type_batch_count, &mut *self.pool);
         }
 
         let batch_count = batches.batch_count;
@@ -528,7 +539,7 @@ impl ConstraintRemover {
                 if type_batch.constraint_count == 0 {
                     // This batch-typebatch needs to be removed.
                     let _lock = self.batch_removal_locker.lock().unwrap();
-                    self.removed_type_batches.push(batch);
+                    self.removed_type_batches.add_unsafely(batch);
                 }
             }
         }
@@ -644,13 +655,14 @@ impl ConstraintRemover {
     /// Post-flush cleanup: removes empty type batches and returns worker cache allocations.
     pub fn postflush(&mut self) {
         unsafe {
-            if !self.removed_type_batches.is_empty() {
+            if self.removed_type_batches.count > 0 {
                 // Sort removed batches from highest to lowest so higher index batches get removed first.
                 self.removed_type_batches
+                    .as_mut_slice()
                     .sort_unstable_by_key(|b| std::cmp::Reverse(b.as_i32()));
                 let solver_ptr = self.solver;
-                for i in 0..self.removed_type_batches.len() {
-                    let batch_indices = self.removed_type_batches[i];
+                for i in 0..self.removed_type_batches.count {
+                    let batch_indices = *self.removed_type_batches.get(i);
                     let active_set = (*solver_ptr).active_set_mut();
                     let batch = active_set.batches.get_mut(batch_indices.batch as i32);
                     let pool = &mut *(*solver_ptr).pool;
@@ -658,10 +670,9 @@ impl ConstraintRemover {
                     (*solver_ptr).remove_batch_if_empty(batch_indices.batch as i32);
                 }
             }
-            self.removed_type_batches.clear();
-
             // Return any fallback allocation ids.
             let pool = &mut *self.pool;
+            self.removed_type_batches.dispose(pool);
             if self.allocation_ids_to_free.span.allocated() {
                 for i in 0..self.allocation_ids_to_free.count {
                     pool.return_unsafely(*self.allocation_ids_to_free.get(i));

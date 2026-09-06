@@ -2,7 +2,10 @@
 // Contact constraint description structs — scalar form for scatter/gather to/from SIMD type batches.
 
 use crate::physics::collision_detection::narrow_phase_callbacks::PairMaterialProperties;
-use crate::physics::constraints::contact::contact_constraint_description::ConstraintContactData;
+use crate::physics::constraints::contact::contact_constraint_description::{
+    ConstraintContactData, IConvexOneBodyContactConstraintDescription,
+    IConvexTwoBodyContactConstraintDescription,
+};
 use crate::physics::constraints::contact::contact_convex_common::ConvexContactWide;
 use crate::physics::constraints::contact::contact_convex_types::*;
 use crate::physics::constraints::spring_settings::SpringSettings;
@@ -104,6 +107,21 @@ macro_rules! impl_convex_one_body_description {
                 &mut self.contact0
             }
         }
+
+        impl IConvexOneBodyContactConstraintDescription for $name {
+            #[inline(always)]
+            fn copy_manifold_wide_properties(&mut self, normal: &Vec3, material: &PairMaterialProperties) {
+                <$name>::copy_manifold_wide_properties(self, normal, material)
+            }
+            #[inline(always)]
+            fn get_first_contact(&self) -> &ConstraintContactData {
+                <$name>::get_first_contact(self)
+            }
+            #[inline(always)]
+            fn get_first_contact_mut(&mut self) -> &mut ConstraintContactData {
+                <$name>::get_first_contact_mut(self)
+            }
+        }
     };
 }
 
@@ -199,6 +217,21 @@ macro_rules! impl_convex_two_body_description {
             #[inline(always)]
             pub fn get_first_contact_mut(&mut self) -> &mut ConstraintContactData {
                 &mut self.contact0
+            }
+        }
+
+        impl IConvexTwoBodyContactConstraintDescription for $name {
+            #[inline(always)]
+            fn copy_manifold_wide_properties(&mut self, offset_b: &Vec3, normal: &Vec3, material: &PairMaterialProperties) {
+                <$name>::copy_manifold_wide_properties(self, offset_b, normal, material)
+            }
+            #[inline(always)]
+            fn get_first_contact(&self) -> &ConstraintContactData {
+                <$name>::get_first_contact(self)
+            }
+            #[inline(always)]
+            fn get_first_contact_mut(&mut self) -> &mut ConstraintContactData {
+                <$name>::get_first_contact_mut(self)
             }
         }
     };

@@ -5,7 +5,7 @@ use crate::physics::collidables::sphere::SphereWide;
 use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 
@@ -38,16 +38,16 @@ impl IPairDistanceTester<SphereWide, BoxWide> for SphereBoxDistanceTester {
         let clamped_local_offset_b = Vector3Wide {
             x: local_offset_b
                 .x
-                .simd_max(-b.half_width)
-                .simd_min(b.half_width),
+                .hw_max(-b.half_width)
+                .hw_min(b.half_width),
             y: local_offset_b
                 .y
-                .simd_max(-b.half_height)
-                .simd_min(b.half_height),
+                .hw_max(-b.half_height)
+                .hw_min(b.half_height),
             z: local_offset_b
                 .z
-                .simd_max(-b.half_length)
-                .simd_min(b.half_length),
+                .hw_max(-b.half_length)
+                .hw_min(b.half_length),
         };
         let mut local_normal = Vector3Wide::default();
         Vector3Wide::subtract(&clamped_local_offset_b, &local_offset_b, &mut local_normal);

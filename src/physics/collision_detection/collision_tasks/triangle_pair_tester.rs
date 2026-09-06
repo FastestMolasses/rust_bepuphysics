@@ -12,7 +12,7 @@ use crate::physics::helpers::Helpers;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
@@ -39,8 +39,8 @@ impl TrianglePairTester {
         Vector3Wide::dot(normal, a, &mut d_a);
         Vector3Wide::dot(normal, b, &mut d_b);
         Vector3Wide::dot(normal, c, &mut d_c);
-        *min = d_a.simd_min(d_b.simd_min(d_c));
-        *max = d_a.simd_max(d_b.simd_max(d_c));
+        *min = d_a.hw_min(d_b.hw_min(d_c));
+        *max = d_a.hw_max(d_b.hw_max(d_c));
     }
 
     #[inline(always)]
@@ -60,7 +60,7 @@ impl TrianglePairTester {
         let mut max_b = Vector::<f32>::splat(0.0);
         Self::get_interval_for_normal(a_a, b_a, c_a, normal, &mut min_a, &mut max_a);
         Self::get_interval_for_normal(a_b, b_b, c_b, normal, &mut min_b, &mut max_b);
-        *depth = (max_a - min_b).simd_min(max_b - min_a);
+        *depth = (max_a - min_b).hw_min(max_b - min_a);
     }
 
     #[inline(always)]
@@ -99,7 +99,7 @@ impl TrianglePairTester {
         let use_candidate = depth_candidate.simd_lt(*depth);
         *normal =
             Vector3Wide::conditional_select(&use_candidate.to_simd(), normal_candidate, normal);
-        *depth = depth.simd_min(*depth_candidate);
+        *depth = depth.hw_min(*depth_candidate);
     }
 
     #[inline(always)]
@@ -115,7 +115,7 @@ impl TrianglePairTester {
         normal.x = use_candidate.select(*nx, normal.x);
         normal.y = use_candidate.select(*ny, normal.y);
         normal.z = use_candidate.select(*nz, normal.z);
-        *depth = depth.simd_min(*depth_candidate);
+        *depth = depth.hw_min(*depth_candidate);
     }
 
     #[inline(always)]
@@ -136,7 +136,7 @@ impl TrianglePairTester {
         allow_contacts: &Vector<i32>,
         inverse_contact_normal_dot_face_normal_b: &Vector<f32>,
         minimum_depth: &Vector<f32>,
-        candidates: &mut ManifoldCandidate,
+        candidates: *mut ManifoldCandidate,
         candidate_count: &mut Vector<i32>,
         pair_count: i32,
     ) {
@@ -172,7 +172,7 @@ impl TrianglePairTester {
             (candidate.depth.simd_ge(*minimum_depth) & contained).to_simd() & *allow_contacts;
         unsafe {
             ManifoldCandidateHelper::add_candidate_with_depth(
-                candidates as *mut ManifoldCandidate,
+                candidates,
                 candidate_count,
                 &candidate,
                 &exists,
@@ -246,7 +246,7 @@ impl TrianglePairTester {
         local_normal: &Vector3Wide,
         minimum_depth: &Vector<f32>,
         mut allow_contacts: Vector<i32>,
-        candidates: &mut ManifoldCandidate,
+        candidates: *mut ManifoldCandidate,
         candidate_count: &mut Vector<i32>,
         pair_count: i32,
     ) {
@@ -308,8 +308,8 @@ impl TrianglePairTester {
         let exit_ab = ab_mask.select(t_ab, min_value);
         let exit_bc = bc_mask.select(t_bc, min_value);
         let exit_ca = ca_mask.select(t_ca, min_value);
-        let entry = entry_ab.simd_min(entry_bc.simd_min(entry_ca));
-        let exit = exit_ab.simd_max(exit_bc.simd_max(exit_ca));
+        let entry = entry_ab.hw_min(entry_bc.hw_min(entry_ca));
+        let exit = exit_ab.hw_max(exit_bc.hw_max(exit_ca));
         let use_ab_as_entry = entry.simd_eq(t_ab);
         let use_bc_as_entry = entry.simd_eq(t_bc);
         let use_ab_as_exit = exit.simd_eq(t_ab);
@@ -324,8 +324,8 @@ impl TrianglePairTester {
         );
         // If an edge fails to generate any interval, it's not intersecting.
         allow_contacts &= !(entry.simd_eq(min_value) | exit.simd_eq(max_value)).to_simd();
-        let entry = entry.simd_max(Vector::<f32>::splat(0.0));
-        let exit = exit.simd_min(Vector::<f32>::splat(1.0));
+        let entry = Vector::<f32>::splat(0.0).hw_max(entry);
+        let exit = Vector::<f32>::splat(1.0).hw_min(exit);
 
         let mut edge_start_b_dot_normal = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(edge_start_b, local_normal, &mut edge_start_b_dot_normal);
@@ -366,7 +366,7 @@ impl TrianglePairTester {
             & (entry.simd_gt(zero_f));
         unsafe {
             ManifoldCandidateHelper::add_candidate_with_depth(
-                candidates as *mut ManifoldCandidate,
+                candidates,
                 candidate_count,
                 &candidate,
                 &exists.to_simd(),
@@ -389,7 +389,7 @@ impl TrianglePairTester {
             & (exit.simd_ge(zero_f));
         unsafe {
             ManifoldCandidateHelper::add_candidate_with_depth(
-                candidates as *mut ManifoldCandidate,
+                candidates,
                 candidate_count,
                 &candidate,
                 &exists.to_simd(),
@@ -852,7 +852,7 @@ impl TrianglePairTester {
                     &use_face_case_for_b.to_simd(),
                     &inverse_contact_normal_dot_face_normal_b,
                     &minimum_depth,
-                    &mut buffer[0],
+                    buffer.as_mut_ptr(),
                     &mut candidate_count,
                     pair_count,
                 );
@@ -873,7 +873,7 @@ impl TrianglePairTester {
                     &use_face_case_for_b.to_simd(),
                     &inverse_contact_normal_dot_face_normal_b,
                     &minimum_depth,
-                    &mut buffer[0],
+                    buffer.as_mut_ptr(),
                     &mut candidate_count,
                     pair_count,
                 );
@@ -894,7 +894,7 @@ impl TrianglePairTester {
                     &use_face_case_for_b.to_simd(),
                     &inverse_contact_normal_dot_face_normal_b,
                     &minimum_depth,
-                    &mut buffer[0],
+                    buffer.as_mut_ptr(),
                     &mut candidate_count,
                     pair_count,
                 );
@@ -971,7 +971,7 @@ impl TrianglePairTester {
                     &local_normal,
                     &minimum_depth,
                     still_could_use_clipping_contacts,
-                    &mut buffer[0],
+                    buffer.as_mut_ptr(),
                     &mut candidate_count,
                     pair_count,
                 );
@@ -1003,7 +1003,7 @@ impl TrianglePairTester {
                     &local_normal,
                     &minimum_depth,
                     still_could_use_clipping_contacts,
-                    &mut buffer[0],
+                    buffer.as_mut_ptr(),
                     &mut candidate_count,
                     pair_count,
                 );
@@ -1035,20 +1035,20 @@ impl TrianglePairTester {
                     &local_normal,
                     &minimum_depth,
                     still_could_use_clipping_contacts,
-                    &mut buffer[0],
+                    buffer.as_mut_ptr(),
                     &mut candidate_count,
                     pair_count,
                 );
             }
 
             // Reduce to 4 contacts.
-            let epsilon_scale = epsilon_scale_a.simd_min(epsilon_scale_b);
+            let epsilon_scale = epsilon_scale_a.hw_min(epsilon_scale_b);
             let mut contact0 = ManifoldCandidate::default();
             let mut contact1 = ManifoldCandidate::default();
             let mut contact2 = ManifoldCandidate::default();
             let mut contact3 = ManifoldCandidate::default();
             ManifoldCandidateHelper::reduce_without_computing_depths(
-                &mut buffer[0] as *mut ManifoldCandidate,
+                buffer.as_mut_ptr(),
                 candidate_count,
                 6,
                 epsilon_scale,

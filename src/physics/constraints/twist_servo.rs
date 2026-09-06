@@ -6,11 +6,10 @@ use crate::utilities::math_helper;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Quat;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::num::SimdFloat;
 use std::simd::Select;
 
 /// Constrains two bodies to maintain a target twist angle around body-attached axes.
@@ -49,7 +48,11 @@ impl TwistServo {
                 "TwistServo",
                 "local_basis_b",
             );
-            ConstraintChecker::assert_valid_servo_settings(&self.servo_settings, "TwistServo");
+            ConstraintChecker::assert_valid_servo_and_spring_settings(
+                &self.servo_settings,
+                &self.spring_settings,
+                "TwistServo",
+            );
         }
         QuaternionWide::write_slot(
             self.local_basis_a,
@@ -442,8 +445,8 @@ impl TwistServoFunctions {
             bias_impulse - *accumulated_impulses * softness_impulse_scale - csi_velocity_component;
         let previous_accumulated_impulse = *accumulated_impulses;
         *accumulated_impulses = (*accumulated_impulses + csi)
-            .simd_max(-maximum_impulse)
-            .simd_min(maximum_impulse);
+            .hw_max(-maximum_impulse)
+            .hw_min(maximum_impulse);
         csi = *accumulated_impulses - previous_accumulated_impulse;
 
         Self::apply_impulse(

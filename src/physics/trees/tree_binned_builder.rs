@@ -2,7 +2,7 @@
 // Implements the binned SAH tree builder used by Tree::binned_build, including MT paths.
 
 use crate::physics::trees::leaf::Leaf;
-use crate::physics::trees::node::{Metanode, Node, NodeChild};
+use crate::physics::trees::node::{CostOrFlag, Metanode, Node, NodeChild};
 use crate::physics::trees::tree::Tree;
 use crate::utilities::bounding_box::BoundingBox4;
 use crate::utilities::collections::comparer_ref::RefComparer;
@@ -267,9 +267,7 @@ struct BinSubtreesTaskContext {
     subtrees: Buffer<NodeChild>,
     bin_indices: Buffer<u8>,
     bin_count: i32,
-    use_x: bool,
-    use_y: bool,
-    axis_index: i32,
+    axis: BinAxisSelector,
     centroid_bounds_min: Vec4,
     offset_to_bin_index: Vec4,
     maximum_bin_index: Vec4,
@@ -412,11 +410,10 @@ unsafe fn bin_subtrees_worker(
     }
 
     let (start, count) = context.task_data.get_slot_interval(task_id);
-    bin_subtrees(
+    debug_assert!(context.bin_indices.allocated());
+    bin_subtrees::<true>(
         context.centroid_bounds_min,
-        context.use_x,
-        context.use_y,
-        context.axis_index,
+        context.axis,
         context.offset_to_bin_index,
         context.maximum_bin_index,
         context.subtrees.slice_offset(start, count),
@@ -424,7 +421,6 @@ unsafe fn bin_subtrees_worker(
         worker.bin_centroid_bounding_boxes,
         worker.bin_leaf_counts,
         context.bin_indices.slice_offset(start, count),
-        true, // Always write bin indices in MT path
     );
 }
 
@@ -432,9 +428,7 @@ unsafe fn bin_subtrees_worker(
 unsafe fn multithreaded_bin_subtrees(
     mt_context: *mut MultithreadBinnedBuildContext,
     centroid_bounds_min: Vec4,
-    use_x: bool,
-    use_y: bool,
-    axis_index: i32,
+    axis: BinAxisSelector,
     offset_to_bin_index: Vec4,
     maximum_bin_index: Vec4,
     subtrees: Buffer<NodeChild>,
@@ -481,9 +475,7 @@ unsafe fn multithreaded_bin_subtrees(
         subtrees,
         bin_indices: subtree_bin_indices,
         bin_count,
-        use_x,
-        use_y,
-        axis_index,
+        axis,
         centroid_bounds_min,
         offset_to_bin_index,
         maximum_bin_index,
@@ -835,56 +827,56 @@ unsafe fn build_node(
     (a_index, b_index)
 }
 
+/// Lane selector used by `compute_bin_index`, built once per node.
+#[derive(Clone, Copy)]
+struct BinAxisSelector {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+    permute_mask: std::arch::x86_64::__m128i,
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+    axis_index: i32,
+}
+
+impl BinAxisSelector {
+    #[inline(always)]
+    fn new(axis_index: i32) -> Self {
+        debug_assert!((0..3).contains(&axis_index));
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+        {
+            Self {
+                permute_mask: unsafe { std::arch::x86_64::_mm_set1_epi32(axis_index) },
+            }
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+        {
+            Self { axis_index }
+        }
+    }
+}
+
 /// Computes the bin index for a single subtree along the chosen axis.
 #[inline(always)]
 fn compute_bin_index(
     centroid_min: Vec4,
-    use_x: bool,
-    use_y: bool,
-    axis_index: i32,
+    axis: BinAxisSelector,
     offset_to_bin_index: Vec4,
     maximum_bin_index: Vec4,
     box_bb4: &BoundingBox4,
 ) -> i32 {
     let centroid = box_bb4.min + box_bb4.max;
+    // Clamping against zero matters too; corrupted bounds can push the index negative.
     let bin_indices_continuous =
         ((centroid - centroid_min) * offset_to_bin_index).clamp(Vec4::ZERO, maximum_bin_index);
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    {
-        #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx") {
-            return unsafe { compute_bin_index_permute_avx(bin_indices_continuous, axis_index) };
-        }
-        // No variable-index permute available; extract the lane with an indexed load.
-        let lanes = bin_indices_continuous.to_array();
-        lanes[axis_index as usize] as i32
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+    unsafe {
+        use std::arch::x86_64::*;
+        let value = _mm_loadu_ps(&bin_indices_continuous as *const Vec4 as *const f32);
+        _mm_cvtss_f32(_mm_permutevar_ps(value, axis.permute_mask)) as i32
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
     {
-        if use_x {
-            bin_indices_continuous.x as i32
-        } else if use_y {
-            bin_indices_continuous.y as i32
-        } else {
-            bin_indices_continuous.z as i32
-        }
+        bin_indices_continuous.to_array()[axis.axis_index as usize] as i32
     }
-}
-
-/// Branchless variable-lane extraction via AVX `vpermilps`.
-///
-/// # Safety
-/// Caller must have verified AVX support (e.g. via `is_x86_feature_detected!("avx")`).
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx")]
-#[inline]
-unsafe fn compute_bin_index_permute_avx(bin_indices_continuous: Vec4, axis_index: i32) -> i32 {
-    use std::arch::x86_64::*;
-    let value = _mm_loadu_ps(&bin_indices_continuous as *const Vec4 as *const f32);
-    let control = _mm_set1_epi32(axis_index);
-    let permuted = _mm_permutevar_ps(value, control);
-    _mm_cvtss_f32(permuted) as i32
 }
 
 /// Computes centroid bounds over a slice of BoundingBox4.
@@ -904,11 +896,10 @@ unsafe fn compute_centroid_bounds(bounds: *const BoundingBox4, count: i32) -> Bo
 }
 
 /// Bins subtrees into bins, optionally writing bin indices.
-unsafe fn bin_subtrees(
+#[inline(always)]
+unsafe fn bin_subtrees<const WRITE_BIN_INDICES: bool>(
     centroid_bounds_min: Vec4,
-    use_x: bool,
-    use_y: bool,
-    axis_index: i32,
+    axis: BinAxisSelector,
     offset_to_bin_index: Vec4,
     maximum_bin_index: Vec4,
     subtrees: Buffer<NodeChild>,
@@ -916,21 +907,18 @@ unsafe fn bin_subtrees(
     mut bin_centroid_bounding_boxes: Buffer<BoundingBox4>,
     mut bin_leaf_counts: Buffer<i32>,
     mut bin_indices: Buffer<u8>,
-    write_bin_indices: bool,
 ) {
     for i in 0..subtrees.len() {
         let subtree = &*subtrees.as_ptr().add(i as usize);
         let box_bb4 = &*(subtree as *const NodeChild as *const BoundingBox4);
         let bin_index = compute_bin_index(
             centroid_bounds_min,
-            use_x,
-            use_y,
-            axis_index,
+            axis,
             offset_to_bin_index,
             maximum_bin_index,
             box_bb4,
         );
-        if write_bin_indices {
+        if WRITE_BIN_INDICES {
             *bin_indices.as_mut_ptr().add(i as usize) = bin_index as u8;
         }
         let bin_bounds = &mut *bin_bounding_boxes.as_mut_ptr().add(bin_index as usize);
@@ -1158,10 +1146,8 @@ unsafe fn micro_sweep_for_binned_builder(
     }
 
     let centroid_span = centroid_max - centroid_min;
-    let axis_is_degenerate_x = centroid_span.x <= 1e-12;
-    let axis_is_degenerate_y = centroid_span.y <= 1e-12;
-    let axis_is_degenerate_z = centroid_span.z <= 1e-12;
-    if axis_is_degenerate_x && axis_is_degenerate_y && axis_is_degenerate_z {
+    let axis_is_degenerate = centroid_span.cmple(Vec4::splat(1e-12));
+    if axis_is_degenerate.bitmask() & 0b111 == 0b111 {
         handle_microsweep_degeneracy(
             subtrees,
             nodes,
@@ -1197,14 +1183,14 @@ unsafe fn micro_sweep_for_binned_builder(
     #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
     {
         // Repurpose the bins memory so we don't need to allocate any extra.
+        // vector_counting_sort picks its bundle width at runtime on x86; padding must cover the
+        // widest width it can pick or the sort writes past the target index buffer.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        let padded_key_count = if std::is_x86_feature_detected!("avx2") {
-            ((subtree_count + 7) / 8) * 8
-        } else {
-            ((subtree_count + 3) / 4) * 4
-        };
+        const SORT_BUNDLE_WIDTH: i32 = 8;
         #[cfg(target_arch = "aarch64")]
-        let padded_key_count = ((subtree_count + 3) / 4) * 4;
+        const SORT_BUNDLE_WIDTH: i32 = 4;
+        let padded_key_count =
+            ((subtree_count + SORT_BUNDLE_WIDTH - 1) / SORT_BUNDLE_WIDTH) * SORT_BUNDLE_WIDTH;
 
         debug_assert!(
             mem::size_of::<BoundingBox4>() as i64 * bin_bounding_boxes.len() as i64
@@ -1547,10 +1533,8 @@ unsafe fn binned_build_node(
     };
 
     let centroid_span = centroid_bounds.max - centroid_bounds.min;
-    let degenerate_x = centroid_span.x <= 1e-12;
-    let degenerate_y = centroid_span.y <= 1e-12;
-    let degenerate_z = centroid_span.z <= 1e-12;
-    if degenerate_x && degenerate_y && degenerate_z {
+    let axis_is_degenerate = centroid_span.cmple(Vec4::splat(1e-12));
+    if axis_is_degenerate.bitmask() & 0b111 == 0b111 {
         handle_degeneracy(
             subtrees,
             nodes,
@@ -1595,6 +1579,7 @@ unsafe fn binned_build_node(
     } else {
         2
     };
+    let axis = BinAxisSelector::new(axis_index);
 
     let bin_count = (subtree_count as f32 * (*ctx).leaf_to_bin_multiplier) as i32;
     let bin_count = bin_count
@@ -1603,24 +1588,7 @@ unsafe fn binned_build_node(
 
     let offset_to_bin_index = Vec4::splat(bin_count as f32) / centroid_span;
     // Avoid NaNs for degenerate axes.
-    let offset_to_bin_index = Vec4::new(
-        if degenerate_x {
-            0.0
-        } else {
-            offset_to_bin_index.x
-        },
-        if degenerate_y {
-            0.0
-        } else {
-            offset_to_bin_index.y
-        },
-        if degenerate_z {
-            0.0
-        } else {
-            offset_to_bin_index.z
-        },
-        0.0,
-    );
+    let offset_to_bin_index = Vec4::select(axis_is_degenerate, Vec4::ZERO, offset_to_bin_index);
     let maximum_bin_index = Vec4::splat((bin_count - 1) as f32);
 
     // Get bins from the appropriate source (MT per-worker or ST).
@@ -1667,9 +1635,7 @@ unsafe fn binned_build_node(
             multithreaded_bin_subtrees(
                 mt_ctx,
                 centroid_bounds.min,
-                use_x,
-                use_y,
-                axis_index,
+                axis,
                 offset_to_bin_index,
                 maximum_bin_index,
                 subtrees,
@@ -1683,21 +1649,31 @@ unsafe fn binned_build_node(
         }
     }
     if use_st_for_binning {
-        let write_indices = subtree_bin_indices.allocated();
-        bin_subtrees(
-            centroid_bounds.min,
-            use_x,
-            use_y,
-            axis_index,
-            offset_to_bin_index,
-            maximum_bin_index,
-            subtrees,
-            bin_bounding_boxes,
-            bin_centroid_bounding_boxes,
-            bin_leaf_counts,
-            subtree_bin_indices,
-            write_indices,
-        );
+        if subtree_bin_indices.allocated() {
+            bin_subtrees::<true>(
+                centroid_bounds.min,
+                axis,
+                offset_to_bin_index,
+                maximum_bin_index,
+                subtrees,
+                bin_bounding_boxes,
+                bin_centroid_bounding_boxes,
+                bin_leaf_counts,
+                subtree_bin_indices,
+            );
+        } else {
+            bin_subtrees::<false>(
+                centroid_bounds.min,
+                axis,
+                offset_to_bin_index,
+                maximum_bin_index,
+                subtrees,
+                bin_bounding_boxes,
+                bin_centroid_bounding_boxes,
+                bin_leaf_counts,
+                subtree_bin_indices,
+            );
+        }
     }
 
     // Build prefix-merged scan (left to right).
@@ -1853,9 +1829,7 @@ unsafe fn binned_build_node(
             let box_bb4 = &*(bounding_boxes.as_ptr().add(subtree_count_a as usize));
             let bin_idx = compute_bin_index(
                 centroid_bounds.min,
-                use_x,
-                use_y,
-                axis_index,
+                axis,
                 offset_to_bin_index,
                 maximum_bin_index,
                 box_bb4,
@@ -2003,15 +1977,15 @@ unsafe fn binned_builder_internal(
     deterministic: bool,
 ) {
     let subtree_count = subtrees.len();
-    debug_assert!(
+    assert!(
         nodes.len() >= subtree_count - 1,
         "Nodes buffer too small for input subtrees."
     );
-    debug_assert!(
+    assert!(
         maximum_bin_count <= 255,
         "Maximum bin count must fit in a byte."
     );
-    debug_assert!(
+    assert!(
         subtrees_pong.allocated() == bin_indices.allocated(),
         "subtreesPong and binIndices must both be allocated or unallocated."
     );
@@ -2033,11 +2007,17 @@ unsafe fn binned_builder_internal(
         // Single-threaded path.
         let allocated_byte_count = allocated_bin_count as usize
             * (4 * mem::size_of::<BoundingBox4>() + mem::size_of::<i32>());
-        let mut bin_bounds_allocation = vec![0u8; allocated_byte_count + 32];
-        let aligned_ptr = {
-            let ptr = bin_bounds_allocation.as_mut_ptr() as usize;
-            ((ptr + 31) & !31) as *mut u8
+        let requested_byte_count = allocated_byte_count + 32;
+        let mut inline_bin_bounds = MaybeUninit::<[u8; INLINE_BIN_BOUNDS_BYTES]>::uninit();
+        let mut spilled_bin_bounds: Vec<MaybeUninit<u8>> = Vec::new();
+        let allocation_ptr = if requested_byte_count <= INLINE_BIN_BOUNDS_BYTES {
+            inline_bin_bounds.as_mut_ptr() as *mut u8
+        } else {
+            spilled_bin_bounds.reserve_exact(requested_byte_count);
+            spilled_bin_bounds.set_len(requested_byte_count);
+            spilled_bin_bounds.as_mut_ptr() as *mut u8
         };
+        let aligned_ptr = ((allocation_ptr as usize + 31) & !31) as *mut u8;
         let bin_bounds_memory = Buffer::new(aligned_ptr, allocated_byte_count as i32, 0);
 
         let bins = SingleThreadedBins::new(bin_bounds_memory, allocated_bin_count);
@@ -2086,17 +2066,22 @@ unsafe fn binned_builder_internal(
         let mut worker_bins_allocation: Buffer<u8> =
             (*pool_ptr).take_at_least(worker_bins_byte_count);
 
-        let mut worker_contexts_vec =
-            vec![std::mem::zeroed::<BinnedBuildWorkerContext>(); worker_count as usize];
+        let mut worker_contexts_vec: Vec<MaybeUninit<BinnedBuildWorkerContext>> =
+            Vec::with_capacity(worker_count as usize);
+        worker_contexts_vec.set_len(worker_count as usize);
         let mut bin_alloc_start = 0i32;
         for ctx in worker_contexts_vec.iter_mut() {
-            *ctx = BinnedBuildWorkerContext::new(
+            ctx.write(BinnedBuildWorkerContext::new(
                 worker_bins_allocation,
                 &mut bin_alloc_start,
                 allocated_bin_count,
-            );
+            ));
         }
-        let worker_contexts = Buffer::new(worker_contexts_vec.as_mut_ptr(), worker_count, 0);
+        let worker_contexts = Buffer::new(
+            worker_contexts_vec.as_mut_ptr() as *mut BinnedBuildWorkerContext,
+            worker_count,
+            0,
+        );
 
         let mut task_stack_storage: Option<TaskStack> = None;
         let actual_task_stack_ptr = if let Some(ts_ptr) = task_stack_pointer {
@@ -2182,8 +2167,27 @@ unsafe fn binned_builder_internal(
 
 // ── Public API on Tree ─────────────────────────────────────────────────────
 
+/// Default maximum number of subtrees the binned builder will try to keep off the buffer pool
+/// when allocating its pong buffers.
+pub const DEFAULT_MAXIMUM_SUBTREE_STACK_ALLOCATION_COUNT: i32 = 4096;
+
+/// Subtree count that fits in the builder's inline pong scratch; larger counts spill to the pool.
+const INLINE_SUBTREE_PONG_CAPACITY: i32 = 128;
+
+/// Bin count covered by the single-threaded builder's inline bin scratch; larger bin counts spill.
+const INLINE_BIN_BOUNDS_BIN_COUNT: usize = 64;
+const INLINE_BIN_BOUNDS_BYTES: usize = INLINE_BIN_BOUNDS_BIN_COUNT
+    * (4 * mem::size_of::<BoundingBox4>() + mem::size_of::<i32>())
+    + 32;
+const _: () = assert!(INLINE_BIN_BOUNDS_BYTES <= 16384);
+
+const _: () = {
+    assert!(INLINE_SUBTREE_PONG_CAPACITY as usize * mem::size_of::<NodeChild>() <= 4096);
+};
+
 impl Tree {
-    /// Runs a binned build across the given subtrees buffer (static version).
+    /// Runs a binned build across the given subtrees buffer (static version), using the default
+    /// stack allocation threshold.
     ///
     /// Supports both single-threaded and multithreaded execution.
     /// If `dispatcher` is provided, `pool` must also be provided.
@@ -2192,6 +2196,52 @@ impl Tree {
     /// The caller must ensure all buffers are valid and large enough.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn binned_build_static(
+        subtrees: Buffer<NodeChild>,
+        nodes: Buffer<Node>,
+        metanodes: Buffer<Metanode>,
+        leaves: Buffer<Leaf>,
+        pool: Option<*mut BufferPool>,
+        dispatcher: Option<&dyn IThreadDispatcher>,
+        task_stack_pointer: Option<*mut TaskStack>,
+        worker_index: i32,
+        worker_count: i32,
+        target_task_count: i32,
+        minimum_bin_count: i32,
+        maximum_bin_count: i32,
+        leaf_to_bin_multiplier: f32,
+        microsweep_threshold: i32,
+        deterministic: bool,
+    ) {
+        Self::binned_build_static_with_stack_limit(
+            subtrees,
+            nodes,
+            metanodes,
+            leaves,
+            pool,
+            dispatcher,
+            task_stack_pointer,
+            worker_index,
+            worker_count,
+            target_task_count,
+            DEFAULT_MAXIMUM_SUBTREE_STACK_ALLOCATION_COUNT,
+            minimum_bin_count,
+            maximum_bin_count,
+            leaf_to_bin_multiplier,
+            microsweep_threshold,
+            deterministic,
+        );
+    }
+
+    /// Runs a binned build across the given subtrees buffer (static version).
+    ///
+    /// `maximum_subtree_stack_allocation_count` is the maximum number of subtrees for which the
+    /// builder will try to avoid the buffer pool when allocating its pong buffers. Larger counts
+    /// resort to a pool allocation, or to slower in-place partitioning if no pool was provided.
+    ///
+    /// # Safety
+    /// The caller must ensure all buffers are valid and large enough.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn binned_build_static_with_stack_limit(
         subtrees: Buffer<NodeChild>,
         mut nodes: Buffer<Node>,
         mut metanodes: Buffer<Metanode>,
@@ -2202,6 +2252,7 @@ impl Tree {
         worker_index: i32,
         worker_count: i32,
         target_task_count: i32,
+        maximum_subtree_stack_allocation_count: i32,
         minimum_bin_count: i32,
         maximum_bin_count: i32,
         leaf_to_bin_multiplier: f32,
@@ -2217,20 +2268,39 @@ impl Tree {
                 NodeChild::default()
             };
             if metanodes.allocated() {
-                let meta = &mut *metanodes.as_mut_ptr().add(0);
-                meta.parent = -1;
-                meta.index_in_parent = -1;
+                *metanodes.as_mut_ptr().add(0) = Metanode {
+                    parent: -1,
+                    index_in_parent: -1,
+                    cost_or_flag: CostOrFlag { refine_flag: 0 },
+                };
             }
             return;
         }
+        assert!(
+            !(dispatcher.is_some() && pool.is_none()),
+            "If a dispatcher is given to binned_build, a BufferPool must also be provided."
+        );
 
         let mut subtrees_pong: Buffer<NodeChild> = Buffer::default();
         let mut bin_indices: Buffer<u8> = Buffer::default();
         let mut requires_return = false;
 
-        if let Some(pool_ptr) = pool {
-            subtrees_pong = (*pool_ptr).take_at_least(subtrees.len());
-            bin_indices = (*pool_ptr).take_at_least(subtrees.len());
+        let subtree_count = subtrees.len();
+        let mut pong_memory =
+            MaybeUninit::<[NodeChild; INLINE_SUBTREE_PONG_CAPACITY as usize]>::uninit();
+        let mut bin_index_memory =
+            MaybeUninit::<[u8; INLINE_SUBTREE_PONG_CAPACITY as usize]>::uninit();
+        if subtree_count <= maximum_subtree_stack_allocation_count.min(INLINE_SUBTREE_PONG_CAPACITY)
+        {
+            subtrees_pong = Buffer::new(
+                pong_memory.as_mut_ptr() as *mut NodeChild,
+                subtree_count,
+                -1,
+            );
+            bin_indices = Buffer::new(bin_index_memory.as_mut_ptr() as *mut u8, subtree_count, -1);
+        } else if let Some(pool_ptr) = pool {
+            subtrees_pong = (*pool_ptr).take_at_least(subtree_count);
+            bin_indices = (*pool_ptr).take_at_least(subtree_count);
             requires_return = true;
         }
 
@@ -2282,7 +2352,8 @@ impl Tree {
         }
     }
 
-    /// Runs a binned build using `self.nodes`, `self.metanodes`, and `self.leaves`.
+    /// Runs a binned build using `self.nodes`, `self.metanodes`, and `self.leaves`, with the
+    /// default stack allocation threshold.
     ///
     /// # Safety
     /// The caller must ensure the tree's buffers are properly allocated and sized.
@@ -2302,10 +2373,51 @@ impl Tree {
         microsweep_threshold: i32,
         deterministic: bool,
     ) {
+        self.binned_build_with_stack_limit(
+            subtrees,
+            pool,
+            dispatcher,
+            task_stack_pointer,
+            worker_index,
+            worker_count,
+            target_task_count,
+            DEFAULT_MAXIMUM_SUBTREE_STACK_ALLOCATION_COUNT,
+            minimum_bin_count,
+            maximum_bin_count,
+            leaf_to_bin_multiplier,
+            microsweep_threshold,
+            deterministic,
+        );
+    }
+
+    /// Runs a binned build using `self.nodes`, `self.metanodes`, and `self.leaves`.
+    ///
+    /// See [`Tree::binned_build_static_with_stack_limit`] for the meaning of
+    /// `maximum_subtree_stack_allocation_count`.
+    ///
+    /// # Safety
+    /// The caller must ensure the tree's buffers are properly allocated and sized.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn binned_build_with_stack_limit(
+        &mut self,
+        subtrees: Buffer<NodeChild>,
+        pool: Option<*mut BufferPool>,
+        dispatcher: Option<&dyn IThreadDispatcher>,
+        task_stack_pointer: Option<*mut TaskStack>,
+        worker_index: i32,
+        worker_count: i32,
+        target_task_count: i32,
+        maximum_subtree_stack_allocation_count: i32,
+        minimum_bin_count: i32,
+        maximum_bin_count: i32,
+        leaf_to_bin_multiplier: f32,
+        microsweep_threshold: i32,
+        deterministic: bool,
+    ) {
         let nodes = self.nodes.slice_count(self.node_count);
         let metanodes = self.metanodes.slice_count(self.node_count);
         let leaves = self.leaves.slice_count(self.leaf_count);
-        Self::binned_build_static(
+        Self::binned_build_static_with_stack_limit(
             subtrees,
             nodes,
             metanodes,
@@ -2316,6 +2428,7 @@ impl Tree {
             worker_index,
             worker_count,
             target_task_count,
+            maximum_subtree_stack_allocation_count,
             minimum_bin_count,
             maximum_bin_count,
             leaf_to_bin_multiplier,

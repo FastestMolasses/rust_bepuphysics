@@ -18,6 +18,7 @@ use crate::physics::handles::BodyHandle;
 use crate::physics::solver::Solver;
 use crate::utilities::collections::quicklist::QuickList;
 use crate::utilities::memory::buffer::Buffer;
+use std::mem::MaybeUninit;
 
 /// Interface for extracting solver contact data from constraints.
 pub trait ISolverContactDataExtractor {
@@ -236,6 +237,7 @@ impl AccessorBase {
     /// Gathers old impulses from a constraint reference.
     /// Convex: reads penetration impulses starting after the tangent friction (Vector2Wide offset).
     /// Nonconvex: reads penetration impulses from NonconvexAccumulatedImpulses layout.
+    #[inline(always)]
     unsafe fn gather_old_impulses(
         &self,
         constraint_reference: &ConstraintReference,
@@ -289,6 +291,7 @@ impl AccessorBase {
     }
 
     /// Scatters new impulses into a constraint reference.
+    #[inline(always)]
     unsafe fn scatter_new_impulses(
         &self,
         constraint_reference: &ConstraintReference,
@@ -611,6 +614,7 @@ unsafe fn read_pending_constraint<
 }
 
 /// Sequential add to simulation — iterates pending constraints and adds them one by one.
+#[inline(always)]
 unsafe fn sequential_add_to_simulation<
     TBodyHandles: Copy,
     TDescription: IConstraintDescription + Copy,
@@ -649,7 +653,12 @@ unsafe fn sequential_add_to_simulation<
     }
 }
 
+/// A contact constraint's body handles are either a `TwoBodyHandles` pair or a single handle.
+const MAXIMUM_BODIES_PER_CONTACT_CONSTRAINT: usize =
+    std::mem::size_of::<TwoBodyHandles>() / std::mem::size_of::<BodyHandle>();
+
 /// Speculative batch add — uses precomputed batch indices for faster constraint batch allocation.
+#[inline(always)]
 unsafe fn add_to_simulation_speculative<
     TBodyHandles: Copy,
     TDescription: IConstraintDescription + Copy,
@@ -670,9 +679,9 @@ unsafe fn add_to_simulation_speculative<
     let body_handle_slice =
         std::slice::from_raw_parts(body_handles_ptr as *const BodyHandle, body_count as usize);
 
-    // Contact constraints involve at most 2 bodies, so these live on the stack.
-    let mut blocking_body_handles_buf = [BodyHandle(0); 2];
-    let mut encoded_body_indices_buf = [0i32; 2];
+    assert!((body_count as usize) <= MAXIMUM_BODIES_PER_CONTACT_CONSTRAINT);
+    let mut blocking_body_handles_buf = [BodyHandle(0); MAXIMUM_BODIES_PER_CONTACT_CONSTRAINT];
+    let mut encoded_body_indices_buf = [0i32; MAXIMUM_BODIES_PER_CONTACT_CONSTRAINT];
     let blocking_count = (*solver_ptr).get_blocking_body_handles(
         body_handle_slice,
         &mut blocking_body_handles_buf[..body_count as usize],
@@ -718,6 +727,7 @@ unsafe fn add_to_simulation_speculative<
 }
 
 /// Sequential add with speculative batch indices.
+#[inline(always)]
 unsafe fn sequential_add_to_simulation_speculative<
     TBodyHandles: Copy,
     TDescription: IConstraintDescription + Copy,
@@ -755,6 +765,7 @@ unsafe fn sequential_add_to_simulation_speculative<
 }
 
 /// Deterministic add — iterate sorted constraint targets from all workers and add with speculative batches.
+#[inline(always)]
 unsafe fn deterministic_add_all<
     TBodyHandles: Copy,
     TDescription: IConstraintDescription + Copy,
@@ -848,6 +859,7 @@ macro_rules! impl_convex_one_body_accessor {
                 std::mem::size_of::<$impulse>() as i32
             }
 
+            #[inline(always)]
             unsafe fn gather_old_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -862,6 +874,7 @@ macro_rules! impl_convex_one_body_accessor {
                 base.gather_old_impulses(constraint_reference, old_impulses);
             }
 
+            #[inline(always)]
             unsafe fn scatter_new_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -957,11 +970,12 @@ macro_rules! impl_convex_one_body_accessor {
                     // ConvexContactManifold case
                     let manifold = &*(manifold_ptr as *const ConvexContactManifold);
                     let mut constraint_cache = ConstraintCache::default();
-                    let mut description: $desc = std::mem::zeroed();
+                    let mut description_storage = MaybeUninit::<$desc>::uninit();
+                    let description = &mut *description_storage.as_mut_ptr();
                     ContactDataCopier::copy_convex_contact_data(
                         manifold,
                         &mut constraint_cache,
-                        &mut description as *mut $desc as *mut ConstraintContactData,
+                        description as *mut $desc as *mut ConstraintContactData,
                     );
                     description.copy_manifold_wide_properties(&manifold.normal, material);
                     let narrow_phase = &mut *(narrow_phase_ptr as *mut NarrowPhaseGenericOpaque);
@@ -971,7 +985,7 @@ macro_rules! impl_convex_one_body_accessor {
                         manifold_type_as_constraint_type,
                         &mut constraint_cache,
                         manifold.count,
-                        &description,
+                        &*description,
                         body_handle,
                     );
                 } else {
@@ -979,7 +993,8 @@ macro_rules! impl_convex_one_body_accessor {
                     let manifold = &*(manifold_ptr as *const NonconvexContactManifold);
                     debug_assert!(manifold.count == 1, "Nonconvex manifolds should only result in convex constraints when the contact count is 1.");
                     let mut constraint_cache: ConstraintCache = std::mem::zeroed();
-                    let mut description: $desc = std::mem::zeroed();
+                    let mut description_storage = MaybeUninit::<$desc>::uninit();
+                    let description = &mut *description_storage.as_mut_ptr();
                     ContactDataCopier::copy_nonconvex_to_convex_contact_data(
                         manifold,
                         &mut constraint_cache,
@@ -993,7 +1008,7 @@ macro_rules! impl_convex_one_body_accessor {
                         manifold_type_as_constraint_type,
                         &mut constraint_cache,
                         manifold.count,
-                        &description,
+                        &*description,
                         body_handle,
                     );
                 }
@@ -1030,6 +1045,7 @@ macro_rules! impl_convex_two_body_accessor {
                 std::mem::size_of::<$impulse>() as i32
             }
 
+            #[inline(always)]
             unsafe fn gather_old_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -1044,6 +1060,7 @@ macro_rules! impl_convex_two_body_accessor {
                 base.gather_old_impulses(constraint_reference, old_impulses);
             }
 
+            #[inline(always)]
             unsafe fn scatter_new_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -1139,11 +1156,12 @@ macro_rules! impl_convex_two_body_accessor {
                     // ConvexContactManifold case
                     let manifold = &*(manifold_ptr as *const ConvexContactManifold);
                     let mut constraint_cache = ConstraintCache::default();
-                    let mut description: $desc = std::mem::zeroed();
+                    let mut description_storage = MaybeUninit::<$desc>::uninit();
+                    let description = &mut *description_storage.as_mut_ptr();
                     ContactDataCopier::copy_convex_contact_data(
                         manifold,
                         &mut constraint_cache,
-                        &mut description as *mut $desc as *mut ConstraintContactData,
+                        description as *mut $desc as *mut ConstraintContactData,
                     );
                     description.copy_manifold_wide_properties(&manifold.offset_b, &manifold.normal, material);
                     let narrow_phase = &mut *(narrow_phase_ptr as *mut NarrowPhaseGenericOpaque);
@@ -1153,7 +1171,7 @@ macro_rules! impl_convex_two_body_accessor {
                         manifold_type_as_constraint_type,
                         &mut constraint_cache,
                         manifold.count,
-                        &description,
+                        &*description,
                         body_handles,
                     );
                 } else {
@@ -1161,7 +1179,8 @@ macro_rules! impl_convex_two_body_accessor {
                     let manifold = &*(manifold_ptr as *const NonconvexContactManifold);
                     debug_assert!(manifold.count == 1, "Nonconvex manifolds should only result in convex constraints when the contact count is 1.");
                     let mut constraint_cache: ConstraintCache = std::mem::zeroed();
-                    let mut description: $desc = std::mem::zeroed();
+                    let mut description_storage = MaybeUninit::<$desc>::uninit();
+                    let description = &mut *description_storage.as_mut_ptr();
                     ContactDataCopier::copy_nonconvex_to_convex_contact_data(
                         manifold,
                         &mut constraint_cache,
@@ -1175,7 +1194,7 @@ macro_rules! impl_convex_two_body_accessor {
                         manifold_type_as_constraint_type,
                         &mut constraint_cache,
                         manifold.count,
-                        &description,
+                        &*description,
                         body_handles,
                     );
                 }
@@ -1212,6 +1231,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 std::mem::size_of::<$impulse>() as i32
             }
 
+            #[inline(always)]
             unsafe fn gather_old_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -1226,6 +1246,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 base.gather_old_impulses(constraint_reference, old_impulses);
             }
 
+            #[inline(always)]
             unsafe fn scatter_new_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -1349,7 +1370,8 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 let body_handle = *(body_handles_ptr as *const i32);
                 let manifold = &*(manifold_ptr as *const NonconvexContactManifold);
                 let mut constraint_cache: ConstraintCache = std::mem::zeroed();
-                let mut description: $desc = std::mem::zeroed();
+                let mut description_storage = MaybeUninit::<$desc>::uninit();
+                let description = &mut *description_storage.as_mut_ptr();
                 ContactDataCopier::copy_nonconvex_contact_data(
                     manifold,
                     &mut constraint_cache,
@@ -1363,7 +1385,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                     manifold_type_as_constraint_type,
                     &mut constraint_cache,
                     manifold.count,
-                    &description,
+                    &*description,
                     body_handle,
                 );
             }
@@ -1399,6 +1421,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 std::mem::size_of::<$impulse>() as i32
             }
 
+            #[inline(always)]
             unsafe fn gather_old_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -1413,6 +1436,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 base.gather_old_impulses(constraint_reference, old_impulses);
             }
 
+            #[inline(always)]
             unsafe fn scatter_new_impulses(
                 &self,
                 constraint_reference: &ConstraintReference,
@@ -1540,7 +1564,8 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 let body_handles = *(body_handles_ptr as *const TwoBodyHandles);
                 let manifold = &*(manifold_ptr as *const NonconvexContactManifold);
                 let mut constraint_cache: ConstraintCache = std::mem::zeroed();
-                let mut description: $desc = std::mem::zeroed();
+                let mut description_storage = MaybeUninit::<$desc>::uninit();
+                let description = &mut *description_storage.as_mut_ptr();
                 ContactDataCopier::copy_nonconvex_contact_data(
                     manifold,
                     &mut constraint_cache,
@@ -1554,7 +1579,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                     manifold_type_as_constraint_type,
                     &mut constraint_cache,
                     manifold.count,
-                    &description,
+                    &*description,
                     body_handles,
                 );
             }

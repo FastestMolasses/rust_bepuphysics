@@ -13,6 +13,7 @@ pub struct SleepingPair {
 }
 
 /// A set of sleeping pairs.
+#[repr(C)]
 #[derive(Default, Copy, Clone)]
 pub struct SleepingSet {
     pub pairs: QuickList<SleepingPair>,

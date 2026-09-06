@@ -1,13 +1,13 @@
 // Translated from BepuPhysics/Constraints/Contact/TangentFriction.cs
 
+use crate::out;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::utilities::matrix2x3_wide::Matrix2x3Wide;
 use crate::utilities::symmetric2x2_wide::Symmetric2x2Wide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::simd::num::SimdFloat;
 
 /// Handles the tangent friction implementation.
 pub struct TangentFriction;
@@ -61,49 +61,35 @@ impl TangentFriction {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut linear_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(
+        let linear_impulse_a = out!(Matrix2x3Wide::transform(
             corrective_impulse,
-            &jacobians.linear_a,
-            &mut linear_impulse_a,
-        );
-        let mut angular_impulse_a = Vector3Wide::default();
-        Matrix2x3Wide::transform(
+            &jacobians.linear_a
+        ));
+        let angular_impulse_a = out!(Matrix2x3Wide::transform(
             corrective_impulse,
-            &jacobians.angular_a,
-            &mut angular_impulse_a,
-        );
-        let mut angular_impulse_b = Vector3Wide::default();
-        Matrix2x3Wide::transform(
+            &jacobians.angular_a
+        ));
+        let angular_impulse_b = out!(Matrix2x3Wide::transform(
             corrective_impulse,
-            &jacobians.angular_b,
-            &mut angular_impulse_b,
-        );
+            &jacobians.angular_b
+        ));
 
-        let mut corrective_velocity_a_linear = Vector3Wide::default();
-        Vector3Wide::scale_to(
+        let corrective_velocity_a_linear = out!(Vector3Wide::scale_to(
             &linear_impulse_a,
-            &inertia_a.inverse_mass,
-            &mut corrective_velocity_a_linear,
-        );
-        let mut corrective_velocity_a_angular = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+            &inertia_a.inverse_mass
+        ));
+        let corrective_velocity_a_angular = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut corrective_velocity_a_angular,
-        );
-        let mut corrective_velocity_b_linear = Vector3Wide::default();
-        Vector3Wide::scale_to(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let corrective_velocity_b_linear = out!(Vector3Wide::scale_to(
             &linear_impulse_a,
-            &inertia_b.inverse_mass,
-            &mut corrective_velocity_b_linear,
-        );
-        let mut corrective_velocity_b_angular = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+            &inertia_b.inverse_mass
+        ));
+        let corrective_velocity_b_angular = out!(Symmetric3x3Wide::transform_without_overlap(
             &angular_impulse_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut corrective_velocity_b_angular,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
         let temp = wsv_a.linear;
         Vector3Wide::add(&temp, &corrective_velocity_a_linear, &mut wsv_a.linear);
         let temp = wsv_a.angular;
@@ -124,54 +110,43 @@ impl TangentFriction {
         accumulated_impulse: &mut Vector2Wide,
         corrective_csi: &mut Vector2Wide,
     ) {
-        let mut csva_linear = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+        let csva_linear = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_a.linear,
-            &jacobians.linear_a,
-            &mut csva_linear,
-        );
-        let mut csva_angular = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &jacobians.linear_a
+        ));
+        let csva_angular = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_a.angular,
-            &jacobians.angular_a,
-            &mut csva_angular,
-        );
-        let mut csvb_linear = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &jacobians.angular_a
+        ));
+        let csvb_linear = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_b.linear,
-            &jacobians.linear_a,
-            &mut csvb_linear,
-        );
-        let mut csvb_angular = Vector2Wide::default();
-        Matrix2x3Wide::transform_by_transpose_without_overlap(
+            &jacobians.linear_a
+        ));
+        let csvb_angular = out!(Matrix2x3Wide::transform_by_transpose_without_overlap(
             &wsv_b.angular,
-            &jacobians.angular_b,
-            &mut csvb_angular,
-        );
+            &jacobians.angular_b
+        ));
         //Note that the velocity in constraint space is (csvaLinear - csvbLinear + csvaAngular + csvbAngular).
         //The subtraction there is due to sharing the linear jacobian between both bodies.
         //In the following, we need to compute the constraint space *violating* velocity- which is the negation of the above velocity in constraint space.
         //So, (csvbLinear - csvaLinear - (csvaAngular + csvbAngular)).
-        let mut csv_linear = Vector2Wide::default();
-        Vector2Wide::subtract(&csvb_linear, &csva_linear, &mut csv_linear);
-        let mut csv_angular = Vector2Wide::default();
-        Vector2Wide::add(&csva_angular, &csvb_angular, &mut csv_angular);
-        let mut csv = Vector2Wide::default();
-        Vector2Wide::subtract(&csv_linear, &csv_angular, &mut csv);
+        let csv_linear = out!(Vector2Wide::subtract(&csvb_linear, &csva_linear));
+        let csv_angular = out!(Vector2Wide::add(&csva_angular, &csvb_angular));
+        let csv = out!(Vector2Wide::subtract(&csv_linear, &csv_angular));
 
-        let mut csi = Vector2Wide::default();
-        Symmetric2x2Wide::transform_without_overlap(&csv, effective_mass, &mut csi);
+        let csi = out!(Symmetric2x2Wide::transform_without_overlap(
+            &csv,
+            effective_mass
+        ));
 
         let previous_accumulated = *accumulated_impulse;
         let temp = *accumulated_impulse;
         Vector2Wide::add(&temp, &csi, accumulated_impulse);
         //The maximum force of friction depends upon the normal impulse. The maximum is supplied per iteration.
-        let mut accumulated_magnitude = Vector::<f32>::splat(0.0);
-        Vector2Wide::length(accumulated_impulse, &mut accumulated_magnitude);
+        let accumulated_magnitude = out!(Vector2Wide::length(accumulated_impulse));
         //Note division by zero guard.
-        let scale = Vector::<f32>::splat(1.0).simd_min(
-            *maximum_impulse / accumulated_magnitude.simd_max(Vector::<f32>::splat(1e-16)),
-        );
+        let scale = Vector::<f32>::splat(1.0)
+            .hw_min(*maximum_impulse / Vector::<f32>::splat(1e-16).hw_max(accumulated_magnitude));
         let temp = *accumulated_impulse;
         Vector2Wide::scale(&temp, &scale, accumulated_impulse);
 
@@ -190,14 +165,12 @@ impl TangentFriction {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut jacobians = TangentFrictionJacobians::default();
-        Self::compute_jacobians(
+        let jacobians = out!(Self::compute_jacobians(
             tangent_x,
             tangent_y,
             offset_to_manifold_center_a,
-            offset_to_manifold_center_b,
-            &mut jacobians,
-        );
+            offset_to_manifold_center_b
+        ));
         //TODO: If the previous frame and current frame are associated with different time steps, the previous frame's solution won't be a good solution anymore.
         //To compensate for this, the accumulated impulse should be scaled if dt changes.
         Self::apply_impulse(
@@ -223,65 +196,53 @@ impl TangentFriction {
         wsv_a: &mut BodyVelocityWide,
         wsv_b: &mut BodyVelocityWide,
     ) {
-        let mut jacobians = TangentFrictionJacobians::default();
-        Self::compute_jacobians(
+        let jacobians = out!(Self::compute_jacobians(
             tangent_x,
             tangent_y,
             offset_to_manifold_center_a,
-            offset_to_manifold_center_b,
-            &mut jacobians,
-        );
+            offset_to_manifold_center_b
+        ));
         //Compute effective mass matrix contributions.
-        let mut linear_contribution_a = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::sandwich_scale(
+        let linear_contribution_a = out!(Symmetric2x2Wide::sandwich_scale(
             &jacobians.linear_a,
-            &inertia_a.inverse_mass,
-            &mut linear_contribution_a,
-        );
-        let mut linear_contribution_b = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::sandwich_scale(
+            &inertia_a.inverse_mass
+        ));
+        let linear_contribution_b = out!(Symmetric2x2Wide::sandwich_scale(
             &jacobians.linear_a,
-            &inertia_b.inverse_mass,
-            &mut linear_contribution_b,
-        );
+            &inertia_b.inverse_mass
+        ));
 
-        let mut angular_contribution_a = Symmetric2x2Wide::default();
-        Symmetric3x3Wide::matrix_sandwich(
+        let angular_contribution_a = out!(Symmetric3x3Wide::matrix_sandwich(
             &jacobians.angular_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_contribution_a,
-        );
-        let mut angular_contribution_b = Symmetric2x2Wide::default();
-        Symmetric3x3Wide::matrix_sandwich(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let angular_contribution_b = out!(Symmetric3x3Wide::matrix_sandwich(
             &jacobians.angular_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut angular_contribution_b,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
 
         //No softening; this constraint is rigid by design. (It does support a maximum force, but that is distinct from a proper damping ratio/natural frequency.)
-        let mut linear = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::add(&linear_contribution_a, &linear_contribution_b, &mut linear);
-        let mut angular = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::add(
+        let linear = out!(Symmetric2x2Wide::add(
+            &linear_contribution_a,
+            &linear_contribution_b
+        ));
+        let angular = out!(Symmetric2x2Wide::add(
             &angular_contribution_a,
-            &angular_contribution_b,
-            &mut angular,
-        );
-        let mut inverse_effective_mass = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::add(&linear, &angular, &mut inverse_effective_mass);
-        let mut effective_mass = Symmetric2x2Wide::default();
-        Symmetric2x2Wide::invert_without_overlap(&inverse_effective_mass, &mut effective_mass);
+            &angular_contribution_b
+        ));
+        let inverse_effective_mass = out!(Symmetric2x2Wide::add(&linear, &angular));
+        let effective_mass = out!(Symmetric2x2Wide::invert_without_overlap(
+            &inverse_effective_mass
+        ));
 
-        let mut corrective_csi = Vector2Wide::default();
-        Self::compute_corrective_impulse(
+        let corrective_csi = out!(Self::compute_corrective_impulse(
             wsv_a,
             wsv_b,
             &effective_mass,
             &jacobians,
             maximum_impulse,
-            accumulated_impulse,
-            &mut corrective_csi,
-        );
+            accumulated_impulse
+        ));
         Self::apply_impulse(
             &jacobians,
             inertia_a,

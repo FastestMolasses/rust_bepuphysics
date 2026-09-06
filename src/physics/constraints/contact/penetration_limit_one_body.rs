@@ -3,9 +3,8 @@
 use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::simd::num::SimdFloat;
 
 pub struct PenetrationLimitOneBody;
 
@@ -31,8 +30,7 @@ impl PenetrationLimitOneBody {
             + (csva_linear + csva_angular - *bias_velocity) * *effective_mass;
 
         let previous_accumulated = *accumulated_impulse;
-        *accumulated_impulse =
-            (*accumulated_impulse - negated_csi).simd_max(Vector::<f32>::splat(0.0));
+        *accumulated_impulse = Vector::<f32>::splat(0.0).hw_max(*accumulated_impulse - negated_csi);
 
         *corrective_csi = *accumulated_impulse - previous_accumulated;
     }
@@ -137,7 +135,7 @@ impl PenetrationLimitOneBody {
 
         //If depth is negative, the bias velocity will permit motion up until the depth hits zero. This works because positionErrorToVelocity * dt will always be <=1.
         let bias_velocity = (*depth * *inverse_dt)
-            .simd_min((*depth * *position_error_to_velocity).simd_min(*maximum_recovery_velocity));
+            .hw_min((*depth * *position_error_to_velocity).hw_min(*maximum_recovery_velocity));
 
         let mut corrective_csi = Vector::<f32>::splat(0.0);
         Self::compute_corrective_impulse(

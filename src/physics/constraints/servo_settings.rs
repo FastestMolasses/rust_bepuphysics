@@ -1,7 +1,7 @@
 // Translated from BepuPhysics/Constraints/ServoSettings.cs
 
 use crate::utilities::gather_scatter::GatherScatter;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::Select;
@@ -79,15 +79,15 @@ impl ServoSettingsWide {
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let base_speed = servo_settings
             .base_speed
-            .simd_min(error.abs() * inverse_dt_wide);
+            .hw_min(error.abs() * inverse_dt_wide);
         let bias_velocity = *error * *position_error_to_velocity;
         let zero = Vector::<f32>::splat(0.0);
         let neg_mask = bias_velocity.simd_lt(zero);
         let neg_branch =
-            (-servo_settings.maximum_speed).simd_max((-base_speed).simd_min(bias_velocity));
+            (-servo_settings.maximum_speed).hw_max((-base_speed).hw_min(bias_velocity));
         let pos_branch = servo_settings
             .maximum_speed
-            .simd_min(base_speed.simd_max(bias_velocity));
+            .hw_min(base_speed.hw_max(bias_velocity));
         *clamped_bias_velocity = neg_mask.select(neg_branch, pos_branch);
         *maximum_impulse = servo_settings.maximum_force * Vector::<f32>::splat(dt);
     }
@@ -105,7 +105,6 @@ impl ServoSettingsWide {
         maximum_impulse: &mut Vector<f32>,
     ) {
         use std::simd::cmp::SimdPartialOrd;
-        use std::simd::num::SimdFloat;
 
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let one = Vector::<f32>::splat(1.0);
@@ -114,10 +113,10 @@ impl ServoSettingsWide {
         // Can't request speed that would cause an overshoot.
         let base_speed = servo_settings
             .base_speed
-            .simd_min(*error_length * inverse_dt_wide);
+            .hw_min(*error_length * inverse_dt_wide);
         let unclamped_bias_speed = *error_length * *position_error_to_bias_velocity;
-        let target_speed = base_speed.simd_max(unclamped_bias_speed);
-        let scale_raw = one.simd_min(servo_settings.maximum_speed / target_speed);
+        let target_speed = base_speed.hw_max(unclamped_bias_speed);
+        let scale_raw = one.hw_min(servo_settings.maximum_speed / target_speed);
         // Protect against division by zero.
         let use_fallback = target_speed.simd_lt(epsilon);
         let scale = use_fallback.select(one, scale_raw);
@@ -179,16 +178,15 @@ impl ServoSettingsWide {
         maximum_impulse: &mut Vector<f32>,
     ) {
         use std::simd::cmp::SimdPartialOrd;
-        use std::simd::num::SimdFloat;
 
         let inverse_dt_wide = Vector::<f32>::splat(inverse_dt);
         let base_speed = servo_settings
             .base_speed
-            .simd_min(*error_length * inverse_dt_wide);
+            .hw_min(*error_length * inverse_dt_wide);
         let unclamped_bias_speed = *error_length * *position_error_to_bias_velocity;
-        let target_speed = base_speed.simd_max(unclamped_bias_speed);
+        let target_speed = base_speed.hw_max(unclamped_bias_speed);
         let scale_raw =
-            Vector::<f32>::splat(1.0).simd_min(servo_settings.maximum_speed / target_speed);
+            Vector::<f32>::splat(1.0).hw_min(servo_settings.maximum_speed / target_speed);
         let epsilon = Vector::<f32>::splat(1e-10);
         let use_fallback = target_speed.simd_lt(epsilon);
         let scale = use_fallback.select(Vector::<f32>::splat(1.0), scale_raw);
@@ -249,7 +247,7 @@ impl ServoSettingsWide {
         Vector2Wide::length(&unclamped, &mut impulse_magnitude);
         let epsilon = Vector::<f32>::splat(1e-10);
         let one = Vector::<f32>::splat(1.0);
-        let impulse_scale_raw = one.simd_min(*maximum_impulse / impulse_magnitude);
+        let impulse_scale_raw = (*maximum_impulse / impulse_magnitude).hw_min(one);
         let use_fallback = impulse_magnitude.abs().simd_lt(epsilon);
         let impulse_scale = use_fallback.select(one, impulse_scale_raw);
         Vector2Wide::scale(&unclamped, &impulse_scale, accumulated_impulse);
@@ -263,10 +261,9 @@ impl ServoSettingsWide {
         accumulated_impulse: &mut Vector<f32>,
         csi: &mut Vector<f32>,
     ) {
-        use std::simd::num::SimdFloat;
         let previous_impulse = *accumulated_impulse;
         *accumulated_impulse =
-            (-*maximum_impulse).simd_max((*maximum_impulse).simd_min(*accumulated_impulse + *csi));
+            (-*maximum_impulse).hw_max((*maximum_impulse).hw_min(*accumulated_impulse + *csi));
         *csi = *accumulated_impulse - previous_impulse;
     }
 
@@ -288,7 +285,7 @@ impl ServoSettingsWide {
         Vector3Wide::length_into(accumulated_impulse, &mut impulse_magnitude);
         let epsilon = Vector::<f32>::splat(1e-10);
         let one = Vector::<f32>::splat(1.0);
-        let impulse_scale_raw = one.simd_min(*maximum_impulse / impulse_magnitude);
+        let impulse_scale_raw = (*maximum_impulse / impulse_magnitude).hw_min(one);
         let use_fallback = impulse_magnitude.abs().simd_lt(epsilon);
         let impulse_scale = use_fallback.select(one, impulse_scale_raw);
         *accumulated_impulse = Vector3Wide::scale(accumulated_impulse, &impulse_scale);

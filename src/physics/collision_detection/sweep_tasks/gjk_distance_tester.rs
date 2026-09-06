@@ -6,7 +6,7 @@ use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -198,9 +198,7 @@ fn edge(
         .select(*b_feature_id, Simd::splat(0));
     let feature_id_candidate = a_feature_contribution | b_feature_contribution;
 
-    ab_t = ab_t
-        .simd_max(Vector::<f32>::splat(0.0))
-        .simd_min(Vector::<f32>::splat(1.0));
+    ab_t = Vector::<f32>::splat(0.0).hw_max(Vector::<f32>::splat(1.0).hw_min(ab_t));
     let mut closest_on_ab = Vector3Wide::default();
     Vector3Wide::scale_to(ab, &ab_t, &mut closest_on_ab);
     closest_on_ab += *a;
@@ -224,6 +222,7 @@ fn edge(
     );
 }
 
+#[inline(always)]
 fn try_remove(
     simplex: &mut Simplex,
     index: i32,
@@ -770,15 +769,15 @@ where
             TSupportFinderA::get_margin(a, &mut margin_a);
             let mut margin_b = Vector::<f32>::default();
             TSupportFinderB::get_margin(b, &mut margin_b);
-            containment_epsilon = containment_epsilon.simd_max(margin_a + margin_b);
+            containment_epsilon = containment_epsilon.hw_max(margin_a + margin_b);
         } else if TSupportFinderA::has_margin() {
             let mut margin_a = Vector::<f32>::default();
             TSupportFinderA::get_margin(a, &mut margin_a);
-            containment_epsilon = containment_epsilon.simd_max(margin_a);
+            containment_epsilon = containment_epsilon.hw_max(margin_a);
         } else if TSupportFinderB::has_margin() {
             let mut margin_b = Vector::<f32>::default();
             TSupportFinderB::get_margin(b, &mut margin_b);
-            containment_epsilon = containment_epsilon.simd_max(margin_b);
+            containment_epsilon = containment_epsilon.hw_max(margin_b);
         }
         let containment_epsilon_squared = containment_epsilon * containment_epsilon;
         let mut distance_squared = Vector::<f32>::splat(f32::MAX);
@@ -805,7 +804,7 @@ where
             }
 
             let no_progress_made = new_distance_squared.simd_ge(distance_squared).to_simd();
-            distance_squared = distance_squared.simd_min(new_distance_squared);
+            distance_squared = distance_squared.hw_min(new_distance_squared);
             let about_to_terminate = no_progress_made & !terminated_mask;
             *closest_a =
                 Vector3Wide::conditional_select(&about_to_terminate, &simplex_closest_a, closest_a);

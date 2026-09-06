@@ -8,7 +8,7 @@ use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_ex;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::ray::RayWide;
@@ -67,7 +67,7 @@ impl IConvexShape for Cylinder {
         maximum_angular_expansion: &mut f32,
     ) {
         *maximum_radius = (self.half_length * self.half_length + self.radius * self.radius).sqrt();
-        *maximum_angular_expansion = *maximum_radius - self.half_length.min(self.radius);
+        *maximum_angular_expansion = *maximum_radius - self.half_length.hw_min(self.radius);
     }
 
     #[inline(always)]
@@ -75,9 +75,9 @@ impl IConvexShape for Cylinder {
         let mut y = Vec3::ZERO;
         quaternion_ex::transform_unit_y(orientation, &mut y);
         let positive_disc_bound_offsets = Vec3::new(
-            (1.0 - y.x * y.x).max(0.0).sqrt(),
-            (1.0 - y.y * y.y).max(0.0).sqrt(),
-            (1.0 - y.z * y.z).max(0.0).sqrt(),
+            0.0f32.hw_max(1.0 - y.x * y.x).sqrt(),
+            0.0f32.hw_max(1.0 - y.y * y.y).sqrt(),
+            0.0f32.hw_max(1.0 - y.z * y.z).sqrt(),
         ) * self.radius;
         *max = (self.half_length * y).abs() + positive_disc_bound_offsets;
         *min = -*max;
@@ -102,7 +102,7 @@ impl IConvexShape for Cylinder {
         let inverse_d_length = 1.0 / d.length();
         d *= inverse_d_length;
 
-        let t_offset = 0.0f32.max(-o.dot(d) - (self.half_length + self.radius));
+        let t_offset = 0.0f32.hw_max(-o.dot(d) - (self.half_length + self.radius));
         o += d * t_offset;
         let oh = Vec3::new(o.x, 0.0, o.z);
         let dh = Vec3::new(d.x, 0.0, d.z);
@@ -125,7 +125,7 @@ impl IConvexShape for Cylinder {
                 return false;
             }
             *t = (-b - discriminant.sqrt()) / a;
-            *t = (*t).max(-t_offset);
+            *t = (*t).hw_max(-t_offset);
             let cylinder_hit = o + d * *t;
             if cylinder_hit.y < -self.half_length {
                 disc_y = -self.half_length;
@@ -242,6 +242,7 @@ impl IShapeWide<Cylinder> for CylinderWide {
         }
     }
 
+    #[inline(always)]
     fn get_bounds(
         &self,
         orientations: &mut QuaternionWide,
@@ -258,13 +259,13 @@ impl IShapeWide<Cylinder> for CylinderWide {
         let zero = Vector::<f32>::splat(0.0);
         let mut squared = Vector3Wide::default();
         Vector3Wide::subtract_from_scalar(&one, &yy, &mut squared);
-        max.x = (self.half_length * y.x).abs() + (squared.x.simd_max(zero)).sqrt() * self.radius;
-        max.y = (self.half_length * y.y).abs() + (squared.y.simd_max(zero)).sqrt() * self.radius;
-        max.z = (self.half_length * y.z).abs() + (squared.z.simd_max(zero)).sqrt() * self.radius;
+        max.x = (self.half_length * y.x).abs() + zero.hw_max(squared.x).sqrt() * self.radius;
+        max.y = (self.half_length * y.y).abs() + zero.hw_max(squared.y).sqrt() * self.radius;
+        max.z = (self.half_length * y.z).abs() + zero.hw_max(squared.z).sqrt() * self.radius;
         Vector3Wide::negate(max, min);
 
         *maximum_radius = (self.half_length * self.half_length + self.radius * self.radius).sqrt();
-        *maximum_angular_expansion = *maximum_radius - self.half_length.simd_min(self.radius);
+        *maximum_angular_expansion = *maximum_radius - self.half_length.hw_min(self.radius);
     }
 
     fn minimum_wide_ray_count() -> i32 {
@@ -303,7 +304,7 @@ impl IShapeWide<Cylinder> for CylinderWide {
         // Move origin to earliest possible impact time.
         let mut od = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&o, &d, &mut od);
-        let t_offset = (-od - (self.half_length + self.radius)).simd_max(Vector::<f32>::splat(0.0));
+        let t_offset = (-od - (self.half_length + self.radius)).hw_max(Vector::<f32>::splat(0.0));
         let mut o_offset = Vector3Wide::default();
         Vector3Wide::scale_to(&d, &t_offset, &mut o_offset);
         let o_copy = o;
@@ -319,7 +320,7 @@ impl IShapeWide<Cylinder> for CylinderWide {
         let cylinder_intersected = (b.simd_le(Vector::<f32>::splat(0.0))
             | c.simd_le(Vector::<f32>::splat(0.0)))
             & discriminant.simd_ge(Vector::<f32>::splat(0.0));
-        let cylinder_t = ((-b - discriminant.sqrt()) / a).simd_max(-t_offset);
+        let cylinder_t = (-t_offset).hw_max((-b - discriminant.sqrt()) / a);
         let mut cylinder_hit_location = Vector3Wide::default();
         Vector3Wide::scale_to(&d, &cylinder_t, &mut o_offset);
         Vector3Wide::add(&o, &o_offset, &mut cylinder_hit_location);

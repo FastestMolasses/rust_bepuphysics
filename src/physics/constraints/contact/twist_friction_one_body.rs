@@ -2,10 +2,9 @@
 
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialEq;
-use std::simd::num::SimdFloat;
 use std::simd::Select;
 
 /// Handles the twist friction implementation for one body contact constraints.
@@ -46,9 +45,8 @@ impl TwistFrictionOneBody {
 
         let previous_accumulated = *accumulated_impulse;
         //The maximum force of friction depends upon the normal impulse.
-        *accumulated_impulse = (*accumulated_impulse - negative_csi)
-            .simd_min(*maximum_impulse)
-            .simd_max(-*maximum_impulse);
+        *accumulated_impulse = (*maximum_impulse)
+            .hw_min((-*maximum_impulse).hw_max(*accumulated_impulse - negative_csi));
 
         *corrective_csi = *accumulated_impulse - previous_accumulated;
     }

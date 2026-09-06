@@ -3,7 +3,7 @@
 use crate::physics::collidables::capsule::CapsuleWide;
 use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 
@@ -39,7 +39,7 @@ impl IPairDistanceTester<CapsuleWide, CapsuleWide> for CapsulePairDistanceTester
         Vector3Wide::dot(&da, &db, &mut dadb);
         // Note potential division by zero when the axes are parallel. Arbitrarily clamp; near zero values will instead produce extreme values which get clamped to reasonable results.
         let mut ta = (da_offset_b - db_offset_b * dadb)
-            / Vector::<f32>::splat(1e-15).simd_max(Vector::<f32>::splat(1.0) - dadb * dadb);
+            / Vector::<f32>::splat(1e-15).hw_max(Vector::<f32>::splat(1.0) - dadb * dadb);
         // tb = ta * (da * db) - db * (b - a)
         let mut tb = ta * dadb - db_offset_b;
 
@@ -52,17 +52,17 @@ impl IPairDistanceTester<CapsuleWide, CapsuleWide> for CapsulePairDistanceTester
         let b_onto_a_offset = b.half_length * absdadb;
         let a_onto_b_offset = a.half_length * absdadb;
         let a_min =
-            (-a.half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(a.half_length));
+            (-a.half_length).hw_max(a.half_length.hw_min(da_offset_b - b_onto_a_offset));
         let a_max = a
             .half_length
-            .simd_min((-a.half_length).simd_max(da_offset_b + b_onto_a_offset));
+            .hw_min((-a.half_length).hw_max(da_offset_b + b_onto_a_offset));
         let b_min =
-            (-b.half_length).simd_max((-a_onto_b_offset - db_offset_b).simd_min(b.half_length));
+            (-b.half_length).hw_max(b.half_length.hw_min(-a_onto_b_offset - db_offset_b));
         let b_max = b
             .half_length
-            .simd_min((-b.half_length).simd_max(a_onto_b_offset - db_offset_b));
-        ta = ta.simd_max(a_min).simd_min(a_max);
-        tb = tb.simd_max(b_min).simd_min(b_max);
+            .hw_min((-b.half_length).hw_max(a_onto_b_offset - db_offset_b));
+        ta = ta.hw_max(a_min).hw_min(a_max);
+        tb = tb.hw_max(b_min).hw_min(b_max);
 
         Vector3Wide::scale_to(&da, &ta, closest_a);
         let mut closest_b = Vector3Wide::default();

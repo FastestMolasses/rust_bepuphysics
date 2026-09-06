@@ -84,8 +84,53 @@ const _: () = {
 unsafe impl Send for TaskStack {}
 unsafe impl Sync for TaskStack {}
 
-/// Fixed stand-in for C#'s unbounded `stackalloc Task[count]` in run_tasks/push_for/for_loop.
-const STACK_TASK_CAP: usize = 1024;
+/// Tasks kept inline before spilling to the worker's pool; C# uses `stackalloc Task[count]`.
+const INLINE_TASK_CAP: usize = 128;
+
+const _: () = assert!(INLINE_TASK_CAP * size_of::<Task>() <= 4096);
+
+/// Stand-in for C#'s `stackalloc T[count]`: inline storage with a `BufferPool` spill for
+/// counts beyond `N`, returned to the pool on drop.
+struct StackScratch<T, const N: usize> {
+    inline: MaybeUninit<[T; N]>,
+    spill: Buffer<T>,
+    pool: *mut BufferPool,
+}
+
+impl<T, const N: usize> StackScratch<T, N> {
+    /// # Safety
+    /// `pool` must remain valid and usable by this thread for the lifetime of the scratch.
+    #[inline(always)]
+    unsafe fn take(count: i32, pool: *mut BufferPool) -> Self {
+        Self {
+            inline: MaybeUninit::uninit(),
+            spill: if count > N as i32 {
+                (*pool).take(count)
+            } else {
+                Buffer::default()
+            },
+            pool,
+        }
+    }
+
+    #[inline(always)]
+    fn as_mut_ptr(&mut self) -> *mut T {
+        if self.spill.allocated() {
+            self.spill.as_mut_ptr()
+        } else {
+            self.inline.as_mut_ptr() as *mut T
+        }
+    }
+}
+
+impl<T, const N: usize> Drop for StackScratch<T, N> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        if self.spill.allocated() {
+            unsafe { (*self.pool).return_buffer(&mut self.spill) };
+        }
+    }
+}
 
 /// C# `SpinWait.YieldThreshold`: spin rounds before yielding.
 const SPIN_YIELD_THRESHOLD: u32 = 10;
@@ -552,13 +597,10 @@ impl TaskStack {
                 )
             };
 
-            // Fixed stack storage standing in for C#'s `stackalloc Task[taskCount]`.
-            debug_assert!(
-                (task_count as usize) <= STACK_TASK_CAP,
-                "run_tasks task count exceeds fixed stack capacity"
-            );
-            let mut tasks_to_push: [MaybeUninit<Task>; STACK_TASK_CAP] =
-                unsafe { MaybeUninit::uninit().assume_init() };
+            let pool = dispatcher.worker_pool_ptr(worker_index);
+            let mut scratch =
+                unsafe { StackScratch::<Task, INLINE_TASK_CAP>::take(task_count, pool) };
+            let tasks_to_push = scratch.as_mut_ptr();
             for i in 1..tasks.len() {
                 let mut task = tasks[i];
                 debug_assert!(
@@ -566,14 +608,10 @@ impl TaskStack {
                     "None of the source tasks should have continuations when provided to run_tasks."
                 );
                 task.continuation = continuation_handle;
-                tasks_to_push[i - 1].write(task);
+                unsafe { tasks_to_push.add(i - 1).write(task) };
             }
-            let tasks_to_push = unsafe {
-                std::slice::from_raw_parts(
-                    tasks_to_push.as_ptr() as *const Task,
-                    task_count as usize,
-                )
-            };
+            let tasks_to_push =
+                unsafe { std::slice::from_raw_parts(tasks_to_push, task_count as usize) };
             self.push(tasks_to_push, worker_index, dispatcher, tag);
         }
 
@@ -676,23 +714,23 @@ impl TaskStack {
         tag: u64,
         continuation: ContinuationHandle,
     ) {
-        // Fixed stack storage standing in for C#'s `stackalloc Task[iterationCount]`.
-        debug_assert!(
-            (iteration_count as usize) <= STACK_TASK_CAP,
-            "push_for_unsafely iteration count exceeds fixed stack capacity"
-        );
-        let mut tasks: [MaybeUninit<Task>; STACK_TASK_CAP] = MaybeUninit::uninit().assume_init();
+        let pool = dispatcher.worker_pool_ptr(worker_index);
+        let mut scratch = StackScratch::<Task, INLINE_TASK_CAP>::take(iteration_count, pool);
+        let tasks = scratch.as_mut_ptr();
         for i in 0..iteration_count {
-            tasks[i as usize].write(Task::new(
+            tasks.add(i as usize).write(Task::new(
                 function,
                 context,
                 (inclusive_start_index + i) as i64,
                 continuation,
             ));
         }
-        let tasks =
-            std::slice::from_raw_parts(tasks.as_ptr() as *const Task, iteration_count as usize);
-        self.push_unsafely(tasks, worker_index, dispatcher, tag);
+        self.push_unsafely(
+            std::slice::from_raw_parts(tasks, iteration_count as usize),
+            worker_index,
+            dispatcher,
+            tag,
+        );
     }
 
     /// Pushes a for loop onto the task stack (thread-safe).
@@ -709,24 +747,21 @@ impl TaskStack {
         tag: u64,
         continuation: ContinuationHandle,
     ) {
-        // Fixed stack storage standing in for C#'s `stackalloc Task[iterationCount]`.
-        debug_assert!(
-            (iteration_count as usize) <= STACK_TASK_CAP,
-            "push_for iteration count exceeds fixed stack capacity"
-        );
-        let mut tasks: [MaybeUninit<Task>; STACK_TASK_CAP] =
-            unsafe { MaybeUninit::uninit().assume_init() };
+        let pool = dispatcher.worker_pool_ptr(worker_index);
+        let mut scratch =
+            unsafe { StackScratch::<Task, INLINE_TASK_CAP>::take(iteration_count, pool) };
+        let tasks = scratch.as_mut_ptr();
         for i in 0..iteration_count {
-            tasks[i as usize].write(Task::new(
-                function,
-                context,
-                (inclusive_start_index + i) as i64,
-                continuation,
-            ));
+            unsafe {
+                tasks.add(i as usize).write(Task::new(
+                    function,
+                    context,
+                    (inclusive_start_index + i) as i64,
+                    continuation,
+                ))
+            };
         }
-        let tasks = unsafe {
-            std::slice::from_raw_parts(tasks.as_ptr() as *const Task, iteration_count as usize)
-        };
+        let tasks = unsafe { std::slice::from_raw_parts(tasks, iteration_count as usize) };
         self.push(tasks, worker_index, dispatcher, tag);
     }
 
@@ -746,26 +781,20 @@ impl TaskStack {
             return;
         }
 
-        // Fixed stack storage standing in for C#'s `stackalloc Task[iterationCount]`.
-        debug_assert!(
-            (iteration_count as usize) <= STACK_TASK_CAP,
-            "for_loop iteration count exceeds fixed stack capacity"
-        );
-        let mut tasks: [MaybeUninit<Task>; STACK_TASK_CAP] =
-            unsafe { MaybeUninit::uninit().assume_init() };
+        let pool = dispatcher.worker_pool_ptr(worker_index);
+        let mut scratch =
+            unsafe { StackScratch::<Task, INLINE_TASK_CAP>::take(iteration_count, pool) };
+        let tasks = scratch.as_mut_ptr();
         for i in 0..iteration_count {
-            tasks[i as usize].write(Task::with_context(
-                function,
-                context,
-                (inclusive_start_index + i) as i64,
-            ));
+            unsafe {
+                tasks.add(i as usize).write(Task::with_context(
+                    function,
+                    context,
+                    (inclusive_start_index + i) as i64,
+                ))
+            };
         }
-        let tasks = unsafe {
-            std::slice::from_raw_parts_mut(
-                tasks.as_mut_ptr() as *mut Task,
-                iteration_count as usize,
-            )
-        };
+        let tasks = unsafe { std::slice::from_raw_parts_mut(tasks, iteration_count as usize) };
         self.run_tasks(tasks, worker_index, dispatcher, filter, tag);
     }
 

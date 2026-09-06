@@ -1,11 +1,11 @@
 // Translated from BepuPhysics/Constraints/Contact/PenetrationLimit.cs
 
+use crate::out;
 use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
-use std::simd::num::SimdFloat;
 
 pub struct PenetrationLimit;
 
@@ -24,22 +24,17 @@ impl PenetrationLimit {
         corrective_csi: &mut Vector<f32>,
     ) {
         //Note that we do NOT use pretransformed jacobians here; the linear jacobian sharing (normal) meant that we had the effective mass anyway.
-        let mut csva_linear = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&wsv_a.linear, normal, &mut csva_linear);
-        let mut csva_angular = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&wsv_a.angular, angular_a, &mut csva_angular);
-        let mut negated_csvb_linear = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&wsv_b.linear, normal, &mut negated_csvb_linear);
-        let mut csvb_angular = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(&wsv_b.angular, angular_b, &mut csvb_angular);
+        let csva_linear = out!(Vector3Wide::dot(&wsv_a.linear, normal));
+        let csva_angular = out!(Vector3Wide::dot(&wsv_a.angular, angular_a));
+        let negated_csvb_linear = out!(Vector3Wide::dot(&wsv_b.linear, normal));
+        let csvb_angular = out!(Vector3Wide::dot(&wsv_b.angular, angular_b));
         //Compute negated version to avoid the need for an explicit negate.
         let negated_csi = *accumulated_impulse * *softness_impulse_scale
             + (csva_linear - negated_csvb_linear + csva_angular + csvb_angular - *bias_velocity)
                 * *effective_mass;
 
         let previous_accumulated = *accumulated_impulse;
-        *accumulated_impulse =
-            (*accumulated_impulse - negated_csi).simd_max(Vector::<f32>::splat(0.0));
+        *accumulated_impulse = Vector::<f32>::splat(0.0).hw_max(*accumulated_impulse - negated_csi);
 
         *corrective_csi = *accumulated_impulse - previous_accumulated;
     }
@@ -60,30 +55,21 @@ impl PenetrationLimit {
             &velocity_a.angular,
             contact_offset_a
         ));
-        let mut contact_velocity_a = Vector3Wide::default();
-        Vector3Wide::add(&wxra, &velocity_a.linear, &mut contact_velocity_a);
+        let contact_velocity_a = out!(Vector3Wide::add(&wxra, &velocity_a.linear));
 
-        let mut contact_offset_b = Vector3Wide::default();
-        Vector3Wide::subtract(contact_offset_a, offset_b, &mut contact_offset_b);
+        let contact_offset_b = out!(Vector3Wide::subtract(contact_offset_a, offset_b));
         let wxrb = out_unsafe!(Vector3Wide::cross_without_overlap(
             &velocity_b.angular,
             &contact_offset_b
         ));
-        let mut contact_velocity_b = Vector3Wide::default();
-        Vector3Wide::add(&wxrb, &velocity_b.linear, &mut contact_velocity_b);
+        let contact_velocity_b = out!(Vector3Wide::add(&wxrb, &velocity_b.linear));
 
-        let mut contact_velocity_difference = Vector3Wide::default();
-        Vector3Wide::subtract(
+        let contact_velocity_difference = out!(Vector3Wide::subtract(
             &contact_velocity_a,
-            &contact_velocity_b,
-            &mut contact_velocity_difference,
-        );
-        let mut estimated_depth_change_velocity = Vector::<f32>::splat(0.0);
-        Vector3Wide::dot(
-            normal,
-            &contact_velocity_difference,
-            &mut estimated_depth_change_velocity,
-        );
+            &contact_velocity_b
+        ));
+        let estimated_depth_change_velocity =
+            out!(Vector3Wide::dot(normal, &contact_velocity_difference));
         *penetration_depth -= estimated_depth_change_velocity * *dt;
     }
 
@@ -102,23 +88,21 @@ impl PenetrationLimit {
         let corrective_velocity_a_linear_velocity =
             Vector3Wide::scale(normal, &linear_velocity_change_a);
         let corrective_angular_impulse_a = Vector3Wide::scale(angular_a, corrective_impulse);
-        let mut corrective_velocity_a_angular_velocity = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
-            &corrective_angular_impulse_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut corrective_velocity_a_angular_velocity,
-        );
+        let corrective_velocity_a_angular_velocity =
+            out!(Symmetric3x3Wide::transform_without_overlap(
+                &corrective_angular_impulse_a,
+                &inertia_a.inverse_inertia_tensor
+            ));
 
         let linear_velocity_change_b = *corrective_impulse * inertia_b.inverse_mass;
         let corrective_velocity_b_linear_velocity =
             Vector3Wide::scale(normal, &linear_velocity_change_b);
         let corrective_angular_impulse_b = Vector3Wide::scale(angular_b, corrective_impulse);
-        let mut corrective_velocity_b_angular_velocity = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
-            &corrective_angular_impulse_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut corrective_velocity_b_angular_velocity,
-        );
+        let corrective_velocity_b_angular_velocity =
+            out!(Symmetric3x3Wide::transform_without_overlap(
+                &corrective_angular_impulse_b,
+                &inertia_b.inverse_inertia_tensor
+            ));
 
         let temp = wsv_a.linear;
         Vector3Wide::add(
@@ -193,18 +177,14 @@ impl PenetrationLimit {
         let angular_b = out_unsafe!(Vector3Wide::cross_without_overlap(normal, contact_offset_b));
 
         //effective mass
-        let mut angular_a0 = Vector::<f32>::splat(0.0);
-        Symmetric3x3Wide::vector_sandwich(
+        let angular_a0 = out!(Symmetric3x3Wide::vector_sandwich(
             &angular_a,
-            &inertia_a.inverse_inertia_tensor,
-            &mut angular_a0,
-        );
-        let mut angular_b0 = Vector::<f32>::splat(0.0);
-        Symmetric3x3Wide::vector_sandwich(
+            &inertia_a.inverse_inertia_tensor
+        ));
+        let angular_b0 = out!(Symmetric3x3Wide::vector_sandwich(
             &angular_b,
-            &inertia_b.inverse_inertia_tensor,
-            &mut angular_b0,
-        );
+            &inertia_b.inverse_inertia_tensor
+        ));
 
         //Linear effective mass contribution notes:
         //1) The J * M^-1 * JT can be reordered to J * JT * M^-1 for the linear components, since M^-1 is a scalar and dot(n * scalar, n) = dot(n, n) * scalar.
@@ -215,10 +195,9 @@ impl PenetrationLimit {
 
         //If depth is negative, the bias velocity will permit motion up until the depth hits zero. This works because positionErrorToVelocity * dt will always be <=1.
         let bias_velocity = (*depth * *inverse_dt)
-            .simd_min((*depth * *position_error_to_velocity).simd_min(*maximum_recovery_velocity));
+            .hw_min((*depth * *position_error_to_velocity).hw_min(*maximum_recovery_velocity));
 
-        let mut corrective_csi = Vector::<f32>::splat(0.0);
-        Self::compute_corrective_impulse(
+        let corrective_csi = out!(Self::compute_corrective_impulse(
             wsv_a,
             wsv_b,
             normal,
@@ -227,9 +206,8 @@ impl PenetrationLimit {
             &bias_velocity,
             softness_impulse_scale,
             &effective_mass,
-            accumulated_impulse,
-            &mut corrective_csi,
-        );
+            accumulated_impulse
+        ));
         Self::apply_impulse(
             inertia_a,
             inertia_b,

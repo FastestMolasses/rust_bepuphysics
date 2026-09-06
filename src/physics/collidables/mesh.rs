@@ -6,6 +6,7 @@ use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::symmetric3x3::Symmetric3x3;
+use crate::utilities::vector::HwMinMax;
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::mesh_inertia_helper::{ITriangleSource, MeshInertiaHelper};
@@ -16,6 +17,7 @@ use super::triangle::TriangleWide;
 use crate::physics::collision_detection::collision_tasks::convex_compound_overlap_finder::IBoundsQueryableCompound;
 use crate::physics::collision_detection::ray_batchers::IShapeRayHitHandler;
 use crate::physics::collision_detection::ray_batchers::RayData;
+use crate::physics::collision_detection::ray_batchers::ShapeRayHitHandlerRef;
 
 // The IRayLeafTester trait uses the RayData type from ray_batcher, not collidables::ray.
 use crate::physics::trees::ray_batcher::RayData as TreeRayData;
@@ -70,6 +72,7 @@ impl<'a, TOverlaps: ICollisionTaskSubpairOverlaps> ISweepLeafTester
 /// clockwise in right handed coordinates or counterclockwise in left handed coordinates
 /// will generate contacts.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Mesh {
     /// Acceleration structure of the mesh.
     pub tree: Tree,
@@ -83,6 +86,13 @@ pub struct Mesh {
     /// Precomputed inverse scale.
     inverse_scale: Vec3,
 }
+
+const _: () = {
+    assert!(
+        size_of::<Mesh>()
+            == size_of::<Tree>() + size_of::<Buffer<Triangle>>() + 2 * size_of::<Vec3>()
+    );
+};
 
 /// Ray leaf tester for mesh ray casts.
 struct HitLeafTester<THandler: IShapeRayHitHandler> {
@@ -209,8 +219,8 @@ impl Mesh {
         for i in 0..triangles.len() {
             let t = &triangles[i];
             let subtree = &mut subtrees[i];
-            subtree.min = t.a.min(t.b.min(t.c));
-            subtree.max = t.a.max(t.b.max(t.c));
+            subtree.min = t.a.hw_min(t.b.hw_min(t.c));
+            subtree.max = t.a.hw_max(t.b.hw_max(t.c));
             subtree.leaf_count = 1;
             subtree.index = Tree::encode(i as i32);
         }
@@ -413,12 +423,12 @@ impl Mesh {
             Matrix3x3::transform(&(self.scale * triangle.a), &r, &mut a);
             Matrix3x3::transform(&(self.scale * triangle.b), &r, &mut b);
             Matrix3x3::transform(&(self.scale * triangle.c), &r, &mut c);
-            let min0 = a.min(b);
-            let min1 = c.min(*min);
-            let max0 = a.max(b);
-            let max1 = c.max(*max);
-            *min = min0.min(min1);
-            *max = max0.max(max1);
+            let min0 = a.hw_min(b);
+            let min1 = c.hw_min(*min);
+            let max0 = a.hw_max(b);
+            let max1 = c.hw_max(*max);
+            *min = min0.hw_min(min1);
+            *max = max0.hw_max(max1);
         }
     }
 
@@ -528,8 +538,8 @@ impl Mesh {
             enumerator.overlaps = overlaps.get_overlaps_for_pair(i) as *mut TSubpairOverlaps;
             // Take a min/max to compensate for negative scales.
             mesh.tree.get_overlaps_minmax(
-                scaled_min.min(scaled_max),
-                scaled_min.max(scaled_max),
+                scaled_min.hw_min(scaled_max),
+                scaled_min.hw_max(scaled_max),
                 &mut *pool_ptr,
                 &mut enumerator,
             );
@@ -556,8 +566,8 @@ impl Mesh {
         };
         // Take a min/max to compensate for negative scales.
         self.tree.sweep(
-            scaled_min.min(scaled_max),
-            scaled_min.max(scaled_max),
+            scaled_min.hw_min(scaled_max),
+            scaled_min.hw_max(scaled_max),
             scaled_sweep,
             maximum_t,
             &mut *pool_ptr,
@@ -709,34 +719,19 @@ impl super::shape::INonConvexBounds for Mesh {
         self.compute_bounds(orientation, min, max);
     }
 
+    fn shape_ray_ref(&self) -> super::shapes::ShapeRayRef {
+        super::shapes::ShapeRayRef::Mesh(self)
+    }
+
     unsafe fn ray_test_shape(
         &self,
         pose: &RigidPose,
         ray: &RayData,
         maximum_t: &mut f32,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     ) {
-        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type
-        // for Mesh::ray_test which requires Sized (stores handler by value in HitLeafTester).
-        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
-        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
-            fn allow_test(&self, child_index: i32) -> bool {
-                self.0.allow_test(child_index)
-            }
-            fn on_ray_hit(
-                &mut self,
-                ray: &RayData,
-                maximum_t: &mut f32,
-                t: f32,
-                normal: Vec3,
-                child_index: i32,
-            ) {
-                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
-            }
-        }
-        let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test(pose, ray, maximum_t, pool, &mut wrapper);
+        self.ray_test(pose, ray, maximum_t, pool, hit_handler);
     }
 
     unsafe fn ray_test_shape_batched(
@@ -744,27 +739,9 @@ impl super::shape::INonConvexBounds for Mesh {
         pose: &RigidPose,
         rays: &mut RaySource,
         pool: &mut BufferPool,
-        hit_handler: &mut dyn IShapeRayHitHandler,
+        hit_handler: &mut ShapeRayHitHandlerRef<'_>,
     ) {
-        // Wrapper to convert &mut dyn IShapeRayHitHandler into a concrete Sized type.
-        struct DynHandlerWrapper<'a>(&'a mut dyn IShapeRayHitHandler);
-        impl IShapeRayHitHandler for DynHandlerWrapper<'_> {
-            fn allow_test(&self, child_index: i32) -> bool {
-                self.0.allow_test(child_index)
-            }
-            fn on_ray_hit(
-                &mut self,
-                ray: &RayData,
-                maximum_t: &mut f32,
-                t: f32,
-                normal: Vec3,
-                child_index: i32,
-            ) {
-                self.0.on_ray_hit(ray, maximum_t, t, normal, child_index)
-            }
-        }
-        let mut wrapper = DynHandlerWrapper(hit_handler);
-        self.ray_test_batched(pose, rays, pool, &mut wrapper);
+        self.ray_test_batched(pose, rays, pool, hit_handler);
     }
 }
 
@@ -815,8 +792,8 @@ impl IHomogeneousCompoundShape<Triangle, TriangleWide> for Mesh {
         let scaled_min = *local_min * self.inverse_scale;
         let scaled_max = *local_max * self.inverse_scale;
         self.tree.get_overlaps_minmax(
-            scaled_min.min(scaled_max),
-            scaled_min.max(scaled_max),
+            scaled_min.hw_min(scaled_max),
+            scaled_min.hw_max(scaled_max),
             pool,
             &mut adapter,
         );
@@ -862,8 +839,8 @@ impl IBoundsQueryableCompound for Mesh {
             };
             // Take a min/max to compensate for negative scales.
             mesh.tree.get_overlaps_minmax(
-                scaled_min.min(scaled_max),
-                scaled_min.max(scaled_max),
+                scaled_min.hw_min(scaled_max),
+                scaled_min.hw_max(scaled_max),
                 unsafe { &mut *pool_ptr },
                 &mut adapter,
             );
@@ -890,8 +867,8 @@ impl IBoundsQueryableCompound for Mesh {
         };
         // Take a min/max to compensate for negative scales.
         self.tree.sweep(
-            scaled_min.min(scaled_max),
-            scaled_min.max(scaled_max),
+            scaled_min.hw_min(scaled_max),
+            scaled_min.hw_max(scaled_max),
             scaled_sweep,
             maximum_t,
             &mut *pool_ptr,

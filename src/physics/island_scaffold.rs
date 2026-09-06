@@ -26,6 +26,7 @@ impl IForEach<i32> for ConstraintHandleEnumerator {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(crate) struct IslandScaffoldTypeBatch {
     pub type_id: i32,
     pub handles: QuickList<i32>,
@@ -42,6 +43,7 @@ impl IslandScaffoldTypeBatch {
 
 // NOTE: There's quite a bit of redundant logic here with the constraint batch and solver. Very likely that we could share more.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(crate) struct IslandScaffoldConstraintBatch {
     pub type_id_to_index: Buffer<i32>,
     pub type_batches: QuickList<IslandScaffoldTypeBatch>,
@@ -120,16 +122,17 @@ impl IslandScaffoldConstraintBatch {
             } else {
                 // This is the fallback batch, so we need to fill it with relevant information.
                 let bodies = &*solver.bodies;
-                let mut dynamic_body_handles: Vec<BodyHandle> =
-                    Vec::with_capacity(dynamic_body_indices.len());
-                for &idx in dynamic_body_indices {
-                    dynamic_body_handles.push(*bodies.active_set().index_to_handle.get(idx));
+                assert!(dynamic_body_indices.len() <= Solver::MAXIMUM_BODIES_PER_CONSTRAINT);
+                let mut dynamic_body_handles =
+                    [BodyHandle(0); Solver::MAXIMUM_BODIES_PER_CONSTRAINT];
+                for (i, &idx) in dynamic_body_indices.iter().enumerate() {
+                    dynamic_body_handles[i] = *bodies.active_set().index_to_handle.get(idx);
                 }
                 fallback_batch.allocate_for_inactive(
-                    &dynamic_body_handles,
+                    &dynamic_body_handles[..dynamic_body_indices.len()],
                     bodies,
                     pool,
-                    bodies.minimum_constraint_capacity_per_body,
+                    SequentialFallbackBatch::DEFAULT_MINIMUM_BODY_CAPACITY,
                 );
             }
             true
@@ -153,6 +156,7 @@ impl IslandScaffoldConstraintBatch {
 /// Represents the constraint batch structure and all references in an island.
 /// Holds everything necessary to create and gather a full island.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(crate) struct IslandScaffold {
     pub body_indices: QuickList<i32>,
     pub protobatches: QuickList<IslandScaffoldConstraintBatch>,
@@ -200,10 +204,10 @@ impl IslandScaffold {
         let type_id = location.type_id;
         let type_processor = solver.type_processors[type_id as usize].as_ref().unwrap();
         let bodies_per_constraint = type_processor.bodies_per_constraint;
-        let mut body_indices_buf = [0i32; 8]; // stack alloc — matches C# stackalloc
-        debug_assert!(
-            bodies_per_constraint <= 8,
-            "Bodies per constraint exceeds stack buffer size"
+        let mut body_indices_buf = [0i32; Solver::MAXIMUM_BODIES_PER_CONSTRAINT];
+        assert!(
+            bodies_per_constraint as usize <= Solver::MAXIMUM_BODIES_PER_CONSTRAINT,
+            "Bodies per constraint exceeds the maximum bodies per constraint."
         );
 
         let mut enumerator = ConstraintHandleEnumerator {

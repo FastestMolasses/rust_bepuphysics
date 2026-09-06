@@ -4,8 +4,9 @@
 
 use crate::physics::collision_detection::support_finder::ISupportFinder;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 use std::simd::prelude::*;
 use std::simd::Select;
 use std::simd::StdFloat;
@@ -270,16 +271,15 @@ impl DepthRefiner {
     // ========================================================================
 
     /// Computes the next search normal from the simplex state.
-    /// When `has_new_support` is true, the provided support is integrated into the simplex.
+    /// When `HAS_NEW_SUPPORT` is true, the provided support is integrated into the simplex.
     /// When false, empty slots are filled with duplicates of existing data.
-    fn get_next_normal(
+    fn get_next_normal<const HAS_NEW_SUPPORT: bool>(
         simplex: &mut Simplex,
         support: &Vector3Wide,
         terminated_lanes: &mut Vector<i32>,
         best_normal: &Vector3Wide,
         best_depth: &Vector<f32>,
         convergence_threshold: &Vector<f32>,
-        has_new_support: bool,
         next_normal: &mut Vector3Wide,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
@@ -287,7 +287,7 @@ impl DepthRefiner {
         let neg_one = Vector::<i32>::splat(-1);
 
         // The search target is the closest point to the origin on the so-far-best bounding plane (the tootbird).
-        let clamped_depth = best_depth.simd_max(zero_f);
+        let clamped_depth = zero_f.hw_max(*best_depth);
         let mut search_target = Vector3Wide::default();
         Vector3Wide::scale_to(best_normal, &clamped_depth, &mut search_target);
         let termination_epsilon = best_depth
@@ -295,7 +295,7 @@ impl DepthRefiner {
             .select(*convergence_threshold - *best_depth, *convergence_threshold);
         let termination_epsilon_squared = termination_epsilon * termination_epsilon;
 
-        if has_new_support {
+        if HAS_NEW_SUPPORT {
             let simplex_full =
                 (simplex.a.exists & (simplex.b.exists & simplex.c.exists)) & !*terminated_lanes;
             // Fill any empty slots with the new support. Combines partial simplex case with degenerate simplex case.
@@ -403,8 +403,8 @@ impl DepthRefiner {
         Vector3Wide::length_squared_to(&bc, &mut bc_length_squared);
         Vector3Wide::length_squared_to(&ca, &mut ca_length_squared);
         let longest_edge_length_squared = ab_length_squared
-            .simd_max(bc_length_squared)
-            .simd_max(ca_length_squared);
+            .hw_max(bc_length_squared)
+            .hw_max(ca_length_squared);
         let simplex_degenerate = triangle_normal_length_squared
             .simd_le(longest_edge_length_squared * Vector::<f32>::splat(1e-10));
         let degeneracy_epsilon = Vector::<f32>::splat(1e-14);
@@ -455,9 +455,9 @@ impl DepthRefiner {
             Vector3Wide::dot(&target_to_a, &ab, &mut oa_dot_ab);
             Vector3Wide::dot(&target_to_b, &bc, &mut ob_dot_bc);
             Vector3Wide::dot(&target_to_c, &ca, &mut oc_dot_ca);
-            let ab_scaled_t = zero_f.simd_max(ab_length_squared.simd_min(-oa_dot_ab));
-            let bc_scaled_t = zero_f.simd_max(bc_length_squared.simd_min(-ob_dot_bc));
-            let ca_scaled_t = zero_f.simd_max(ca_length_squared.simd_min(-oc_dot_ca));
+            let ab_scaled_t = zero_f.hw_max(ab_length_squared.hw_min(-oa_dot_ab));
+            let bc_scaled_t = zero_f.hw_max(bc_length_squared.hw_min(-ob_dot_bc));
+            let ca_scaled_t = zero_f.hw_max(ca_length_squared.hw_min(-oc_dot_ca));
             let ab_t = ab_scaled_t * inverse_ab_length_squared;
             let bc_t = bc_scaled_t * inverse_bc_length_squared;
             let ca_t = ca_scaled_t * inverse_ca_length_squared;
@@ -601,7 +601,7 @@ impl DepthRefiner {
     // ========================================================================
 
     /// Computes the next search normal from the witness simplex state.
-    fn get_next_normal_witness(
+    fn get_next_normal_witness<const HAS_NEW_SUPPORT: bool>(
         simplex: &mut SimplexWithWitness,
         support: &Vector3Wide,
         support_on_a: &Vector3Wide,
@@ -609,7 +609,6 @@ impl DepthRefiner {
         best_normal: &Vector3Wide,
         best_depth: &Vector<f32>,
         convergence_threshold: &Vector<f32>,
-        has_new_support: bool,
         next_normal: &mut Vector3Wide,
     ) {
         let zero_f = Vector::<f32>::splat(0.0);
@@ -617,7 +616,7 @@ impl DepthRefiner {
         let neg_one = Vector::<i32>::splat(-1);
         let one_f = Vector::<f32>::splat(1.0);
 
-        let clamped_depth = best_depth.simd_max(zero_f);
+        let clamped_depth = zero_f.hw_max(*best_depth);
         let mut search_target = Vector3Wide::default();
         Vector3Wide::scale_to(best_normal, &clamped_depth, &mut search_target);
         let termination_epsilon = best_depth
@@ -625,7 +624,7 @@ impl DepthRefiner {
             .select(*convergence_threshold - *best_depth, *convergence_threshold);
         let termination_epsilon_squared = termination_epsilon * termination_epsilon;
 
-        if has_new_support {
+        if HAS_NEW_SUPPORT {
             let simplex_full =
                 (simplex.a.exists & (simplex.b.exists & simplex.c.exists)) & !*terminated_lanes;
             Self::fill_slot_witness(&mut simplex.a, support, support_on_a, terminated_lanes);
@@ -758,8 +757,8 @@ impl DepthRefiner {
         Vector3Wide::length_squared_to(&bc, &mut bc_length_squared);
         Vector3Wide::length_squared_to(&ca, &mut ca_length_squared);
         let longest_edge_length_squared = ab_length_squared
-            .simd_max(bc_length_squared)
-            .simd_max(ca_length_squared);
+            .hw_max(bc_length_squared)
+            .hw_max(ca_length_squared);
         let simplex_degenerate = triangle_normal_length_squared
             .simd_le(longest_edge_length_squared * Vector::<f32>::splat(1e-10));
         let degeneracy_epsilon = Vector::<f32>::splat(1e-14);
@@ -817,9 +816,9 @@ impl DepthRefiner {
             Vector3Wide::dot(&target_to_a, &ab, &mut oa_dot_ab);
             Vector3Wide::dot(&target_to_b, &bc, &mut ob_dot_bc);
             Vector3Wide::dot(&target_to_c, &ca, &mut oc_dot_ca);
-            let ab_scaled_t = zero_f.simd_max(ab_length_squared.simd_min(-oa_dot_ab));
-            let bc_scaled_t = zero_f.simd_max(bc_length_squared.simd_min(-ob_dot_bc));
-            let ca_scaled_t = zero_f.simd_max(ca_length_squared.simd_min(-oc_dot_ca));
+            let ab_scaled_t = zero_f.hw_max(ab_length_squared.hw_min(-oa_dot_ab));
+            let bc_scaled_t = zero_f.hw_max(bc_length_squared.hw_min(-ob_dot_bc));
+            let ca_scaled_t = zero_f.hw_max(ca_length_squared.hw_min(-oc_dot_ca));
             let ab_t = ab_scaled_t * inverse_ab_length_squared;
             let bc_t = bc_scaled_t * inverse_bc_length_squared;
             let ca_t = ca_scaled_t * inverse_ca_length_squared;
@@ -855,11 +854,10 @@ impl DepthRefiner {
                     .select(bc_distance_squared, ca_distance_squared),
             );
 
-            *terminated_lanes = *terminated_lanes
-                | (use_edge
+            *terminated_lanes |= use_edge
                     & best_distance_squared
                         .simd_le(termination_epsilon_squared)
-                        .to_simd());
+                        .to_simd();
 
             // Note: in the witness variant, the C# doesn't have the conditional guard around this block.
             {
@@ -1026,8 +1024,9 @@ impl DepthRefiner {
         );
         let mut initial_depth = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&initial_support, initial_normal, &mut initial_depth);
-        let mut simplex = Simplex::default();
-        Self::create(initial_normal, &initial_support, &mut simplex);
+        let mut simplex_storage = MaybeUninit::<Simplex>::uninit();
+        let simplex = unsafe { &mut *simplex_storage.as_mut_ptr() };
+        Self::create(initial_normal, &initial_support, simplex);
         Self::find_minimum_depth_with_simplex(
             a,
             b,
@@ -1035,7 +1034,7 @@ impl DepthRefiner {
             local_orientation_b,
             support_finder_a,
             support_finder_b,
-            &mut simplex,
+            simplex,
             initial_normal,
             &initial_depth,
             inactive_lanes,
@@ -1099,14 +1098,13 @@ impl DepthRefiner {
 
         let dummy = Vector3Wide::default();
         let mut normal = Vector3Wide::default();
-        Self::get_next_normal(
+        Self::get_next_normal::<false>(
             simplex,
             &dummy,
             &mut terminated_lanes,
             refined_normal,
             refined_depth,
             convergence_threshold,
-            false,
             &mut normal,
         );
 
@@ -1140,14 +1138,13 @@ impl DepthRefiner {
                 break;
             }
 
-            Self::get_next_normal(
+            Self::get_next_normal::<true>(
                 simplex,
                 &support,
                 &mut terminated_lanes,
                 refined_normal,
                 refined_depth,
                 convergence_threshold,
-                true,
                 &mut normal,
             );
         }
@@ -1155,12 +1152,12 @@ impl DepthRefiner {
         if TSupportFinderA::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderA::get_margin(a, &mut margin);
-            *refined_depth = *refined_depth + margin;
+            *refined_depth += margin;
         }
         if TSupportFinderB::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderB::get_margin(b, &mut margin);
-            *refined_depth = *refined_depth + margin;
+            *refined_depth += margin;
         }
     }
 
@@ -1210,12 +1207,20 @@ impl DepthRefiner {
         );
         let mut initial_depth = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&initial_support, initial_normal, &mut initial_depth);
-        let mut simplex = SimplexWithWitness::default();
+        // create_with_witness leaves the barycentric weights unwritten; they are read back through
+        // conditional selects on terminated lanes, so they must be initialized here.
+        let mut simplex_storage = MaybeUninit::<SimplexWithWitness>::uninit();
+        let simplex = unsafe { &mut *simplex_storage.as_mut_ptr() };
+        let zero_f = Vector::<f32>::splat(0.0);
+        simplex.a.weight = zero_f;
+        simplex.b.weight = zero_f;
+        simplex.c.weight = zero_f;
+        simplex.weight_denominator = zero_f;
         Self::create_with_witness(
             initial_normal,
             &initial_support,
             &initial_support_on_a,
-            &mut simplex,
+            simplex,
         );
         Self::find_minimum_depth_with_witness_and_simplex(
             a,
@@ -1224,7 +1229,7 @@ impl DepthRefiner {
             local_orientation_b,
             support_finder_a,
             support_finder_b,
-            &mut simplex,
+            simplex,
             initial_normal,
             &initial_depth,
             inactive_lanes,
@@ -1293,7 +1298,7 @@ impl DepthRefiner {
 
         let dummy = Vector3Wide::default();
         let mut normal = Vector3Wide::default();
-        Self::get_next_normal_witness(
+        Self::get_next_normal_witness::<false>(
             simplex,
             &dummy,
             &dummy,
@@ -1301,7 +1306,6 @@ impl DepthRefiner {
             refined_normal,
             refined_depth,
             convergence_threshold,
-            false,
             &mut normal,
         );
 
@@ -1337,7 +1341,7 @@ impl DepthRefiner {
                 break;
             }
 
-            Self::get_next_normal_witness(
+            Self::get_next_normal_witness::<true>(
                 simplex,
                 &support,
                 &support_on_a,
@@ -1345,7 +1349,6 @@ impl DepthRefiner {
                 refined_normal,
                 refined_depth,
                 convergence_threshold,
-                true,
                 &mut normal,
             );
         }
@@ -1353,12 +1356,12 @@ impl DepthRefiner {
         if TSupportFinderA::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderA::get_margin(a, &mut margin);
-            *refined_depth = *refined_depth + margin;
+            *refined_depth += margin;
         }
         if TSupportFinderB::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderB::get_margin(b, &mut margin);
-            *refined_depth = *refined_depth + margin;
+            *refined_depth += margin;
         }
 
         // For simplexes terminating in a triangle state, we deferred the division for converting

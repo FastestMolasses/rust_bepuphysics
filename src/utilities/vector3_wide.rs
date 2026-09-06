@@ -1,4 +1,4 @@
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::{out_unsafe, utilities::gather_scatter::GatherScatter};
 use glam::Vec3;
 use std::simd::Select;
@@ -99,26 +99,26 @@ impl Vector3Wide {
     /// Computes the per-component minimum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn min_scalar(s: &Vector<f32>, v: &Self, result: &mut Self) {
-        result.x = s.simd_min(v.x);
-        result.y = s.simd_min(v.y);
-        result.z = s.simd_min(v.z);
+        result.x = s.hw_min(v.x);
+        result.y = s.hw_min(v.y);
+        result.z = s.hw_min(v.z);
     }
 
     /// Computes the per-component minimum of two vectors.
     #[inline(always)]
     pub fn min(a: &Self, b: &Self, result: &mut Self) {
-        result.x = a.x.simd_min(b.x);
-        result.y = a.y.simd_min(b.y);
-        result.z = a.z.simd_min(b.z);
+        result.x = a.x.hw_min(b.x);
+        result.y = a.y.hw_min(b.y);
+        result.z = a.z.hw_min(b.z);
     }
 
     /// Computes the per-component minimum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn min_scalar_new(s: &Vector<f32>, v: &Self) -> Self {
         Self {
-            x: s.simd_min(v.x),
-            y: s.simd_min(v.y),
-            z: s.simd_min(v.z),
+            x: s.hw_min(v.x),
+            y: s.hw_min(v.y),
+            z: s.hw_min(v.z),
         }
     }
 
@@ -126,35 +126,35 @@ impl Vector3Wide {
     #[inline(always)]
     pub fn min_new(a: &Self, b: &Self) -> Self {
         Self {
-            x: a.x.simd_min(b.x),
-            y: a.y.simd_min(b.y),
-            z: a.z.simd_min(b.z),
+            x: a.x.hw_min(b.x),
+            y: a.y.hw_min(b.y),
+            z: a.z.hw_min(b.z),
         }
     }
 
     /// Computes the per-component maximum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn max_scalar(s: &Vector<f32>, v: &Self, result: &mut Self) {
-        result.x = s.simd_max(v.x);
-        result.y = s.simd_max(v.y);
-        result.z = s.simd_max(v.z);
+        result.x = s.hw_max(v.x);
+        result.y = s.hw_max(v.y);
+        result.z = s.hw_max(v.z);
     }
 
     /// Computes the per-component maximum of two vectors.
     #[inline(always)]
     pub fn max(a: &Self, b: &Self, result: &mut Self) {
-        result.x = a.x.simd_max(b.x);
-        result.y = a.y.simd_max(b.y);
-        result.z = a.z.simd_max(b.z);
+        result.x = a.x.hw_max(b.x);
+        result.y = a.y.hw_max(b.y);
+        result.z = a.z.hw_max(b.z);
     }
 
     /// Computes the per-component maximum between a scalar value and the components of a vector.
     #[inline(always)]
     pub fn max_scalar_new(s: &Vector<f32>, v: &Self) -> Self {
         Self {
-            x: s.simd_max(v.x),
-            y: s.simd_max(v.y),
-            z: s.simd_max(v.z),
+            x: s.hw_max(v.x),
+            y: s.hw_max(v.y),
+            z: s.hw_max(v.z),
         }
     }
 
@@ -162,9 +162,9 @@ impl Vector3Wide {
     #[inline(always)]
     pub fn max_new(a: &Self, b: &Self) -> Self {
         Self {
-            x: a.x.simd_max(b.x),
-            y: a.y.simd_max(b.y),
-            z: a.z.simd_max(b.z),
+            x: a.x.hw_max(b.x),
+            y: a.y.hw_max(b.y),
+            z: a.z.hw_max(b.z),
         }
     }
 
@@ -213,6 +213,7 @@ impl Vector3Wide {
     }
 
     /// Negates a vector in place and returns a reference to it.
+    #[inline(always)]
     pub fn negate_self(&mut self) -> &Self {
         self.x = -self.x;
         self.y = -self.y;
@@ -427,6 +428,7 @@ impl Vector3Wide {
     }
 
     /// Gathers values from a vector and places them into the first indices of the target vector.
+    #[inline(always)]
     pub fn write_first(source: Vec3, target_slot: &mut Self) {
         unsafe {
             *GatherScatter::get_first_mut(&mut target_slot.x) = source.x;

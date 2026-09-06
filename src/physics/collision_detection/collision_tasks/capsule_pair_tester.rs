@@ -3,7 +3,7 @@
 use crate::physics::collidables::capsule::CapsuleWide;
 use crate::physics::collision_detection::convex_contact_manifold_wide::Convex2ContactManifoldWide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Select;
@@ -39,7 +39,7 @@ impl CapsulePairTester {
         Vector3Wide::dot(&da, &db, &mut dadb);
         // Note potential division by zero when axes are parallel.
         let mut ta = (da_offset_b - db_offset_b * dadb)
-            / Vector::<f32>::splat(1e-15).simd_max(Vector::<f32>::splat(1.0) - dadb * dadb);
+            / Vector::<f32>::splat(1e-15).hw_max(Vector::<f32>::splat(1.0) - dadb * dadb);
         let mut tb = ta * dadb - db_offset_b;
 
         // Project each line segment onto the other, clamping against the target's interval.
@@ -47,17 +47,17 @@ impl CapsulePairTester {
         let b_onto_a_offset = b.half_length * absdadb;
         let a_onto_b_offset = a.half_length * absdadb;
         let mut a_min =
-            (-a.half_length).simd_max((da_offset_b - b_onto_a_offset).simd_min(a.half_length));
+            (-a.half_length).hw_max(a.half_length.hw_min(da_offset_b - b_onto_a_offset));
         let mut a_max = a
             .half_length
-            .simd_min((da_offset_b + b_onto_a_offset).simd_max(-a.half_length));
+            .hw_min((-a.half_length).hw_max(da_offset_b + b_onto_a_offset));
         let b_min =
-            (-b.half_length).simd_max((-a_onto_b_offset - db_offset_b).simd_min(b.half_length));
+            (-b.half_length).hw_max(b.half_length.hw_min(-a_onto_b_offset - db_offset_b));
         let b_max = b
             .half_length
-            .simd_min((a_onto_b_offset - db_offset_b).simd_max(-b.half_length));
-        ta = ta.simd_max(a_min).simd_min(a_max);
-        tb = tb.simd_max(b_min).simd_min(b_max);
+            .hw_min((-b.half_length).hw_max(a_onto_b_offset - db_offset_b));
+        ta = ta.hw_max(a_min).hw_min(a_max);
+        tb = tb.hw_max(b_min).hw_min(b_max);
 
         let mut closest_point_on_a = Vector3Wide::default();
         Vector3Wide::scale_to(&da, &ta, &mut closest_point_on_a);
@@ -94,7 +94,7 @@ impl CapsulePairTester {
         const LOWER_THRESHOLD: f32 = 0.01 * 0.01;
         const UPPER_THRESHOLD: f32 = 0.05 * 0.05;
         let interval_weight =
-            Vector::<f32>::splat(0.0).simd_max(Vector::<f32>::splat(1.0).simd_min(
+            Vector::<f32>::splat(0.0).hw_max(Vector::<f32>::splat(1.0).hw_min(
                 (Vector::<f32>::splat(UPPER_THRESHOLD) - squared_angle)
                     * Vector::<f32>::splat(1.0 / (UPPER_THRESHOLD - LOWER_THRESHOLD)),
             ));
@@ -113,8 +113,8 @@ impl CapsulePairTester {
         let mut offset_b1 = Vector3Wide::default();
         Vector3Wide::subtract(&manifold.offset_a1, offset_b, &mut offset_b1);
         let inverse_dadb = Vector::<f32>::splat(1.0) / dadb;
-        let projected_tb0 = b_min.simd_max(b_max.simd_min((a_min - da_offset_b) * inverse_dadb));
-        let projected_tb1 = b_min.simd_max(b_max.simd_min((a_max - da_offset_b) * inverse_dadb));
+        let projected_tb0 = b_min.hw_max(b_max.hw_min((a_min - da_offset_b) * inverse_dadb));
+        let projected_tb1 = b_min.hw_max(b_max.hw_min((a_max - da_offset_b) * inverse_dadb));
         let mut b0_normal = Vector::<f32>::splat(0.0);
         Vector3Wide::dot(&offset_b0, &manifold.normal, &mut b0_normal);
         let mut b1_normal = Vector::<f32>::splat(0.0);

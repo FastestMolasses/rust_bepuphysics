@@ -6,7 +6,7 @@ use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::ray::RayWide;
@@ -158,6 +158,7 @@ impl IShapeWide<Sphere> for SphereWide {
         }
     }
 
+    #[inline(always)]
     fn get_bounds(
         &self,
         _orientations: &mut QuaternionWide,
@@ -209,7 +210,7 @@ impl IShapeWide<Sphere> for SphereWide {
         let mut o = Vector3Wide::default();
         Vector3Wide::subtract(&ray_wide.origin, &pose.position, &mut o);
         let dot = Vector3Wide::dot_val(&o, &d);
-        let t_offset = ((-dot) - self.radius).simd_max(zero);
+        let t_offset = zero.hw_max((-dot) - self.radius);
         let mut o_offset = Vector3Wide::default();
         Vector3Wide::scale_to(&d, &t_offset, &mut o_offset);
         let tmp = o;
@@ -224,7 +225,7 @@ impl IShapeWide<Sphere> for SphereWide {
         *intersected =
             (b.simd_le(zero) | c.simd_le(zero)).to_simd() & discriminant.simd_ge(zero).to_simd();
 
-        *t = (-t_offset).simd_max(-b - discriminant.simd_max(zero).sqrt());
+        *t = (-t_offset).hw_max(-b - discriminant.sqrt());
         Vector3Wide::scale_to(&d, t, &mut o_offset);
         Vector3Wide::add(&o, &o_offset, normal);
         let inverse_radius = one / self.radius;

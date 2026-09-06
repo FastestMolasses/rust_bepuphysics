@@ -3,6 +3,8 @@
 use crate::physics::bodies::Bodies;
 use crate::physics::constraint_batch::ConstraintBatch;
 use crate::physics::handles::BodyHandle;
+use crate::physics::handy_enumerators::PassthroughReferenceCollector;
+use crate::physics::solver::Solver;
 use crate::utilities::collections::index_set::IndexSet;
 use crate::utilities::collections::primitive_comparer::PrimitiveComparer;
 use crate::utilities::collections::quick_dictionary::QuickDictionary;
@@ -40,6 +42,7 @@ impl IBodyReferenceGetter for InactiveSetGetter {
 /// bodies. All of the contained constraints will be solved using a fallback solver that trades
 /// rigidity for parallelism.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct SequentialFallbackBatch {
     // In order to maintain the batch referenced handles for the fallback batch (which can have
     // the same body appear more than once), every body must maintain a count of fallback
@@ -51,11 +54,15 @@ pub struct SequentialFallbackBatch {
 }
 
 impl SequentialFallbackBatch {
+    /// Default `minimumBodyCapacity` of C# `AllocateForActive`/`AllocateForInactive`.
+    pub(crate) const DEFAULT_MINIMUM_BODY_CAPACITY: i32 = 8;
+
     /// Gets the number of bodies in the fallback batch.
     pub fn body_count(&self) -> i32 {
         self.dynamic_body_constraint_counts.count
     }
 
+    #[inline(always)]
     fn allocate<TGetter: IBodyReferenceGetter>(
         &mut self,
         dynamic_body_handles: &[BodyHandle],
@@ -90,12 +97,7 @@ impl SequentialFallbackBatch {
         pool: &mut BufferPool,
         minimum_body_capacity: i32,
     ) {
-        self.allocate::<ActiveSetGetter>(
-            dynamic_body_handles,
-            bodies,
-            pool,
-            minimum_body_capacity.max(8),
-        );
+        self.allocate::<ActiveSetGetter>(dynamic_body_handles, bodies, pool, minimum_body_capacity);
     }
 
     #[inline(always)]
@@ -110,7 +112,7 @@ impl SequentialFallbackBatch {
             dynamic_body_handles,
             bodies,
             pool,
-            minimum_body_capacity.max(8),
+            minimum_body_capacity,
         );
     }
 
@@ -132,41 +134,23 @@ impl SequentialFallbackBatch {
             .unwrap();
         let body_count = type_processor.bodies_per_constraint;
 
-        // Collect body indices by enumerating body references (stack alloc — matches C# stackalloc).
-        let mut body_indices = [0i32; 8]; // max bodies per constraint
-        debug_assert!(
-            body_count <= 8,
-            "Bodies per constraint exceeds stack buffer size"
+        let mut body_indices = [0i32; Solver::MAXIMUM_BODIES_PER_CONSTRAINT];
+        assert!(
+            body_count as usize <= Solver::MAXIMUM_BODIES_PER_CONSTRAINT,
+            "Bodies per constraint exceeds the maximum this scratch buffer supports"
         );
         let type_batch_index = *batch.type_index_to_type_batch_index.get(type_id);
         let type_batch = batch.type_batches.get(type_batch_index);
 
-        // Use the raw body reference enumeration.
-        let bodies_per_constraint = body_count;
-        let bytes_per_bundle = bodies_per_constraint
-            * std::mem::size_of::<
-                std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
-            >() as i32;
-        let mut bundle_index = 0usize;
-        let mut inner_index = 0usize;
-        crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
-            index_in_type_batch as usize,
-            &mut bundle_index,
-            &mut inner_index,
+        let mut enumerator = PassthroughReferenceCollector::new(body_indices.as_mut_ptr());
+        solver_ref.enumerate_connected_raw_body_references_from_type_batch(
+            type_batch,
+            index_in_type_batch,
+            &mut enumerator,
         );
-        let start_byte = bundle_index as i32 * bytes_per_bundle + inner_index as i32 * 4;
-        for i in 0..body_count {
-            body_indices[i as usize] = *(type_batch.body_references.as_ptr().add(
-                (start_byte
-                    + i * std::mem::size_of::<
-                        std::simd::Simd<i32, { crate::utilities::vector::optimal_lanes::<i32>() }>,
-                    >() as i32) as usize,
-            ) as *const i32);
-        }
 
-        // Use stack allocation (matches C# stackalloc) — no pool buffer needed.
         let maximum_allocation_ids_to_free = 3 + body_count as usize * 2;
-        let mut allocation_ids_storage = [0i32; 3 + 8 * 2]; // max bodies per constraint = 8
+        let mut allocation_ids_storage = [0i32; 3 + Solver::MAXIMUM_BODIES_PER_CONSTRAINT * 2];
         let initial_span = Buffer::new(
             allocation_ids_storage.as_mut_ptr(),
             maximum_allocation_ids_to_free as i32,

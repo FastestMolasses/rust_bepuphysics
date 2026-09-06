@@ -258,7 +258,7 @@ impl BufferPool {
     /// * `expected_pooled_resource_count` - Number of suballocations to preallocate reference space for.
     ///   This does not preallocate actual blocks, just the space to hold references that are waiting in the pool.
     pub fn new(minimum_block_allocation_size: i32, expected_pooled_resource_count: i32) -> Self {
-        debug_assert!(
+        assert!(
             (minimum_block_allocation_size & (minimum_block_allocation_size - 1)) == 0,
             "Block allocation size must be a power of 2."
         );

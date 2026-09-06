@@ -3,6 +3,7 @@
 
 use crate::physics::collision_detection::narrow_phase_callbacks::PairMaterialProperties;
 use crate::physics::constraints::contact::contact_constraint_description::{
+    INonconvexOneBodyContactConstraintDescription, INonconvexTwoBodyContactConstraintDescription,
     NonconvexConstraintContactData, NonconvexOneBodyManifoldConstraintProperties,
     NonconvexTwoBodyManifoldConstraintProperties,
 };
@@ -142,6 +143,33 @@ macro_rules! impl_nonconvex_two_body_description {
                 &mut self.contact0
             }
         }
+
+        impl INonconvexTwoBodyContactConstraintDescription for $name {
+            #[inline(always)]
+            fn contact_count() -> i32 {
+                <$name>::CONTACT_COUNT
+            }
+            #[inline(always)]
+            fn copy_manifold_wide_properties(&mut self, offset_b: &Vec3, material: &PairMaterialProperties) {
+                <$name>::copy_manifold_wide_properties(self, offset_b, material)
+            }
+            #[inline(always)]
+            fn get_common_properties(&self) -> &NonconvexTwoBodyManifoldConstraintProperties {
+                &self.common
+            }
+            #[inline(always)]
+            fn get_common_properties_mut(&mut self) -> &mut NonconvexTwoBodyManifoldConstraintProperties {
+                &mut self.common
+            }
+            #[inline(always)]
+            fn get_first_contact(&self) -> &NonconvexConstraintContactData {
+                <$name>::get_first_contact(self)
+            }
+            #[inline(always)]
+            fn get_first_contact_mut(&mut self) -> &mut NonconvexConstraintContactData {
+                <$name>::get_first_contact_mut(self)
+            }
+        }
     };
 }
 
@@ -228,6 +256,33 @@ macro_rules! impl_nonconvex_one_body_description {
             #[inline(always)]
             pub fn get_first_contact_mut(&mut self) -> &mut NonconvexConstraintContactData {
                 &mut self.contact0
+            }
+        }
+
+        impl INonconvexOneBodyContactConstraintDescription for $name {
+            #[inline(always)]
+            fn contact_count() -> i32 {
+                <$name>::CONTACT_COUNT
+            }
+            #[inline(always)]
+            fn copy_manifold_wide_properties(&mut self, material: &PairMaterialProperties) {
+                <$name>::copy_manifold_wide_properties(self, material)
+            }
+            #[inline(always)]
+            fn get_common_properties(&self) -> &NonconvexOneBodyManifoldConstraintProperties {
+                &self.common
+            }
+            #[inline(always)]
+            fn get_common_properties_mut(&mut self) -> &mut NonconvexOneBodyManifoldConstraintProperties {
+                &mut self.common
+            }
+            #[inline(always)]
+            fn get_first_contact(&self) -> &NonconvexConstraintContactData {
+                <$name>::get_first_contact(self)
+            }
+            #[inline(always)]
+            fn get_first_contact_mut(&mut self) -> &mut NonconvexConstraintContactData {
+                <$name>::get_first_contact_mut(self)
             }
         }
     };

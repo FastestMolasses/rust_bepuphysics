@@ -3,6 +3,7 @@ use std::debug_assert;
 /// Pointer to a leaf's tree location.
 ///
 /// The identity of a leaf is implicit in its position within the leaf array.
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
 pub struct Leaf {
     packed: u32,
@@ -33,3 +34,5 @@ impl Leaf {
         }
     }
 }
+
+const _: () = assert!(std::mem::size_of::<Leaf>() == 4);

@@ -5,7 +5,7 @@ use crate::physics::collidables::triangle::TriangleWide;
 use crate::physics::collision_detection::sweep_tasks::IPairDistanceTester;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::prelude::*;
 use std::simd::Mask;
@@ -110,8 +110,8 @@ impl IPairDistanceTester<SphereWide, TriangleWide> for SphereTriangleDistanceTes
             );
             let mut edge_dot_edge = Vector::<f32>::default();
             Vector3Wide::dot(&edge_direction, &edge_direction, &mut edge_dot_edge);
-            let edge_scale = zero_f.simd_max(
-                Vector::<f32>::splat(1.0).simd_min(-negative_offset_dot_edge / edge_dot_edge),
+            let edge_scale = zero_f.hw_max(
+                Vector::<f32>::splat(1.0).hw_min(-negative_offset_dot_edge / edge_dot_edge),
             );
             let mut point_on_edge = Vector3Wide::default();
             Vector3Wide::scale_to(&edge_direction, &edge_scale, &mut point_on_edge);

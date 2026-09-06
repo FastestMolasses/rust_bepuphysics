@@ -9,7 +9,7 @@ use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3::Symmetric3x3;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 
 use super::mesh_inertia_helper::{ITriangleSource, MeshInertiaHelper};
@@ -22,6 +22,7 @@ use crate::physics::collision_detection::support_finder::ISupportFinder as Depth
 use std::simd::Select;
 
 /// Bounding plane of a convex hull face.
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HullBoundingPlanes {
     /// Normal of the bounding plane.
@@ -47,6 +48,7 @@ impl std::fmt::Display for HullVertexIndex {
 }
 
 /// Collision shape representing a convex hull.
+#[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct ConvexHull {
     /// Bundled points of the convex hull.
@@ -61,9 +63,35 @@ pub struct ConvexHull {
     pub face_to_vertex_indices_start: Buffer<i32>,
 }
 
+const _: () = {
+    assert!(
+        std::mem::size_of::<ConvexHull>()
+            == std::mem::size_of::<Buffer<Vector3Wide>>()
+                + std::mem::size_of::<Buffer<HullBoundingPlanes>>()
+                + std::mem::size_of::<Buffer<HullVertexIndex>>()
+                + std::mem::size_of::<Buffer<i32>>()
+    );
+};
+
 impl ConvexHull {
     /// Type id of convex hull shapes.
     pub const ID: i32 = 5;
+
+    /// Creates a convex hull from a point set, returning the hull and the center it was
+    /// recentered around.
+    pub fn new(points: &[Vec3], pool: &mut BufferPool) -> (ConvexHull, Vec3) {
+        let mut center = Vec3::ZERO;
+        let mut hull = ConvexHull::default();
+        if !super::convex_hull_helper::ConvexHullHelper::create_shape_simple(
+            points,
+            pool,
+            &mut center,
+            &mut hull,
+        ) {
+            panic!("Could not create a convex hull from the point set; is it degenerate? Convex hull shapes must have volume.");
+        }
+        (hull, center)
+    }
 
     /// Gets the vertex indices for a specific face.
     #[inline(always)]
@@ -103,6 +131,7 @@ impl ConvexHull {
     }
 
     /// Computes bounds internally using a wide orientation.
+    #[inline(always)]
     fn compute_bounds_internal(
         &self,
         orientation_wide: &QuaternionWide,
@@ -111,8 +140,8 @@ impl ConvexHull {
     ) {
         let mut orientation_matrix = Matrix3x3Wide::default();
         Matrix3x3Wide::create_from_quaternion(orientation_wide, &mut orientation_matrix);
-        let mut min_wide = Vector3Wide::broadcast(Vec3::splat(f32::MAX));
-        let mut max_wide = Vector3Wide::broadcast(Vec3::splat(f32::MIN));
+        let mut min_wide = Vector3Wide::default();
+        let mut max_wide = Vector3Wide::default();
         for i in 0..self.points.len() as usize {
             let mut p = Vector3Wide::default();
             Matrix3x3Wide::transform_without_overlap(&self.points[i], &orientation_matrix, &mut p);
@@ -125,8 +154,8 @@ impl ConvexHull {
         for i in 1..lanes {
             let min_candidate = Vec3::new(min_wide.x[i], min_wide.y[i], min_wide.z[i]);
             let max_candidate = Vec3::new(max_wide.x[i], max_wide.y[i], max_wide.z[i]);
-            *min = min.min(min_candidate);
-            *max = max.max(max_candidate);
+            *min = min_candidate.hw_min(*min);
+            *max = max_candidate.hw_max(*max);
         }
     }
 }
@@ -208,8 +237,8 @@ impl IConvexShape for ConvexHull {
         for i in 0..self.points.len() as usize {
             let mut candidate = Vector::<f32>::splat(0.0);
             Vector3Wide::length_squared_to(&self.points[i], &mut candidate);
-            maximum_radius_squared_wide = maximum_radius_squared_wide.simd_max(candidate);
-            minimum_radius_squared_wide = minimum_radius_squared_wide.simd_min(candidate);
+            maximum_radius_squared_wide = candidate.hw_max(maximum_radius_squared_wide);
+            minimum_radius_squared_wide = candidate.hw_min(minimum_radius_squared_wide);
         }
         let minimum_radius_wide = minimum_radius_squared_wide.sqrt();
         let maximum_radius_wide = maximum_radius_squared_wide.sqrt();
@@ -295,14 +324,12 @@ impl IConvexShape for ConvexHull {
             let exit_candidate = denominator.simd_gt(zero);
             let lane_exists = bounding_plane.offset.simd_gt(min_value);
             earliest_exit_wide = (lane_exists & exit_candidate)
-                .select(plane_t.simd_min(earliest_exit_wide), earliest_exit_wide);
+                .select(plane_t.hw_min(earliest_exit_wide), earliest_exit_wide);
             let entry_candidate =
                 plane_t.simd_gt(latest_entry_wide) & (lane_exists & !exit_candidate);
             latest_entry_wide = entry_candidate.select(plane_t, latest_entry_wide);
-            latest_entry_index_bundle = entry_candidate
-                .to_simd()
-                .simd_eq(Vector::<i32>::splat(-1))
-                .select(candidate_indices, latest_entry_index_bundle);
+            latest_entry_index_bundle =
+                entry_candidate.select(candidate_indices, latest_entry_index_bundle);
         }
 
         let mut latest_entry_t = latest_entry_wide[0];
@@ -412,9 +439,9 @@ impl ConvexHullWide {
 }
 
 impl IShapeWideAllocation for ConvexHullWide {
-    fn internal_allocation_size_of(&self) -> usize {
-        Vector::<f32>::LEN * std::mem::size_of::<ConvexHull>()
-    }
+    const INTERNAL_ALLOCATION_SIZE: usize =
+        crate::utilities::vector::VECTOR_WIDTH * std::mem::size_of::<ConvexHull>();
+    const INTERNAL_ALLOCATION_ALIGN: usize = std::mem::align_of::<ConvexHull>();
 
     fn initialize_allocation(&mut self, memory: &Buffer<u8>) {
         debug_assert!(memory.len() as usize == self.internal_allocation_size_of());
@@ -500,7 +527,7 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
                 Matrix3x3Wide::transform_without_overlap(local_point, &orientation_matrix, &mut p);
                 let mut length_squared = Vector::<f32>::splat(0.0);
                 Vector3Wide::length_squared_to(local_point, &mut length_squared);
-                maximum_radius_squared_wide = maximum_radius_squared_wide.simd_max(length_squared);
+                maximum_radius_squared_wide = length_squared.hw_max(maximum_radius_squared_wide);
                 min_wide = Vector3Wide::min_new(&min_wide, &p);
                 max_wide = Vector3Wide::max_new(&max_wide, &p);
             }
@@ -513,8 +540,8 @@ impl IShapeWide<ConvexHull> for ConvexHullWide {
             for j in 1..lanes {
                 let min_candidate = Vec3::new(min_wide.x[j], min_wide.y[j], min_wide.z[j]);
                 let max_candidate = Vec3::new(max_wide.x[j], max_wide.y[j], max_wide.z[j]);
-                min_narrow = min_narrow.min(min_candidate);
-                max_narrow = max_narrow.max(max_candidate);
+                min_narrow = min_candidate.hw_min(min_narrow);
+                max_narrow = max_candidate.hw_max(max_narrow);
                 let max_radius_candidate = maximum_radius_squared_wide[j];
                 if max_radius_candidate > maximum_radius_squared {
                     maximum_radius_squared = max_radius_candidate;
@@ -592,7 +619,6 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
                 hull.points.allocated(),
                 "If the lane isn't terminated, then the hull should actually exist."
             );
-            let _slot_direction = QuaternionWide::default();
             // Rebroadcast the direction for this slot
             // (access lane slot_index and broadcast across all lanes)
             let dir_as_v3w = direction;
@@ -610,14 +636,11 @@ impl ISupportFinder<ConvexHull, ConvexHullWide> for ConvexHullSupportFinder {
                 let mut dot_candidate = Vector::<f32>::splat(0.0);
                 Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
                 let use_candidate = dot_candidate.simd_gt(dot);
-                best_indices = use_candidate
-                    .to_simd()
-                    .simd_eq(Vector::<i32>::splat(-1))
-                    .select(
-                        index_offsets
-                            + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
-                        best_indices,
-                    );
+                best_indices = use_candidate.select(
+                    index_offsets
+                        + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
+                    best_indices,
+                );
                 dot = use_candidate.select(dot_candidate, dot);
             }
             // Horizontal reduction
@@ -705,14 +728,11 @@ impl DepthRefinerSupportFinder<ConvexHullWide> for ConvexHullSupportFinder {
                 let mut dot_candidate = Vector::<f32>::splat(0.0);
                 Vector3Wide::dot(&rebroadcast_dir, candidate, &mut dot_candidate);
                 let use_candidate = dot_candidate.simd_gt(dot);
-                best_indices = use_candidate
-                    .to_simd()
-                    .simd_eq(Vector::<i32>::splat(-1))
-                    .select(
-                        index_offsets
-                            + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
-                        best_indices,
-                    );
+                best_indices = use_candidate.select(
+                    index_offsets
+                        + Vector::<i32>::splat((j << BundleIndexing::vector_shift()) as i32),
+                    best_indices,
+                );
                 dot = use_candidate.select(dot_candidate, dot);
             }
             let mut best_slot_index = 0usize;

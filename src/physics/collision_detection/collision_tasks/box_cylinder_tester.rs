@@ -11,7 +11,7 @@ use crate::physics::collision_detection::depth_refiner::DepthRefiner;
 use crate::utilities::bundle_indexing::BundleIndexing;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::mem::MaybeUninit;
@@ -38,7 +38,7 @@ impl BoxCylinderTester {
         let one_f = Vector::<f32>::splat(1.0);
         let mut a_val = Vector::<f32>::splat(0.0);
         Vector2Wide::dot(line_direction, line_direction, &mut a_val);
-        a_val = a_val.simd_max(Vector::<f32>::splat(2e-38));
+        a_val = a_val.hw_max(Vector::<f32>::splat(2e-38));
         let inverse_a = one_f / a_val;
         let mut b_val = Vector::<f32>::splat(0.0);
         Vector2Wide::dot(line_position, line_direction, &mut b_val);
@@ -48,7 +48,7 @@ impl BoxCylinderTester {
         c_val -= radius_squared;
         let d = b_val * b_val - a_val * c_val;
         *intersected = d.simd_ge(zero_f).to_simd();
-        let t_offset = StdFloat::sqrt(d.simd_max(zero_f)) * inverse_a;
+        let t_offset = StdFloat::sqrt(zero_f.hw_max(d)) * inverse_a;
         let t_base = -b_val * inverse_a;
         *t_min = t_base - t_offset;
         *t_max = t_base + t_offset;
@@ -229,9 +229,8 @@ impl BoxCylinderTester {
         let depth_threshold = -*speculative_margin;
         let epsilon_scale = a
             .half_width
-            .simd_max(a.half_height)
-            .simd_max(a.half_length)
-            .simd_min(b.half_length.simd_max(b.radius));
+            .hw_max(a.half_height.hw_max(a.half_length))
+            .hw_min(b.half_length.hw_max(b.radius));
 
         let mut depth = Vector::<f32>::splat(0.0);
         let mut closest_on_b = Vector3Wide::default();
@@ -438,14 +437,14 @@ impl BoxCylinderTester {
                 &mut intersected1101,
             );
 
-            t_min0010 = t_min0010.simd_max(zero_f).simd_min(one_f);
-            t_max0010 = t_max0010.simd_max(zero_f).simd_min(one_f);
-            t_min1101 = t_min1101.simd_max(zero_f).simd_min(one_f);
-            t_max1101 = t_max1101.simd_max(zero_f).simd_min(one_f);
-            t_min0100 = t_min0100.simd_max(zero_f).simd_min(one_f);
-            t_max0100 = t_max0100.simd_max(zero_f).simd_min(one_f);
-            t_min1011 = t_min1011.simd_max(zero_f).simd_min(one_f);
-            t_max1011 = t_max1011.simd_max(zero_f).simd_min(one_f);
+            t_min0010 = t_min0010.hw_max(zero_f).hw_min(one_f);
+            t_max0010 = t_max0010.hw_max(zero_f).hw_min(one_f);
+            t_min1101 = t_min1101.hw_max(zero_f).hw_min(one_f);
+            t_max1101 = t_max1101.hw_max(zero_f).hw_min(one_f);
+            t_min0100 = t_min0100.hw_max(zero_f).hw_min(one_f);
+            t_max0100 = t_max0100.hw_max(zero_f).hw_min(one_f);
+            t_min1011 = t_min1011.hw_max(zero_f).hw_min(one_f);
+            t_max1011 = t_max1011.hw_max(zero_f).hw_min(one_f);
 
             Self::add_candidate_for_edge(
                 &p00,
@@ -514,10 +513,10 @@ impl BoxCylinderTester {
             let edge0010_plane1 = p01.x * edge0010.y - p01.y * edge0010.x;
             let edge1011_plane0 = p10.x * edge1011.y - p10.y * edge1011.x;
             let edge1011_plane1 = p00.x * edge1011.y - p00.y * edge1011.x;
-            let edge0010_plane_min = edge0010_plane0.simd_min(edge0010_plane1);
-            let edge0010_plane_max = edge0010_plane0.simd_max(edge0010_plane1);
-            let edge1011_plane_min = edge1011_plane0.simd_min(edge1011_plane1);
-            let edge1011_plane_max = edge1011_plane0.simd_max(edge1011_plane1);
+            let edge0010_plane_min = edge0010_plane0.hw_min(edge0010_plane1);
+            let edge0010_plane_max = edge0010_plane0.hw_max(edge0010_plane1);
+            let edge1011_plane_min = edge1011_plane0.hw_min(edge1011_plane1);
+            let edge1011_plane_max = edge1011_plane0.hw_max(edge1011_plane1);
             Self::try_add_interior_point(
                 &interior0,
                 &Vector::<i32>::splat(8),
@@ -730,26 +729,26 @@ impl BoxCylinderTester {
             let negative_half_length = -b.half_length;
             let t_x_min = x_invalid.select(
                 min_value,
-                unrestrict_weight_x * negative_half_length + regular_weight_x * t_x0.simd_min(t_x1),
+                unrestrict_weight_x * negative_half_length + regular_weight_x * t_x0.hw_min(t_x1),
             );
             let t_x_max = x_invalid.select(
                 max_value,
-                unrestrict_weight_x * b.half_length + regular_weight_x * t_x0.simd_max(t_x1),
+                unrestrict_weight_x * b.half_length + regular_weight_x * t_x0.hw_max(t_x1),
             );
             let t_y_min = y_invalid.select(
                 min_value,
-                unrestrict_weight_y * negative_half_length + regular_weight_y * t_y0.simd_min(t_y1),
+                unrestrict_weight_y * negative_half_length + regular_weight_y * t_y0.hw_min(t_y1),
             );
             let t_y_max = y_invalid.select(
                 max_value,
-                unrestrict_weight_y * b.half_length + regular_weight_y * t_y0.simd_max(t_y1),
+                unrestrict_weight_y * b.half_length + regular_weight_y * t_y0.hw_max(t_y1),
             );
             let t_max = negative_half_length
-                .simd_max(t_x_max.simd_min(t_y_max))
-                .simd_min(b.half_length);
+                .hw_max(t_x_max.hw_min(t_y_max))
+                .hw_min(b.half_length);
             let t_min = negative_half_length
-                .simd_max(t_x_min.simd_max(t_y_min))
-                .simd_min(b.half_length);
+                .hw_max(t_x_min.hw_max(t_y_min))
+                .hw_min(b.half_length);
 
             let local_contact0 = Vector3Wide {
                 x: closest_on_b.x,

@@ -75,6 +75,65 @@ pub trait IShapeRayHitHandler {
     );
 }
 
+/// Borrowed handler with its calls bound to the concrete handler type at construction.
+///
+/// `ShapeBatch`'s ray tests are virtual, as C#'s abstract batch dispatch is, so a handler type
+/// parameter cannot cross that boundary. Callers that know the handler type statically should use
+/// `Shapes::ray_test`/`Shapes::ray_test_batched` instead, which run the traversal monomorphized.
+pub struct ShapeRayHitHandlerRef<'a> {
+    context: *mut u8,
+    allow_test: unsafe fn(*const u8, i32) -> bool,
+    on_ray_hit: unsafe fn(*mut u8, &RayData, &mut f32, f32, Vec3, i32),
+    handler: std::marker::PhantomData<&'a mut ()>,
+}
+
+impl<'a> ShapeRayHitHandlerRef<'a> {
+    #[inline(always)]
+    pub fn new<H: IShapeRayHitHandler>(handler: &'a mut H) -> Self {
+        unsafe fn allow_test_trampoline<H: IShapeRayHitHandler>(
+            context: *const u8,
+            child_index: i32,
+        ) -> bool {
+            (*(context as *const H)).allow_test(child_index)
+        }
+        unsafe fn on_ray_hit_trampoline<H: IShapeRayHitHandler>(
+            context: *mut u8,
+            ray: &RayData,
+            maximum_t: &mut f32,
+            t: f32,
+            normal: Vec3,
+            child_index: i32,
+        ) {
+            (*(context as *mut H)).on_ray_hit(ray, maximum_t, t, normal, child_index)
+        }
+        Self {
+            context: handler as *mut H as *mut u8,
+            allow_test: allow_test_trampoline::<H>,
+            on_ray_hit: on_ray_hit_trampoline::<H>,
+            handler: std::marker::PhantomData,
+        }
+    }
+}
+
+impl IShapeRayHitHandler for ShapeRayHitHandlerRef<'_> {
+    #[inline(always)]
+    fn allow_test(&self, child_index: i32) -> bool {
+        unsafe { (self.allow_test)(self.context, child_index) }
+    }
+
+    #[inline(always)]
+    fn on_ray_hit(
+        &mut self,
+        ray: &RayData,
+        maximum_t: &mut f32,
+        t: f32,
+        normal: Vec3,
+        child_index: i32,
+    ) {
+        unsafe { (self.on_ray_hit)(self.context, ray, maximum_t, t, normal, child_index) }
+    }
+}
+
 /// Callback for broad phase sweep tests.
 pub trait IBroadPhaseSweepTester {
     /// Tests a sweep against a collidable.
@@ -121,6 +180,18 @@ pub struct BroadPhaseRayBatcher<TRayTester: IBroadPhaseBatchedRayTester> {
 }
 
 impl<TRayTester: IBroadPhaseBatchedRayTester> BroadPhaseRayBatcher<TRayTester> {
+    /// Maximum number of rays executed in each traversal when no capacity is specified.
+    pub const DEFAULT_RAY_CAPACITY: i32 = 2048;
+
+    /// Constructs a ray batcher for the broad phase using the default ray capacity.
+    pub fn new(
+        pool: *mut BufferPool,
+        broad_phase: *const BroadPhase,
+        ray_tester: TRayTester,
+    ) -> Self {
+        Self::with_capacity(pool, broad_phase, ray_tester, Self::DEFAULT_RAY_CAPACITY)
+    }
+
     /// Constructs a ray batcher for the broad phase and initializes its backing resources.
     ///
     /// # Arguments
@@ -129,7 +200,7 @@ impl<TRayTester: IBroadPhaseBatchedRayTester> BroadPhaseRayBatcher<TRayTester> {
     /// * `ray_tester` - Ray tester used to test leaves found by the broad phase tree traversals.
     /// * `batcher_ray_capacity` - Maximum number of rays to execute in each traversal.
     ///   This should typically be chosen as the highest value which avoids spilling data out of L2 cache.
-    pub fn new(
+    pub fn with_capacity(
         pool: *mut BufferPool,
         broad_phase: *const BroadPhase,
         ray_tester: TRayTester,
@@ -158,22 +229,7 @@ impl<TRayTester: IBroadPhaseBatchedRayTester> BroadPhaseRayBatcher<TRayTester> {
             // This should be revisited - there are many simulations in which testing the static tree first
             // would be better because of more conservative maximumT values. Not immediately clear which
             // case is dominant.
-            unsafe {
-                let broad_phase = &*self.broad_phase;
-                let mut active_tester = LeafTester {
-                    ray_tester: &mut self.ray_tester,
-                    leaves: self.active_leaves,
-                };
-                self.batcher
-                    .test_rays(&broad_phase.active_tree, &mut active_tester);
-                let mut static_tester = LeafTester {
-                    ray_tester: &mut self.ray_tester,
-                    leaves: self.static_leaves,
-                };
-                self.batcher
-                    .test_rays(&broad_phase.static_tree, &mut static_tester);
-            }
-            self.batcher.reset_rays();
+            self.test_accumulated_rays();
         }
     }
 
@@ -182,23 +238,28 @@ impl<TRayTester: IBroadPhaseBatchedRayTester> BroadPhaseRayBatcher<TRayTester> {
         if self.batcher.ray_count() > 0 {
             // TODO: Similar to Add - order matters here for performance. Need testing to determine which
             // order tends to be better.
-            unsafe {
-                let broad_phase = &*self.broad_phase;
-                let mut active_tester = LeafTester {
-                    ray_tester: &mut self.ray_tester,
-                    leaves: self.active_leaves,
-                };
-                self.batcher
-                    .test_rays(&broad_phase.active_tree, &mut active_tester);
-                let mut static_tester = LeafTester {
-                    ray_tester: &mut self.ray_tester,
-                    leaves: self.static_leaves,
-                };
-                self.batcher
-                    .test_rays(&broad_phase.static_tree, &mut static_tester);
-            }
-            self.batcher.reset_rays();
+            self.test_accumulated_rays();
         }
+    }
+
+    #[inline(always)]
+    fn test_accumulated_rays(&mut self) {
+        unsafe {
+            let broad_phase = &*self.broad_phase;
+            let mut active_tester = LeafTester {
+                ray_tester: &mut self.ray_tester,
+                leaves: self.active_leaves,
+            };
+            self.batcher
+                .test_rays(&broad_phase.active_tree, &mut active_tester);
+            let mut static_tester = LeafTester {
+                ray_tester: &mut self.ray_tester,
+                leaves: self.static_leaves,
+            };
+            self.batcher
+                .test_rays(&broad_phase.static_tree, &mut static_tester);
+        }
+        self.batcher.reset_rays();
     }
 
     /// Disposes the underlying batcher resources.
@@ -255,16 +316,14 @@ impl<TRayHitHandler: IRayHitHandler> IBroadPhaseRayTester for SimulationRayDispa
             self.hit_handler.reference = collidable;
             type RealShapes = crate::physics::collidables::shapes::Shapes;
             let shapes = &*(simulation.shapes as *const RealShapes);
-            if let Some(batch) = shapes.get_batch(shape.type_id() as usize) {
-                batch.ray_test(
-                    shape.index() as usize,
-                    &*pose,
-                    &*ray_data,
-                    &mut *maximum_t,
-                    &mut *self.pool,
-                    &mut self.hit_handler,
-                );
-            }
+            shapes.ray_test(
+                &shape,
+                &*pose,
+                &*ray_data,
+                &mut *maximum_t,
+                &mut *self.pool,
+                &mut self.hit_handler,
+            );
         }
     }
 }
@@ -286,15 +345,7 @@ impl<TRayHitHandler: IRayHitHandler> IBroadPhaseBatchedRayTester
                 self.hit_handler.reference = collidable;
                 type RealShapes = crate::physics::collidables::shapes::Shapes;
                 let shapes = &*(simulation.shapes as *const RealShapes);
-                if let Some(batch) = shapes.get_batch(shape.type_id() as usize) {
-                    batch.ray_test_batched(
-                        shape.index() as usize,
-                        &*pose,
-                        rays,
-                        pool,
-                        &mut self.hit_handler,
-                    );
-                }
+                shapes.ray_test_batched(&shape, &*pose, rays, pool, &mut self.hit_handler);
             }
         }
     }
@@ -306,11 +357,24 @@ pub struct SimulationRayBatcher<TRayHitHandler: IRayHitHandler> {
 }
 
 impl<TRayHitHandler: IRayHitHandler> SimulationRayBatcher<TRayHitHandler> {
+    /// Maximum number of rays executed in each traversal when no capacity is specified.
+    pub const DEFAULT_RAY_CAPACITY: i32 =
+        BroadPhaseRayBatcher::<SimulationRayDispatcher<TRayHitHandler>>::DEFAULT_RAY_CAPACITY;
+
+    /// Constructs a batcher for testing rays against a simulation using the default ray capacity.
+    pub fn new(
+        pool: *mut BufferPool,
+        simulation: *const Simulation,
+        hit_handler: TRayHitHandler,
+    ) -> Self {
+        Self::with_capacity(pool, simulation, hit_handler, Self::DEFAULT_RAY_CAPACITY)
+    }
+
     /// Constructs a batcher for testing rays against a simulation.
     ///
     /// # Arguments
     /// * `batcher_ray_capacity` - Maximum number of rays to execute in each traversal.
-    pub fn new(
+    pub fn with_capacity(
         pool: *mut BufferPool,
         simulation: *const Simulation,
         hit_handler: TRayHitHandler,
@@ -328,7 +392,7 @@ impl<TRayHitHandler: IRayHitHandler> SimulationRayBatcher<TRayHitHandler> {
             type RealBroadPhase = crate::physics::collision_detection::broad_phase::BroadPhase;
             let broad_phase = (*simulation).broad_phase as *const RealBroadPhase;
             Self {
-                batcher: BroadPhaseRayBatcher::new(
+                batcher: BroadPhaseRayBatcher::with_capacity(
                     pool,
                     broad_phase,
                     dispatcher,

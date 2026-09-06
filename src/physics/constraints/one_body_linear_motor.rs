@@ -2,6 +2,7 @@
 
 use glam::Vec3;
 
+use crate::out;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::motor_settings::{MotorSettings, MotorSettingsWide};
 use crate::physics::constraints::one_body_linear_servo::OneBodyLinearServoFunctions;
@@ -11,6 +12,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 
 /// Constrains a point on a body to have a target linear velocity.
 #[repr(C)]
@@ -101,12 +103,10 @@ impl OneBodyLinearMotorFunctions {
         accumulated_impulses: &Vector3Wide,
         wsv_a: &mut BodyVelocityWide,
     ) {
-        let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+        let offset = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset,
-            orientation_a,
-            &mut offset,
-        );
+            orientation_a
+        ));
         OneBodyLinearServoFunctions::apply_impulse(&offset, inertia_a, wsv_a, accumulated_impulses);
     }
 
@@ -121,48 +121,47 @@ impl OneBodyLinearMotorFunctions {
         accumulated_impulses: &mut Vector3Wide,
         wsv_a: &mut BodyVelocityWide,
     ) {
-        let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+        let offset = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset,
-            orientation_a,
-            &mut offset,
-        );
+            orientation_a
+        ));
 
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        let mut maximum_impulse = Vector::<f32>::splat(0.0);
-        MotorSettingsWide::compute_softness(
-            &prestep.settings,
-            dt,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-            &mut maximum_impulse,
-        );
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut maximum_impulse = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            MotorSettingsWide::compute_softness(
+                &prestep.settings,
+                dt,
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+                &mut *maximum_impulse.as_mut_ptr(),
+            );
+        }
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
+        let maximum_impulse = unsafe { maximum_impulse.assume_init() };
 
         // csi = projection.BiasImpulse - accumulatedImpulse * projection.SoftnessImpulseScale - (csiaLinear + csiaAngular);
         let cross_term = Vector3Wide::cross_new(&wsv_a.angular, &offset);
-        let mut csv = Vector3Wide::default();
-        Vector3Wide::subtract(&prestep.target_velocity, &cross_term, &mut csv);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::subtract(&csv, &wsv_a.linear, &mut tmp);
-        csv = tmp;
+        let csv = out!(Vector3Wide::subtract(&prestep.target_velocity, &cross_term));
+        let csv = out!(Vector3Wide::subtract(&csv, &wsv_a.linear));
 
         // The grabber is roughly equivalent to a ball socket joint with a nonzero goal (and only one body).
-        let mut inverse_effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::skew_sandwich_without_overlap(
+        let mut inverse_effective_mass = out!(Symmetric3x3Wide::skew_sandwich_without_overlap(
             &offset,
-            &inertia_a.inverse_inertia_tensor,
-            &mut inverse_effective_mass,
-        );
+            &inertia_a.inverse_inertia_tensor
+        ));
 
         // Linear contributions are simply I * inverseMass * I, which is just boosting the diagonal.
         inverse_effective_mass.xx += inertia_a.inverse_mass;
         inverse_effective_mass.yy += inertia_a.inverse_mass;
         inverse_effective_mass.zz += inertia_a.inverse_mass;
-        let mut effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::invert(&inverse_effective_mass, &mut effective_mass);
-        let mut csi = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&csv, &effective_mass, &mut csi);
+        let effective_mass = out!(Symmetric3x3Wide::invert(&inverse_effective_mass));
+        let mut csi = out!(Symmetric3x3Wide::transform_without_overlap(
+            &csv,
+            &effective_mass
+        ));
         let scaled_csi = csi * effective_mass_cfm_scale;
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);

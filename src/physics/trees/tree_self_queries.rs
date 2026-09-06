@@ -392,9 +392,10 @@ impl Tree {
         // nodes. It's just an easy way to get some of them.)
         const MAXIMUM_ISOLATED_NODE_CAPACITY: i32 = 32;
         let isolated_node_capacity = MAXIMUM_ISOLATED_NODE_CAPACITY.min(target_task_budget / 4);
-        let mut early_isolated_nodes_memory = [0i32; MAXIMUM_ISOLATED_NODE_CAPACITY as usize];
+        let mut early_isolated_nodes_memory =
+            std::mem::MaybeUninit::<[i32; MAXIMUM_ISOLATED_NODE_CAPACITY as usize]>::uninit();
         let early_isolated_nodes_buffer = Buffer::new(
-            early_isolated_nodes_memory.as_mut_ptr(),
+            early_isolated_nodes_memory.as_mut_ptr() as *mut i32,
             isolated_node_capacity,
             -1,
         );

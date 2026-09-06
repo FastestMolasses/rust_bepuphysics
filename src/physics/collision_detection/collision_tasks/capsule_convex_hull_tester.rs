@@ -7,9 +7,10 @@ use crate::physics::collision_detection::convex_contact_manifold_wide::Convex2Co
 use crate::physics::collision_detection::depth_refiner::DepthRefiner;
 use crate::physics::helpers::Helpers;
 use crate::utilities::bundle_indexing::BundleIndexing;
+use crate::utilities::gather_scatter::GatherScatter;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::prelude::*;
@@ -74,7 +75,7 @@ impl CapsuleConvexHullTester {
             BundleIndexing::create_trailing_mask_for_count_in_bundle(pair_count as usize);
         let mut hull_epsilon_scale = zero_f;
         b.estimate_epsilon_scale(&inactive_lanes, &mut hull_epsilon_scale);
-        let epsilon_scale = a.radius.simd_min(hull_epsilon_scale);
+        let epsilon_scale = a.radius.hw_min(hull_epsilon_scale);
         let depth_threshold = -*speculative_margin;
 
         let mut depth = zero_f;
@@ -212,19 +213,21 @@ impl CapsuleConvexHullTester {
                 }
             }
 
-            latest_entry_numerator_bundle.as_mut_array()[slot_index] = latest_entry_numerator;
-            latest_entry_denominator_bundle.as_mut_array()[slot_index] = latest_entry_denominator;
-            earliest_exit_numerator_bundle.as_mut_array()[slot_index] = earliest_exit_numerator;
-            earliest_exit_denominator_bundle.as_mut_array()[slot_index] = earliest_exit_denominator;
+            *GatherScatter::get_mut(&mut latest_entry_numerator_bundle, slot_index) =
+                latest_entry_numerator;
+            *GatherScatter::get_mut(&mut latest_entry_denominator_bundle, slot_index) =
+                latest_entry_denominator;
+            *GatherScatter::get_mut(&mut earliest_exit_numerator_bundle, slot_index) =
+                earliest_exit_numerator;
+            *GatherScatter::get_mut(&mut earliest_exit_denominator_bundle, slot_index) =
+                earliest_exit_denominator;
         }
 
         let t_entry = latest_entry_numerator_bundle / latest_entry_denominator_bundle;
         let t_exit = earliest_exit_numerator_bundle / earliest_exit_denominator_bundle;
         let negated_half_length = -a.half_length;
-        let t_entry = t_entry
-            .simd_max(negated_half_length)
-            .simd_min(a.half_length);
-        let t_exit = t_exit.simd_max(negated_half_length).simd_min(a.half_length);
+        let t_entry = negated_half_length.hw_max(a.half_length.hw_min(t_entry));
+        let t_exit = negated_half_length.hw_max(a.half_length.hw_min(t_exit));
 
         let local_offset0 = Vector3Wide::scale(&local_capsule_axis, &t_entry);
         let local_offset1 = Vector3Wide::scale(&local_capsule_axis, &t_exit);

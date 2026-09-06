@@ -1,14 +1,52 @@
 // Translated from BepuPhysics/CollisionDetection/SweepTaskRegistry.cs
 
 use crate::physics::body_properties::{BodyVelocity, RigidPose};
+use crate::physics::collidables::shape::IShape;
 use crate::physics::collidables::shapes::Shapes;
 use crate::utilities::memory::buffer_pool::BufferPool;
 use glam::{Quat, Vec3};
+use std::marker::PhantomData;
 
 /// Filter for swept tests between children of compound shapes.
 pub trait ISweepFilter {
     /// Checks whether a swept test should be performed for children of swept shapes.
     fn allow_test(&self, child_a: i32, child_b: i32) -> bool;
+}
+
+/// Borrowed handle to a caller-supplied [`ISweepFilter`].
+///
+/// Shape-type dispatch runs through `dyn SweepTask`, which cannot carry the filter as a generic
+/// parameter; [`SweepFilterRef::new`] instantiates its trampoline per filter type instead, so the
+/// concrete `allow_test` body is inlined into it.
+#[derive(Clone, Copy)]
+pub struct SweepFilterRef<'a> {
+    context: *const u8,
+    allow_test: unsafe fn(*const u8, i32, i32) -> bool,
+    _marker: PhantomData<&'a ()>,
+}
+
+impl<'a> SweepFilterRef<'a> {
+    #[inline(always)]
+    pub fn new<TSweepFilter: ISweepFilter>(filter: &'a TSweepFilter) -> Self {
+        unsafe fn trampoline<TSweepFilter: ISweepFilter>(
+            context: *const u8,
+            child_a: i32,
+            child_b: i32,
+        ) -> bool {
+            (*(context as *const TSweepFilter)).allow_test(child_a, child_b)
+        }
+        Self {
+            context: filter as *const TSweepFilter as *const u8,
+            allow_test: trampoline::<TSweepFilter>,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Checks whether a swept test should be performed for the given pair of children.
+    #[inline(always)]
+    pub fn allow_test(&self, child_a: i32, child_b: i32) -> bool {
+        unsafe { (self.allow_test)(self.context, child_a, child_b) }
+    }
 }
 
 /// Parent type of tasks which handle sweep tests between shape pairs.
@@ -34,6 +72,7 @@ pub trait SweepTask {
         minimum_progression: f32,
         convergence_threshold: f32,
         maximum_iteration_count: i32,
+        pool: *mut BufferPool,
         t0: &mut f32,
         t1: &mut f32,
         hit_location: &mut Vec3,
@@ -58,6 +97,7 @@ pub trait SweepTask {
         minimum_progression: f32,
         convergence_threshold: f32,
         maximum_iteration_count: i32,
+        pool: *mut BufferPool,
         t0: &mut f32,
         t1: &mut f32,
         hit_location: &mut Vec3,
@@ -85,6 +125,7 @@ pub trait SweepTask {
                 minimum_progression,
                 convergence_threshold,
                 maximum_iteration_count,
+                pool,
                 t0,
                 t1,
                 hit_location,
@@ -105,6 +146,7 @@ pub trait SweepTask {
                 minimum_progression,
                 convergence_threshold,
                 maximum_iteration_count,
+                pool,
                 t0,
                 t1,
                 hit_location,
@@ -132,7 +174,7 @@ pub trait SweepTask {
         convergence_threshold: f32,
         maximum_iteration_count: i32,
         flip_required: bool,
-        filter: *mut u8,
+        filter: SweepFilterRef,
         shapes: *mut Shapes,
         sweep_tasks: *mut SweepTaskRegistry,
         pool: *mut BufferPool,
@@ -158,7 +200,7 @@ pub trait SweepTask {
         minimum_progression: f32,
         convergence_threshold: f32,
         maximum_iteration_count: i32,
-        filter: *mut u8,
+        filter: SweepFilterRef,
         shapes: *mut Shapes,
         sweep_tasks: *mut SweepTaskRegistry,
         pool: *mut BufferPool,
@@ -278,6 +320,12 @@ impl SweepTaskRegistry {
         index
     }
 
+    /// Gets the task at the given index in the registry.
+    #[inline(always)]
+    pub fn get_task_by_index(&self, task_index: usize) -> &dyn SweepTask {
+        &*self.tasks[task_index]
+    }
+
     /// Gets the task for the given shape type pair, or None if no task is registered.
     #[inline(always)]
     pub fn get_task(&self, top_level_type_a: i32, top_level_type_b: i32) -> Option<&dyn SweepTask> {
@@ -293,5 +341,11 @@ impl SweepTaskRegistry {
             return None;
         }
         Some(&*self.tasks[task_index as usize])
+    }
+
+    /// Gets the task for the given shape types, or None if no task is registered.
+    #[inline(always)]
+    pub fn get_task_typed<TShapeA: IShape, TShapeB: IShape>(&self) -> Option<&dyn SweepTask> {
+        self.get_task(TShapeA::type_id(), TShapeB::type_id())
     }
 }

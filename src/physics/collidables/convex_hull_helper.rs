@@ -10,7 +10,7 @@ use crate::utilities::matrix3x3::Matrix3x3;
 use crate::utilities::matrix3x3_wide::Matrix3x3Wide;
 use crate::utilities::memory::buffer::Buffer;
 use crate::utilities::memory::buffer_pool::BufferPool;
-use crate::utilities::vector::{Vector, VECTOR_WIDTH};
+use crate::utilities::vector::{HwMinMax, Vector, VECTOR_WIDTH};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 
@@ -163,7 +163,7 @@ impl ConvexHullHelper {
         let x = unsafe { projected_on_x.get_mut(0) };
         let y = unsafe { projected_on_y.get_mut(0) };
         Vector3Wide::dot(basis_x, &to_candidate, x);
-        *x = (*x).simd_max(Vector::<f32>::splat(0.0));
+        *x = Vector::<f32>::splat(0.0).hw_max(*x);
         Vector3Wide::dot(basis_y, &to_candidate, y);
         let mut best_y = *y;
         let mut best_x = *x;
@@ -191,7 +191,7 @@ impl ConvexHullHelper {
             let x = unsafe { projected_on_x.get_mut(i as i32) };
             let y = unsafe { projected_on_y.get_mut(i as i32) };
             Vector3Wide::dot(basis_x, &to_candidate, x);
-            *x = (*x).simd_max(Vector::<f32>::splat(0.0));
+            *x = Vector::<f32>::splat(0.0).hw_max(*x);
             Vector3Wide::dot(basis_y, &to_candidate, y);
 
             let candidate_indices =
@@ -277,7 +277,7 @@ impl ConvexHullHelper {
         for i in 0..face_points.count {
             let candidate = face_points.span[i as usize];
             let to_candidate = candidate - start;
-            let x = (to_candidate.dot(basis_x)).max(0.0);
+            let x = 0.0f32.hw_max(to_candidate.dot(basis_x));
             let y = to_candidate.dot(basis_y);
 
             let ignore_slot = x <= plane_epsilon && y >= -plane_epsilon;
@@ -475,7 +475,8 @@ impl ConvexHullHelper {
             reduced_indices_set.add_unsafely(face_vertex_indices.span[next_index as usize]);
             let prev_point = face_points.span[previous_end_index as usize];
             let next_point = face_points.span[next_index as usize];
-            previous_edge_direction = (next_point - prev_point).normalize();
+            let edge_offset = next_point - prev_point;
+            previous_edge_direction = edge_offset / edge_offset.length();
             previous_end_index = next_index;
         }
 
@@ -615,7 +616,7 @@ impl ConvexHullHelper {
             most_distant_indices_bundle = use_new
                 .cast::<i32>()
                 .select(bundle_indices, most_distant_indices_bundle);
-            distance_squared_bundle = distance_squared_bundle.simd_max(distance_squared_candidate);
+            distance_squared_bundle = distance_squared_bundle.hw_max(distance_squared_candidate);
         }
 
         let mut best_distance_squared = distance_squared_bundle[0];
@@ -775,8 +776,8 @@ impl ConvexHullHelper {
             let edge_offset = edge_b - edge_a;
             let basis_y = edge_offset.cross(edge_to_test.face_normal);
             let basis_x = edge_offset.cross(basis_y);
-            let basis_x_norm = basis_x.normalize();
-            let basis_y_norm = basis_y.normalize();
+            let basis_x_norm = basis_x / basis_x.length();
+            let basis_y_norm = basis_y / basis_y.length();
             let basis_x_bundle = Vector3Wide::broadcast(basis_x_norm);
             let basis_y_bundle = Vector3Wide::broadcast(basis_y_norm);
             let basis_origin = Vector3Wide::broadcast(edge_a);
@@ -1201,8 +1202,14 @@ impl ConvexHullHelper {
         target_points: &mut Buffer<Vector3Wide>,
         target_bounding_planes: &mut Buffer<HullBoundingPlanes>,
     ) {
-        debug_assert!(target_points.len() >= source.points.len());
-        debug_assert!(target_bounding_planes.len() >= source.bounding_planes.len());
+        assert!(
+            target_points.len() >= source.points.len(),
+            "Target points buffer cannot hold the copy."
+        );
+        assert!(
+            target_bounding_planes.len() >= source.bounding_planes.len(),
+            "Target bounding planes buffer cannot hold the copy."
+        );
 
         let mut transform_wide = Matrix3x3Wide::default();
         Matrix3x3Wide::broadcast(transform, &mut transform_wide);

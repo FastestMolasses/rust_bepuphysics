@@ -34,6 +34,7 @@ impl IForEach<i32> for ActiveBodyHandleRemover {
 
 /// Contains a set of type batches whose constraints share no body references.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct ConstraintBatch {
     // Note that both active and inactive constraint batches share the same data layout.
     // This means we have a type id->index mapping in inactive islands.
@@ -139,6 +140,7 @@ impl ConstraintBatch {
     }
 
     /// Removes a type batch if it has no more constraints.
+    #[inline(always)]
     pub fn remove_type_batch_if_empty(&mut self, type_batch_index: i32, pool: &mut BufferPool) {
         let constraint_count = self.type_batches.get(type_batch_index).constraint_count;
         if constraint_count == 0 {

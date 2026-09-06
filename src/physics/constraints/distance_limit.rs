@@ -9,7 +9,7 @@ use crate::utilities::vector3_wide::Vector3Wide;
 use glam::Vec3;
 use std::simd::cmp::SimdPartialOrd;
 use std::simd::num::SimdFloat;
-use std::simd::Select;
+use std::simd::{Mask, Select};
 
 /// Constrains points on two bodies to be separated by a distance within a range.
 #[repr(C)]
@@ -215,8 +215,8 @@ impl DistanceLimitFunctions {
             .abs()
             .simd_lt((*distance - *maximum_distance).abs())
             .to_simd();
-        let sign = use_minimum
-            .simd_lt(Vector::<i32>::splat(0))
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let sign = unsafe { Mask::from_simd_unchecked(*use_minimum) }
             .select(Vector::<f32>::splat(-1.0), Vector::<f32>::splat(1.0));
         let scale_factor = sign / *distance;
         Vector3Wide::scale_to(&anchor_offset, &scale_factor, direction);
@@ -354,7 +354,8 @@ impl DistanceLimitFunctions {
             &mut softness_impulse_scale,
         );
         let effective_mass = effective_mass_cfm_scale / inverse_effective_mass;
-        let error = use_minimum.simd_lt(Vector::<i32>::splat(0)).select(
+        // Safety: lanes come from a SIMD compare, so each is all-0s or all-1s.
+        let error = unsafe { Mask::from_simd_unchecked(use_minimum) }.select(
             prestep.minimum_distance - distance,
             distance - prestep.maximum_distance,
         );

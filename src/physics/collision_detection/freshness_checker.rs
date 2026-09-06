@@ -1,28 +1,11 @@
 // Translated from BepuPhysics/CollisionDetection/FreshnessChecker.cs
 
 use crate::physics::collision_detection::pair_cache::PairCache;
-use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::thread_dispatcher::IThreadDispatcher;
-
-/// Identifies a type of preflush job.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PreflushJobType {
-    CheckFreshness,
-    // Other types will be added by NarrowPhase
-}
-
-/// Describes a preflush job to execute, including its type and work range.
-#[derive(Clone, Copy, Debug)]
-pub struct PreflushJob {
-    pub job_type: PreflushJobType,
-    pub start: i32,
-    pub end: i32,
-}
 
 /// Checks for stale collision pairs by reading freshness bytes in bulk (8 at a time)
 /// and enqueuing removals for any pair that was not refreshed during the current frame.
 pub(crate) struct FreshnessChecker {
-    freshness_job_count: i32,
     pair_cache: *mut PairCache,
     constraint_remover: *mut ConstraintRemover,
     pub(crate) cached_dispatcher: Option<*mut dyn IThreadDispatcher>,
@@ -34,55 +17,9 @@ pub(crate) use super::constraint_remover::ConstraintRemover;
 impl FreshnessChecker {
     pub fn new(pair_cache: *mut PairCache, constraint_remover: *mut ConstraintRemover) -> Self {
         Self {
-            freshness_job_count: 0,
             pair_cache,
             constraint_remover,
             cached_dispatcher: None,
-        }
-    }
-
-    pub fn create_jobs(
-        &mut self,
-        dispatcher: Option<*mut dyn IThreadDispatcher>,
-        thread_count: i32,
-        jobs: &mut Vec<PreflushJob>,
-        _pool: &mut BufferPool,
-        mapping_count: i32,
-    ) {
-        self.cached_dispatcher = dispatcher;
-        if mapping_count > 0 {
-            if thread_count > 1 {
-                const JOBS_PER_THREAD: i32 = 2;
-                self.freshness_job_count = i32::min(thread_count * JOBS_PER_THREAD, mapping_count);
-                let pairs_per_job = mapping_count / self.freshness_job_count;
-                let remainder = mapping_count - pairs_per_job * self.freshness_job_count;
-                let mut previous_end = 0i32;
-                let mut job_index = 0i32;
-                while previous_end < mapping_count {
-                    let pairs_in_job = if job_index < remainder {
-                        pairs_per_job + 1
-                    } else {
-                        pairs_per_job
-                    };
-                    let mut next_end = ((previous_end + pairs_in_job + 7) >> 3) << 3;
-                    if next_end > mapping_count {
-                        next_end = mapping_count;
-                    }
-                    jobs.push(PreflushJob {
-                        job_type: PreflushJobType::CheckFreshness,
-                        start: previous_end,
-                        end: next_end,
-                    });
-                    previous_end = next_end;
-                    job_index += 1;
-                }
-            } else {
-                jobs.push(PreflushJob {
-                    job_type: PreflushJobType::CheckFreshness,
-                    start: 0,
-                    end: mapping_count,
-                });
-            }
         }
     }
 

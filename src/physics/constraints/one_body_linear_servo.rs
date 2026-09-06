@@ -2,6 +2,8 @@
 
 use glam::Vec3;
 
+use crate::out;
+use crate::out_unsafe;
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::servo_settings::{ServoSettings, ServoSettingsWide};
 use crate::physics::constraints::spring_settings::{SpringSettings, SpringSettingsWide};
@@ -10,6 +12,7 @@ use crate::utilities::quaternion_wide::QuaternionWide;
 use crate::utilities::symmetric3x3_wide::Symmetric3x3Wide;
 use crate::utilities::vector::Vector;
 use crate::utilities::vector3_wide::Vector3Wide;
+use std::mem::MaybeUninit;
 
 /// Constrains a point on a body to a target location.
 #[repr(C)]
@@ -37,8 +40,9 @@ impl OneBodyLinearServo {
         #[cfg(debug_assertions)]
         {
             use crate::physics::constraints::constraint_checker::ConstraintChecker;
-            ConstraintChecker::assert_valid_servo_settings(
+            ConstraintChecker::assert_valid_servo_and_spring_settings(
                 &self.servo_settings,
+                &self.spring_settings,
                 "OneBodyLinearServo",
             );
         }
@@ -114,18 +118,12 @@ impl OneBodyLinearServoFunctions {
         velocity_a: &mut BodyVelocityWide,
         csi: &Vector3Wide,
     ) {
-        let mut wsi = Vector3Wide::default();
-        unsafe {
-            Vector3Wide::cross_without_overlap(offset, csi, &mut wsi);
-        }
-        let mut change = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(
+        let wsi = out_unsafe!(Vector3Wide::cross_without_overlap(offset, csi));
+        let mut change = out!(Symmetric3x3Wide::transform_without_overlap(
             &wsi,
-            &inertia.inverse_inertia_tensor,
-            &mut change,
-        );
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::add(&velocity_a.angular, &change, &mut tmp);
+            &inertia.inverse_inertia_tensor
+        ));
+        let mut tmp = out!(Vector3Wide::add(&velocity_a.angular, &change));
         velocity_a.angular = tmp;
 
         Vector3Wide::scale_to(csi, &inertia.inverse_mass, &mut change);
@@ -142,12 +140,10 @@ impl OneBodyLinearServoFunctions {
         _accumulated_impulses: &Vector3Wide,
         wsv_a: &mut BodyVelocityWide,
     ) {
-        let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+        let offset = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset,
-            orientation_a,
-            &mut offset,
-        );
+            orientation_a
+        ));
         Self::apply_impulse(&offset, inertia_a, wsv_a, _accumulated_impulses);
     }
 
@@ -162,65 +158,66 @@ impl OneBodyLinearServoFunctions {
         accumulated_impulses: &mut Vector3Wide,
         wsv_a: &mut BodyVelocityWide,
     ) {
-        let mut offset = Vector3Wide::default();
-        QuaternionWide::transform_without_overlap(
+        let offset = out!(QuaternionWide::transform_without_overlap(
             &prestep.local_offset,
-            orientation_a,
-            &mut offset,
-        );
+            orientation_a
+        ));
 
-        let mut position_error_to_velocity = Vector::<f32>::splat(0.0);
-        let mut effective_mass_cfm_scale = Vector::<f32>::splat(0.0);
-        let mut softness_impulse_scale = Vector::<f32>::splat(0.0);
-        SpringSettingsWide::compute_springiness(
-            &prestep.spring_settings,
-            dt,
-            &mut position_error_to_velocity,
-            &mut effective_mass_cfm_scale,
-            &mut softness_impulse_scale,
-        );
+        let mut position_error_to_velocity = MaybeUninit::<Vector<f32>>::uninit();
+        let mut effective_mass_cfm_scale = MaybeUninit::<Vector<f32>>::uninit();
+        let mut softness_impulse_scale = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            SpringSettingsWide::compute_springiness(
+                &prestep.spring_settings,
+                dt,
+                &mut *position_error_to_velocity.as_mut_ptr(),
+                &mut *effective_mass_cfm_scale.as_mut_ptr(),
+                &mut *softness_impulse_scale.as_mut_ptr(),
+            );
+        }
+        let position_error_to_velocity = unsafe { position_error_to_velocity.assume_init() };
+        let effective_mass_cfm_scale = unsafe { effective_mass_cfm_scale.assume_init() };
+        let softness_impulse_scale = unsafe { softness_impulse_scale.assume_init() };
 
         // Compute the position error and bias velocities.
-        let mut world_grab_point = Vector3Wide::default();
-        Vector3Wide::add(&offset, position_a, &mut world_grab_point);
-        let mut error = Vector3Wide::default();
-        Vector3Wide::subtract(&prestep.target, &world_grab_point, &mut error);
-        let mut bias_velocity = Vector3Wide::default();
-        let mut maximum_impulse = Vector::<f32>::splat(0.0);
-        ServoSettingsWide::compute_clamped_bias_velocity_3d(
-            &error,
-            &position_error_to_velocity,
-            &prestep.servo_settings,
-            dt,
-            inverse_dt,
-            &mut bias_velocity,
-            &mut maximum_impulse,
-        );
+        let world_grab_point = out!(Vector3Wide::add(&offset, position_a));
+        let error = out!(Vector3Wide::subtract(&prestep.target, &world_grab_point));
+        let mut bias_velocity = MaybeUninit::<Vector3Wide>::uninit();
+        let mut maximum_impulse = MaybeUninit::<Vector<f32>>::uninit();
+        unsafe {
+            ServoSettingsWide::compute_clamped_bias_velocity_3d(
+                &error,
+                &position_error_to_velocity,
+                &prestep.servo_settings,
+                dt,
+                inverse_dt,
+                &mut *bias_velocity.as_mut_ptr(),
+                &mut *maximum_impulse.as_mut_ptr(),
+            );
+        }
+        let bias_velocity = unsafe { bias_velocity.assume_init() };
+        let maximum_impulse = unsafe { maximum_impulse.assume_init() };
 
         // csi = projection.BiasImpulse - accumulatedImpulse * projection.SoftnessImpulseScale - (csiaLinear + csiaAngular);
         let cross_term = Vector3Wide::cross_new(&wsv_a.angular, &offset);
-        let mut csv = Vector3Wide::default();
-        Vector3Wide::subtract(&bias_velocity, &cross_term, &mut csv);
-        let mut tmp = Vector3Wide::default();
-        Vector3Wide::subtract(&csv, &wsv_a.linear, &mut tmp);
-        csv = tmp;
+        let csv = out!(Vector3Wide::subtract(&bias_velocity, &cross_term));
+        let csv = out!(Vector3Wide::subtract(&csv, &wsv_a.linear));
 
         // The grabber is roughly equivalent to a ball socket joint with a nonzero goal (and only one body).
-        let mut inverse_effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::skew_sandwich_without_overlap(
+        let mut inverse_effective_mass = out!(Symmetric3x3Wide::skew_sandwich_without_overlap(
             &offset,
-            &inertia_a.inverse_inertia_tensor,
-            &mut inverse_effective_mass,
-        );
+            &inertia_a.inverse_inertia_tensor
+        ));
 
         // Linear contributions are simply I * inverseMass * I, which is just boosting the diagonal.
         inverse_effective_mass.xx += inertia_a.inverse_mass;
         inverse_effective_mass.yy += inertia_a.inverse_mass;
         inverse_effective_mass.zz += inertia_a.inverse_mass;
-        let mut effective_mass = Symmetric3x3Wide::default();
-        Symmetric3x3Wide::invert(&inverse_effective_mass, &mut effective_mass);
-        let mut csi = Vector3Wide::default();
-        Symmetric3x3Wide::transform_without_overlap(&csv, &effective_mass, &mut csi);
+        let effective_mass = out!(Symmetric3x3Wide::invert(&inverse_effective_mass));
+        let mut csi = out!(Symmetric3x3Wide::transform_without_overlap(
+            &csv,
+            &effective_mass
+        ));
         let scaled_csi = csi * effective_mass_cfm_scale;
         let scaled_accumulated = *accumulated_impulses * softness_impulse_scale;
         Vector3Wide::subtract(&scaled_csi, &scaled_accumulated, &mut csi);

@@ -12,12 +12,11 @@ use crate::physics::constraints::contact::twist_friction_one_body::TwistFriction
 use crate::physics::constraints::spring_settings::SpringSettingsWide;
 use crate::physics::helpers::Helpers;
 use crate::utilities::quaternion_wide::QuaternionWide;
-use crate::utilities::vector::Vector;
+use crate::utilities::vector::{HwMinMax, Vector};
 use crate::utilities::vector2_wide::Vector2Wide;
 use crate::utilities::vector3_wide::Vector3Wide;
 use std::simd::cmp::SimdPartialEq;
 use std::simd::cmp::SimdPartialOrd;
-use std::simd::num::SimdFloat;
 use std::simd::Select;
 
 // ============================================================================
@@ -33,28 +32,35 @@ pub struct Contact1AccumulatedImpulses {
 }
 
 impl IContactAccumulatedImpulses for Contact1AccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         1
     }
 }
 
 impl IConvexContactAccumulatedImpulses for Contact1AccumulatedImpulses {
+    #[inline(always)]
     fn get_tangent_friction(&self) -> &Vector2Wide {
         &self.tangent
     }
+    #[inline(always)]
     fn get_tangent_friction_mut(&mut self) -> &mut Vector2Wide {
         &mut self.tangent
     }
+    #[inline(always)]
     fn get_twist_friction(&self) -> &Vector<f32> {
         &self.twist
     }
+    #[inline(always)]
     fn get_twist_friction_mut(&mut self) -> &mut Vector<f32> {
         &mut self.twist
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact(&self, index: usize) -> &Vector<f32> {
         debug_assert!(index < 1);
         &self.penetration0
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact_mut(&mut self, index: usize) -> &mut Vector<f32> {
         debug_assert!(index < 1);
         &mut self.penetration0
@@ -71,28 +77,35 @@ pub struct Contact2AccumulatedImpulses {
 }
 
 impl IContactAccumulatedImpulses for Contact2AccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         2
     }
 }
 
 impl IConvexContactAccumulatedImpulses for Contact2AccumulatedImpulses {
+    #[inline(always)]
     fn get_tangent_friction(&self) -> &Vector2Wide {
         &self.tangent
     }
+    #[inline(always)]
     fn get_tangent_friction_mut(&mut self) -> &mut Vector2Wide {
         &mut self.tangent
     }
+    #[inline(always)]
     fn get_twist_friction(&self) -> &Vector<f32> {
         &self.twist
     }
+    #[inline(always)]
     fn get_twist_friction_mut(&mut self) -> &mut Vector<f32> {
         &mut self.twist
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact(&self, index: usize) -> &Vector<f32> {
         debug_assert!(index < 2);
         unsafe { &*(&self.penetration0 as *const Vector<f32>).add(index) }
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact_mut(&mut self, index: usize) -> &mut Vector<f32> {
         debug_assert!(index < 2);
         unsafe { &mut *(&mut self.penetration0 as *mut Vector<f32>).add(index) }
@@ -110,28 +123,35 @@ pub struct Contact3AccumulatedImpulses {
 }
 
 impl IContactAccumulatedImpulses for Contact3AccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         3
     }
 }
 
 impl IConvexContactAccumulatedImpulses for Contact3AccumulatedImpulses {
+    #[inline(always)]
     fn get_tangent_friction(&self) -> &Vector2Wide {
         &self.tangent
     }
+    #[inline(always)]
     fn get_tangent_friction_mut(&mut self) -> &mut Vector2Wide {
         &mut self.tangent
     }
+    #[inline(always)]
     fn get_twist_friction(&self) -> &Vector<f32> {
         &self.twist
     }
+    #[inline(always)]
     fn get_twist_friction_mut(&mut self) -> &mut Vector<f32> {
         &mut self.twist
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact(&self, index: usize) -> &Vector<f32> {
         debug_assert!(index < 3);
         unsafe { &*(&self.penetration0 as *const Vector<f32>).add(index) }
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact_mut(&mut self, index: usize) -> &mut Vector<f32> {
         debug_assert!(index < 3);
         unsafe { &mut *(&mut self.penetration0 as *mut Vector<f32>).add(index) }
@@ -150,28 +170,35 @@ pub struct Contact4AccumulatedImpulses {
 }
 
 impl IContactAccumulatedImpulses for Contact4AccumulatedImpulses {
+    #[inline(always)]
     fn contact_count() -> i32 {
         4
     }
 }
 
 impl IConvexContactAccumulatedImpulses for Contact4AccumulatedImpulses {
+    #[inline(always)]
     fn get_tangent_friction(&self) -> &Vector2Wide {
         &self.tangent
     }
+    #[inline(always)]
     fn get_tangent_friction_mut(&mut self) -> &mut Vector2Wide {
         &mut self.tangent
     }
+    #[inline(always)]
     fn get_twist_friction(&self) -> &Vector<f32> {
         &self.twist
     }
+    #[inline(always)]
     fn get_twist_friction_mut(&mut self) -> &mut Vector<f32> {
         &mut self.twist
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact(&self, index: usize) -> &Vector<f32> {
         debug_assert!(index < 4);
         unsafe { &*(&self.penetration0 as *const Vector<f32>).add(index) }
     }
+    #[inline(always)]
     fn get_penetration_impulse_for_contact_mut(&mut self, index: usize) -> &mut Vector<f32> {
         debug_assert!(index < 4);
         unsafe { &mut *(&mut self.penetration0 as *mut Vector<f32>).add(index) }
@@ -302,31 +329,39 @@ pub struct Contact1OneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact1OneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         1
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl IConvexContactPrestep for Contact1OneBodyPrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 1);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 1);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -441,7 +476,7 @@ impl Contact1OneBodyFunctions {
         //That can cause some subtle behavioral issues sometimes, so we approximate lever arm with the contact depth, assuming that the contact surface area will increase as the depth increases.
         let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * accumulated_impulses.penetration0
-            * prestep.contact0.depth.simd_max(Vector::<f32>::splat(0.0));
+            * Vector::<f32>::splat(0.0).hw_max(prestep.contact0.depth);
         TwistFrictionOneBody::solve(
             &prestep.normal,
             inertia_a,
@@ -473,31 +508,39 @@ pub struct Contact2OneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact2OneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         2
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl IConvexContactPrestep for Contact2OneBodyPrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 2);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 2);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -688,31 +731,39 @@ pub struct Contact3OneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact3OneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         3
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl IConvexContactPrestep for Contact3OneBodyPrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 3);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -942,31 +993,39 @@ pub struct Contact4OneBodyPrestepData {
 }
 
 impl IContactPrestep for Contact4OneBodyPrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         4
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         1
     }
 }
 
 impl IConvexContactPrestep for Contact4OneBodyPrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 4);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -1231,31 +1290,39 @@ pub struct Contact1PrestepData {
 }
 
 impl IContactPrestep for Contact1PrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         1
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl IConvexContactPrestep for Contact1PrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 1);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 1);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -1263,9 +1330,11 @@ impl IConvexContactPrestep for Contact1PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact1PrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }
@@ -1415,7 +1484,7 @@ impl Contact1Functions {
         //If there's only one contact, then the contact patch as determined by contact distance would be zero.
         let maximum_twist_impulse = prestep.material_properties.friction_coefficient
             * accumulated_impulses.penetration0
-            * prestep.contact0.depth.simd_max(Vector::<f32>::splat(0.0));
+            * Vector::<f32>::splat(0.0).hw_max(prestep.contact0.depth);
         TwistFriction::solve(
             &prestep.normal,
             inertia_a,
@@ -1449,31 +1518,39 @@ pub struct Contact2PrestepData {
 }
 
 impl IContactPrestep for Contact2PrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         2
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl IConvexContactPrestep for Contact2PrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 2);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 2);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -1481,9 +1558,11 @@ impl IConvexContactPrestep for Contact2PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact2PrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }
@@ -1725,31 +1804,39 @@ pub struct Contact3PrestepData {
 }
 
 impl IContactPrestep for Contact3PrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         3
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl IConvexContactPrestep for Contact3PrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 3);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 3);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -1757,9 +1844,11 @@ impl IConvexContactPrestep for Contact3PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact3PrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }
@@ -2050,31 +2139,39 @@ pub struct Contact4PrestepData {
 }
 
 impl IContactPrestep for Contact4PrestepData {
+    #[inline(always)]
     fn get_material_properties(&self) -> &MaterialPropertiesWide {
         &self.material_properties
     }
+    #[inline(always)]
     fn get_material_properties_mut(&mut self) -> &mut MaterialPropertiesWide {
         &mut self.material_properties
     }
+    #[inline(always)]
     fn contact_count() -> i32 {
         4
     }
+    #[inline(always)]
     fn body_count() -> i32 {
         2
     }
 }
 
 impl IConvexContactPrestep for Contact4PrestepData {
+    #[inline(always)]
     fn get_normal(&self) -> &Vector3Wide {
         &self.normal
     }
+    #[inline(always)]
     fn get_normal_mut(&mut self) -> &mut Vector3Wide {
         &mut self.normal
     }
+    #[inline(always)]
     fn get_contact(&self, index: usize) -> &ConvexContactWide {
         debug_assert!(index < 4);
         unsafe { &*(&self.contact0 as *const ConvexContactWide).add(index) }
     }
+    #[inline(always)]
     fn get_contact_mut(&mut self, index: usize) -> &mut ConvexContactWide {
         debug_assert!(index < 4);
         unsafe { &mut *(&mut self.contact0 as *mut ConvexContactWide).add(index) }
@@ -2082,9 +2179,11 @@ impl IConvexContactPrestep for Contact4PrestepData {
 }
 
 impl ITwoBodyConvexContactPrestep for Contact4PrestepData {
+    #[inline(always)]
     fn get_offset_b(&self) -> &Vector3Wide {
         &self.offset_b
     }
+    #[inline(always)]
     fn get_offset_b_mut(&mut self) -> &mut Vector3Wide {
         &mut self.offset_b
     }

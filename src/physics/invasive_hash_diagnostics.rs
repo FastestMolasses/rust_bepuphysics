@@ -1,5 +1,7 @@
 // Translated from BepuPhysics/InvasiveHashDiagnostics.cs
 
+use crate::utilities::collections::quick_dictionary::HashHelper;
+
 /// Hardcoded hash types used by invasive hash diagnostics.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,7 +151,7 @@ impl InvasiveHashDiagnostics {
 
     #[inline(always)]
     pub fn contribute_to_hash_value(hash: &mut i32, value: i32) {
-        *hash = Self::rehash(*hash ^ value);
+        *hash = HashHelper::rehash(*hash ^ value);
     }
 
     #[inline(always)]
@@ -179,18 +181,5 @@ impl InvasiveHashDiagnostics {
     ) {
         let hash = self.get_hash_for_type(hash_type);
         Self::contribute_to_hash_bytes(hash, value);
-    }
-
-    #[inline(always)]
-    fn rehash(hash: i32) -> i32 {
-        // Uses the same hash helper as BepuUtilities.HashHelper.Rehash
-        let h = hash as u32;
-        let h = h.wrapping_add(h << 15) ^ 0xFFFFFFFF;
-        let h = h ^ (h >> 10);
-        let h = h.wrapping_add(h << 3);
-        let h = h ^ (h >> 6);
-        let h = h.wrapping_add(h << 2).wrapping_add(h << 14);
-        let h = h ^ (h >> 16);
-        h as i32
     }
 }

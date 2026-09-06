@@ -20,12 +20,8 @@ pub fn validate_power(power: i32) {
 /// Computes the lowest integer N such that 2^N >= i.
 #[inline(always)]
 pub fn get_containing_power_of_2(i: i32) -> i32 {
-    if i <= 0 {
-        0
-    } else {
-        let unsigned = i as u32;
-        32 - (unsigned - 1).leading_zeros() as i32
-    }
+    let unsigned = if i == 0 { 1u32 } else { i as u32 };
+    32 - unsigned.wrapping_sub(1).leading_zeros() as i32
 }
 
 /// Tests if a type is a primitive type.

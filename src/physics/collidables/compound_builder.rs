@@ -5,6 +5,7 @@ use crate::utilities::memory::buffer_pool::BufferPool;
 use crate::utilities::symmetric3x3::Symmetric3x3;
 
 use super::compound::CompoundChild;
+use super::shape::IConvexShape;
 use super::shapes::Shapes;
 use super::typed_index::TypedIndex;
 use crate::physics::body_properties::{BodyInertia, RigidPose};
@@ -90,6 +91,36 @@ impl CompoundBuilder {
             weight,
             local_inverse_inertia: Symmetric3x3::default(),
         });
+    }
+
+    /// Adds a new shape to the accumulator, creating a new shape in the shapes set.
+    /// The mass used to compute the inertia tensor is based on the given weight.
+    pub fn add_shape<TShape: IConvexShape + Copy + Default + 'static>(
+        &mut self,
+        shape: &TShape,
+        local_pose: &RigidPose,
+        weight: f32,
+    ) {
+        let shape_index = unsafe { (*self.shapes).add(shape) };
+        let inertia = shape.compute_inertia(weight);
+        self.add(
+            shape_index,
+            local_pose,
+            &inertia.inverse_inertia_tensor,
+            weight,
+        );
+    }
+
+    /// Adds a new shape to the accumulator, creating a new shape in the shapes set.
+    /// Inertia is assumed to be infinite.
+    pub fn add_shape_for_kinematic<TShape: IConvexShape + Copy + Default + 'static>(
+        &mut self,
+        shape: &TShape,
+        local_pose: &RigidPose,
+        weight: f32,
+    ) {
+        let shape_index = unsafe { (*self.shapes).add(shape) };
+        self.add_for_kinematic(shape_index, local_pose, weight);
     }
 
     /// Gets the contribution to an inertia tensor of a point mass at the given offset from the center of mass.

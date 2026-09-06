@@ -289,7 +289,10 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
         value: TValue,
         pool: &mut impl UnmanagedMemoryPool,
     ) -> bool {
-        self.ensure_capacity(self.count + 1, pool);
+        // Resize before any indices are computed; resizing afterward would invalidate them.
+        if self.count == self.keys.len() {
+            self.resize(self.count * 2, pool);
+        }
         self.add_and_replace_unsafely(key, value)
     }
 
@@ -407,15 +410,10 @@ impl<TKey: Copy, TValue: Copy, TEqualityComparer: RefEqualityComparer<TKey>>
             self.keys[element_index] = self.keys[self.count];
             self.values[element_index] = self.values[self.count];
             // Locate the swapped object in the table and update its index.
-            // The swapped element was previously at array index `self.count` (before decrement),
-            // so its table entry has value `self.count + 1` (1-indexed encoding).
-            let swapped_key = self.keys[element_index]; // Copy key to avoid borrow issues
-            let mut swap_table_index =
-                HashHelper::rehash(self.equality_comparer.hash(&swapped_key)) & self.table_mask;
-            while self.table[swap_table_index] != self.count + 1 {
-                swap_table_index = (swap_table_index + 1) & self.table_mask;
-            }
-            self.table[swap_table_index] = element_index + 1; // Remember the encoding! all indices offset by 1.
+            let swapped_key = self.keys[element_index];
+            let mut old_object_index = 0;
+            self.get_table_indices(&swapped_key, &mut table_index, &mut old_object_index);
+            self.table[table_index] = element_index + 1; // Remember the encoding! all indices offset by 1.
         }
 
         // Clear the vacated final slots (matches C# `Keys[Count] = default; Values[Count] = default`)

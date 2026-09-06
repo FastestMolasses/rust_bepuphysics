@@ -14,7 +14,10 @@
 
 use crate::physics::body_properties::{BodyInertiaWide, BodyVelocityWide};
 use crate::physics::constraints::body_access_filter::*;
-use crate::physics::constraints::constraint_description::IConstraintDescription;
+use crate::physics::constraints::constraint_description::{
+    IConstraintDescription, IFourBodyConstraintDescription, IOneBodyConstraintDescription,
+    IThreeBodyConstraintDescription, ITwoBodyConstraintDescription,
+};
 use crate::physics::constraints::four_body_type_processor::{
     FourBodyTypeProcessorImpl, IFourBodyConstraintFunctions,
 };
@@ -103,6 +106,7 @@ macro_rules! impl_two_body_functions {
                 false
             }
 
+            #[inline(always)]
             fn incrementally_update_for_substep(
                 _dt: &Vector<f32>,
                 _wsv_a: &BodyVelocityWide,
@@ -165,6 +169,7 @@ macro_rules! impl_one_body_functions {
                 false
             }
 
+            #[inline(always)]
             fn incrementally_update_for_substep(
                 _dt: &Vector<f32>,
                 _velocity: &BodyVelocityWide,
@@ -227,6 +232,8 @@ macro_rules! impl_two_body_description {
                 )
             }
         }
+
+        impl ITwoBodyConstraintDescription for $desc {}
     };
 }
 
@@ -280,6 +287,8 @@ macro_rules! impl_one_body_description {
                 )
             }
         }
+
+        impl IOneBodyConstraintDescription for $desc {}
     };
 }
 
@@ -365,6 +374,7 @@ macro_rules! impl_three_body_functions {
                 false
             }
 
+            #[inline(always)]
             fn incrementally_update_for_substep(
                 _dt: &Vector<f32>,
                 _wsv_a: &BodyVelocityWide,
@@ -475,6 +485,7 @@ macro_rules! impl_four_body_functions {
                 false
             }
 
+            #[inline(always)]
             fn incrementally_update_for_substep(
                 _dt: &Vector<f32>,
                 _wsv_a: &BodyVelocityWide,
@@ -542,6 +553,8 @@ macro_rules! impl_three_body_description {
                 )
             }
         }
+
+        impl IThreeBodyConstraintDescription for $desc {}
     };
 }
 
@@ -601,6 +614,8 @@ macro_rules! impl_four_body_description {
                 )
             }
         }
+
+        impl IFourBodyConstraintDescription for $desc {}
     };
 }
 
@@ -872,6 +887,7 @@ macro_rules! impl_contact_one_body_functions {
                 true
             }
 
+            #[inline(always)]
             fn incrementally_update_for_substep(
                 dt: &Vector<f32>,
                 velocity: &BodyVelocityWide,
@@ -949,6 +965,7 @@ macro_rules! impl_contact_two_body_functions {
                 true
             }
 
+            #[inline(always)]
             fn incrementally_update_for_substep(
                 dt: &Vector<f32>,
                 wsv_a: &BodyVelocityWide,
@@ -1023,6 +1040,7 @@ impl
         Contact2NonconvexAccumulatedImpulses,
     > for Contact2NonconvexOneBodyFunctionsImpl
 {
+    #[inline(always)]
     fn warm_start(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1040,6 +1058,7 @@ impl
             wsv_a,
         );
     }
+    #[inline(always)]
     fn solve(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1064,6 +1083,7 @@ impl
     fn requires_incremental_substep_updates() -> bool {
         true
     }
+    #[inline(always)]
     fn incrementally_update_for_substep(
         dt: &Vector<f32>,
         velocity: &BodyVelocityWide,
@@ -1080,6 +1100,7 @@ impl
         Contact3NonconvexAccumulatedImpulses,
     > for Contact3NonconvexOneBodyFunctionsImpl
 {
+    #[inline(always)]
     fn warm_start(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1097,6 +1118,7 @@ impl
             wsv_a,
         );
     }
+    #[inline(always)]
     fn solve(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1121,6 +1143,7 @@ impl
     fn requires_incremental_substep_updates() -> bool {
         true
     }
+    #[inline(always)]
     fn incrementally_update_for_substep(
         dt: &Vector<f32>,
         velocity: &BodyVelocityWide,
@@ -1137,6 +1160,7 @@ impl
         Contact4NonconvexAccumulatedImpulses,
     > for Contact4NonconvexOneBodyFunctionsImpl
 {
+    #[inline(always)]
     fn warm_start(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1154,6 +1178,7 @@ impl
             wsv_a,
         );
     }
+    #[inline(always)]
     fn solve(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1178,6 +1203,7 @@ impl
     fn requires_incremental_substep_updates() -> bool {
         true
     }
+    #[inline(always)]
     fn incrementally_update_for_substep(
         dt: &Vector<f32>,
         velocity: &BodyVelocityWide,
@@ -1191,6 +1217,7 @@ pub struct Contact2NonconvexTwoBodyFunctionsImpl;
 impl ITwoBodyConstraintFunctions<Contact2NonconvexPrestepData, Contact2NonconvexAccumulatedImpulses>
     for Contact2NonconvexTwoBodyFunctionsImpl
 {
+    #[inline(always)]
     fn warm_start(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1216,6 +1243,7 @@ impl ITwoBodyConstraintFunctions<Contact2NonconvexPrestepData, Contact2Nonconvex
             wsv_b,
         );
     }
+    #[inline(always)]
     fn solve(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1248,6 +1276,7 @@ impl ITwoBodyConstraintFunctions<Contact2NonconvexPrestepData, Contact2Nonconvex
     fn requires_incremental_substep_updates() -> bool {
         true
     }
+    #[inline(always)]
     fn incrementally_update_for_substep(
         dt: &Vector<f32>,
         wsv_a: &BodyVelocityWide,
@@ -1264,6 +1293,7 @@ pub struct Contact3NonconvexTwoBodyFunctionsImpl;
 impl ITwoBodyConstraintFunctions<Contact3NonconvexPrestepData, Contact3NonconvexAccumulatedImpulses>
     for Contact3NonconvexTwoBodyFunctionsImpl
 {
+    #[inline(always)]
     fn warm_start(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1289,6 +1319,7 @@ impl ITwoBodyConstraintFunctions<Contact3NonconvexPrestepData, Contact3Nonconvex
             wsv_b,
         );
     }
+    #[inline(always)]
     fn solve(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1321,6 +1352,7 @@ impl ITwoBodyConstraintFunctions<Contact3NonconvexPrestepData, Contact3Nonconvex
     fn requires_incremental_substep_updates() -> bool {
         true
     }
+    #[inline(always)]
     fn incrementally_update_for_substep(
         dt: &Vector<f32>,
         wsv_a: &BodyVelocityWide,
@@ -1337,6 +1369,7 @@ pub struct Contact4NonconvexTwoBodyFunctionsImpl;
 impl ITwoBodyConstraintFunctions<Contact4NonconvexPrestepData, Contact4NonconvexAccumulatedImpulses>
     for Contact4NonconvexTwoBodyFunctionsImpl
 {
+    #[inline(always)]
     fn warm_start(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1362,6 +1395,7 @@ impl ITwoBodyConstraintFunctions<Contact4NonconvexPrestepData, Contact4Nonconvex
             wsv_b,
         );
     }
+    #[inline(always)]
     fn solve(
         position_a: &Vector3Wide,
         orientation_a: &QuaternionWide,
@@ -1394,6 +1428,7 @@ impl ITwoBodyConstraintFunctions<Contact4NonconvexPrestepData, Contact4Nonconvex
     fn requires_incremental_substep_updates() -> bool {
         true
     }
+    #[inline(always)]
     fn incrementally_update_for_substep(
         dt: &Vector<f32>,
         wsv_a: &BodyVelocityWide,

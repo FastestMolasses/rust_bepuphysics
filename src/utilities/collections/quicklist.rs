@@ -135,7 +135,9 @@ impl<T: Copy> QuickList<T> {
     /// Adds an element to the list, resizing if necessary.
     #[inline(always)]
     pub fn add(&mut self, element: T, pool: &mut impl UnmanagedMemoryPool) {
-        self.ensure_capacity(self.count + 1, pool);
+        if self.count == self.span.len() {
+            self.resize(self.count * 2, pool);
+        }
         self.add_unsafely(element);
     }
 
@@ -216,7 +218,10 @@ impl<T: Copy> QuickList<T> {
     /// Returns a pointer to the first allocated slot.
     #[inline(always)]
     pub fn allocate_count(&mut self, count: i32, pool: &mut impl UnmanagedMemoryPool) -> *mut T {
-        self.ensure_capacity(self.count + count, pool);
+        let new_count = self.count + count;
+        if new_count > self.span.len() {
+            self.resize((self.count * 2).max(new_count), pool);
+        }
         self.allocate_unsafely_count(count)
     }
 
@@ -371,7 +376,9 @@ impl<T: Copy> QuickList<T> {
     /// Allocates and returns a slot in the list.
     #[inline(always)]
     pub fn allocate(&mut self, pool: &mut impl UnmanagedMemoryPool) -> &mut T {
-        self.ensure_capacity(self.count + 1, pool);
+        if self.count == self.span.len() {
+            self.resize(self.count * 2, pool);
+        }
         self.allocate_unsafely()
     }
 

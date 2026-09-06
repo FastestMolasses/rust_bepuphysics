@@ -179,6 +179,36 @@ impl<
     }
 
     #[inline(always)]
+    fn update_for_body_memory_move(
+        &self,
+        type_batch: &mut TypeBatch,
+        index_in_type_batch: i32,
+        body_index_in_constraint: i32,
+        new_body_location: i32,
+    ) -> bool {
+        unsafe {
+            let (mut bundle_index, mut inner_index) = (0usize, 0usize);
+            crate::utilities::bundle_indexing::BundleIndexing::get_bundle_indices(
+                index_in_type_batch as usize,
+                &mut bundle_index,
+                &mut inner_index,
+            );
+            // Body references are laid out as 4 consecutive Vector<int>, one per body.
+            let vector_len = crate::utilities::vector::VECTOR_WIDTH;
+            let body_refs_base = type_batch.body_references.as_mut_ptr() as *mut i32;
+            let lane_offset = inner_index + body_index_in_constraint as usize * vector_len;
+            let reference_location =
+                &mut *body_refs_base.add(bundle_index * 4 * vector_len + lane_offset);
+
+            // Preserve the old kinematic mask so the caller doesn't have to re-query.
+            let is_kinematic = Bodies::is_encoded_kinematic_reference(*reference_location);
+            *reference_location =
+                new_body_location | (*reference_location & Bodies::KINEMATIC_MASK as i32);
+            is_kinematic
+        }
+    }
+
+    #[inline(always)]
     fn constrained_degrees_of_freedom(&self) -> i32 {
         self.constrained_degrees_of_freedom
     }

@@ -107,10 +107,10 @@ impl TestTriangle {
         let normal_length_squared = nx * nx + ny * ny + nz * nz;
         let inverse_length = Vec4::ONE
             / Vec4::new(
-                normal_length_squared.x.max(1e-30).sqrt(),
-                normal_length_squared.y.max(1e-30).sqrt(),
-                normal_length_squared.z.max(1e-30).sqrt(),
-                normal_length_squared.w.max(1e-30).sqrt(),
+                normal_length_squared.x.sqrt(),
+                normal_length_squared.y.sqrt(),
+                normal_length_squared.z.sqrt(),
+                normal_length_squared.w.sqrt(),
             );
         let nx = nx * inverse_length;
         let ny = ny * inverse_length;
@@ -375,12 +375,20 @@ impl MeshReduction {
 
         const BRUTE_FORCE_THRESHOLD: i32 = 128;
         if count < BRUTE_FORCE_THRESHOLD {
-            // count < BRUTE_FORCE_THRESHOLD here, so a fixed-size uninitialized stack array suffices.
-            let mut active_triangles_storage: MaybeUninit<
-                [TestTriangle; BRUTE_FORCE_THRESHOLD as usize],
+            const INLINE_TRIANGLE_CAPACITY: i32 = 32;
+            const _: () = assert!(
+                INLINE_TRIANGLE_CAPACITY as usize * std::mem::size_of::<TestTriangle>() <= 4096,
+                "Inline scratch must stay small enough to keep the frame cheap."
+            );
+            let mut inline_storage: MaybeUninit<
+                [TestTriangle; INLINE_TRIANGLE_CAPACITY as usize],
             > = MaybeUninit::uninit();
-            let active_triangles_ptr = active_triangles_storage.as_mut_ptr() as *mut TestTriangle;
-            let mut active_triangles = Buffer::new(active_triangles_ptr, count, -1);
+            let spilled = count > INLINE_TRIANGLE_CAPACITY;
+            let mut active_triangles: Buffer<TestTriangle> = if spilled {
+                pool.take(count)
+            } else {
+                Buffer::new(inline_storage.as_mut_ptr() as *mut TestTriangle, count, -1)
+            };
             for i in 0..count {
                 active_triangles[i] = TestTriangle::new(&*triangles_ptr.add(i as usize), i);
             }
@@ -449,9 +457,17 @@ impl MeshReduction {
                     requires_flip,
                 );
             }
+
+            if spilled {
+                pool.return_buffer(&mut active_triangles);
+            }
         } else {
-            // Tree-query path. If the per-mesh thunks were never wired, skip boundary smoothing
-            // rather than call through a null function pointer.
+            // Tree-query path. Unwired thunks are a continuation-creation bug; release builds skip
+            // boundary smoothing rather than call through a missing function pointer.
+            debug_assert!(
+                find_local_overlaps_thunk.is_some() && get_local_child_thunk.is_some(),
+                "Mesh reduction's per-mesh thunks must be wired before the tree query path runs."
+            );
             let (find_local_overlaps, get_local_child) =
                 match (find_local_overlaps_thunk, get_local_child_thunk) {
                     (Some(f), Some(g)) => (f, g),
