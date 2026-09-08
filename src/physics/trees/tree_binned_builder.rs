@@ -274,19 +274,21 @@ struct BinSubtreesTaskContext {
 }
 
 /// Partition counters with cache-line padding to prevent false sharing.
+/// Layout matches C# `PartitionCounters` (`FieldOffset` 128 and 132, `Size = 264`): 128 bytes of
+/// padding on each side keep neighbors off the counters' cache line. The two counters share one
+/// line, which suits the access pattern: each worker adds to A and then B back-to-back per batch.
 #[repr(C)]
 struct PartitionCounters {
     _pad_a: [u8; 128],
     subtree_count_a: UnsafeCell<i32>,
-    _pad_mid: [u8; 60],
     subtree_count_b: UnsafeCell<i32>,
-    _pad_b: [u8; 60],
+    _pad_b: [u8; 128],
 }
 
 const _: () = {
     assert!(std::mem::offset_of!(PartitionCounters, subtree_count_a) == 128);
-    assert!(std::mem::offset_of!(PartitionCounters, subtree_count_b) == 192);
-    assert!(std::mem::size_of::<PartitionCounters>() == 256);
+    assert!(std::mem::offset_of!(PartitionCounters, subtree_count_b) == 132);
+    assert!(std::mem::size_of::<PartitionCounters>() == 264);
 };
 
 /// Context for multithreaded partition.
@@ -663,9 +665,8 @@ unsafe fn multithreaded_partition(
         counters: PartitionCounters {
             _pad_a: [0; 128],
             subtree_count_a: UnsafeCell::new(0),
-            _pad_mid: [0; 60],
             subtree_count_b: UnsafeCell::new(0),
-            _pad_b: [0; 60],
+            _pad_b: [0; 128],
         },
     };
     task_context.task_data.task_count = task_data.task_count;

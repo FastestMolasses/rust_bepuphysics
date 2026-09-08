@@ -19,6 +19,19 @@ use crate::utilities::vector3_wide::Vector3Wide;
 #[allow(unused_imports)]
 use glam::{Quat, Vec3};
 
+// The transposes below are written out for a specific bundle width; guard the selection so an
+// unsupported width fails here instead of deep inside a swizzle.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
+const _: () = assert!(
+    crate::utilities::vector::VECTOR_WIDTH == 8,
+    "The AVX gather/scatter path requires 8-wide float bundles."
+);
+#[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+const _: () = assert!(
+    crate::utilities::vector::VECTOR_WIDTH == 4,
+    "The non-AVX gather/scatter path requires 4-wide float bundles."
+);
+
 // Float offsets within a MotionState (64 bytes = 16 floats):
 //   [0..3]  = orientation (x, y, z, w)
 //   [4..6]  = position (x, y, z)
@@ -299,6 +312,9 @@ impl Bodies {
     /// Transposes a bundle of array-of-structures layout motion states into a bundle of
     /// array-of-structures-of-arrays layout.
     /// Buffer size must be no larger than `Vector::<f32>::LEN`.
+    ///
+    /// Every lane of every output is written before any is read, so callers may pass
+    /// uninitialized storage; lanes beyond `states.len()` are zeroed.
     pub unsafe fn transpose_motion_states(
         states: &Buffer<MotionState>,
         position: &mut Vector3Wide,
