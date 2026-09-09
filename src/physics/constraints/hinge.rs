@@ -173,7 +173,7 @@ impl HingeFunctions {
         //           [ 0, constraintAxisAX, 0, -constraintAxisAX ]
         //           [ 0, constraintAxisAY, 0, -constraintAxisAY ]
         let linear_change_a = Vector3Wide::scale(&csi.ball_socket, &inertia_a.inverse_mass);
-        velocity_a.linear = velocity_a.linear + linear_change_a;
+        velocity_a.linear += linear_change_a;
 
         let ball_socket_angular_impulse_a =
             out_unsafe!(Vector3Wide::cross_without_overlap(offset_a, &csi.ball_socket));
@@ -183,7 +183,7 @@ impl HingeFunctions {
             &angular_impulse_a,
             &inertia_a.inverse_inertia_tensor
         ));
-        velocity_a.angular = velocity_a.angular + angular_change_a;
+        velocity_a.angular += angular_change_a;
 
         // Note cross order flip for negation
         let negated_linear_change_b = Vector3Wide::scale(&csi.ball_socket, &inertia_b.inverse_mass);
@@ -201,7 +201,7 @@ impl HingeFunctions {
             &angular_impulse_b,
             &inertia_b.inverse_inertia_tensor
         ));
-        velocity_b.angular = velocity_b.angular + angular_change_b;
+        velocity_b.angular += angular_change_b;
     }
 
     #[inline(always)]

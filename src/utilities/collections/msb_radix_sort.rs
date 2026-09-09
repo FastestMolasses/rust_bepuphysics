@@ -216,8 +216,8 @@ pub unsafe fn sort_u32_simple<T: Copy>(
         let new_shift = (shift - 7).max(0); // 7 bits per level for 128 buckets; clamp to 0
 
         let mut previous_end = 0usize;
-        for i in 0..BUCKET_COUNT {
-            let bucket_end = bucket_counts[i] as usize;
+        for &bucket_count in bucket_counts.iter() {
+            let bucket_end = bucket_count as usize;
             let count = bucket_end - previous_end;
             if count > 0 {
                 sort_u32_simple(

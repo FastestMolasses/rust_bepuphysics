@@ -183,7 +183,7 @@ impl DepthRefiner {
     /// Force-fills a simplex slot.
     #[inline(always)]
     fn force_fill_slot(should_fill: &Vector<i32>, vertex: &mut Vertex, support: &Vector3Wide) {
-        vertex.exists = vertex.exists | *should_fill;
+        vertex.exists |= *should_fill;
         vertex.support = Vector3Wide::conditional_select(should_fill, support, &vertex.support);
     }
 
@@ -217,7 +217,7 @@ impl DepthRefiner {
         support: &Vector3Wide,
         support_on_a: &Vector3Wide,
     ) {
-        vertex.exists = vertex.exists | *should_fill;
+        vertex.exists |= *should_fill;
         vertex.support = Vector3Wide::conditional_select(should_fill, support, &vertex.support);
         vertex.support_on_a =
             Vector3Wide::conditional_select(should_fill, support_on_a, &vertex.support_on_a);
@@ -233,9 +233,9 @@ impl DepthRefiner {
         // While only one slot is actually full, GetNextNormal expects every slot to have some kind of data-
         // for those slots which are not yet filled, it should be duplicates of other data.
         // (The sub-triangle case is treated the same as the degenerate case.)
-        simplex.a.support = support.clone();
-        simplex.b.support = support.clone();
-        simplex.c.support = support.clone();
+        simplex.a.support = *support;
+        simplex.b.support = *support;
+        simplex.c.support = *support;
         simplex.a.exists = Vector::<i32>::splat(-1);
         simplex.b.exists = Vector::<i32>::splat(0);
         simplex.c.exists = Vector::<i32>::splat(0);
@@ -254,12 +254,12 @@ impl DepthRefiner {
         support_on_a: &Vector3Wide,
         simplex: &mut SimplexWithWitness,
     ) {
-        simplex.a.support = support.clone();
-        simplex.b.support = support.clone();
-        simplex.c.support = support.clone();
-        simplex.a.support_on_a = support_on_a.clone();
-        simplex.b.support_on_a = support_on_a.clone();
-        simplex.c.support_on_a = support_on_a.clone();
+        simplex.a.support = *support;
+        simplex.b.support = *support;
+        simplex.c.support = *support;
+        simplex.a.support_on_a = *support_on_a;
+        simplex.b.support_on_a = *support_on_a;
+        simplex.c.support_on_a = *support_on_a;
         simplex.a.exists = Vector::<i32>::splat(-1);
         simplex.b.exists = Vector::<i32>::splat(0);
         simplex.c.exists = Vector::<i32>::splat(0);
@@ -357,7 +357,7 @@ impl DepthRefiner {
                 Self::force_fill_slot(&(use_abd & simplex_full), &mut simplex.c, support);
             }
         } else {
-            let a_support = simplex.a.support.clone();
+            let a_support = simplex.a.support;
             Self::fill_slot(&mut simplex.a, &a_support, terminated_lanes);
             Self::fill_slot(&mut simplex.b, &a_support, terminated_lanes);
             Self::fill_slot(&mut simplex.c, &a_support, terminated_lanes);
@@ -433,11 +433,10 @@ impl DepthRefiner {
         // If this is a vertex case and the sample is right on top of the target, immediately quit.
         let mut target_to_a_length_squared = Vector::<f32>::splat(0.0);
         Vector3Wide::length_squared_to(&target_to_a, &mut target_to_a_length_squared);
-        *terminated_lanes = *terminated_lanes
-            | (simplex_is_a_vertex.to_simd()
-                & target_to_a_length_squared
-                    .simd_lt(termination_epsilon_squared)
-                    .to_simd());
+        *terminated_lanes |= simplex_is_a_vertex.to_simd()
+            & target_to_a_length_squared
+                .simd_lt(termination_epsilon_squared)
+                .to_simd();
 
         let use_edge =
             (target_outside_triangle_edges | simplex_is_an_edge).to_simd() & !*terminated_lanes;
@@ -494,11 +493,10 @@ impl DepthRefiner {
             );
 
             // If the search target is on the edge, we can immediately quit.
-            *terminated_lanes = *terminated_lanes
-                | (use_edge
-                    & best_distance_squared
-                        .simd_le(termination_epsilon_squared)
-                        .to_simd());
+            *terminated_lanes |= use_edge
+                & best_distance_squared
+                    .simd_le(termination_epsilon_squared)
+                    .to_simd();
 
             // NOTE: Wrapping this in a condition under the assumption that we just terminated is a little iffy. Measure.
             if (use_edge & !*terminated_lanes).simd_lt(zero_i).any() {
@@ -558,8 +556,8 @@ impl DepthRefiner {
             Vector3Wide::dot(&target_to_a, &triangle_normal, &mut target_to_a_dot);
             let target_on_triangle_surface = (target_to_a_dot * target_to_a_dot)
                 .simd_lt(termination_epsilon_squared * triangle_normal_length_squared);
-            *terminated_lanes = *terminated_lanes
-                | (target_contained_in_edge_planes & target_on_triangle_surface.to_simd());
+            *terminated_lanes |=
+                target_contained_in_edge_planes & target_on_triangle_surface.to_simd();
             triangle_to_target = Vector3Wide::conditional_select(
                 &target_contained_in_edge_planes,
                 &triangle_normal,
@@ -696,8 +694,8 @@ impl DepthRefiner {
                 );
             }
         } else {
-            let a_support = simplex.a.support.clone();
-            let a_support_on_a = simplex.a.support_on_a.clone();
+            let a_support = simplex.a.support;
+            let a_support_on_a = simplex.a.support_on_a;
             Self::fill_slot_witness(
                 &mut simplex.a,
                 &a_support,
@@ -796,11 +794,10 @@ impl DepthRefiner {
 
         let mut target_to_a_length_squared = Vector::<f32>::splat(0.0);
         Vector3Wide::length_squared_to(&target_to_a, &mut target_to_a_length_squared);
-        *terminated_lanes = *terminated_lanes
-            | (simplex_is_a_vertex.to_simd()
-                & target_to_a_length_squared
-                    .simd_lt(termination_epsilon_squared)
-                    .to_simd());
+        *terminated_lanes |= simplex_is_a_vertex.to_simd()
+            & target_to_a_length_squared
+                .simd_lt(termination_epsilon_squared)
+                .to_simd();
 
         let use_edge =
             (target_outside_triangle_edges | simplex_is_an_edge).to_simd() & !*terminated_lanes;
@@ -936,8 +933,8 @@ impl DepthRefiner {
             Vector3Wide::dot(&target_to_a, &triangle_normal, &mut target_to_a_dot);
             let target_on_triangle_surface = (target_to_a_dot * target_to_a_dot)
                 .simd_lt(termination_epsilon_squared * triangle_normal_length_squared);
-            *terminated_lanes = *terminated_lanes
-                | (target_contained_in_edge_planes & target_on_triangle_surface.to_simd());
+            *terminated_lanes |=
+                target_contained_in_edge_planes & target_on_triangle_surface.to_simd();
             triangle_to_target = Vector3Wide::conditional_select(
                 &target_contained_in_edge_planes,
                 &triangle_normal,
@@ -1080,17 +1077,17 @@ impl DepthRefiner {
         if TSupportFinderA::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderA::get_margin(a, &mut margin);
-            depth_threshold = depth_threshold - margin;
+            depth_threshold -= margin;
         }
         if TSupportFinderB::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderB::get_margin(b, &mut margin);
-            depth_threshold = depth_threshold - margin;
+            depth_threshold -= margin;
         }
         let depth_below_threshold = initial_depth.simd_lt(depth_threshold);
         let mut terminated_lanes = depth_below_threshold.to_simd() | *inactive_lanes;
 
-        *refined_normal = initial_normal.clone();
+        *refined_normal = *initial_normal;
         *refined_depth = *initial_depth;
         if terminated_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
             return;
@@ -1133,7 +1130,7 @@ impl DepthRefiner {
                 .select(depth, *refined_depth);
             *refined_normal =
                 Vector3Wide::conditional_select(&use_new_depth, &normal, refined_normal);
-            terminated_lanes = terminated_lanes | refined_depth.simd_le(depth_threshold).to_simd();
+            terminated_lanes |= refined_depth.simd_le(depth_threshold).to_simd();
             if terminated_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
                 break;
             }
@@ -1279,17 +1276,17 @@ impl DepthRefiner {
         if TSupportFinderA::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderA::get_margin(a, &mut margin);
-            depth_threshold = depth_threshold - margin;
+            depth_threshold -= margin;
         }
         if TSupportFinderB::has_margin() {
             let mut margin = Vector::<f32>::splat(0.0);
             TSupportFinderB::get_margin(b, &mut margin);
-            depth_threshold = depth_threshold - margin;
+            depth_threshold -= margin;
         }
         let depth_below_threshold = initial_depth.simd_lt(depth_threshold);
         let mut terminated_lanes = depth_below_threshold.to_simd() | *inactive_lanes;
 
-        *refined_normal = initial_normal.clone();
+        *refined_normal = *initial_normal;
         *refined_depth = *initial_depth;
         if terminated_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
             *witness_on_a = Vector3Wide::default();
@@ -1336,7 +1333,7 @@ impl DepthRefiner {
                 .select(depth, *refined_depth);
             *refined_normal =
                 Vector3Wide::conditional_select(&use_new_depth, &normal, refined_normal);
-            terminated_lanes = terminated_lanes | refined_depth.simd_le(depth_threshold).to_simd();
+            terminated_lanes |= refined_depth.simd_le(depth_threshold).to_simd();
             if terminated_lanes.simd_lt(Vector::<i32>::splat(0)).all() {
                 break;
             }

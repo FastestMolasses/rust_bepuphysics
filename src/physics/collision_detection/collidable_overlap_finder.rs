@@ -302,7 +302,7 @@ pub struct CollidableOverlapFinder {
 impl CollidableOverlapFinder {
     /// Creates a new overlap finder. The generic parameter is captured at construction
     /// and erased — subsequent calls to `dispatch_overlaps` do not require it.
-    pub fn new<TCallbacks: INarrowPhaseCallbacks>(
+    pub unsafe fn new<TCallbacks: INarrowPhaseCallbacks>(
         narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
         broad_phase: *mut BroadPhase,
     ) -> Self {

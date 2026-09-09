@@ -27,7 +27,7 @@ impl IForEach<i32> for ConstraintHandleEnumerator {
 
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub(crate) struct IslandScaffoldTypeBatch {
+pub struct IslandScaffoldTypeBatch {
     pub type_id: i32,
     pub handles: QuickList<i32>,
 }

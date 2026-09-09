@@ -96,7 +96,7 @@ pub struct CollisionBatcher<TCallbacks: ICollisionCallbacks> {
 }
 
 impl<TCallbacks: ICollisionCallbacks> CollisionBatcher<TCallbacks> {
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         shapes: *mut crate::physics::collidables::shapes::Shapes,
         collision_type_matrix: *mut CollisionTaskRegistry,

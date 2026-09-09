@@ -33,7 +33,7 @@ impl IForEach<i32> for ActiveBodyHandleRemover {
 }
 
 /// Contains a set of type batches whose constraints share no body references.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct ConstraintBatch {
     // Note that both active and inactive constraint batches share the same data layout.
@@ -277,14 +277,5 @@ impl ConstraintBatch {
         self.type_index_to_type_batch_index = Buffer::default();
         self.type_batches.dispose(pool);
         self.type_batches = QuickList::default();
-    }
-}
-
-impl Default for ConstraintBatch {
-    fn default() -> Self {
-        Self {
-            type_index_to_type_batch_index: Buffer::default(),
-            type_batches: QuickList::default(),
-        }
     }
 }

@@ -165,8 +165,7 @@ impl<
                     &mut continuation_index,
                 );
 
-                let mut next_continuation_child_index = 0;
-                for j in 0..overlap_count {
+                for (next_continuation_child_index, j) in (0..overlap_count).enumerate() {
                     let child_index = pair_overlaps.overlaps[j];
 
                     // Account for pair flipping.
@@ -176,8 +175,7 @@ impl<
                         (0, child_index)
                     };
 
-                    let continuation_child_index = next_continuation_child_index;
-                    next_continuation_child_index += 1;
+                    let continuation_child_index = next_continuation_child_index as i32;
                     let subpair_continuation = PairContinuation::new(
                         pair.continuation.pair_id,
                         child_a,

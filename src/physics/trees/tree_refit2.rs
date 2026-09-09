@@ -80,7 +80,7 @@ impl Tree {
         debug_assert!(tree.leaf_count >= 2);
 
         unsafe {
-            let source_node = &*source_nodes.get(source_node_index);
+            let source_node = source_nodes.get(source_node_index);
             let target_node_index = child_in_parent.index;
             let target_node =
                 &mut *(tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
@@ -144,8 +144,7 @@ impl Tree {
         if self.leaf_count <= 2 {
             return;
         }
-        let mut stub = NodeChild::default();
-        stub.index = 0;
+        let mut stub = NodeChild { index: 0, ..Default::default() };
         // We need to pass self mutably but also read from source_nodes.
         // Use a raw pointer to work around the borrow checker here.
         let source_nodes_copy = *source_nodes;
@@ -255,8 +254,7 @@ impl Tree {
         dispatcher: &dyn IThreadDispatcher,
     ) {
         let context = untyped_context as *mut RefitContext;
-        let mut stub = NodeChild::default();
-        stub.index = 0;
+        let mut stub = NodeChild { index: 0, ..Default::default() };
         (*context)
             .tree
             .refit2_with_task_spawning(&mut stub, context, worker_index, dispatcher);
@@ -305,8 +303,7 @@ impl Tree {
                 dispatcher.thread_count().min(target_task_count),
             );
         } else {
-            let mut stub = NodeChild::default();
-            stub.index = 0;
+            let mut stub = NodeChild { index: 0, ..Default::default() };
             self.refit2_with_task_spawning(&mut stub, &mut refit_context, worker_index, dispatcher);
         }
     }
@@ -351,7 +348,7 @@ impl Tree {
     ) {
         let ctx = &mut *context;
         debug_assert!(ctx.tree.leaf_count >= 2);
-        let source_node = &*ctx.source_nodes.get(source_node_index);
+        let source_node = ctx.source_nodes.get(source_node_index);
         let target_node_index = child_in_parent.index;
         let target_node =
             &mut *(ctx.tree.nodes.as_ptr() as *mut Node).add(target_node_index as usize);
@@ -486,7 +483,7 @@ impl Tree {
         let context = untyped_context as *mut RefitWithCacheOptimizationContext;
         let source_parent_index = (parent_node_indices >> 32) as i32;
         let target_parent_index = parent_node_indices as i32;
-        let source_parent_node = &*(*context).source_nodes.get(source_parent_index);
+        let source_parent_node = (*context).source_nodes.get(source_parent_index);
         let target_parent_node =
             &mut *((*context).tree.nodes.as_ptr() as *mut Node).add(target_parent_index as usize);
         Self::refit2_with_cache_opt_and_task_spawning(
@@ -507,8 +504,7 @@ impl Tree {
         dispatcher: &dyn IThreadDispatcher,
     ) {
         let context = untyped_context as *mut RefitWithCacheOptimizationContext;
-        let mut stub = NodeChild::default();
-        stub.index = 0;
+        let mut stub = NodeChild { index: 0, ..Default::default() };
         Self::refit2_with_cache_opt_and_task_spawning(
             0,
             -1,
@@ -565,8 +561,7 @@ impl Tree {
                 dispatcher.thread_count().min(target_task_count),
             );
         } else {
-            let mut stub = NodeChild::default();
-            stub.index = 0;
+            let mut stub = NodeChild { index: 0, ..Default::default() };
             Self::refit2_with_cache_opt_and_task_spawning(
                 0,
                 -1,

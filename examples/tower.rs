@@ -12,6 +12,7 @@
 
 #![feature(portable_simd)]
 #![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 use bevy::color::palettes::css;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
@@ -94,9 +95,9 @@ impl IPoseIntegratorCallbacks for GravityCallbacks {
         velocity.linear.x = (velocity.linear.x + gx * dt) * lin_damp;
         velocity.linear.y = (velocity.linear.y + gy * dt) * lin_damp;
         velocity.linear.z = (velocity.linear.z + gz * dt) * lin_damp;
-        velocity.angular.x = velocity.angular.x * ang_damp;
-        velocity.angular.y = velocity.angular.y * ang_damp;
-        velocity.angular.z = velocity.angular.z * ang_damp;
+        velocity.angular.x *= ang_damp;
+        velocity.angular.y *= ang_damp;
+        velocity.angular.z *= ang_damp;
     }
 }
 

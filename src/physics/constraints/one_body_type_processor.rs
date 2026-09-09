@@ -186,7 +186,7 @@ impl<
         }
     }
 
-    fn allocate_in_type_batch_for_fallback(
+    unsafe fn allocate_in_type_batch_for_fallback(
         &self,
         type_batch: &mut TypeBatch,
         handle: ConstraintHandle,
@@ -265,7 +265,7 @@ impl<
         *accumulated_impulse_bundle_size = std::mem::size_of::<TAccumulatedImpulse>() as i32;
     }
 
-    fn generate_sort_keys_and_copy_references(
+    unsafe fn generate_sort_keys_and_copy_references(
         &self,
         type_batch: &mut TypeBatch,
         bundle_start: i32,
@@ -354,7 +354,7 @@ impl<
         }
     }
 
-    fn regather(
+    unsafe fn regather(
         &self,
         type_batch: &mut TypeBatch,
         constraint_start: i32,
@@ -431,7 +431,7 @@ impl<
                 as *mut crate::utilities::vector::Vector<f32>;
             // NOTE: C# bug fix — original iterates 0..dofCount (first bundle only).
             // Must iterate over ALL bundles: bundleCount * dofCount.
-            for i in 0..(type_batch.bundle_count() as usize * dof_count) {
+            for i in 0..(type_batch.bundle_count() * dof_count) {
                 *impulses_base.add(i) *= broadcasted_scale;
             }
         }

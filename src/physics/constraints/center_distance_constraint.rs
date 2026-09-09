@@ -194,7 +194,7 @@ impl CenterDistanceConstraintFunctions {
         Vector3Wide::dot(&wsv_b.linear, &jacobian_a, &mut negated_csv_b);
         let csi = (bias_velocity - (linear_csv_a - negated_csv_b)) * effective_mass
             - *accumulated_impulse * softness_impulse_scale;
-        *accumulated_impulse = *accumulated_impulse + csi;
+        *accumulated_impulse += csi;
         Self::apply_impulse(
             &jacobian_a,
             &inertia_a.inverse_mass,

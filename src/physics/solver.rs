@@ -297,6 +297,8 @@ impl Solver {
         }
     }
 
+    // Mirrors C# Solver.pool access; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn pool(&self) -> &mut BufferPool {
         unsafe { &mut *self.pool }
     }
@@ -305,6 +307,8 @@ impl Solver {
         unsafe { &*self.bodies }
     }
 
+    // Mirrors C# Solver.bodies access; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn bodies_mut(&self) -> &mut Bodies {
         unsafe { &mut *self.bodies }
     }
@@ -370,7 +374,7 @@ impl Solver {
         count
     }
 
-    pub fn new(
+    pub unsafe fn new(
         bodies: *mut Bodies,
         pool: *mut BufferPool,
         solve_description: SolveDescription,
@@ -864,22 +868,22 @@ impl Solver {
         let self_ptr = self as *mut Self;
         unsafe {
             let set = (*self_ptr).sets.get_mut(0);
-            if set.batches.get(batch_index).type_batches.count == 0 {
-                if batch_index == set.batches.count - 1 {
-                    let pool = &mut *(*self_ptr).pool;
-                    while set.batches.count > 0 {
-                        let last_batch_index = set.batches.count - 1;
-                        if set.batches.get(last_batch_index).type_batches.count == 0 {
-                            set.batches.get_mut(last_batch_index).dispose(pool);
-                            (*self_ptr)
-                                .batch_referenced_handles
-                                .get_mut(last_batch_index)
-                                .dispose(pool);
-                            (*self_ptr).batch_referenced_handles.count -= 1;
-                            set.batches.count -= 1;
-                        } else {
-                            break;
-                        }
+            if set.batches.get(batch_index).type_batches.count == 0
+                && batch_index == set.batches.count - 1
+            {
+                let pool = &mut *(*self_ptr).pool;
+                while set.batches.count > 0 {
+                    let last_batch_index = set.batches.count - 1;
+                    if set.batches.get(last_batch_index).type_batches.count == 0 {
+                        set.batches.get_mut(last_batch_index).dispose(pool);
+                        (*self_ptr)
+                            .batch_referenced_handles
+                            .get_mut(last_batch_index)
+                            .dispose(pool);
+                        (*self_ptr).batch_referenced_handles.count -= 1;
+                        set.batches.count -= 1;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -1626,8 +1630,8 @@ impl Solver {
             crate::physics::handy_enumerators::FloatCollector::new(impulses.as_mut_ptr());
         self.enumerate_accumulated_impulses(constraint_handle, &mut collector);
         let mut sum_of_squares = 0.0f32;
-        for i in 0..dof as usize {
-            sum_of_squares += impulses[i] * impulses[i];
+        for impulse in &impulses[..dof as usize] {
+            sum_of_squares += impulse * impulse;
         }
         sum_of_squares
     }
@@ -2235,6 +2239,8 @@ impl ISolverStageFunction for IncrementalUpdateStageFunction {
 /// Integrate constrained kinematics stage: integrates kinematic velocities/poses.
 pub(crate) struct IntegrateConstrainedKinematicsStageFunction {
     pub dt: f32,
+    // Mirrors C# IntegrateConstrainedKinematicsStageFunction.InverseDt; not read by the Rust port's execute.
+    #[allow(dead_code)]
     pub inverse_dt: f32,
     pub substep_index: i32,
     pub solver: *mut Solver,
@@ -2431,6 +2437,9 @@ impl Solver {
         }
     }
 
+    // `map_or(false, ..)` is kept on purpose: `is_some_and` changes the block layout of the inlined
+    // solve worker loop (verified against the emitted assembly).
+    #[allow(clippy::unnecessary_map_or)]
     #[inline(always)]
     fn get_previous_sync_index_for_integrate_constrained_kinematics(
         &self,
@@ -2536,7 +2545,7 @@ impl Solver {
                 );
                 locally_completed_count += 1;
                 work_block_index += 1;
-                if work_block_index >= claims.len() as i32 {
+                if work_block_index >= claims.len() {
                     work_block_index = 0;
                 }
             } else {
@@ -2548,7 +2557,7 @@ impl Solver {
         work_block_index = worker_start - 1;
         loop {
             if work_block_index < 0 {
-                work_block_index = claims.len() as i32 - 1;
+                work_block_index = claims.len() - 1;
             }
             let claim_ptr = claims.get_ptr(work_block_index) as *mut i32;
             let atomic = AtomicI32::from_ptr(claim_ptr);
@@ -2591,7 +2600,7 @@ impl Solver {
     ) {
         use std::sync::atomic::{AtomicI32, Ordering};
 
-        let available_blocks_count = stage.claims.len() as i32;
+        let available_blocks_count = stage.claims.len();
         if available_blocks_count == 0 {
             return;
         }
@@ -2731,7 +2740,7 @@ impl Solver {
                         &incremental_update_stage,
                         worker_index,
                         incremental_update_worker_start,
-                        &(*self_ptr).substep_context.stages.get(0),
+                        (*self_ptr).substep_context.stages.get(0),
                         (*self_ptr).get_previous_sync_index_for_incremental_update(
                             substep_index,
                             sync_index,
@@ -2744,6 +2753,8 @@ impl Solver {
                 sync_index += 1;
 
                 // Integrate constrained kinematics.
+                // `map_or(false, ..)` kept on purpose; see get_previous_sync_index_for_integrate_constrained_kinematics.
+                #[allow(clippy::unnecessary_map_or)]
                 let integrate_velocity_for_kinematics = (*self_ptr)
                     .pose_integrator
                     .map_or(false, |pi| (*pi).integrate_velocity_for_kinematics());
@@ -3562,7 +3573,7 @@ impl Solver {
                         QuickList::with_capacity(128, pool);
                     let mut constraint_count = 0i32;
                     const TARGET_JOB_SIZE: i32 = 2048;
-                    debug_assert!(
+                    const _: () = assert!(
                         TARGET_JOB_SIZE % 64 == 0,
                         "Target job size must be a multiple of the index set bundles to avoid threads working on the same flag bundle."
                     );

@@ -19,6 +19,8 @@ impl SphereTriangleTester {
     pub const BATCH_SIZE: i32 = 32;
 
     #[inline(always)]
+    // Mirrors C# private static Select; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn select(
         distance_squared: &mut Vector<f32>,
         local_normal: &mut Vector3Wide,

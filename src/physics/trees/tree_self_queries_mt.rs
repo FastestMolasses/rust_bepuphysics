@@ -95,19 +95,19 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         if overlap.a >= 0 {
             if overlap.a == overlap.b {
                 // Same node.
-                tree.get_overlaps_in_node(&*tree.nodes.get(overlap.a), self.handler_mut(worker_index));
+                tree.get_overlaps_in_node(tree.nodes.get(overlap.a), self.handler_mut(worker_index));
             } else if overlap.b >= 0 {
                 // Different nodes.
                 tree.get_overlaps_between_different_nodes(
-                    &*tree.nodes.get(overlap.a),
-                    &*tree.nodes.get(overlap.b),
+                    tree.nodes.get(overlap.a),
+                    tree.nodes.get(overlap.b),
                     self.handler_mut(worker_index),
                 );
             } else {
                 // A is an internal node, B is a leaf.
                 let leaf_index = Tree::encode(overlap.b);
-                let leaf = &*tree.leaves.get(leaf_index);
-                let node = &*tree.nodes.get(leaf.node_index());
+                let leaf = tree.leaves.get(leaf_index);
+                let node = tree.nodes.get(leaf.node_index());
                 let child_owning_leaf = Tree::node_child(node, leaf.child_index());
                 tree.test_leaf_against_node(
                     leaf_index,
@@ -119,8 +119,8 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         } else {
             // A is a leaf, B is internal.
             let leaf_index = Tree::encode(overlap.a);
-            let leaf = &*tree.leaves.get(leaf_index);
-            let node = &*tree.nodes.get(leaf.node_index());
+            let leaf = tree.leaves.get(leaf_index);
+            let node = tree.nodes.get(leaf.node_index());
             let child_owning_leaf = Tree::node_child(node, leaf.child_index());
             tree.test_leaf_against_node(
                 leaf_index,
@@ -179,7 +179,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         results: &mut TOverlapHandler,
     ) {
         let tree = &*self.tree;
-        let node = &*tree.nodes.get(node_index);
+        let node = tree.nodes.get(node_index);
         let a = &node.a;
         let b = &node.b;
         // Despite recursion, leafBounds should remain in L1- it'll be used all the way down the
@@ -218,8 +218,8 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
                     );
                 } else {
                     self.get_jobs_between_different_nodes(
-                        &*tree.nodes.get(a.index),
-                        &*tree.nodes.get(b.index),
+                        tree.nodes.get(a.index),
+                        tree.nodes.get(b.index),
                         results,
                     );
                 }
@@ -274,7 +274,7 @@ impl<TOverlapHandler: IOverlapHandler> MultithreadedSelfTest<TOverlapHandler> {
         }
 
         let tree = &*self.tree;
-        let node = &*tree.nodes.get(node_index);
+        let node = tree.nodes.get(node_index);
 
         let ab = BoundingBox::intersects_unsafe(&node.a, &node.b);
 

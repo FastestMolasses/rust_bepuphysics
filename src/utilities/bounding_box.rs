@@ -18,11 +18,11 @@ pub struct BoundingBox4 {
     pub max: Vec4,
 }
 
-impl BoundingBox4 {
+impl std::fmt::Display for BoundingBox4 {
     /// Creates a string representation of the bounding box.
     #[inline(always)]
-    pub fn to_string(&self) -> String {
-        format!("({}, {})", self.min.xyz(), self.max.xyz())
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.min.xyz(), self.max.xyz())
     }
 }
 
@@ -406,9 +406,11 @@ impl BoundingBox {
         bounding_box.min = bounding_sphere.center - radius;
         bounding_box.max = bounding_sphere.center + radius;
     }
+}
 
+impl std::fmt::Display for BoundingBox {
     /// Creates a string representation of the bounding box.
-    pub fn to_string(&self) -> String {
-        format!("({}, {})", self.min, self.max)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.min, self.max)
     }
 }

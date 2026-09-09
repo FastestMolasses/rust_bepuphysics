@@ -231,7 +231,7 @@ pub struct BodyInertias {
 
 /// Describes the pose and velocity of a body.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MotionState {
     /// Pose of the body.
     pub pose: RigidPose,
@@ -243,15 +243,6 @@ pub struct MotionState {
 const _: () = {
     assert!(std::mem::size_of::<MotionState>() == 64);
 };
-
-impl Default for MotionState {
-    fn default() -> Self {
-        Self {
-            pose: RigidPose::default(),
-            velocity: BodyVelocity::default(),
-        }
-    }
-}
 
 /// Stores all body information needed by the solver together.
 #[repr(C)]

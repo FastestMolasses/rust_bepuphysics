@@ -11,7 +11,7 @@ pub const MAXIMUM_SPAN_SIZE_POWER: i32 = 30;
 #[inline(always)]
 pub fn validate_power(power: i32) {
     debug_assert!(
-        power >= 0 && power <= MAXIMUM_SPAN_SIZE_POWER,
+        (0..=MAXIMUM_SPAN_SIZE_POWER).contains(&power),
         "Power must be from 0 to {}, inclusive.",
         MAXIMUM_SPAN_SIZE_POWER
     );

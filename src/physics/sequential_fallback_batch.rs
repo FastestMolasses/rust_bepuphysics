@@ -41,7 +41,7 @@ impl IBodyReferenceGetter for InactiveSetGetter {
 /// Contains constraints that could not belong to any lower constraint batch due to their involved
 /// bodies. All of the contained constraints will be solved using a fallback solver that trades
 /// rigidity for parallelism.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct SequentialFallbackBatch {
     // In order to maintain the batch referenced handles for the fallback batch (which can have
@@ -74,6 +74,9 @@ impl SequentialFallbackBatch {
             + dynamic_body_handles.len() as i32)
             .max(minimum_body_capacity);
         self.ensure_capacity(target, pool);
+        // Index loop on purpose: the iterator form costs two extra address computations in the inlined
+        // callers (verified against the emitted assembly).
+        #[allow(clippy::needless_range_loop)]
         for i in 0..dynamic_body_handles.len() {
             let body_reference = TGetter::get_body_reference(bodies, dynamic_body_handles[i]);
 
@@ -189,9 +192,9 @@ impl SequentialFallbackBatch {
     ) -> bool {
         let mut table_index = 0i32;
         let mut body_references_index = 0i32;
-        let mut body_ref = body_reference;
+        let body_ref = body_reference;
         if !self.dynamic_body_constraint_counts.get_table_indices(
-            &mut body_ref,
+            &body_ref,
             &mut table_index,
             &mut body_references_index,
         ) {
@@ -227,12 +230,12 @@ impl SequentialFallbackBatch {
         body_reference: i32,
         allocation_ids_to_free: &mut QuickList<i32>,
     ) -> bool {
-        let mut body_ref = body_reference;
+        let body_ref = body_reference;
         let mut table_index = 0i32;
         let mut body_references_index = 0i32;
         if self.dynamic_body_constraint_counts.keys.allocated()
             && self.dynamic_body_constraint_counts.get_table_indices(
-                &mut body_ref,
+                &body_ref,
                 &mut table_index,
                 &mut body_references_index,
             )
@@ -266,9 +269,9 @@ impl SequentialFallbackBatch {
         );
         let mut table_index = 0i32;
         let mut element_index = 0i32;
-        let mut orig = original_body_index;
+        let orig = original_body_index;
         self.dynamic_body_constraint_counts.get_table_indices(
-            &mut orig,
+            &orig,
             &mut table_index,
             &mut element_index,
         );
@@ -279,6 +282,8 @@ impl SequentialFallbackBatch {
             .add_unsafely(new_body_location, references);
     }
 
+    // Mirrors C# SequentialFallbackBatch.UpdateForBodyMemorySwap; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     pub(crate) fn update_for_body_memory_swap(&mut self, a: i32, b: i32) {
         let index_a = self.dynamic_body_constraint_counts.index_of(&a);
         let index_b = self.dynamic_body_constraint_counts.index_of(&b);
@@ -360,14 +365,6 @@ impl SequentialFallbackBatch {
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         if self.dynamic_body_constraint_counts.keys.allocated() {
             self.dynamic_body_constraint_counts.dispose(pool);
-        }
-    }
-}
-
-impl Default for SequentialFallbackBatch {
-    fn default() -> Self {
-        Self {
-            dynamic_body_constraint_counts: QuickDictionary::default(),
         }
     }
 }

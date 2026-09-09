@@ -117,7 +117,7 @@ impl IContactManifoldWide for Convex2ContactManifoldWide {
         }
         if self.contact1_exists[lane] < 0 {
             unsafe {
-                let contact = &mut *(&mut target.contact0 as *mut _
+                let contact = &mut *(&mut target.contact0
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
@@ -197,7 +197,7 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
         }
         unsafe {
             if self.contact1_exists[lane] < 0 {
-                let contact = &mut *(&mut target.contact0 as *mut _
+                let contact = &mut *(&mut target.contact0
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
@@ -208,7 +208,7 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
                 contact.feature_id = self.feature_id1[lane];
             }
             if self.contact2_exists[lane] < 0 {
-                let contact = &mut *(&mut target.contact0 as *mut _
+                let contact = &mut *(&mut target.contact0
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;
@@ -219,7 +219,7 @@ impl IContactManifoldWide for Convex4ContactManifoldWide {
                 contact.feature_id = self.feature_id2[lane];
             }
             if self.contact3_exists[lane] < 0 {
-                let contact = &mut *(&mut target.contact0 as *mut _
+                let contact = &mut *(&mut target.contact0
                     as *mut crate::physics::collision_detection::contact_manifold::ConvexContact)
                     .add(target.count as usize);
                 target.count += 1;

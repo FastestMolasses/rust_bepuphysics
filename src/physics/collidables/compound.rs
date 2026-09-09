@@ -339,10 +339,11 @@ impl Compound {
                 };
 
                 // Build a ray in compound-local space
-                let mut local_ray = RayData::default();
-                local_ray.origin = local_origin;
-                local_ray.direction = local_direction;
-                local_ray.id = 0;
+                let local_ray = RayData {
+                    origin: local_origin,
+                    direction: local_direction,
+                    id: 0,
+                };
 
                 // Use a child shape tester to capture the hit, then rotate normal to world space
                 struct CompoundChildShapeTester {

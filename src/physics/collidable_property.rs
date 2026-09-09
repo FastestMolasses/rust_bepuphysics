@@ -31,7 +31,7 @@ impl<T: Copy + Default> CollidableProperty<T> {
     }
 
     /// Constructs a new collection with initial capacity.
-    pub fn with_capacity(
+    pub unsafe fn with_capacity(
         pool: *mut BufferPool,
         body_handle_capacity: i32,
         static_handle_capacity: i32,
@@ -55,6 +55,8 @@ impl<T: Copy + Default> CollidableProperty<T> {
         self.static_data = pool.take_at_least(static_handle_capacity);
     }
 
+    // Mirrors C# private pool field access; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn pool_mut(&self) -> &mut BufferPool {
         unsafe { &mut *self.pool }
     }

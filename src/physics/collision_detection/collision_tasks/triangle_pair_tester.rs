@@ -103,6 +103,8 @@ impl TrianglePairTester {
     }
 
     #[inline(always)]
+    // Mirrors C# private static Select overload; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn select_components(
         depth: &mut Vector<f32>,
         normal: &mut Vector3Wide,

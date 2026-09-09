@@ -1,12 +1,20 @@
 #![feature(portable_simd)]
 #![feature(generic_const_exprs)]
+// `generic_const_exprs` is required for the width-generic SIMD bundle types; rustc flags it as incomplete.
+#![allow(incomplete_features)]
 #![allow(unused_unsafe)]
+// Many structs hold raw pointers to objects they do not own (the C# reference fields), and hand out
+// `&mut` through them from `&self` accessors. Aliasing is governed by the C# call structure being
+// mirrored, not by the borrow checker, so this lint has nothing to check here.
+#![allow(clippy::mut_from_ref)]
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::approx_constant)]
+// `out_unsafe!` exists to wrap the caller-supplied call in `unsafe`; the lint cannot be silenced per-macro.
+#![allow(clippy::macro_metavars_in_unsafe)]
 
 pub mod physics;
 pub mod utilities;

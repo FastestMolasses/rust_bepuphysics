@@ -140,7 +140,7 @@ pub struct BoundingBoxBatcher {
 pub const COLLIDABLES_PER_FLUSH: i32 = 16;
 
 impl BoundingBoxBatcher {
-    pub fn new(
+    pub unsafe fn new(
         bodies: *mut Bodies,
         shapes: *mut Shapes,
         broad_phase: *mut BroadPhase,

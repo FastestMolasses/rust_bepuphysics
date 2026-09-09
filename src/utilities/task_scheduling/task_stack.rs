@@ -601,6 +601,8 @@ impl TaskStack {
             let mut scratch =
                 unsafe { StackScratch::<Task, INLINE_TASK_CAP>::take(task_count, pool) };
             let tasks_to_push = scratch.as_mut_ptr();
+            // Index is also used for the `i - 1` destination offset; kept as-is to match C#.
+            #[allow(clippy::needless_range_loop)]
             for i in 1..tasks.len() {
                 let mut task = tasks[i];
                 debug_assert!(

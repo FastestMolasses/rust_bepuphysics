@@ -138,7 +138,7 @@ pub trait ITypeProcessor {
     ) -> i32;
 
     /// Allocates a slot in the type batch for a fallback batch.
-    fn allocate_in_type_batch_for_fallback(
+    unsafe fn allocate_in_type_batch_for_fallback(
         &self,
         type_batch: &mut TypeBatch,
         handle: ConstraintHandle,
@@ -212,7 +212,7 @@ pub trait ITypeProcessor {
 
     /// Transfers a constraint from one batch's type batch to another batch's type batch of the same type.
     /// Uses pre-computed dynamic body handles and encoded body indices.
-    fn transfer_constraint(
+    unsafe fn transfer_constraint(
         &self,
         source_type_batch: &mut TypeBatch,
         _source_batch_index: i32,
@@ -260,12 +260,12 @@ pub trait ITypeProcessor {
                 source_type_batch
                     .prestep_data
                     .as_ptr()
-                    .add(source_bundle as usize * prestep_size as usize),
+                    .add(source_bundle * prestep_size as usize),
                 source_inner,
                 target_type_batch
                     .prestep_data
                     .as_mut_ptr()
-                    .add(target_bundle as usize * prestep_size as usize),
+                    .add(target_bundle * prestep_size as usize),
                 target_inner,
                 prestep_size as usize,
             );
@@ -275,12 +275,12 @@ pub trait ITypeProcessor {
                 source_type_batch
                     .accumulated_impulses
                     .as_ptr()
-                    .add(source_bundle as usize * accum_size as usize),
+                    .add(source_bundle * accum_size as usize),
                 source_inner,
                 target_type_batch
                     .accumulated_impulses
                     .as_mut_ptr()
-                    .add(target_bundle as usize * accum_size as usize),
+                    .add(target_bundle * accum_size as usize),
                 target_inner,
                 accum_size as usize,
             );
@@ -299,7 +299,7 @@ pub trait ITypeProcessor {
 
     /// Convenience wrapper that auto-collects dynamic body handles and encoded body indices,
     /// then calls the full `transfer_constraint`.
-    fn transfer_constraint_auto_collect(
+    unsafe fn transfer_constraint_auto_collect(
         &self,
         source_type_batch: &mut TypeBatch,
         source_batch_index: i32,
@@ -401,7 +401,7 @@ pub trait ITypeProcessor {
 
     /// Generates sort keys for constraints in the given range and copies body references to a cache buffer.
     /// Used by constraint layout optimization (batch compressor).
-    fn generate_sort_keys_and_copy_references(
+    unsafe fn generate_sort_keys_and_copy_references(
         &self,
         type_batch: &mut TypeBatch,
         bundle_start: i32,
@@ -431,7 +431,7 @@ pub trait ITypeProcessor {
     );
 
     /// After sorting, regathers constraints from cache buffers back into the type batch in sorted order.
-    fn regather(
+    unsafe fn regather(
         &self,
         type_batch: &mut TypeBatch,
         constraint_start: i32,

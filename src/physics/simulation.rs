@@ -67,6 +67,8 @@ pub struct Simulation {
     profiler: SimulationProfiler,
 
     // Helpers shared across at least two stages.
+    // Mirrors C# internal constraintRemover; the Rust port reads it through NarrowPhase instead.
+    #[allow(dead_code)]
     constraint_remover: *mut ConstraintRemover,
 
     /// The main memory pool used to fill persistent structures and main thread ephemeral resources.
@@ -146,8 +148,8 @@ impl Simulation {
         // Create bodies.
         let bodies = Box::into_raw(Box::new(Bodies::new(
             buffer_pool,
-            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            shapes_ptr,
+            broad_phase,
             sizes.bodies,
             sizes.islands,
             sizes.constraint_count_per_body_estimate,
@@ -156,17 +158,17 @@ impl Simulation {
         // Create statics.
         let statics = Box::into_raw(Box::new(Statics::new(
             buffer_pool,
-            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
+            shapes_ptr,
             bodies,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            broad_phase,
             sizes.statics,
         )));
 
         // Create pose integrator.
         let pose_integrator = Box::into_raw(Box::new(PoseIntegrator::new(
             bodies,
-            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            shapes_ptr,
+            broad_phase,
             pose_integrator_callbacks,
         )));
 
@@ -192,7 +194,7 @@ impl Simulation {
         let sleeper = Box::into_raw(Box::new(IslandSleeper::new(
             bodies,
             solver,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            broad_phase,
             // The constraint_remover is moved into NarrowPhase; sleeper needs its own pointer.
             // For now, use a null pointer; it will be wired later.
             std::ptr::null_mut(),
@@ -204,7 +206,7 @@ impl Simulation {
             bodies,
             statics,
             solver,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            broad_phase,
             sleeper,
             std::ptr::null_mut(), // pair_cache, wired later
             buffer_pool,
@@ -236,10 +238,10 @@ impl Simulation {
             bodies,
             statics,
             solver,
-            shapes_ptr as *mut crate::physics::collidables::shapes::Shapes,
+            shapes_ptr,
             collision_task_registry,
             sweep_task_registry,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            broad_phase,
             constraint_remover,
             narrow_phase_callbacks,
             sizes.islands + 1,
@@ -270,7 +272,7 @@ impl Simulation {
         // Create broad phase overlap finder.
         let overlap_finder = Box::into_raw(Box::new(RealOverlapFinder::new(
             narrow_phase,
-            broad_phase as *mut crate::physics::collision_detection::broad_phase::BroadPhase,
+            broad_phase,
         )));
 
         // Build the simulation struct.
@@ -774,7 +776,7 @@ impl Simulation {
     ) {
         use crate::physics::collision_detection::ray_batchers::IBroadPhaseSweepTester;
         use crate::physics::collision_detection::sweep_task_registry::{
-            ISweepFilter, SweepFilterRef, SweepTaskRegistry,
+            ISweepFilter, SweepFilterRef,
         };
 
         // SweepFilter delegates child-level filtering to the user's hit handler.
@@ -862,7 +864,7 @@ impl Simulation {
                                 SweepFilterRef::new(&filter),
                                 self.simulation.shapes
                                     as *mut crate::physics::collidables::shapes::Shapes,
-                                narrow_phase.sweep_task_registry as *mut SweepTaskRegistry,
+                                narrow_phase.sweep_task_registry,
                                 self.pool,
                                 &mut t0,
                                 &mut t1,

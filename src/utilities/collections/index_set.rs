@@ -183,7 +183,7 @@ impl IndexSet {
     /// Returns the resources associated with the set to the pool.
     #[inline(always)]
     pub fn dispose(&mut self, pool: &mut impl UnmanagedMemoryPool) {
-        debug_assert!(self.flags.len() > 0, "Cannot double-dispose.");
+        debug_assert!(!self.flags.is_empty(), "Cannot double-dispose.");
         pool.return_buffer(&mut self.flags);
         self.flags = Buffer::default();
     }

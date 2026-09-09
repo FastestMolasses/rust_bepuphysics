@@ -116,7 +116,6 @@ impl Tree {
                 if BoundingBox::intersects_unsafe(&bounding_box, &self.nodes.get(0).a) {
                     leaf_enumerator.loop_body(Self::encode(self.nodes.get(0).a.index));
                 }
-                return;
             }
             // If the leaf count is zero, there's nothing to test against.
         }

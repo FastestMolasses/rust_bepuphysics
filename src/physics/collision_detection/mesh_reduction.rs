@@ -298,7 +298,7 @@ unsafe fn try_apply_block_to_triangle(
     requires_flip: bool,
 ) {
     if triangle.blocked {
-        let manifold = &mut (*children.get_mut(triangle.child_index)).manifold;
+        let manifold = &mut children.get_mut(triangle.child_index).manifold;
         if triangle.force_deletion_on_block {
             // No other manifold infringed upon this one — safe to just zero its contacts.
             manifold.count = 0;

@@ -201,7 +201,7 @@ impl IForEach<i32> for ConstraintBodyEnumerator {
 }
 
 impl IslandSleeper {
-    pub fn new(
+    pub unsafe fn new(
         bodies: *mut Bodies,
         solver: *mut Solver,
         broad_phase: *mut BroadPhase,
@@ -244,6 +244,8 @@ impl IslandSleeper {
         unsafe { &*self.solver }
     }
 
+    // Mirrors C# private solver field access; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn solver_mut(&self) -> &mut Solver {
         unsafe { &mut *self.solver }
     }
@@ -252,6 +254,8 @@ impl IslandSleeper {
         unsafe { &*self.bodies }
     }
 
+    // Mirrors C# private pool field access; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn pool(&self) -> &mut BufferPool {
         unsafe { &mut *self.pool }
     }

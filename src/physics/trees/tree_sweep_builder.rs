@@ -213,29 +213,28 @@ impl Tree {
             &mut z_leaf_count_b,
         );
 
-        let best_index_map: *mut i32;
-        if x_cost <= y_cost && x_cost <= z_cost {
+        let best_index_map: *mut i32 = if x_cost <= y_cost && x_cost <= z_cost {
             *split_index = x_split;
             *a = x_a;
             *b = x_b;
             *leaf_count_a = x_leaf_count_a;
             *leaf_count_b = x_leaf_count_b;
-            best_index_map = leaves.index_map_x;
+            leaves.index_map_x
         } else if y_cost <= z_cost {
             *split_index = y_split;
             *a = y_a;
             *b = y_b;
             *leaf_count_a = y_leaf_count_a;
             *leaf_count_b = y_leaf_count_b;
-            best_index_map = leaves.index_map_y;
+            leaves.index_map_y
         } else {
             *split_index = z_split;
             *a = z_a;
             *b = z_b;
             *leaf_count_a = z_leaf_count_a;
             *leaf_count_b = z_leaf_count_b;
-            best_index_map = leaves.index_map_z;
-        }
+            leaves.index_map_z
+        };
         for i in 0..count {
             *leaves.index_map.add((i + start) as usize) = *best_index_map.add(i as usize);
         }
@@ -339,6 +338,8 @@ impl Tree {
     }
 
     /// Builds the tree using a top-down sweep approach with SAH cost function.
+    // `len() > 0` is C#'s `Length > 0`; `!is_empty()` compiles to a different test here.
+    #[allow(clippy::len_zero)]
     pub fn sweep_build(&mut self, pool: &mut BufferPool, leaf_bounds: &Buffer<BoundingBox>) {
         assert!(leaf_bounds.len() > 0, "Length must be positive.");
 

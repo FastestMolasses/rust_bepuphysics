@@ -134,6 +134,8 @@ impl Statics {
 
     /// Gets the backing pool.
     #[inline(always)]
+    // Mirrors C# protected pool field access; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     fn pool(&mut self) -> &mut BufferPool {
         unsafe { &mut *self.pool }
     }

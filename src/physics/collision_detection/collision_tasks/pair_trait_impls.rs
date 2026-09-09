@@ -38,7 +38,7 @@ macro_rules! impl_pair_tester_0orient {
             fn batch_size() -> i32 {
                 Self::BATCH_SIZE
             }
-            fn test_two_orientations(
+            unsafe fn test_two_orientations(
                 _a: &$wide_a,
                 _b: &$wide_b,
                 _speculative_margin: &Vector<f32>,
@@ -87,7 +87,7 @@ macro_rules! impl_pair_tester_1orient {
             fn batch_size() -> i32 {
                 Self::BATCH_SIZE
             }
-            fn test_two_orientations(
+            unsafe fn test_two_orientations(
                 _a: &$wide_a,
                 _b: &$wide_b,
                 _speculative_margin: &Vector<f32>,
@@ -144,7 +144,7 @@ macro_rules! impl_pair_tester_2orient {
             fn batch_size() -> i32 {
                 Self::BATCH_SIZE
             }
-            fn test_two_orientations(
+            unsafe fn test_two_orientations(
                 a: &$wide_a,
                 b: &$wide_b,
                 speculative_margin: &Vector<f32>,
@@ -203,7 +203,7 @@ macro_rules! impl_pair_tester_2orient_pooled {
             fn batch_size() -> i32 {
                 Self::BATCH_SIZE
             }
-            fn test_two_orientations(
+            unsafe fn test_two_orientations(
                 a: &$wide_a,
                 b: &$wide_b,
                 speculative_margin: &Vector<f32>,

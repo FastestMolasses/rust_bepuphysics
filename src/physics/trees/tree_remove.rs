@@ -20,7 +20,7 @@ impl Tree {
                 *node = *self.nodes.get(last);
                 let meta_ptr = self.metanodes.as_ptr() as *mut super::node::Metanode;
                 let metanode = &mut *meta_ptr.add(node_index as usize);
-                *metanode = *&*meta_ptr.add(last as usize);
+                *metanode = *meta_ptr.add(last as usize);
 
                 // Update the moved node's pointers:
                 // its parent's child pointer should change
@@ -49,7 +49,7 @@ impl Tree {
         // Note that no attempt is made to refit the root node.
         unsafe {
             let mut node = &*(self.nodes.as_ptr()).add(node_index as usize);
-            let mut metanode = &*self.metanodes.get(node_index);
+            let mut metanode = self.metanodes.get(node_index);
             while metanode.parent >= 0 {
                 // Compute the new bounding box for this node.
                 let parent = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
@@ -65,7 +65,7 @@ impl Tree {
                 );
                 child_in_parent.leaf_count -= 1;
                 node = &*parent;
-                metanode = &*self.metanodes.get(metanode.parent);
+                metanode = self.metanodes.get(metanode.parent);
             }
         }
     }

@@ -77,7 +77,7 @@ impl BatchCompressor {
 
     pub fn set_target_candidate_fraction(&mut self, value: f32) {
         assert!(
-            value >= 0.0 && value <= 1.0,
+            (0.0..=1.0).contains(&value),
             "Fraction must be from 0 to 1."
         );
         self.target_candidate_fraction = value;
@@ -89,7 +89,7 @@ impl BatchCompressor {
 
     pub fn set_maximum_compression_fraction(&mut self, value: f32) {
         assert!(
-            value >= 0.0 && value <= 1.0,
+            (0.0..=1.0).contains(&value),
             "Fraction must be from 0 to 1."
         );
         self.maximum_compression_fraction = value;
@@ -424,15 +424,14 @@ impl BatchCompressor {
         }
 
         // Clean up per-worker compression lists.
-        if thread_dispatcher.is_none() {
-            self.worker_compressions.get_mut(0).dispose(pool);
-        } else {
-            let td = thread_dispatcher.unwrap();
+        if let Some(td) = thread_dispatcher {
             for i in 0..worker_count {
                 self.worker_compressions
                     .get_mut(i)
                     .dispose(&mut *td.worker_pool_ptr(i));
             }
+        } else {
+            self.worker_compressions.get_mut(0).dispose(pool);
         }
         pool.return_buffer(&mut self.worker_compressions);
     }

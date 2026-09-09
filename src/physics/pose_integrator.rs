@@ -286,15 +286,12 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let mut velocity = velocity.assume_init();
             let inertia = inertia.assume_init();
 
-            let integration_mask;
-            if self.callbacks.integrate_velocity_for_kinematics() {
-                integration_mask =
-                    BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize);
+            let integration_mask = if self.callbacks.integrate_velocity_for_kinematics() {
+                BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize)
             } else {
-                integration_mask =
-                    BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize)
-                        & !Bodies::is_kinematic_wide(&inertia);
-            }
+                BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize)
+                    & !Bodies::is_kinematic_wide(&inertia)
+            };
 
             // Fill empty lanes with -1 for consistent behavior with solver callbacks.
             let lane_indices = lane_indices | !integration_mask;
@@ -367,6 +364,8 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let count_in_bundle = (body_count - bundle_base_index).min(lanes);
 
             let mut body_indices_arr = [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
+            // Index is also used for handle arithmetic; keep the C# loop shape.
+            #[allow(clippy::needless_range_loop)]
             for i in 0..count_in_bundle as usize {
                 body_indices_arr[i] = handle_to_location
                     .get(*body_handles.get(bundle_base_index + i as i32))
@@ -438,6 +437,8 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
             let count_in_bundle = (body_count - bundle_base_index).min(lanes);
 
             let mut body_indices_arr = [0i32; { crate::utilities::vector::optimal_lanes::<i32>() }];
+            // Index is also used for handle arithmetic; keep the C# loop shape.
+            #[allow(clippy::needless_range_loop)]
             for i in 0..count_in_bundle as usize {
                 body_indices_arr[i] = handle_to_location
                     .get(*body_handles.get(bundle_base_index + i as i32))
@@ -448,7 +449,7 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize);
             let trailing_mask = !existing_mask;
             let mut body_indices_vector = Simd::from_array(body_indices_arr);
-            body_indices_vector = body_indices_vector | trailing_mask;
+            body_indices_vector |= trailing_mask;
 
             let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
             let mut orientation = std::mem::MaybeUninit::<QuaternionWide>::uninit();
@@ -558,20 +559,20 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 let trailing_mask = BundleIndexing::create_trailing_mask_for_count_in_bundle(
                     count_in_bundle as usize,
                 );
-                body_indices = body_indices | trailing_mask;
+                body_indices |= trailing_mask;
                 // Empty slots should not be considered; clear the mask slot.
                 // C#: Vector.AndNot(unconstrained, trailing) => unconstrained & !trailing
-                unconstrained_mask = unconstrained_mask & !trailing_mask;
+                unconstrained_mask &= !trailing_mask;
             }
 
-            let bundle_effective_dt: Vector<f32>;
-            if self.callbacks.allow_substeps_for_unconstrained_bodies() {
-                bundle_effective_dt = bundle_substep_dt;
-            } else {
-                // Unconstrained bodies use full dt, constrained use substep dt.
-                let mask = Mask::from_simd(unconstrained_mask);
-                bundle_effective_dt = mask.select(bundle_dt, bundle_substep_dt);
-            }
+            let bundle_effective_dt: Vector<f32> =
+                if self.callbacks.allow_substeps_for_unconstrained_bodies() {
+                    bundle_substep_dt
+                } else {
+                    // Unconstrained bodies use full dt, constrained use substep dt.
+                    let mask = Mask::from_simd(unconstrained_mask);
+                    mask.select(bundle_dt, bundle_substep_dt)
+                };
             let half_dt = bundle_effective_dt * Simd::splat(0.5f32);
 
             let mut position = std::mem::MaybeUninit::<Vector3Wide>::uninit();
@@ -613,12 +614,12 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
                 body_indices | !unconstrained_velocity_integration_mask;
 
             if any_body_in_bundle_is_unconstrained {
-                let integration_step_count: i32;
-                if self.callbacks.allow_substeps_for_unconstrained_bodies() {
-                    integration_step_count = substep_count;
-                } else {
-                    integration_step_count = 1;
-                }
+                let integration_step_count: i32 =
+                    if self.callbacks.allow_substeps_for_unconstrained_bodies() {
+                        substep_count
+                    } else {
+                        1
+                    };
 
                 for step_index in 0..integration_step_count {
                     // Note: integrates velocities, then poses.
@@ -705,12 +706,10 @@ impl<TCallbacks: IPoseIntegratorCallbacks> PoseIntegrator<TCallbacks> {
 
                     let mut integrate_pose_mask =
                         BundleIndexing::create_mask_for_count_in_bundle(count_in_bundle as usize);
-                    if self.callbacks.allow_substeps_for_unconstrained_bodies() {
-                        if step_index > 0 {
-                            // Only the first substep should integrate poses for constrained bodies,
-                            // so mask them out for later substeps.
-                            integrate_pose_mask = integrate_pose_mask & unconstrained_mask;
-                        }
+                    if self.callbacks.allow_substeps_for_unconstrained_bodies() && step_index > 0 {
+                        // Only the first substep should integrate poses for constrained bodies,
+                        // so mask them out for later substeps.
+                        integrate_pose_mask &= unconstrained_mask;
                     }
                     bodies.scatter_pose(
                         &position,

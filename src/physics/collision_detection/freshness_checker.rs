@@ -104,11 +104,11 @@ impl FreshnessChecker {
         let constraint_handle = pair_cache.get_old_constraint_handle(pair_index);
         constraint_remover.enqueue_removal(worker_index, constraint_handle);
 
-        let pool = if self.cached_dispatcher.is_none() {
-            pair_cache.pool
-        } else {
-            let dispatcher = &*self.cached_dispatcher.unwrap();
+        let pool = if let Some(dispatcher) = self.cached_dispatcher {
+            let dispatcher = &*dispatcher;
             dispatcher.worker_pool_ptr(worker_index)
+        } else {
+            pair_cache.pool
         };
 
         let pending_changes = &mut pair_cache.worker_pending_changes[worker_index as usize];

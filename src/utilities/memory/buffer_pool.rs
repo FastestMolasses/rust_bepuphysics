@@ -24,6 +24,8 @@ struct PowerPool {
     /// Pool of slots available to this power level.
     slots: ManagedIdPool,
     /// Number of suballocations that fit in each block.
+    // Mirrors C# PowerPool.SuballocationsPerBlock; not read by the Rust port's current callers.
+    #[allow(dead_code)]
     suballocations_per_block: i32,
     /// Log2 of suballocations_per_block for fast division.
     suballocations_per_block_shift: i32,
@@ -113,8 +115,11 @@ impl PowerPool {
         }
     }
 
+    // Mirrors C# PowerPool.GetStartPointerForSlot (public there); PowerPool is private here, so
+    // rustc still treats it as unreachable.
+    #[allow(dead_code)]
     #[inline(always)]
-    fn get_start_pointer_for_slot(&self, slot: i32) -> *mut u8 {
+    pub fn get_start_pointer_for_slot(&self, slot: i32) -> *mut u8 {
         let block_index = slot >> self.suballocations_per_block_shift;
         let index_in_block = slot & self.suballocations_per_block_mask;
         unsafe {
@@ -245,6 +250,8 @@ impl Drop for PowerPool {
 /// power-of-2 size. This allows O(1) allocation and deallocation with minimal fragmentation.
 pub struct BufferPool {
     pools: Vec<PowerPool>,
+    // Mirrors C# BufferPool.minimumBlockSize; not read by the Rust port's current callers.
+    #[allow(dead_code)]
     minimum_block_size: i32,
 }
 

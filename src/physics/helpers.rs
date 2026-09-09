@@ -78,8 +78,8 @@ impl Helpers {
     #[inline(always)]
     pub fn fill_vector_with_lane_indices(indices: &mut Vector<i32>) {
         let mut values = [0i32; Vector::<i32>::LEN];
-        for i in 0..Vector::<i32>::LEN {
-            values[i] = i as i32;
+        for (i, value) in values.iter_mut().enumerate() {
+            *value = i as i32;
         }
         *indices = Vector::<i32>::from_array(values);
     }

@@ -154,7 +154,7 @@ impl PairCache {
     pub const COLLISION_TYPE_COUNT: i32 = 16;
 
     /// Creates a new PairCache.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         initial_set_capacity: i32,
         minimum_mapping_size: i32,

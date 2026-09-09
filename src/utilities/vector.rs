@@ -223,8 +223,8 @@ impl HwMinMax for Simd<f32, 4> {
         {
             unsafe {
                 std::mem::transmute(arch_simd::_mm_min_ps(
-                    std::mem::transmute(self),
-                    std::mem::transmute(other),
+                    std::mem::transmute::<Simd<f32, 4>, arch_simd::__m128>(self),
+                    std::mem::transmute::<Simd<f32, 4>, arch_simd::__m128>(other),
                 ))
             }
         }
@@ -258,8 +258,8 @@ impl HwMinMax for Simd<f32, 4> {
         {
             unsafe {
                 std::mem::transmute(arch_simd::_mm_max_ps(
-                    std::mem::transmute(self),
-                    std::mem::transmute(other),
+                    std::mem::transmute::<Simd<f32, 4>, arch_simd::__m128>(self),
+                    std::mem::transmute::<Simd<f32, 4>, arch_simd::__m128>(other),
                 ))
             }
         }

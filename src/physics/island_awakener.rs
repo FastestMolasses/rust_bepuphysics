@@ -478,7 +478,7 @@ impl IslandAwakener {
     }
 
     pub(crate) unsafe fn execute_phase_two_job(&self, index: i32) {
-        let job = &*self.phase_two_jobs.get(index);
+        let job = self.phase_two_jobs.get(index);
         match job.job_type {
             PhaseTwoJobType::BroadPhase => {
                 // Move collidables from static tree back to active tree.
@@ -577,7 +577,7 @@ impl IslandAwakener {
         if set_indices.count == 0 {
             return (0, 0);
         }
-        self.unique_set_indices = set_indices.clone();
+        self.unique_set_indices = *set_indices;
         self.reset_activity_states = reset_activity_states;
 
         let pool = unsafe { &mut *self.pool };
@@ -1029,10 +1029,9 @@ impl IslandAwakener {
                 if matches!(
                     job.job_type,
                     PhaseTwoJobType::AddFallbackTypeBatchConstraints
-                ) {
-                    if job.fallback_sources.allocated() {
-                        pool.return_buffer(&mut job.fallback_sources);
-                    }
+                ) && job.fallback_sources.allocated()
+                {
+                    pool.return_buffer(&mut job.fallback_sources);
                 }
             }
             phase_two.dispose(pool);

@@ -184,7 +184,7 @@ impl<TRayTester: IBroadPhaseBatchedRayTester> BroadPhaseRayBatcher<TRayTester> {
     pub const DEFAULT_RAY_CAPACITY: i32 = 2048;
 
     /// Constructs a ray batcher for the broad phase using the default ray capacity.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         broad_phase: *const BroadPhase,
         ray_tester: TRayTester,
@@ -200,7 +200,7 @@ impl<TRayTester: IBroadPhaseBatchedRayTester> BroadPhaseRayBatcher<TRayTester> {
     /// * `ray_tester` - Ray tester used to test leaves found by the broad phase tree traversals.
     /// * `batcher_ray_capacity` - Maximum number of rays to execute in each traversal.
     ///   This should typically be chosen as the highest value which avoids spilling data out of L2 cache.
-    pub fn with_capacity(
+    pub unsafe fn with_capacity(
         pool: *mut BufferPool,
         broad_phase: *const BroadPhase,
         ray_tester: TRayTester,
@@ -362,7 +362,7 @@ impl<TRayHitHandler: IRayHitHandler> SimulationRayBatcher<TRayHitHandler> {
         BroadPhaseRayBatcher::<SimulationRayDispatcher<TRayHitHandler>>::DEFAULT_RAY_CAPACITY;
 
     /// Constructs a batcher for testing rays against a simulation using the default ray capacity.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         simulation: *const Simulation,
         hit_handler: TRayHitHandler,
@@ -374,7 +374,7 @@ impl<TRayHitHandler: IRayHitHandler> SimulationRayBatcher<TRayHitHandler> {
     ///
     /// # Arguments
     /// * `batcher_ray_capacity` - Maximum number of rays to execute in each traversal.
-    pub fn with_capacity(
+    pub unsafe fn with_capacity(
         pool: *mut BufferPool,
         simulation: *const Simulation,
         hit_handler: TRayHitHandler,

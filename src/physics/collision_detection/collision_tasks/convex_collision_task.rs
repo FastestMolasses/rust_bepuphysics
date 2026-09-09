@@ -20,7 +20,7 @@ pub trait IPairTester<TShapeWideA, TShapeWideB, TManifoldWide> {
     fn batch_size() -> i32;
 
     /// Tests with two orientations (standard convex pair).
-    fn test_two_orientations(
+    unsafe fn test_two_orientations(
         a: &TShapeWideA,
         b: &TShapeWideB,
         speculative_margin: &Vector<f32>,

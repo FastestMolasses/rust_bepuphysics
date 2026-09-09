@@ -113,6 +113,8 @@ impl BinaryHeap {
         Self::new(pool.take(capacity))
     }
 
+    // Mirrors C# BinaryHeap.Dispose; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     pub fn dispose(&mut self, pool: &mut BufferPool) {
         pool.return_buffer(&mut self.entries);
     }
@@ -565,7 +567,6 @@ impl Tree {
 
         root_refinement_subtrees.dispose(pool);
         root_refinement_node_indices.dispose(pool);
-        let mut root_refinement_nodes = root_refinement_nodes;
         pool.return_buffer(&mut root_refinement_nodes);
     }
 
@@ -658,6 +659,9 @@ impl Tree {
                 .reify_subtree_refinement_st(&subtree_refinement_node_indices, &refinement_nodes);
         }
 
+        // Rebinding kept on purpose: without it the compiler emits two extra dead stores for the
+        // returned buffer in this function (verified against the emitted assembly).
+        #[allow(clippy::redundant_locals)]
         let mut refinement_nodes = refinement_nodes;
         pool.return_buffer(&mut refinement_nodes);
         subtree_refinement_node_indices.dispose(pool);
@@ -861,7 +865,7 @@ impl Tree {
             return;
         }
 
-        let node = unsafe { &*self.nodes.get(node_index) };
+        let node = unsafe { self.nodes.get(node_index) };
         let midpoint = left_leaf_count + node.a.leaf_count;
         if *start_index < midpoint {
             // Go left!
@@ -1022,7 +1026,7 @@ impl Tree {
 
         while let Some(node_to_visit) = root_stack.try_pop() {
             *root_refinement_node_indices.allocate_unsafely() = node_to_visit.0;
-            let node = unsafe { &*self.nodes.get(node_to_visit.0) };
+            let node = unsafe { self.nodes.get(node_to_visit.0) };
             let node_total_leaf_count = node.a.leaf_count + node.b.leaf_count;
             debug_assert!(node_to_visit.1 <= node_total_leaf_count);
             let lower_subtree_budget =
@@ -1115,7 +1119,7 @@ impl Tree {
         while heap.count > 0 && heap.count + root_refinement_subtrees.count < root_refinement_size {
             let entry = heap.pop();
             *root_refinement_node_indices.allocate_unsafely() = entry.index;
-            let node = unsafe { &*self.nodes.get(entry.index) };
+            let node = unsafe { self.nodes.get(entry.index) };
             let node_total_leaf_count = node.a.leaf_count + node.b.leaf_count;
 
             self.try_push_child_for_root_refinement2(
@@ -1140,9 +1144,9 @@ impl Tree {
         for i in 0..heap.count {
             let entry = *heap.entries.get(i);
             unsafe {
-                let metanode = &*self.metanodes.get(entry.index);
+                let metanode = self.metanodes.get(entry.index);
                 debug_assert!(metanode.parent >= 0);
-                let parent = &*self.nodes.get(metanode.parent);
+                let parent = self.nodes.get(metanode.parent);
                 let child_in_parent = Self::node_child(parent, metanode.index_in_parent);
                 let allocated = root_refinement_subtrees.allocate_unsafely();
                 debug_assert!(child_in_parent.index >= 0);
@@ -1166,7 +1170,7 @@ impl Tree {
         let mut subtree_stack = QuickList::<i32>::new(*subtree_stack_buffer);
         *subtree_stack.allocate_unsafely() = refinement_target_root_node_index;
         while let Some(node_to_visit) = subtree_stack.try_pop() {
-            let node = unsafe { &*self.nodes.get(node_to_visit) };
+            let node = unsafe { self.nodes.get(node_to_visit) };
             *subtree_refinement_node_indices.allocate_unsafely() = node_to_visit;
             if node.b.index >= 0 {
                 *subtree_stack.allocate_unsafely() = node.b.index;

@@ -39,6 +39,7 @@ impl Default for NonconvexReductionChild {
 
 /// Accumulates child manifolds and reduces them into a single nonconvex contact manifold.
 #[repr(C)]
+#[derive(Default)]
 pub struct NonconvexReduction {
     pub child_count: i32,
     pub completed_child_count: i32,
@@ -50,16 +51,6 @@ impl ICollisionTestContinuation for NonconvexReduction {
         self.child_count = child_manifold_count;
         self.completed_child_count = 0;
         self.children = pool.take(child_manifold_count);
-    }
-}
-
-impl Default for NonconvexReduction {
-    fn default() -> Self {
-        Self {
-            child_count: 0,
-            completed_child_count: 0,
-            children: Buffer::default(),
-        }
     }
 }
 
@@ -106,7 +97,7 @@ impl NonconvexReduction {
     ) {
         let candidate = *remaining_candidates.get(index);
         Self::add_contact(
-            &*children.get(candidate.child_index),
+            children.get(candidate.child_index),
             candidate.contact_index,
             target_manifold,
         );
@@ -165,7 +156,7 @@ impl NonconvexReduction {
         let mut minimum_extent = f32::MAX;
         let mut minimum_extent_position = Vec3::ZERO;
         for i in 0..self.child_count {
-            let child = &*self.children.get(i);
+            let child = self.children.get(i);
             for j in 0..child.manifold.count {
                 let position =
                     &(*(&child.manifold.contact0 as *const ConvexContact).add(j as usize)).offset;
@@ -178,7 +169,7 @@ impl NonconvexReduction {
         }
         let mut maximum_distance_squared: f32 = 0.0;
         for i in 0..self.child_count {
-            let child = &*self.children.get(i);
+            let child = self.children.get(i);
             for j in 0..child.manifold.count {
                 let distance_squared =
                     ((*(&child.manifold.contact0 as *const ConvexContact).add(j as usize)).offset
@@ -214,17 +205,16 @@ impl NonconvexReduction {
         let mut remaining_contacts = QuickList::new(remaining_contacts_buffer);
         let extremity_scale = maximum_distance * 5e-3;
         for child_index in 0..self.child_count {
-            let child = &*self.children.get(child_index);
+            let child = self.children.get(child_index);
             for contact_index in 0..child.manifold.count {
                 let contact = &*(&child.manifold.contact0 as *const ConvexContact)
                     .add(contact_index as usize);
-                let candidate_score: f32;
-                if contact.depth >= 0.0 {
+                let candidate_score: f32 = if contact.depth >= 0.0 {
                     let extent = contact.offset.dot(extent_axis) - minimum_extent;
-                    candidate_score = contact.depth + extent * extremity_scale;
+                    contact.depth + extent * extremity_scale
                 } else {
-                    candidate_score = contact.depth;
-                }
+                    contact.depth
+                };
                 if candidate_score > initial_best_score {
                     initial_best_score = candidate_score;
                     initial_best_score_index = remaining_contacts.count;
@@ -265,7 +255,7 @@ impl NonconvexReduction {
             let mut i = 0i32;
             while i < remaining_contacts.count {
                 let remaining_contact = remaining_contacts.get_mut(i);
-                let child_manifold = &(*self.children.get(remaining_contact.child_index)).manifold;
+                let child_manifold = &self.children.get(remaining_contact.child_index).manifold;
                 let child_contact = &*(&child_manifold.contact0 as *const ConvexContact)
                     .add(remaining_contact.contact_index as usize);
                 let distinctiveness = Self::compute_distinctiveness(
@@ -328,11 +318,11 @@ impl NonconvexReduction {
                     // Push all contacts into the space of the parent object.
                     let contact =
                         &mut *(&mut child.manifold.contact0 as *mut ConvexContact).add(j as usize);
-                    contact.offset = contact.offset + child.offset_a;
+                    contact.offset += child.offset_a;
                 }
             }
         }
-        let sample_child = &*self.children.get(sample_populated_child_index);
+        let sample_child = self.children.get(sample_populated_child_index);
 
         if populated_child_manifolds > 1 {
             // Multiple contributing child manifolds — produce a nonconvex manifold.
@@ -342,7 +332,7 @@ impl NonconvexReduction {
             if total_contact_count <= NonconvexContactManifold::MAXIMUM_CONTACT_COUNT {
                 // No reduction required; we can fit every contact.
                 for i in 0..self.child_count {
-                    let child = &*self.children.get(i);
+                    let child = self.children.get(i);
                     for j in 0..child.manifold.count {
                         Self::add_contact(child, j, reduced_manifold.as_mut_ptr());
                     }
@@ -377,14 +367,14 @@ impl NonconvexReduction {
         report: &PairContinuation,
         manifold: &ConvexContactManifold,
     ) {
-        (*self.children.get_mut(report.child_index())).manifold = *manifold;
+        self.children.get_mut(report.child_index()).manifold = *manifold;
         self.completed_child_count += 1;
     }
 
     /// Records an untested child as having zero contacts.
     #[inline(always)]
     pub unsafe fn on_untested_child_completed(&mut self, report: &PairContinuation) {
-        (*self.children.get_mut(report.child_index()))
+        self.children.get_mut(report.child_index())
             .manifold
             .count = 0;
         self.completed_child_count += 1;

@@ -165,6 +165,8 @@ unsafe fn store_4f32_v(ptr: *mut f32, v: Vector<f32>) {
 }
 
 impl Bodies {
+    // Mirrors C# private WriteGatherInertia; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     #[inline(always)]
     fn write_gather_inertia(
         index: i32,
@@ -203,6 +205,8 @@ impl Bodies {
         }
     }
 
+    // Mirrors C# private WriteGatherMotionState; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     #[inline(always)]
     fn write_gather_motion_state(
         index: i32,
@@ -321,7 +325,7 @@ impl Bodies {
         orientation: &mut QuaternionWide,
         velocity: &mut BodyVelocityWide,
     ) {
-        debug_assert!(states.len() > 0 && (states.len() as usize) <= Vector::<f32>::LEN);
+        debug_assert!(!states.is_empty() && (states.len() as usize) <= Vector::<f32>::LEN);
         #[cfg(all(target_arch = "x86_64", target_feature = "avx"))]
         {
             let len = states.len() as usize;

@@ -10,8 +10,8 @@ impl Tree {
         // Note that no attempt is made to refit the root node.
         // The root node is the only node that can have a number of children less than 2.
         unsafe {
-            let mut node = &*self.nodes.get(node_index);
-            let mut metanode = &*self.metanodes.get(node_index);
+            let mut node = self.nodes.get(node_index);
+            let mut metanode = self.metanodes.get(node_index);
             while metanode.parent >= 0 {
                 // Compute the new bounding box for this node.
                 let parent = &mut *(self.nodes.as_ptr() as *mut super::node::Node)
@@ -26,7 +26,7 @@ impl Tree {
                     &mut child_in_parent.max,
                 );
                 node = &*parent;
-                metanode = &*self.metanodes.get(metanode.parent);
+                metanode = self.metanodes.get(metanode.parent);
             }
         }
     }

@@ -165,7 +165,7 @@ impl Tree {
         internal_nodes: &mut QuickList<i32>,
         treelet_cost: &mut f32,
     ) {
-        let node = &*self.nodes.get(node_index);
+        let node = self.nodes.get(node_index);
         debug_assert!(
             maximum_subtrees >= 2,
             "Can't only consider some of a node's children, but specified maximum_subtrees precludes the treelet root's children."
@@ -191,7 +191,7 @@ impl Tree {
             internal_nodes.add_unsafely(highest_index);
 
             // Add all children to the set of subtrees.
-            let expanded_node = &*self.nodes.get(highest_index);
+            let expanded_node = self.nodes.get(highest_index);
             priority_queue.insert(expanded_node, subtrees);
         }
 

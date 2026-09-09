@@ -70,8 +70,7 @@ impl Job {
 
         // Note that the job and the buffer of tasks are allocated together as one block.
         // This ensures we only need to perform one allocation.
-        let size_to_allocate =
-            std::mem::size_of::<Job>() + source_tasks.len() * std::mem::size_of::<Task>();
+        let size_to_allocate = std::mem::size_of::<Job>() + std::mem::size_of_val(source_tasks);
 
         let raw_buffer: Buffer<u8> = pool.take(size_to_allocate as i32);
         let job_ptr = raw_buffer.as_ptr() as *mut Job;

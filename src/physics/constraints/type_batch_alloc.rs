@@ -31,6 +31,8 @@ pub unsafe fn set_body_references_lane(
 ) {
     let base = bundle_ptr as *mut i32;
     let target_lane = base.add(inner_index);
+    // Index drives pointer arithmetic (i * LEN); keep the explicit loop.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..bodies_per_constraint {
         *target_lane.add(i * Vector::<i32>::LEN) = body_indices[i];
     }
@@ -484,7 +486,7 @@ unsafe fn probe_bundle_for_fallback(
         *target_bundle_index = bundle_index as i32;
         *target_inner_index = get_inner_index_for_fallback_allocation(bundle_ptr);
         set_body_references_lane(
-            bundle_ptr as *mut u8,
+            bundle_ptr,
             *target_inner_index as usize,
             encoded_body_indices,
             bodies_per_constraint,
@@ -540,6 +542,8 @@ pub unsafe fn allocate_in_type_batch_for_fallback(
     debug_assert!(bodies_per_constraint <= 4);
     let mut broadcasted_storage = MaybeUninit::<[Vector<i32>; 4]>::uninit();
     let broadcasted_body_indices = broadcasted_storage.as_mut_ptr() as *mut Vector<i32>;
+    // Index drives raw pointer arithmetic (add(i)); keep the explicit loop.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..bodies_per_constraint {
         unsafe {
             *broadcasted_body_indices.add(i) =

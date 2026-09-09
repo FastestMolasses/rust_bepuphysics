@@ -6,6 +6,7 @@ use crate::physics::trees::node::{CostOrFlag, Metanode, Node, NodeChild};
 use crate::physics::trees::tree::Tree;
 use crate::utilities::bounding_box::BoundingBox4;
 use crate::utilities::collections::comparer_ref::RefComparer;
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::utilities::collections::quicksort::Quicksort;
 use crate::utilities::collections::vectorized_sorts;
 use crate::utilities::memory::buffer::Buffer;
@@ -32,7 +33,10 @@ fn compute_bounds_metric_bb4(bounds: &BoundingBox4) -> f32 {
 }
 
 // ── Axis comparers (for the non-vectorised micro sweep path) ───────────────
+// Mirrors C# BoundsComparerX/Y/Z; only used by the scalar fallback micro sweep, which is dead on
+// every supported CPU (the vectorized path is always taken).
 
+#[allow(dead_code)]
 struct BoundsComparerX;
 impl RefComparer<NodeChild> for BoundsComparerX {
     fn compare(&self, a: &NodeChild, b: &NodeChild) -> Ordering {
@@ -44,6 +48,7 @@ impl RefComparer<NodeChild> for BoundsComparerX {
     }
 }
 
+#[allow(dead_code)]
 struct BoundsComparerY;
 impl RefComparer<NodeChild> for BoundsComparerY {
     fn compare(&self, a: &NodeChild, b: &NodeChild) -> Ordering {
@@ -55,6 +60,7 @@ impl RefComparer<NodeChild> for BoundsComparerY {
     }
 }
 
+#[allow(dead_code)]
 struct BoundsComparerZ;
 impl RefComparer<NodeChild> for BoundsComparerZ {
     fn compare(&self, a: &NodeChild, b: &NodeChild) -> Ordering {
@@ -198,6 +204,8 @@ struct SharedTaskData {
     worker_count: i32,
     task_count: i32,
     subtree_start_index: i32,
+    // Mirrors C# SharedTaskData.SubtreeCount; not read by the Rust port's current callers.
+    #[allow(dead_code)]
     subtree_count: i32,
     slots_per_task_base: i32,
     slot_remainder: i32,

@@ -2,8 +2,8 @@
 //!
 //! Demonstrates the BepuPhysics Bevy plugin with the simplest possible setup.
 
-#![feature(portable_simd)]
 #![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 use bevy::prelude::*;
 use rust_bepuphysics::bevy_bepu::prelude::*;

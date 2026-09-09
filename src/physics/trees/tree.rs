@@ -12,7 +12,7 @@ use super::node::{Metanode, Node, NodeChild};
 ///
 /// Note: In C#, Tree is a partial struct spread across many files.
 /// In Rust, the struct is defined here and extended with `impl Tree` blocks in sibling modules.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct Tree {
     /// Buffer of nodes in the tree.
@@ -30,18 +30,6 @@ pub struct Tree {
 
 /// Maximum stack depth for iterative tree traversals.
 pub const TRAVERSAL_STACK_CAPACITY: usize = 256;
-
-impl Default for Tree {
-    fn default() -> Self {
-        Self {
-            nodes: Buffer::default(),
-            metanodes: Buffer::default(),
-            leaves: Buffer::default(),
-            node_count: 0,
-            leaf_count: 0,
-        }
-    }
-}
 
 impl Tree {
     /// Encodes a leaf index into the negative-index form used by the tree.
@@ -77,7 +65,7 @@ impl Tree {
     #[inline(always)]
     pub unsafe fn get_bounds_pointers(&self, leaf_index: i32) -> (*mut Vec3, *mut Vec3) {
         let leaf = *self.leaves.get(leaf_index);
-        let node_child = (&*self.nodes.get(leaf.node_index()) as *const Node as *const NodeChild)
+        let node_child = (self.nodes.get(leaf.node_index()) as *const Node as *const NodeChild)
             .add(leaf.child_index() as usize) as *mut NodeChild;
         (
             &mut (*node_child).min as *mut Vec3,

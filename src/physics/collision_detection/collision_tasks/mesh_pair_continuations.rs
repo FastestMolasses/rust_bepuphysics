@@ -90,7 +90,6 @@ impl<
             continuation.query_bounds[j] = BoundingBox {
                 min: pair_queries[j].min,
                 max: pair_queries[j].max,
-                ..Default::default()
             };
         }
         continuation as *mut CompoundMeshReduction

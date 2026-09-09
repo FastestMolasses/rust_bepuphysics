@@ -99,7 +99,7 @@ pub trait ContactConstraintAccessor: Send + Sync {
     );
 
     /// Flushes pending constraints sequentially.
-    fn flush_sequentially(
+    unsafe fn flush_sequentially(
         &self,
         list: &mut UntypedList,
         narrow_phase_constraint_type_id: i32,
@@ -109,7 +109,7 @@ pub trait ContactConstraintAccessor: Send + Sync {
     );
 
     /// Flushes pending constraints using speculative batch indices.
-    fn flush_with_speculative_batches(
+    unsafe fn flush_with_speculative_batches(
         &self,
         list: &mut UntypedList,
         narrow_phase_constraint_type_id: i32,
@@ -120,7 +120,7 @@ pub trait ContactConstraintAccessor: Send + Sync {
     );
 
     /// Deterministically adds constraints from sorted targets across all workers.
-    fn deterministically_add(
+    unsafe fn deterministically_add(
         &self,
         type_index: i32,
         overlap_workers_pending: &[*mut PendingConstraintAddCache],
@@ -907,7 +907,7 @@ macro_rules! impl_convex_one_body_accessor {
                 unsafe { extract_one_body_prestep_and_impulses::<$prestep, $impulse>(constraint_location, solver, extractor, true); }
             }
 
-            fn flush_sequentially(
+            unsafe fn flush_sequentially(
                 &self,
                 list: &mut UntypedList,
                 _narrow_phase_constraint_type_id: i32,
@@ -920,7 +920,7 @@ macro_rules! impl_convex_one_body_accessor {
                 }
             }
 
-            fn flush_with_speculative_batches(
+            unsafe fn flush_with_speculative_batches(
                 &self,
                 list: &mut UntypedList,
                 narrow_phase_constraint_type_id: i32,
@@ -936,7 +936,7 @@ macro_rules! impl_convex_one_body_accessor {
                 }
             }
 
-            fn deterministically_add(
+            unsafe fn deterministically_add(
                 &self,
                 type_index: i32,
                 overlap_workers_pending: &[*mut PendingConstraintAddCache],
@@ -1093,7 +1093,7 @@ macro_rules! impl_convex_two_body_accessor {
                 unsafe { extract_two_body_prestep_and_impulses::<$prestep, $impulse>(constraint_location, solver, extractor, true); }
             }
 
-            fn flush_sequentially(
+            unsafe fn flush_sequentially(
                 &self,
                 list: &mut UntypedList,
                 _narrow_phase_constraint_type_id: i32,
@@ -1106,7 +1106,7 @@ macro_rules! impl_convex_two_body_accessor {
                 }
             }
 
-            fn flush_with_speculative_batches(
+            unsafe fn flush_with_speculative_batches(
                 &self,
                 list: &mut UntypedList,
                 narrow_phase_constraint_type_id: i32,
@@ -1122,7 +1122,7 @@ macro_rules! impl_convex_two_body_accessor {
                 }
             }
 
-            fn deterministically_add(
+            unsafe fn deterministically_add(
                 &self,
                 type_index: i32,
                 overlap_workers_pending: &[*mut PendingConstraintAddCache],
@@ -1293,7 +1293,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 }
             }
 
-            fn flush_sequentially(
+            unsafe fn flush_sequentially(
                 &self,
                 list: &mut UntypedList,
                 _narrow_phase_constraint_type_id: i32,
@@ -1312,7 +1312,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 }
             }
 
-            fn flush_with_speculative_batches(
+            unsafe fn flush_with_speculative_batches(
                 &self,
                 list: &mut UntypedList,
                 narrow_phase_constraint_type_id: i32,
@@ -1334,7 +1334,7 @@ macro_rules! impl_nonconvex_one_body_accessor {
                 }
             }
 
-            fn deterministically_add(
+            unsafe fn deterministically_add(
                 &self,
                 type_index: i32,
                 overlap_workers_pending: &[*mut PendingConstraintAddCache],
@@ -1483,7 +1483,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 }
             }
 
-            fn flush_sequentially(
+            unsafe fn flush_sequentially(
                 &self,
                 list: &mut UntypedList,
                 _narrow_phase_constraint_type_id: i32,
@@ -1502,7 +1502,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 }
             }
 
-            fn flush_with_speculative_batches(
+            unsafe fn flush_with_speculative_batches(
                 &self,
                 list: &mut UntypedList,
                 narrow_phase_constraint_type_id: i32,
@@ -1528,7 +1528,7 @@ macro_rules! impl_nonconvex_two_body_accessor {
                 }
             }
 
-            fn deterministically_add(
+            unsafe fn deterministically_add(
                 &self,
                 type_index: i32,
                 overlap_workers_pending: &[*mut PendingConstraintAddCache],

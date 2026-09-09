@@ -315,7 +315,7 @@ impl RayBatcher {
     ///   typically be chosen as the highest value which avoids spilling data out of L2 cache.
     /// * `tree_depth_for_preallocation` - Tree depth to preallocate ray stack space for. If a
     ///   traversal finds nodes deeper than this, a dynamic resize will be triggered.
-    pub fn new(pool: *mut BufferPool, ray_capacity: i32, tree_depth_for_preallocation: i32) -> Self {
+    pub unsafe fn new(pool: *mut BufferPool, ray_capacity: i32, tree_depth_for_preallocation: i32) -> Self {
         let mut batcher = Self {
             stack_pointer_a0: 0,
             stack_pointer_b: 0,

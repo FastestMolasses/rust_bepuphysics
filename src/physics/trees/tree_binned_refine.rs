@@ -594,8 +594,7 @@ impl Tree {
         let subtree_count_a = split_index - start;
         let subtree_count_b = start + count - split_index;
 
-        let cost_a;
-        if subtree_count_a > 1 {
+        let cost_a = if subtree_count_a > 1 {
             let mut child_cost_a = 0.0f32;
             let idx = self.create_staging_node_binned(
                 resources,
@@ -607,16 +606,15 @@ impl Tree {
             // Re-borrow staging node
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
             staging_node.a.index = idx;
-            cost_a = child_cost_a + Self::compute_bounds_metric_bb(&a_bounds);
+            child_cost_a + Self::compute_bounds_metric_bb(&a_bounds)
         } else {
             debug_assert_eq!(subtree_count_a, 1);
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
             staging_node.a.index = Self::encode(*resources.index_map.add(start as usize));
-            cost_a = 0.0;
-        }
+            0.0
+        };
 
-        let cost_b;
-        if subtree_count_b > 1 {
+        let cost_b = if subtree_count_b > 1 {
             let mut child_cost_b = 0.0f32;
             let idx = self.create_staging_node_binned(
                 resources,
@@ -627,13 +625,13 @@ impl Tree {
             );
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
             staging_node.b.index = idx;
-            cost_b = child_cost_b + Self::compute_bounds_metric_bb(&b_bounds);
+            child_cost_b + Self::compute_bounds_metric_bb(&b_bounds)
         } else {
             debug_assert_eq!(subtree_count_b, 1);
             let staging_node = &mut *resources.staging_nodes.add(staging_node_index as usize);
             staging_node.b.index = Self::encode(*resources.index_map.add(split_index as usize));
-            cost_b = 0.0;
-        }
+            0.0
+        };
         *children_treelets_cost = cost_a + cost_b;
     }
 

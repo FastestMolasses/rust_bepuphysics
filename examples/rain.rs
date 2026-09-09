@@ -12,8 +12,8 @@
 //!
 //! NOTE: Run with --release for best performance!
 
-#![feature(portable_simd)]
 #![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 use bevy::color::palettes::css;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;

@@ -135,9 +135,7 @@ impl Allocator {
                 // Wrapped around, so the gap goes from here to the end of the memory block, and from
                 // the beginning of the memory block to the next allocation. Contiguous space is
                 // required, so the two areas have to be tested independently.
-                if self.capacity - allocation.end >= size {
-                    return true;
-                } else if next_allocation.start >= size {
+                if self.capacity - allocation.end >= size || next_allocation.start >= size {
                     return true;
                 }
             } else {

@@ -1,6 +1,6 @@
 /// The common set of allocation sizes for a simulation.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SimulationAllocationSizes {
     /// The number of bodies to allocate space for.
     pub bodies: i32,
@@ -44,20 +44,6 @@ impl SimulationAllocationSizes {
             constraints,
             constraints_per_type_batch,
             constraint_count_per_body_estimate,
-        }
-    }
-}
-
-impl Default for SimulationAllocationSizes {
-    fn default() -> Self {
-        Self {
-            bodies: 0,
-            statics: 0,
-            islands: 0,
-            shapes_per_type: 0,
-            constraints: 0,
-            constraints_per_type_batch: 0,
-            constraint_count_per_body_estimate: 0,
         }
     }
 }

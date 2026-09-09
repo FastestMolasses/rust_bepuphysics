@@ -10,6 +10,9 @@
 /// Scalar fallback implementation of counting sort.
 /// This is used when no SIMD is available or for debugging.
 #[inline(never)]
+// Index loops on purpose: the slice-iterator form makes the compiler materialize extra slice pointers
+// and a hoisted bounds check here (verified against the emitted assembly), so keep C#'s indexed loops.
+#[allow(clippy::needless_range_loop)]
 pub fn vector_counting_sort_scalar(
     padded_keys: &[f32],
     padded_target_indices: &mut [i32],
@@ -66,7 +69,7 @@ mod x86_impl {
     ) {
         debug_assert!(
             padded_keys.len() == padded_target_indices.len()
-                && padded_keys.len() % 8 == 0
+                && padded_keys.len().is_multiple_of(8)
                 && padded_keys.len() >= element_count,
             "Preconditions not met: keys.len={}, indices.len={}, element_count={}",
             padded_keys.len(),
@@ -153,7 +156,7 @@ mod x86_impl {
     ) {
         debug_assert!(
             padded_keys.len() == padded_target_indices.len()
-                && padded_keys.len() % 4 == 0
+                && padded_keys.len().is_multiple_of(4)
                 && padded_keys.len() >= element_count,
             "Preconditions not met."
         );

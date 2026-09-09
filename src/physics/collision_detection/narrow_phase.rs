@@ -339,7 +339,7 @@ pub struct CollisionCallbacks<TCallbacks: INarrowPhaseCallbacks> {
 }
 
 impl<TCallbacks: INarrowPhaseCallbacks> CollisionCallbacks<TCallbacks> {
-    pub fn new(
+    pub unsafe fn new(
         worker_index: i32,
         pool: *mut BufferPool,
         narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
@@ -394,8 +394,8 @@ impl<TCallbacks: INarrowPhaseCallbacks> CollisionCallbacks<TCallbacks> {
         debug_assert!(continuation.exists());
         let index = continuation.index();
         match continuation.type_index() {
-            0 => unsafe { (*self.discrete.caches.get(index)).pair },
-            1 => unsafe { (*self.continuous.caches.get(index)).pair },
+            0 => unsafe { self.discrete.caches.get(index).pair },
+            1 => unsafe { self.continuous.caches.get(index).pair },
             _ => {
                 debug_assert!(
                     false,
@@ -529,7 +529,7 @@ pub struct PendingConstraintAddCache {
 }
 
 impl PendingConstraintAddCache {
-    pub fn new(pool: *mut BufferPool, minimum_constraint_count_per_cache: i32) -> Self {
+    pub unsafe fn new(pool: *mut BufferPool, minimum_constraint_count_per_cache: i32) -> Self {
         let pool_ref = unsafe { &mut *pool };
         let mut pending: Buffer<UntypedList> =
             pool_ref.take_at_least(PairCache::COLLISION_CONSTRAINT_TYPE_COUNT);
@@ -606,13 +606,16 @@ impl PendingConstraintAddCache {
         for i in 0..narrow_phase.contact_constraint_accessors.len() {
             if let Some(ref accessor) = narrow_phase.contact_constraint_accessors[i] {
                 let list = unsafe { self.pending_constraints_by_type.get_mut(i as i32) };
-                accessor.flush_sequentially(
-                    list,
-                    i as i32,
-                    narrow_phase as *const NarrowPhase,
-                    solver,
-                    pair_cache,
-                );
+                // The pointers handed to the accessor are all derived from live references.
+                unsafe {
+                    accessor.flush_sequentially(
+                        list,
+                        i as i32,
+                        narrow_phase as *const NarrowPhase,
+                        solver,
+                        pair_cache,
+                    );
+                }
             }
         }
     }
@@ -651,7 +654,7 @@ impl PendingConstraintAddCache {
             let type_list = unsafe { self.pending_constraints_by_type.get(i) };
             if type_list.buffer.allocated() {
                 debug_assert!(type_list.count > 0);
-                let indices: Buffer<u16> = pool_ref.take_at_least(type_list.count as i32);
+                let indices: Buffer<u16> = pool_ref.take_at_least(type_list.count);
                 unsafe {
                     *self.speculative_batch_indices.get_mut(i) = indices;
                 }
@@ -675,7 +678,7 @@ impl PendingConstraintAddCache {
     pub(crate) fn count_constraints(&self) -> i32 {
         let mut count = 0;
         for i in 0..PairCache::COLLISION_CONSTRAINT_TYPE_COUNT {
-            count += unsafe { self.pending_constraints_by_type.get(i).count as i32 };
+            count += unsafe { self.pending_constraints_by_type.get(i).count };
         }
         count
     }
@@ -688,18 +691,20 @@ impl PendingConstraintAddCache {
         solver: &mut Solver,
         pair_cache: &mut PairCache,
     ) {
-        for i in 0..accessors.len() {
-            if let Some(ref accessor) = accessors[i] {
+        for (i, slot) in accessors.iter().enumerate() {
+            if let Some(ref accessor) = slot {
                 let list = unsafe { self.pending_constraints_by_type.get_mut(i as i32) };
                 let speculative = &mut self.speculative_batch_indices;
-                accessor.flush_with_speculative_batches(
-                    list,
-                    i as i32,
-                    speculative,
-                    narrow_phase,
-                    solver,
-                    pair_cache,
-                );
+                unsafe {
+                    accessor.flush_with_speculative_batches(
+                        list,
+                        i as i32,
+                        speculative,
+                        narrow_phase,
+                        solver,
+                        pair_cache,
+                    );
+                }
             }
         }
     }
@@ -729,7 +734,7 @@ pub struct OverlapWorker<TCallbacks: INarrowPhaseCallbacks> {
 }
 
 impl<TCallbacks: INarrowPhaseCallbacks> OverlapWorker<TCallbacks> {
-    pub fn new(
+    pub unsafe fn new(
         worker_index: i32,
         pool: *mut BufferPool,
         narrow_phase: *mut NarrowPhaseGeneric<TCallbacks>,
@@ -800,7 +805,7 @@ pub struct NarrowPhase {
 
 impl NarrowPhase {
     /// Creates a new NarrowPhase.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         bodies: *mut Bodies,
         statics: *mut Statics,
@@ -1110,13 +1115,10 @@ impl NarrowPhase {
     #[inline(always)]
     pub fn extract_contact_constraint_body_count(contact_constraint_type_id: i32) -> i32 {
         debug_assert!(
-            contact_constraint_type_id >= 0
-                && contact_constraint_type_id < PairCache::COLLISION_CONSTRAINT_TYPE_COUNT
+            (0..PairCache::COLLISION_CONSTRAINT_TYPE_COUNT).contains(&contact_constraint_type_id)
         );
         // [0, 3] and [8, 14] are one body. Otherwise, two.
-        if contact_constraint_type_id <= 3
-            || (contact_constraint_type_id >= 8 && contact_constraint_type_id <= 14)
-        {
+        if contact_constraint_type_id <= 3 || (8..=14).contains(&contact_constraint_type_id) {
             1
         } else {
             2
@@ -1170,7 +1172,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> ISweepFilter for CCDSweepFilter<TCallbac
 
 impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
     /// Creates a new generic narrow phase.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         bodies: *mut Bodies,
         statics: *mut Statics,
@@ -1271,7 +1273,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             } else {
                 self.base.pool
             };
-            let worker = OverlapWorker::new(i as i32, pool, self_ptr);
+            let worker = unsafe { OverlapWorker::new(i as i32, pool, self_ptr) };
             if i < self.overlap_workers.len() {
                 self.overlap_workers[i] = worker;
             } else {
@@ -1469,18 +1471,17 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         let bodies = unsafe { &*self.base.bodies };
 
         let body_location_a = &bodies.handle_to_location[a.body_handle().0 as usize];
-        let set_a = unsafe { &*bodies.sets.get(body_location_a.set_index) };
-        let collidable_a = unsafe { &*set_a.collidables.get(body_location_a.index) };
+        let set_a = unsafe { bodies.sets.get(body_location_a.set_index) };
+        let collidable_a = unsafe { set_a.collidables.get(body_location_a.index) };
 
-        let speculative_margin_b;
-        if two_bodies {
+        let speculative_margin_b = if two_bodies {
             let body_location_b = &bodies.handle_to_location[b.body_handle().0 as usize];
-            let set_b = unsafe { &*bodies.sets.get(body_location_b.set_index) };
-            let collidable_b = unsafe { &*set_b.collidables.get(body_location_b.index) };
-            speculative_margin_b = collidable_b.speculative_margin;
+            let set_b = unsafe { bodies.sets.get(body_location_b.set_index) };
+            let collidable_b = unsafe { set_b.collidables.get(body_location_b.index) };
+            collidable_b.speculative_margin
         } else {
-            speculative_margin_b = 0.0;
-        }
+            0.0
+        };
 
         let mut speculative_margin = collidable_a.speculative_margin + speculative_margin_b;
 
@@ -1495,10 +1496,10 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
 
         if two_bodies {
             let body_location_b = &bodies.handle_to_location[b.body_handle().0 as usize];
-            let set_b = unsafe { &*bodies.sets.get(body_location_b.set_index) };
-            let state_b = unsafe { &*set_b.dynamics_state.get(body_location_b.index) };
-            let collidable_b = unsafe { &*set_b.collidables.get(body_location_b.index) };
-            let state_a = unsafe { &*set_a.dynamics_state.get(body_location_a.index) };
+            let set_b = unsafe { bodies.sets.get(body_location_b.set_index) };
+            let state_b = unsafe { set_b.dynamics_state.get(body_location_b.index) };
+            let collidable_b = unsafe { set_b.collidables.get(body_location_b.index) };
+            let state_a = unsafe { set_a.dynamics_state.get(body_location_a.index) };
 
             self.add_batch_entries(
                 worker_index,
@@ -1517,7 +1518,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             );
         } else {
             // Body-static pair.
-            let state_a = unsafe { &*set_a.dynamics_state.get(body_location_a.index) };
+            let state_a = unsafe { set_a.dynamics_state.get(body_location_a.index) };
             let statics = unsafe { &*self.base.statics };
             let static_b = statics.get_direct_reference(b.static_handle());
 
@@ -1582,11 +1583,11 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                 let bodies = unsafe { &*self.base.bodies };
                 let a_in_static_tree = pair.a.mobility() == CollidableMobility::Static
                     || unsafe {
-                        (*bodies.handle_to_location.get(pair.a.raw_handle_value())).set_index > 0
+                        bodies.handle_to_location.get(pair.a.raw_handle_value()).set_index > 0
                     };
                 let b_in_static_tree = pair.b.mobility() == CollidableMobility::Static
                     || unsafe {
-                        (*bodies.handle_to_location.get(pair.b.raw_handle_value())).set_index > 0
+                        bodies.handle_to_location.get(pair.b.raw_handle_value()).set_index > 0
                     };
                 let a_tree = if a_in_static_tree {
                     &broad_phase.static_tree
@@ -1855,17 +1856,19 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                 let pair_cache = &mut self.base.pair_cache;
                 let accessors = &self.base.contact_constraint_accessors;
                 let worker_ptrs = &self.base.worker_pending_constraints;
-                for type_index in 0..accessors.len() {
-                    if let Some(ref accessor) = accessors[type_index] {
+                for (type_index, slot) in accessors.iter().enumerate() {
+                    if let Some(ref accessor) = slot {
                         let sorted = unsafe { self.sorted_constraints.get_mut(type_index as i32) };
-                        accessor.deterministically_add(
-                            type_index as i32,
-                            worker_ptrs,
-                            sorted,
-                            np_ptr,
-                            solver,
-                            pair_cache,
-                        );
+                        unsafe {
+                            accessor.deterministically_add(
+                                type_index as i32,
+                                worker_ptrs,
+                                sorted,
+                                np_ptr,
+                                solver,
+                                pair_cache,
+                            );
+                        }
                     }
                 }
             }
@@ -1991,7 +1994,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             sets_to_awaken = QuickList::with_capacity(_sets_to_awaken_capacity, pool);
             if !self.base.awakener.is_null() {
                 let bodies = &*self.base.bodies;
-                let mut unique_set = IndexSet::new(pool, bodies.sets.len() as i32);
+                let mut unique_set = IndexSet::new(pool, bodies.sets.len());
                 for i in 0..thread_count {
                     (*self.base.awakener).accumulate_unique_indices(
                         &self.overlap_workers[i].pending_set_awakenings,
@@ -2019,7 +2022,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
         let _awakener_phase_one_job_count = awakener_phase_one_job_count;
         let _awakener_phase_two_job_count = awakener_phase_two_job_count;
 
-        if thread_count > 1 && thread_dispatcher.is_some() {
+        if let Some(dispatcher) = thread_dispatcher.filter(|_| thread_count > 1) {
             let pool = unsafe { &mut *self.base.pool };
             // Fixed initial capacity of 128 + max awakener jobs
             let initial_capacity =
@@ -2067,7 +2070,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                         self.preflush_jobs.add(
                             PreflushJob {
                                 job_type: PreflushJobType::SortContactConstraintType,
-                                type_index: type_index as i32,
+                                type_index,
                                 worker_index_or_count: thread_count as i32,
                                 ..PreflushJob::default()
                             },
@@ -2104,7 +2107,7 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
                                     job_type: PreflushJobType::SpeculativeConstraintBatchSearch,
                                     start: job_start,
                                     end: previous_end,
-                                    type_index: type_index as i32,
+                                    type_index,
                                     worker_index_or_count: worker_index as i32,
                                     job_index: 0,
                                 },
@@ -2121,7 +2124,6 @@ impl<TCallbacks: INarrowPhaseCallbacks> NarrowPhaseGeneric<TCallbacks> {
             unsafe {
                 *self.preflush_job_index.get() = -1;
             }
-            let dispatcher = thread_dispatcher.unwrap();
             let self_ptr = self as *mut NarrowPhaseGeneric<TCallbacks> as *mut ();
             unsafe {
                 dispatcher.dispatch_workers(

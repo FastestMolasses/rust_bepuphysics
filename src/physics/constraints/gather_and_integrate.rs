@@ -116,13 +116,13 @@ pub unsafe fn integrate_pose_and_velocity(
     *position = Vector3Wide::conditional_select(integration_mask, &new_position, position);
 
     inertia_out.inverse_mass = local_inertia.inverse_mass;
-    let previous_velocity = velocity.clone();
+    let previous_velocity = *velocity;
 
     let half_dt_wide = dt_wide * Vector::<f32>::splat(0.5);
 
     match angular_integration_mode {
         AngularIntegrationMode::ConserveMomentum => {
-            let previous_orientation = orientation.clone();
+            let previous_orientation = *orientation;
             let mut new_orientation = QuaternionWide::default();
             PoseIntegration::integrate_orientation_wide(
                 orientation,
@@ -197,9 +197,9 @@ pub unsafe fn integrate_pose_and_velocity(
     (velocity_callbacks.fn_ptr)(
         velocity_callbacks.context,
         *body_indices,
-        position.clone(),
-        orientation.clone(),
-        local_inertia.clone(),
+        *position,
+        *orientation,
+        *local_inertia,
         *integration_mask,
         worker_index,
         dt_wide,
@@ -278,13 +278,13 @@ pub unsafe fn integrate_velocity(
 
     if batch_integration_mode == BatchIntegrationMode::Conditional {
         // Conditional: must mask velocity changes
-        let previous_velocity = velocity.clone();
+        let previous_velocity = *velocity;
         (velocity_callbacks.fn_ptr)(
             velocity_callbacks.context,
             *body_indices,
-            position.clone(),
-            orientation.clone(),
-            local_inertia.clone(),
+            *position,
+            *orientation,
+            *local_inertia,
             *integration_mask,
             worker_index,
             dt_wide,
@@ -305,9 +305,9 @@ pub unsafe fn integrate_velocity(
         (velocity_callbacks.fn_ptr)(
             velocity_callbacks.context,
             *body_indices,
-            position.clone(),
-            orientation.clone(),
-            local_inertia.clone(),
+            *position,
+            *orientation,
+            *local_inertia,
             *integration_mask,
             worker_index,
             dt_wide,
@@ -404,7 +404,7 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
             }
             BatchIntegrationMode::Conditional => {
                 // Check per-bundle integration flags.
-                let flags = &*integration_flags.get(body_index_in_constraint);
+                let flags = integration_flags.get(body_index_in_constraint);
                 let (bundle_mode, integration_mask) = bundle_should_integrate(bundle_index, flags);
 
                 // Always gather with AccessAll since integration requires full state.
@@ -491,7 +491,7 @@ pub unsafe fn gather_and_integrate<TAccessFilter: IBodyAccessFilter>(
                 );
             }
             BatchIntegrationMode::Conditional => {
-                let flags = &*integration_flags.get(body_index_in_constraint);
+                let flags = integration_flags.get(body_index_in_constraint);
                 let (bundle_mode, integration_mask) = bundle_should_integrate(bundle_index, flags);
 
                 let mut gathered_inertia = MaybeUninit::<BodyInertiaWide>::uninit();

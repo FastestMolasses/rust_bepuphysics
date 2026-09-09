@@ -96,7 +96,7 @@ impl Bodies {
     }
 
     /// Creates a new Bodies collection.
-    pub fn new(
+    pub unsafe fn new(
         pool: *mut BufferPool,
         shapes: *mut Shapes,
         broad_phase: *mut BroadPhase,
@@ -870,6 +870,8 @@ impl Bodies {
     ///
     /// # Safety
     /// The active_body_index must be a valid index into the active set.
+    // Mirrors C# internal EnumerateConnectedBodyIndices; not reached by the Rust port's current callers.
+    #[allow(dead_code)]
     #[inline(always)]
     pub(crate) unsafe fn enumerate_connected_body_indices<
         E: crate::utilities::for_each_ref::IForEach<i32>,
